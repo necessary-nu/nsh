@@ -104,10 +104,6 @@ impl SyntaxContext {
             };
         };
 
-        if byte >= 0x81 && byte <= 0x88 {
-            return SyntaxClass::Control;
-        }
-
         match self {
             Self::Base => match byte {
                 b'\n' => SyntaxClass::Newline,
@@ -221,11 +217,11 @@ mod tests {
     }
 
     #[test]
-    fn internal_control_bytes_are_explicitly_framed() {
-        for byte in 0x81..=0x88 {
+    fn non_ascii_bytes_remain_word_data() {
+        for byte in 0x80..=u8::MAX {
             assert_eq!(
                 SyntaxContext::Base.classify(InputUnit::Byte(byte)),
-                SyntaxClass::Control
+                SyntaxClass::Word
             );
         }
     }

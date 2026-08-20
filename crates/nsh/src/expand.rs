@@ -1,14 +1,12 @@
 //! Shell word expansion.
 //!
-//! Active argument and case-pattern expansion is implemented by [`typed`]
-//! as structural transformations over parsed word parts. The remaining
-//! translated helpers in this file serve compatibility call sites such as
-//! `read` field splitting; later cleanup leaves remove that inactive port
-//! machinery once its callers have typed interfaces of their own.
+//! Argument and case-pattern expansion is implemented by [`typed`] as
+//! structural transformations over parsed word parts. The `read` builtin
+//! shares the IFS classifier through a byte string plus a protection mask.
 
 use crate::context::Shell;
 
-use bstr::{BStr, BString, ByteSlice};
+use bstr::{BStr, BString};
 
 use crate::error::Error;
 use crate::nodes::Node;
@@ -19,11 +17,6 @@ mod typed;
 
 use bytes::at as byte_at;
 pub(crate) use mode::ExpansionMode;
-
-const LEGACY_ESCAPE: u8 = crate::parser::LEGACY_ESCAPE;
-const LEGACY_MULTIBYTE: u8 = crate::parser::LEGACY_MULTIBYTE;
-const LEGACY_QUOTE: u8 = crate::parser::LEGACY_QUOTE;
-const BACKSLASH: u8 = b'\\';
 
 // ---------------------------------------------------------------------
 // src/expand.h
@@ -52,18 +45,6 @@ impl ExpandedField {
         ExpandedField {
             text: BString::from(bytes),
         }
-    }
-
-    /// `rmescapes(sp->text)`, in place as the C does it.
-    ///
-    /// Quote removal compacts the field in place and returns its new length.
-    #[inline]
-    // [spec:posix:req:expand.quote-removal]
-    // [spec:posix:sem:expand.quote-removal-quoting-remembered]
-    // [spec:dash:sem:expand.rmescapes-fn]
-    pub fn remove_escapes(&mut self) {
-        let unescaped_length = remove_escapes_in_buffer(&mut self.text);
-        self.text.truncate(unescaped_length);
     }
 }
 
@@ -96,12 +77,10 @@ impl ExpandedFields {
 pub struct FieldSplitRegion {
     pub start: usize,
     pub end: usize,
-    pub nul_only: bool,
 }
 
 /// Mutable state for one field-splitting pass.
 pub struct FieldSplitState {
-    pub nul_only: bool,
     pub field_start: usize,
     /// Start of a trailing IFS run that should be removed.
     pub trailing_whitespace_start: Option<usize>,
@@ -112,14 +91,12 @@ pub struct FieldSplitState {
 /// Owned intermediate buffers for one expansion.
 pub(crate) struct ExpandState {
     buffer: BString,
-    ifs_regions: Vec<FieldSplitRegion>,
 }
 
 impl ExpandState {
     pub(crate) const fn new() -> Self {
         Self {
             buffer: BString::new(Vec::new()),
-            ifs_regions: Vec::new(),
         }
     }
 }
@@ -153,58 +130,12 @@ impl IfsCache {
     }
 }
 
-#[inline]
-fn split_regions(state: &mut ExpandState) -> &mut Vec<FieldSplitRegion> {
-    &mut state.ifs_regions
-}
-
 /// The most recent unsplit expansion result.
 ///
 /// Here-document and prompt expansion read these length-delimited bytes
 /// immediately after expansion and before another expansion can replace them.
 pub fn expansion_result(shell: &crate::context::Shell) -> &BStr {
     BStr::new(shell.expand.buffer.as_slice())
-}
-
-// [spec:dash:sem:expand.mbnext-fn]
-//
-#[derive(Clone, Copy)]
-struct EncodedCharacterSpan {
-    prefix: usize,
-    remainder: usize,
-}
-
-// The pointer form is gone with its last caller.  It existed to answer
-// "how much of this may I read?" for a walker holding a bare `*const
-// i8` -- three bytes when the first is CTLMBCHAR, one otherwise --
-// and every walker that asked now holds a slice that answers it.
-//
-// The decoding itself, over a slice, so the framing is bounds-checked
-// rather than trusted.
-fn next_encoded_character(encoded: &[u8]) -> EncodedCharacterSpan {
-    let mut prefix = 0usize;
-    let mut remainder = 0usize;
-
-    let character = byte_at(encoded, remainder);
-    remainder += 1;
-
-    match character {
-        LEGACY_MULTIBYTE => {
-            if byte_at(encoded, remainder) == LEGACY_ESCAPE {
-                remainder += 1;
-            }
-            let payload = usize::from(byte_at(encoded, remainder));
-            remainder += 1;
-            prefix = remainder;
-            remainder = payload + 2;
-        }
-        LEGACY_ESCAPE => {
-            prefix += 1;
-        }
-        _ => {}
-    }
-
-    EncodedCharacterSpan { prefix, remainder }
 }
 
 // [spec:dash:sem:expand.getpwhome-fn]
@@ -242,25 +173,6 @@ pub fn expand_argument(
     typed::expand_argument(shell, &word.word, expanded_fields, mode)
 }
 
-/*
- * Record the fact that we have to scan this region of the
- * string for IFS characters.
- */
-
-// [spec:dash:sem:expand.recordregion-fn]
-pub(crate) fn record_split_region(
-    state: &mut ExpandState,
-    start: usize,
-    end: usize,
-    nul_only: bool,
-) {
-    split_regions(state).push(FieldSplitRegion {
-        start,
-        end,
-        nul_only,
-    });
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct IfsMembership {
     separator: bool,
@@ -268,23 +180,13 @@ struct IfsMembership {
 }
 
 // [spec:dash:sem:expand.ifsisifs-fn]
-fn classify_ifs(
-    shell: &Shell,
-    bytes: &[u8],
-    multibyte_length: usize,
-    nul_only: bool,
-) -> IfsMembership {
+fn classify_ifs(shell: &Shell, bytes: &[u8], multibyte_length: usize) -> IfsMembership {
     let mut is_default_whitespace = false;
     let mut is_separator = false;
     let mut wide_character = byte_at(bytes, 0) as i32;
-    // [spec:nsh:sem:idiom.specified-defects+1]
-    // NUL-only splitting has no first IFS character. Represent that absence
-    // instead of reading the reference's uninitialized `ifs0` slot.
     let mut first_separator = None;
 
-    if nul_only {
-        is_separator = wide_character == 0;
-    } else if !shell.ifs.bytes.is_empty() && !shell.ifs.wide_characters.is_empty() {
+    if !shell.ifs.bytes.is_empty() && !shell.ifs.wide_characters.is_empty() {
         if (wide_character & 0x80) != 0 {
             /* `ml` came from `mbnext` over this same slice, so the
              * clamp can only bite where the C read past the word's
@@ -303,7 +205,7 @@ fn classify_ifs(
 
         is_separator = shell.ifs.wide_characters.contains(&wide_character);
         first_separator = shell.ifs.wide_characters.first().copied();
-    } else if multibyte_length == 0 {
+    } else if multibyte_length <= 1 {
         is_separator = shell.ifs.bytes.contains(&(wide_character as u8));
         first_separator = shell.ifs.bytes.first().copied().map(i32::from);
     }
@@ -322,30 +224,43 @@ fn classify_ifs(
 }
 
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
+// [spec:dash:sem:expand.mbnext-fn]
+fn character_length(locale: &nsh_platform::Locale, bytes: &[u8]) -> usize {
+    let Some(first) = bytes.first() else {
+        return 0;
+    };
+    if first.is_ascii() {
+        return 1;
+    }
+
+    let mut decoder = locale.decoder();
+    for (index, byte) in bytes.iter().copied().take(16).enumerate() {
+        match decoder.push(byte) {
+            nsh_platform::LocaleDecode::Incomplete => {}
+            nsh_platform::LocaleDecode::Complete(_) => return index + 1,
+            nsh_platform::LocaleDecode::Invalid => return 1,
+        }
+    }
+    1
+}
+
 fn split_fields_slow(
     shell: &Shell,
     split_state: &mut FieldSplitState,
     fields: &mut Vec<ExpandedField>,
-    after_nul_region: bool,
     string: &[u8],
     mut cursor: usize,
 ) -> usize {
     let mut character_start = cursor;
-    let character = next_encoded_character(string.get(cursor..).unwrap_or_default());
-    cursor += character.prefix;
-    let multibyte_length = if character.remainder > 3 {
-        character.remainder - 2
-    } else {
-        0
-    };
+    let multibyte_length =
+        character_length(&shell.locale, string.get(cursor..).unwrap_or_default());
 
     let membership = classify_ifs(
         shell,
         string.get(cursor..).unwrap_or_default(),
         multibyte_length,
-        split_state.nul_only,
     );
-    cursor += character.remainder;
+    cursor += multibyte_length.max(1);
 
     let is_separator = membership.separator;
     let is_default_whitespace = membership.default_whitespace;
@@ -391,12 +306,8 @@ fn split_fields_slow(
             return cursor;
         }
     } else if is_separator {
-        let mut separator_is_whitespace = split_state.separator_is_whitespace;
-
-        if !after_nul_region {
-            separator_is_whitespace = is_default_whitespace;
-            split_state.separator_is_whitespace = separator_is_whitespace;
-        }
+        let separator_is_whitespace = is_default_whitespace;
+        split_state.separator_is_whitespace = separator_is_whitespace;
 
         /* Ignore IFS whitespace at start. */
         if character_start == split_state.field_start && separator_is_whitespace {
@@ -436,115 +347,84 @@ fn split_regions_into_fields(
     max_fields: usize,
     fields: &mut Vec<ExpandedField>,
 ) {
-    let mut region_index: usize;
     /* `struct ifs_state ifst;` and the three assignments the C makes
      * before the loop, as one initialiser. `mem::zeroed` was standing in
      * for the C leaving `ifs` and `ifsspc` unset here, and both are
      * assigned on every path that reads them; a struct without a pointer
      * in it can say so directly. */
     let mut split_state = FieldSplitState {
-        nul_only: false,
         field_start: 0,
         trailing_whitespace_start: None,
         remaining_fields: max_fields,
         separator_is_whitespace: false,
     };
-    let mut nul_only: bool;
-    let mut cursor: usize;
-    let mut preserve_nul_field = false;
     let mut final_end = string.len();
 
-    if !regions.is_empty() {
+    for region in regions {
+        let end = region.end;
+        let mut cursor = region.start;
+        debug_assert!(
+            end <= string.len(),
+            "a recorded region ends past the word it was recorded in"
+        );
         split_state.separator_is_whitespace = false;
-        nul_only = false;
-        /* `realifs = ifsset() ? ncifs : nullstr` is gone with the
-         * pointer it cached: `ifsisifs` reads `IFS` off the shell,
-         * and what it needs from here is the one bit below. */
-        region_index = 0;
         loop {
-            let end = regions[region_index].end;
+            let scan_start = cursor;
 
-            cursor = regions[region_index].start;
-            debug_assert!(
-                end <= string.len(),
-                "a recorded region ends past the word it was recorded in"
-            );
-            let after_nul_region = nul_only;
-            nul_only = regions[region_index].nul_only;
-            split_state.nul_only = nul_only;
-            split_state.separator_is_whitespace = false;
-            loop {
-                let scan_start = cursor;
+            /* `stackblock() + endoff - p >= 8` — eight bytes of
+             * this region left to look at.  As offsets it is also
+             * the bound that makes the load below a checked one. */
+            while end >= cursor + 8 {
+                /* union { uint64_t qw; unsigned char b[8]; } x; */
+                let chunk_bytes: [u8; 8] = string[cursor..cursor + 8].try_into().unwrap();
+                let chunk_bits = u64::from_ne_bytes(chunk_bytes);
 
-                /* `stackblock() + endoff - p >= 8` — eight bytes of
-                 * this region left to look at.  As offsets it is also
-                 * the bound that makes the load below a checked one. */
-                while end >= cursor + 8 {
-                    /* union { uint64_t qw; unsigned char b[8]; } x; */
-                    let chunk_bytes: [u8; 8] = string[cursor..cursor + 8].try_into().unwrap();
-                    let chunk_bits = u64::from_ne_bytes(chunk_bytes);
-
-                    if (chunk_bits & 0x8080808080808080) != 0 {
-                        break;
-                    }
-                    if chunk_bytes
-                        .iter()
-                        .any(|byte| shell.ifs.ascii_membership[*byte as usize])
-                    {
-                        break;
-                    }
-                    cursor += 8;
-                }
-
-                if cursor != scan_start {
-                    if split_state.remaining_fields == 0 {
-                        split_state.trailing_whitespace_start = None;
-                    } else if split_state.separator_is_whitespace {
-                        split_state.field_start = scan_start;
-                    }
-                    split_state.separator_is_whitespace = false;
-                }
-
-                if cursor >= end {
+                if (chunk_bits & 0x8080808080808080) != 0 {
                     break;
                 }
-
-                cursor = split_fields_slow(
-                    shell,
-                    &mut split_state,
-                    fields,
-                    after_nul_region || nul_only,
-                    string,
-                    cursor,
-                );
+                if chunk_bytes
+                    .iter()
+                    .any(|byte| shell.ifs.ascii_membership[*byte as usize])
+                {
+                    break;
+                }
+                cursor += 8;
             }
 
-            region_index += 1;
-            if region_index >= regions.len() {
+            if cursor != scan_start {
+                if split_state.remaining_fields == 0 {
+                    split_state.trailing_whitespace_start = None;
+                } else if split_state.separator_is_whitespace {
+                    split_state.field_start = scan_start;
+                }
+                split_state.separator_is_whitespace = false;
+            }
+
+            if cursor >= end {
                 break;
             }
-        }
-        if nul_only {
-            preserve_nul_field = true;
-        } else if let Some(trailing_whitespace_start) = split_state.trailing_whitespace_start {
-            /* This is the one write into `string` that happens after
-             * `ifsbreakup_slow` has stopped emitting fields, and the
-             * fields no longer alias `string` — they copied out at the
-             * instant each was terminated.  So it has to land in the
-             * field that has *not* been created yet, which is the one
-             * `add:` below takes from `ifst.start`.  It does: `r` is
-             * only ever set once the field limit is exhausted, and the two
-             * branches that set it both return without emitting, so no
-             * field is taken between the two points. */
-            debug_assert!(
-                trailing_whitespace_start >= split_state.field_start,
-                "the trailing-IFS truncation lands in an already-taken field"
-            );
-            final_end = trailing_whitespace_start;
+
+            cursor = split_fields_slow(shell, &mut split_state, fields, string, cursor);
         }
     }
+    if let Some(trailing_whitespace_start) = split_state.trailing_whitespace_start {
+        /* This is the one write into `string` that happens after
+         * `ifsbreakup_slow` has stopped emitting fields, and the
+         * fields no longer alias `string` — they copied out at the
+         * instant each was terminated.  So it has to land in the
+         * field that has *not* been created yet, which is the one
+         * `add:` below takes from `ifst.start`.  It does: `r` is
+         * only ever set once the field limit is exhausted, and the two
+         * branches that set it both return without emitting, so no
+         * field is taken between the two points. */
+        debug_assert!(
+            trailing_whitespace_start >= split_state.field_start,
+            "the trailing-IFS truncation lands in an already-taken field"
+        );
+        final_end = trailing_whitespace_start;
+    }
 
-    if !preserve_nul_field && split_state.field_start >= final_end {
+    if split_state.field_start >= final_end {
         return;
     }
 
@@ -566,29 +446,48 @@ fn split_regions_into_fields(
 // [spec:posix:def:expand.field-splitting-delimited]
 // [spec:posix:req:expand.field-splitting-algorithm]
 // [spec:posix:req:expand.field-splitting-output-replaces-input]
+// [spec:dash:sem:expand.ifsfree-fn]
+// [spec:dash:sem:expand.recordregion-fn]
 pub fn split_fields(
     shell: &Shell,
     string: &[u8],
+    protected: &[bool],
     max_fields: usize,
     expanded_fields: &mut ExpandedFields,
 ) {
+    debug_assert_eq!(string.len(), protected.len());
+    // Dash records split-eligible offsets in a process-global linked list and
+    // clears it after each expansion. This interface derives the same regions
+    // from the owned protection mask, and the local vector is dropped when the
+    // split finishes.
+    let mut regions = Vec::new();
+    let mut start = None;
+    for (index, protected) in protected.iter().copied().enumerate() {
+        match (start, protected) {
+            (None, false) => start = Some(index),
+            (Some(region_start), true) => {
+                regions.push(FieldSplitRegion {
+                    start: region_start,
+                    end: index,
+                });
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(region_start) = start {
+        regions.push(FieldSplitRegion {
+            start: region_start,
+            end: string.len(),
+        });
+    }
     split_regions_into_fields(
         shell,
-        &shell.expand.ifs_regions,
+        &regions,
         string,
         max_fields,
         &mut expanded_fields.fields,
     );
-}
-
-// [spec:dash:sem:expand.ifsfree-fn]
-pub(crate) fn clear_split_regions(state: &mut ExpandState) {
-    /* Emptying the owned region list replaces freeing the C chain and
-     * nulling its tail pointer. */
-    if split_regions(state).len() > 1 {
-        split_regions(state).truncate(1);
-    }
-    split_regions(state).clear();
 }
 
 // [spec:dash:sem:expand.changeifs-fn]
@@ -618,85 +517,6 @@ pub fn update_ifs_cache(shell: &mut crate::context::Shell, ifs: &BStr) {
 }
 
 /*
- * Remove any CTLESC characters from a string.
- */
-
-// [spec:dash:sem:expand.rmescapes-fn]
-/// The transform, over one buffer, in place.
-///
-/// `at` is the index of the first byte that needs quote removal. Returns
-/// the length of the compacted result.
-///
-/// In place is the only shape any caller needs, because **the output never
-/// exceeds the input**: `CTLQUOTEMARK` consumes a byte and writes none,
-/// `CTLESC` consumes two and writes at most two, both `CTLMBCHAR` arms
-/// write no more than they consume, and everything else is one for one.
-/// So `q <= p` throughout and the write is always at or behind the read,
-/// which is what lets the two allocating callers reach this same body by
-/// materialising their source into their destination first.
-///
-/// Recorded in plan/decisions/owned-data.md, "What this cost in the port:
-/// `_rmescapes`", together with the two reach-backs' safety argument.
-// [spec:posix:syn:pattern.backslash-escape-with-shell-quoting]
-// [spec:posix:syn:pattern.backslash-escape-without-shell-quoting]
-// [spec:posix:req:pattern.escaping-follows-quoting-rules]
-// [spec:posix:syn:pattern.trailing-backslash-unspecified]
-// [spec:posix:req:pattern.quote-to-match-literally]
-fn compact_escapes(buffer: &mut [u8], start: usize) -> usize {
-    let mut read_index = start;
-    let mut write_index = start;
-
-    while read_index < buffer.len() {
-        let mut character = byte_at(buffer, read_index);
-
-        let copy_byte = if character == LEGACY_QUOTE {
-            read_index += 1;
-            continue;
-        } else if character == LEGACY_ESCAPE {
-            read_index += 1;
-            character = byte_at(buffer, read_index);
-            true
-        } else if character == LEGACY_MULTIBYTE {
-            let span = next_encoded_character(buffer.get(read_index..).unwrap_or_default());
-            read_index += span.prefix;
-            let span_to_copy = span.remainder - 2;
-
-            buffer.copy_within(read_index..read_index + span_to_copy, write_index);
-            write_index += span_to_copy;
-            read_index += span_to_copy + 2;
-            false
-        } else {
-            true
-        };
-
-        if copy_byte {
-            buffer[write_index] = character;
-            write_index += 1;
-            read_index += 1;
-        }
-    }
-    write_index
-}
-
-/// The index of the first byte `_rmescapes` has anything to do with, if
-/// there is one.
-///
-/// The marker set is independent of byte value zero; the slice length stops
-/// the scan.
-fn first_escape_offset(bytes: &[u8]) -> Option<usize> {
-    let markers = [BACKSLASH, LEGACY_ESCAPE, LEGACY_MULTIBYTE, LEGACY_QUOTE];
-    bytes.find_byteset(markers)
-}
-
-/// Apply quote removal to one owned byte buffer and return its new length.
-fn remove_escapes_in_buffer(bytes: &mut [u8]) -> usize {
-    let Some(first_escape) = first_escape_offset(bytes) else {
-        return bytes.len();
-    };
-    compact_escapes(bytes, first_escape)
-}
-
-/*
  * See if a pattern matches in a case statement.
  */
 
@@ -712,32 +532,4 @@ pub fn case_pattern_matches(
             .shell_error(b"case matching requires a word node"));
     };
     typed::case_matches(shell, &word.word, value)
-}
-
-/// The `out:` tail `redirectsafe` and `expandstr` share: decide whether
-/// what came back is this frame's to keep.
-///
-/// It kept its C name and lost its first job. The C's version restores
-/// `handler` and then asks a global which exception arrived —
-/// `if (err) { if (exception != EXERROR) longjmp(handler->loc, 1); ifsfree(); }`
-/// — and both halves of that are gone: there is no handler to restore,
-/// and nothing to re-raise. What is left is the half that was always the
-/// real decision, and it is a match on the value's own type.
-///
-/// `ifsfree` belongs to the swallowing arm alone. The regions the failed
-/// expansion recorded would otherwise mis-split the *next* word, and the
-/// frame that takes an interrupt is not the frame that owns them.
-// [spec:dash:sem:expand.restore-handler-expandarg-fn]
-pub fn recover_expansion(
-    shell: &mut crate::context::Shell,
-    caught: Option<crate::error::Error>,
-) -> Option<crate::error::Error> {
-    match &caught {
-        /* Not this frame's to keep, and never was: the C re-raised it
-         * from here. */
-        Some(error) if error.is_interrupt() => {}
-        Some(_) => clear_split_regions(&mut shell.expand),
-        None => {}
-    }
-    caught
 }

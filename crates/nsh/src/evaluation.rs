@@ -1205,7 +1205,6 @@ pub fn evaluate_command_substitution(
                 .map_err(|error| {
                     crate::redirection::descriptor_error(shell, LogicalDescriptor::STDOUT, error)
                 })?;
-            crate::expand::clear_split_regions(&mut shell.expand);
             /* The one forked child that cannot hand its `Flow` back: it
              * sits under the whole expansion chain, which has no business
              * carrying control flow that only ever exists on the far side

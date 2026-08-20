@@ -26,7 +26,6 @@ impl Shell {
     pub(crate) fn clear_evaluation_resources(&mut self) {
         self.evaluation.loop_depth = 0;
         self.evaluation.expanding_trace_prompt = false;
-        crate::expand::clear_split_regions(&mut self.expand);
         self.restore_saved_redirections();
     }
 

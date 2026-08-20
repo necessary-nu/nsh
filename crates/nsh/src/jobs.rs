@@ -136,9 +136,7 @@ fn process_command_text(shell: &crate::context::Shell, job_id: JobId, index: usi
         .map_or(BStr::new(b""), |process| process.command_text.as_bstr())
 }
 
-/// `%s` of a command text. The bytes are the shell's own — the parser
-/// puts control bytes 0x81-0x88 in them — so they go out as bytes and
-/// not through a `char *`.
+/// Write one command's byte-preserving display text.
 #[inline]
 pub(crate) fn write_command_text(
     shell: &mut crate::context::Shell,

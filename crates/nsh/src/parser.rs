@@ -12,7 +12,7 @@ use bstr::{BStr, BString};
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
-use crate::expand::{ExpansionMode, expand_argument, recover_expansion};
+use crate::expand::{ExpansionMode, expand_argument};
 use crate::input::{
     PromptKind, push_string_input, read_input_unit, read_input_unit_or_alias_end, set_input_string,
     unread_input_unit, unread_input_units,
@@ -24,7 +24,7 @@ use crate::nodes::{
     Pipeline, Redirection, SimpleCommand, WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
-use crate::word::ParsedWord;
+use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, WordToken};
 
 /// `MB_LEN_MAX` from `<limits.h>` (16 on the platforms dash targets).
 const MAX_MULTIBYTE_LENGTH: usize = 16;
@@ -230,30 +230,46 @@ static RESERVED_WORDS: [(&[u8], TokenKind); 16] = [
     (b"}", TokenKind::RightBrace),
 ];
 
-// ---------------------------------------------------------------------
-// src/parser.h
-// ---------------------------------------------------------------------
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ParameterSyntax {
+    braced: bool,
+    operation: ParameterOperation,
+    colon: bool,
+}
 
-/* control characters in argument strings */
-pub const LEGACY_ESCAPE: u8 = 0x81; /* escape next character */
-pub const LEGACY_PARAMETER: u8 = 0x82; /* variable defn */
-pub const LEGACY_END_PARAMETER: u8 = 0x83;
-pub const LEGACY_COMMAND_SUBSTITUTION: u8 = 0x84;
-pub const LEGACY_MULTIBYTE: u8 = 0x85;
-pub const LEGACY_ARITHMETIC: u8 = 0x86; /* arithmetic expression */
-pub const LEGACY_END_ARITHMETIC: u8 = 0x87;
-pub const LEGACY_QUOTE: u8 = 0x88;
+impl ParameterSyntax {
+    const fn unbraced() -> Self {
+        Self {
+            braced: false,
+            operation: ParameterOperation::Value,
+            colon: false,
+        }
+    }
 
-/* variable substitution byte (follows CTLVAR) */
-pub const PARAMETER_COLON: u8 = 0x10; /* colon--treat the empty string as unset */
-pub const PARAMETER_PRESENT: u8 = 0x20; /* Ensure subtype is not zero */
+    const fn braced() -> Self {
+        Self {
+            braced: true,
+            operation: ParameterOperation::Invalid,
+            colon: false,
+        }
+    }
 
-/* values of VSTYPE field */
-pub const PARAMETER_NORMAL: u8 = 0x1; /* normal variable:  $var or ${var} */
-pub const PARAMETER_TRIM_SUFFIX: u8 = 0x6; /* ${var%pattern} */
-pub const PARAMETER_TRIM_PREFIX: u8 = 0x8; /* ${var#pattern} */
-pub const PARAMETER_LENGTH: u8 = 0xa; /* ${#var} */
-/* VSLENGTH must come last. */
+    const fn accepts_multiple_name_digits(self) -> bool {
+        self.braced
+            && matches!(
+                self.operation,
+                ParameterOperation::Invalid | ParameterOperation::Length
+            )
+    }
+
+    const fn accepts_array_subscript(self) -> bool {
+        self.braced && matches!(self.operation, ParameterOperation::Invalid)
+    }
+
+    const fn has_operand(self) -> bool {
+        !matches!(self.operation, ParameterOperation::Value)
+    }
+}
 
 /// Outcome of parsing one top-level input unit.
 pub enum ParseResult {
@@ -1361,6 +1377,13 @@ mod word_lexer;
 
 pub(crate) use multibyte::MultibyteMode;
 
+/// Result of decoding the input unit at the current lexer position.
+pub(crate) enum MultibyteInput {
+    SingleByte,
+    FieldBoundary,
+    Character { bytes: BString, escaped: bool },
+}
+
 // [spec:dash:sem:parser.getmbc-fn]
 /// The destination is a fixed scratch buffer sized to what this writes.
 ///
@@ -1378,36 +1401,24 @@ pub(crate) use multibyte::MultibyteMode;
 pub(crate) fn read_multibyte_character(
     shell: &mut Shell,
     input: InputUnit,
-    output: &mut [u8; MULTIBYTE_OUTPUT_CAPACITY],
     mode: MultibyteMode,
-) -> Result<usize, Error> {
+) -> Result<MultibyteInput, Error> {
     let Some(mut byte) = input.byte() else {
-        return Ok(0);
+        return Ok(MultibyteInput::SingleByte);
     };
-    /* The C's `out` cursor, and its `start`, as the offsets they were. */
-    let mut written_length: usize = 0;
     let mut decoder = shell.locale.decoder();
-    let mut multibyte_length = 0usize;
+    let mut bytes = BString::new(Vec::new());
     let mut wc: i32 = 0;
     let mut complete = false;
-    let framed = matches!(
-        mode,
-        MultibyteMode::Framed | MultibyteMode::Escaped | MultibyteMode::FieldBoundary
-    );
     let escaped = matches!(mode, MultibyteMode::Escaped);
 
     if byte.is_ascii() {
-        return Ok(0);
+        return Ok(MultibyteInput::SingleByte);
     }
 
-    let mbc = if framed { 2 + usize::from(escaped) } else { 0 };
-    output[mbc + multibyte_length] = byte;
     loop {
-        /* `mbrtowc` is asked for exactly one byte, and the slice it is
-         * given starts at the byte just written -- so the pointer is
-         * bounded by the indexing rather than by the caller's promise. */
-        let decoded = decoder.push(output[mbc + multibyte_length]);
-        multibyte_length += 1;
+        bytes.push(byte);
+        let decoded = decoder.push(byte);
         match decoded {
             nsh_platform::LocaleDecode::Incomplete => {}
             nsh_platform::LocaleDecode::Complete(wide) => {
@@ -1417,7 +1428,7 @@ pub(crate) fn read_multibyte_character(
             }
             nsh_platform::LocaleDecode::Invalid => break,
         }
-        if multibyte_length >= MAX_MULTIBYTE_LENGTH {
+        if bytes.len() >= MAX_MULTIBYTE_LENGTH {
             break;
         }
         let next = read_input_unit_or_alias_end(shell)?;
@@ -1425,84 +1436,20 @@ pub(crate) fn read_multibyte_character(
             break;
         };
         byte = next_byte;
-        output[mbc + multibyte_length] = byte;
     }
 
-    if complete && multibyte_length > 1 {
+    if complete && bytes.len() > 1 {
         if matches!(mode, MultibyteMode::FieldBoundary) && shell.locale.wide_is_blank(wc) {
-            return Ok(1);
+            return Ok(MultibyteInput::FieldBoundary);
         }
-
-        /* The last two `memalloc.h` macros this file expanded were here.
-         * Over an offset they are one statement each, so they are written
-         * out with the C's name beside them and the macros are deleted --
-         * the bookkeeping [[delete-memalloc]] left recorded. */
-        if framed {
-            /* USTPUTC(CTLMBCHAR, out) */
-            output[written_length] = LEGACY_MULTIBYTE;
-            written_length += 1;
-            if escaped {
-                /* USTPUTC(CTLESC, out) */
-                output[written_length] = LEGACY_ESCAPE;
-                written_length += 1;
-            }
-            /* USTPUTC(ml, out) */
-            output[written_length] = multibyte_length as u8;
-            written_length += 1;
-        }
-        /* STADJUST(ml, out) — step over the bytes written ahead of the
-         * cursor, which are the character itself. */
-        written_length += multibyte_length;
-        if framed {
-            /* USTPUTC(ml, out) */
-            output[written_length] = multibyte_length as u8;
-            written_length += 1;
-            /* USTPUTC(CTLMBCHAR, out) */
-            output[written_length] = LEGACY_MULTIBYTE;
-            written_length += 1;
-        }
-
-        return Ok(written_length);
+        return Ok(MultibyteInput::Character { bytes, escaped });
     }
 
-    if multibyte_length > 1 {
-        unread_input_units(shell, multibyte_length.saturating_sub(1));
+    if bytes.len() > 1 {
+        unread_input_units(shell, bytes.len() - 1);
     }
 
-    Ok(0)
-}
-
-/// The most `getmbc` or `conv_escape` can write past the cursor.
-///
-/// `readtoken1` spells it `CHECKSTRSPACE(MAX(MB_LEN_MAX, 16) + 7, out)` and
-/// then lets both of them write through a bare `char *`. Reserving is what
-/// makes those writes land in a `Vec`'s spare capacity rather than past the
-/// end of it, so the number has to stay the C's.
-pub const MULTIBYTE_OUTPUT_CAPACITY: usize = (if MAX_MULTIBYTE_LENGTH > 16 {
-    MAX_MULTIBYTE_LENGTH
-} else {
-    16
-}) + 7;
-
-/// `getmbc` appending to a growable string.
-///
-/// The C hands it a cursor into the stack block; the byte count it returns is
-/// how far that cursor moved, which here is what the caller commits. It can
-/// also return 0 or 1 having scribbled on the block past the cursor, and the
-/// C leaves that scribble for the next write to overwrite — so does this,
-/// because the bytes stay uncommitted.
-fn decode_multibyte_character_at(
-    shell: &mut Shell,
-    output: &mut BString,
-    input: InputUnit,
-    mode: MultibyteMode,
-) -> Result<usize, Error> {
-    let mut scratch: [u8; MULTIBYTE_OUTPUT_CAPACITY] = [0; MULTIBYTE_OUTPUT_CAPACITY];
-    let multibyte_length = read_multibyte_character(shell, input, &mut scratch, mode)?;
-    /* The append *is* the commit the callers used to make with `set_len`,
-     * so it happens here once instead of at each of the three of them. */
-    output.extend_from_slice(&scratch[..multibyte_length]);
-    Ok(multibyte_length)
+    Ok(MultibyteInput::SingleByte)
 }
 
 // [spec:dash:sem:parser.dollarsq-escape-fn]
@@ -1519,21 +1466,10 @@ fn decode_multibyte_character_at(
 // [spec:posix:req:quote.dollar-single-quotes-quote-escape-not-terminator]
 fn parse_dollar_single_quote_escape(
     shell: &mut Shell,
-    destination: &mut BString,
+    destination: &mut Vec<WordToken>,
 ) -> Result<(), Error> {
-    /* The C writes into the stack block through a cursor and commits the
-     * prefix. `conv_escape` takes a fixed scratch buffer now -- it writes
-     * above the length it reports, which is why the buffer has to be
-     * `CONV_ESCAPE_SLOP` and not the four bytes the C's `CHECKSTRSPACE`
-     * names -- so the write lands there and the committed prefix is
-     * appended. Same bytes, same length, and the reservation that used to
-     * be a memory-safety contract is gone with the raw cursor. */
-    let mut scratch: [u8; crate::escape::ESCAPE_OUTPUT_CAPACITY] =
-        [0; crate::escape::ESCAPE_OUTPUT_CAPACITY];
-    let mut written_length: usize = 0;
     /* Longest accepted escape spelling is `UXXXXXXXX`. */
     let mut text = Vec::with_capacity(9);
-    let mut at: usize;
 
     while text.len() < text.capacity() {
         let input = read_input_unit(shell)?;
@@ -1547,29 +1483,23 @@ fn parse_dollar_single_quote_escape(
             break;
         }
     }
-    at = 0;
-    if text.first() != Some(&b'c') {
-        let converted = crate::escape::parse_escape(&text, &mut scratch, true);
-        at += converted.consumed;
-        written_length += converted.written;
+    let (bytes, consumed) = if text.first() != Some(&b'c') {
+        let converted = crate::escape::parse_escape(&text, true);
+        (converted.bytes().to_vec(), converted.consumed)
     } else {
-        at += 1;
-        if let Some(&byte) = text.get(at) {
-            let control_byte = byte;
+        let mut consumed = 1;
+        let bytes = if let Some(&control_byte) = text.get(consumed) {
+            consumed += 1;
+            consumed += usize::from(control_byte == b'\\' && text.get(consumed) == Some(&b'\\'));
+            vec![(control_byte & !((control_byte & 0x40) >> 1) & 0x7f) ^ 0x40]
+        } else {
+            Vec::new()
+        };
+        (bytes, consumed)
+    };
 
-            at += 1;
-
-            at += usize::from(control_byte == b'\\' && text.get(at) == Some(&b'\\'));
-
-            let converted_byte = (control_byte & !((control_byte & 0x40) >> 1) & 0x7f) ^ 0x40;
-            /* USTPUTC(conv_ch, out) */
-            scratch[written_length] = converted_byte;
-            written_length += 1;
-        }
-    }
-
-    unread_input_units(shell, text.len().saturating_sub(at));
-    destination.extend_from_slice(&scratch[..written_length]);
+    unread_input_units(shell, text.len().saturating_sub(consumed));
+    destination.extend(bytes.into_iter().map(WordToken::Escaped));
     Ok(())
 }
 
@@ -1592,40 +1522,13 @@ struct WordLexer<'a> {
     syntax_frames: Vec<SyntaxFrame>,
     check_here_document_end: bool,
     preserve_escapes: bool,
-    command_substitutions: Vec<Option<Node>>,
     dollar_single_quoted: bool,
     input: InputUnit,
     quoted: bool,
-    /// The word being built. The C's `out` is a `char *` cursor into the
-    /// stack block and `stackblock()` is the base; here the base is the
-    /// buffer and the cursor is its length, so `STADJUST` is `truncate`
-    /// or `push`. Nothing writes into this buffer's spare capacity any
-    /// more -- the two routines that did, `getmbc` and `dollarsq_escape`,
-    /// have their own scratch and hand back bytes to append.
-    output: BString,
+    /// Typed lexer events for the word being built.
+    output: Vec<WordToken>,
     delimiter: EofMark<'a>,
     strip_tabs: bool,
-}
-
-impl WordLexer<'_> {
-    #[inline]
-    fn current_syntax(&self) -> &SyntaxFrame {
-        self.syntax_frames.last().unwrap()
-    }
-
-    #[inline]
-    fn current_syntax_mut(&mut self) -> &mut SyntaxFrame {
-        self.syntax_frames.last_mut().unwrap()
-    }
-
-    fn record_quote_boundary(&mut self, toggle_nested_double_quote: bool) {
-        if toggle_nested_double_quote && self.current_syntax().variable_depth != 0 {
-            self.current_syntax_mut().inner_double_quote ^= true;
-        }
-        if self.delimiter.is_none() {
-            self.output.push(LEGACY_QUOTE);
-        }
-    }
 }
 
 // [spec:dash:sem:parser.readtoken1-fn]
@@ -1674,11 +1577,10 @@ fn read_word_token(
         }],
         check_here_document_end,
         preserve_escapes: syntax == SyntaxContext::SingleQuoted,
-        command_substitutions: Vec::new(),
         dollar_single_quoted: false,
         input: first_input,
         quoted: false,
-        output: BString::new(Vec::new()),
+        output: Vec::new(),
         delimiter,
         strip_tabs,
     };
@@ -1697,22 +1599,20 @@ fn read_word_token(
              * what it reports, so there is no room for this frame to
              * make on its behalf. */
             let multibyte_mode = MultibyteMode::for_word(field_splitting, lexer.preserve_escapes);
-            let multibyte_length = decode_multibyte_character_at(
-                shell,
-                &mut lexer.output,
-                lexer.input,
-                multibyte_mode,
-            )?;
-            if multibyte_length == 1 {
-                if lexer.output.is_empty() {
-                    return Ok(Token::plain(TokenKind::Blank));
+            match read_multibyte_character(shell, lexer.input, multibyte_mode)? {
+                MultibyteInput::FieldBoundary => {
+                    if lexer.output.is_empty() {
+                        return Ok(Token::plain(TokenKind::Blank));
+                    }
+                    lexer.input = read_input_unit(shell)?;
+                    break 'word;
                 }
-                lexer.input = read_input_unit(shell)?;
-                break 'word;
-            }
-            if multibyte_length != 0 {
-                lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
-                continue;
+                MultibyteInput::Character { bytes, escaped } => {
+                    lexer.push_multibyte(bytes, escaped);
+                    lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
+                    continue;
+                }
+                MultibyteInput::SingleByte => {}
             }
 
             let class = lexer.current_syntax().syntax.classify(lexer.input);
@@ -1722,12 +1622,12 @@ fn read_word_token(
                     if field_splitting {
                         break 'word;
                     }
-                    lexer.output.push(lexer.input.expect_byte());
+                    lexer.push_literal(lexer.input.expect_byte());
                     prompt_after_newline(shell)?;
                     lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
                     continue 'word;
                 }
-                SyntaxClass::Word => lexer.output.push(lexer.input.expect_byte()),
+                SyntaxClass::Word => lexer.push_literal(lexer.input.expect_byte()),
                 SyntaxClass::Control => {
                     if lexer.dollar_single_quoted && lexer.input.is(b'\\') {
                         parse_dollar_single_quote_escape(shell, &mut lexer.output)?;
@@ -1736,27 +1636,28 @@ fn read_word_token(
                             || lexer.current_syntax().double_quoted
                             || lexer.current_syntax().variable_depth != 0
                         {
-                            lexer.output.push(LEGACY_ESCAPE);
+                            lexer.push_escaped(lexer.input.expect_byte());
+                        } else {
+                            lexer.push_literal(lexer.input.expect_byte());
                         }
-                        lexer.output.push(lexer.input.expect_byte());
                     }
                 }
                 SyntaxClass::Backslash => word_lexer::read_backslash(shell, &mut lexer)?,
                 SyntaxClass::SingleQuote => {
                     lexer.current_syntax_mut().syntax = SyntaxContext::SingleQuoted;
-                    lexer.record_quote_boundary(false);
+                    lexer.record_quote_boundary(QuoteBoundary::Open, false);
                 }
                 SyntaxClass::DoubleQuote => {
                     lexer.current_syntax_mut().syntax = SyntaxContext::DoubleQuoted;
                     lexer.current_syntax_mut().double_quoted = true;
-                    lexer.record_quote_boundary(true);
+                    lexer.record_quote_boundary(QuoteBoundary::Open, true);
                 }
                 SyntaxClass::EndQuote => lexer.close_quote(),
                 SyntaxClass::Variable => parse_parameter_expansion(shell, &mut lexer)?,
                 SyntaxClass::EndVariable => lexer.close_parameter_expansion(),
                 SyntaxClass::LeftParen => {
                     lexer.current_syntax_mut().parenthesis_depth += 1;
-                    lexer.output.push(lexer.input.expect_byte());
+                    lexer.push_literal(lexer.input.expect_byte());
                 }
                 SyntaxClass::RightParen => {
                     if lexer.current_syntax().parenthesis_depth > 0 {
@@ -1764,22 +1665,25 @@ fn read_word_token(
                     } else if read_unit_skipping_line_continuations(shell)?.is(b')') {
                         syntax_stack::pop(&mut lexer.syntax_frames);
                         if lexer.check_here_document_end {
-                            lexer.output.push(lexer.input.expect_byte());
+                            lexer.push_literal(lexer.input.expect_byte());
+                            lexer.push_literal(b')');
                         } else {
-                            lexer.input = InputUnit::Byte(LEGACY_END_ARITHMETIC);
+                            lexer.output.push(WordToken::ArithmeticEnd);
                         }
                     } else {
                         unread_input_unit(shell);
                     }
-                    lexer.output.push(lexer.input.expect_byte());
+                    if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
+                        lexer.push_literal(lexer.input.expect_byte());
+                    }
                 }
                 SyntaxClass::Backquote => {
                     if lexer.current_syntax().backquote == BackquoteContext::Legacy {
                         syntax_stack::pop(&mut lexer.syntax_frames);
                         lexer.preserve_escapes = false;
-                        lexer.output.push(lexer.input.expect_byte());
+                        lexer.push_literal(lexer.input.expect_byte());
                     } else {
-                        lexer.output.push(b'`');
+                        lexer.push_literal(b'`');
                         parse_command_substitution(shell, &mut lexer, true)?;
                     }
                 }
@@ -1790,11 +1694,11 @@ fn read_word_token(
                     {
                         syntax_stack::pop(&mut lexer.syntax_frames);
                         lexer.preserve_escapes = false;
-                        lexer.output.push(lexer.input.expect_byte());
+                        lexer.push_literal(lexer.input.expect_byte());
                     } else if field_splitting {
                         break 'word;
                     } else {
-                        lexer.output.push(lexer.input.expect_byte());
+                        lexer.push_literal(lexer.input.expect_byte());
                     }
                 }
             }
@@ -1815,14 +1719,17 @@ fn read_word_token(
         /* { */
         return Err(syntax_error(shell, b"Missing '}'"));
     }
-    let output_length = lexer.output.len();
+    let descriptor_digit = match lexer.output.as_slice() {
+        [] => Some(0),
+        [WordToken::Literal(byte)] if byte.is_ascii_digit() => Some(*byte),
+        _ => None,
+    };
     if lexer.delimiter.is_none() {
         if (lexer.input.is(b'>') || lexer.input.is(b'<'))
             && !lexer.quoted
-            && output_length <= 1
-            && lexer.output.first().is_none_or(u8::is_ascii_digit)
+            && descriptor_digit.is_some()
         {
-            parse_redirection(shell, &mut lexer)?;
+            parse_redirection(shell, &mut lexer, descriptor_digit.unwrap_or(0))?;
             shell.input.last_token = TokenKind::Redirection;
             shell.input.last_token_quoted = false;
             return Ok(Token::plain(TokenKind::Redirection));
@@ -1835,9 +1742,7 @@ fn read_word_token(
      * scratch space, which is what made `wordtext` outlive the next token.
      * Moving the buffer out is the same guarantee. */
     // [spec:nsh:def:idiom.word-ir]
-    let encoded = mem::take(&mut lexer.output);
-    shell.input.word =
-        ParsedWord::from_legacy_fragment(&encoded, mem::take(&mut lexer.command_substitutions));
+    shell.input.word = ParsedWord::from_tokens(mem::take(&mut lexer.output));
     shell.input.last_token = TokenKind::Word;
     Ok(Token {
         kind: TokenKind::Word,
@@ -1925,14 +1830,17 @@ fn finish_word_if_delimited(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Res
 // [spec:posix:syn:grammar.io-file]
 // [spec:posix:syn:grammar.io-here]
 // [spec:posix:def:grammar.operator-tokens]
-fn parse_redirection(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(), Error> {
+fn parse_redirection(
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+    descriptor_digit: u8,
+) -> Result<(), Error> {
     enum ParsedRedirection {
         File(FileRedirectionOperator),
         Descriptor(DescriptorRedirectionOperator),
         HereDocument,
     }
 
-    let descriptor_digit = lexer.output.first().copied().unwrap_or(0);
     /* The C carves one `struct nfile` and then decides what it is by
      * assigning `np->type`, re-allocating only because `nhere` is smaller.
      * The arm has to be chosen up front here, so the type and the fd are
@@ -1998,21 +1906,84 @@ fn parse_redirection(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(),
     Ok(())
 }
 
+fn parse_parameter_operator(
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+    bad_substitution: bool,
+    parameter_syntax: &mut ParameterSyntax,
+    nested_syntax: &mut SyntaxContext,
+) -> Result<(), Error> {
+    if bad_substitution {
+        unread_input_unit(shell);
+    } else if parameter_syntax.operation == ParameterOperation::Invalid {
+        let current_unit = lexer.input;
+
+        if lexer.check_here_document_end {
+            lexer.push_literal(lexer.input.expect_byte());
+        }
+
+        if lexer.input.is(b'%') || lexer.input.is(b'#') {
+            let trim_prefix = lexer.input.is(b'#');
+            parameter_syntax.operation = if trim_prefix {
+                ParameterOperation::RemoveSmallestPrefix
+            } else {
+                ParameterOperation::RemoveSmallestSuffix
+            };
+            lexer.input = read_unit_skipping_line_continuations(shell)?;
+            if lexer.input == current_unit {
+                if lexer.check_here_document_end {
+                    lexer.push_literal(lexer.input.expect_byte());
+                }
+                parameter_syntax.operation = if trim_prefix {
+                    ParameterOperation::RemoveLargestPrefix
+                } else {
+                    ParameterOperation::RemoveLargestSuffix
+                };
+            } else {
+                unread_input_unit(shell);
+            }
+
+            *nested_syntax = SyntaxContext::Base;
+        } else {
+            if lexer.input.is(b':') {
+                parameter_syntax.colon = true;
+                lexer.input = read_unit_skipping_line_continuations(shell)?;
+                if lexer.check_here_document_end {
+                    lexer.push_literal(lexer.input.expect_byte());
+                }
+            }
+            parameter_syntax.operation = match lexer.input.byte() {
+                Some(b'}') => ParameterOperation::Value,
+                Some(b'-') => ParameterOperation::Default,
+                Some(b'+') => ParameterOperation::Alternate,
+                Some(b'?') => ParameterOperation::Error,
+                Some(b'=') => ParameterOperation::Assign,
+                _ => ParameterOperation::Invalid,
+            };
+        }
+    } else {
+        if parameter_syntax.operation == ParameterOperation::Length && !lexer.input.is(b'}') {
+            parameter_syntax.operation = ParameterOperation::Invalid;
+        }
+        unread_input_unit(shell);
+    }
+    Ok(())
+}
+
 /*
  * Parse a substitution.  At this point, we have read the dollar sign
  * and nothing else.
  */
 fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     let mut nested_syntax = lexer.current_syntax().syntax;
-    static TYPES: [u8; 5] = *b"}-+?=";
-    let mut subtype: u8;
+    let substitution_start = lexer.output.len();
 
-    lexer.output.push(b'$');
+    lexer.push_literal(b'$');
 
     lexer.input = read_unit_skipping_line_continuations(shell)?;
     if lexer.input.is(b'(') {
         /* $(command) or $((arith)) */
-        lexer.output.push(lexer.input.expect_byte());
+        lexer.push_literal(lexer.input.expect_byte());
         if read_unit_skipping_line_continuations(shell)?.is(b'(') {
             parse_arithmetic_expansion(lexer)?;
         } else {
@@ -2022,37 +1993,29 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
     } else if lexer.input.is(b'\'')
         && nested_syntax.classify(InputUnit::Byte(b'&')) != SyntaxClass::Word
     {
-        lexer.output.pop();
+        lexer.output.truncate(substitution_start);
         lexer.dollar_single_quoted = true;
         lexer.current_syntax_mut().syntax = SyntaxContext::SingleQuoted;
-        lexer.record_quote_boundary(false);
+        lexer.record_quote_boundary(QuoteBoundary::Open, false);
         return Ok(());
     } else if lexer.input.is(b'{')
         || lexer.input.begins_name(&shell.locale)
         || lexer.input.is_special_parameter()
     {
-        let parameter_type_offset: usize = lexer.output.len();
         let mut bad_substitution = false;
-
-        /* `STADJUST(chkeofmark == 0, out)` steps over the byte the CTLVAR
-         * subtype lands in below; nothing reads it in between, so the
-         * placeholder value is not observable. */
-        lexer.output.resize(
-            parameter_type_offset + (!lexer.check_here_document_end) as usize,
-            0,
-        );
-        subtype = PARAMETER_NORMAL;
+        let mut parameter_syntax = ParameterSyntax::unbraced();
         if lexer.input.is(b'{') {
             if lexer.check_here_document_end {
-                lexer.output.push(b'{');
+                lexer.push_literal(b'{');
             }
             lexer.input = read_unit_skipping_line_continuations(shell)?;
-            subtype = 0;
+            parameter_syntax = ParameterSyntax::braced();
         }
+        let name_start = lexer.output.len();
         'assignment_name: loop {
             if lexer.input.begins_name(&shell.locale) {
                 loop {
-                    lexer.output.push(lexer.input.expect_byte());
+                    lexer.push_literal(lexer.input.expect_byte());
                     lexer.input = read_unit_skipping_line_continuations(shell)?;
                     if !lexer.input.continues_name(&shell.locale) {
                         break;
@@ -2060,9 +2023,10 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                 }
             } else if lexer.input.is_digit() {
                 loop {
-                    lexer.output.push(lexer.input.expect_byte());
+                    lexer.push_literal(lexer.input.expect_byte());
                     lexer.input = read_unit_skipping_line_continuations(shell)?;
-                    if !((subtype == 0 || subtype >= PARAMETER_LENGTH) && lexer.input.is_digit()) {
+                    if !(parameter_syntax.accepts_multiple_name_digits() && lexer.input.is_digit())
+                    {
                         break;
                     }
                 }
@@ -2071,8 +2035,8 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
 
                 lexer.input = read_unit_skipping_line_continuations(shell)?;
 
-                if subtype == 0 && current_unit.is(b'#') {
-                    subtype = PARAMETER_LENGTH;
+                if parameter_syntax.accepts_array_subscript() && current_unit.is(b'#') {
+                    parameter_syntax.operation = ParameterOperation::Length;
 
                     if lexer.input.is(b'_')
                         || lexer
@@ -2081,7 +2045,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                             .is_some_and(|byte| shell.locale.is_alphanumeric(byte))
                     {
                         if lexer.check_here_document_end {
-                            lexer.output.push(b'#');
+                            lexer.push_literal(b'#');
                         }
                         continue 'assignment_name;
                     }
@@ -2090,23 +2054,23 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                     lexer.input = read_unit_skipping_line_continuations(shell)?;
                     if current_unit.is(b'}') || !lexer.input.is(b'}') {
                         unread_input_unit(shell);
-                        subtype = 0;
+                        parameter_syntax.operation = ParameterOperation::Invalid;
                         lexer.input = current_unit;
                         current_unit = InputUnit::Byte(b'#');
                     } else if lexer.check_here_document_end {
-                        lexer.output.push(b'#');
+                        lexer.push_literal(b'#');
                     }
                 }
 
                 if !current_unit.is_special_parameter() {
-                    if subtype == PARAMETER_LENGTH {
-                        subtype = 0;
+                    if parameter_syntax.operation == ParameterOperation::Length {
+                        parameter_syntax.operation = ParameterOperation::Invalid;
                     }
                     bad_substitution = true;
                     break 'assignment_name;
                 }
 
-                lexer.output.push(current_unit.expect_byte());
+                lexer.push_literal(current_unit.expect_byte());
             } else {
                 bad_substitution = true;
                 break 'assignment_name;
@@ -2114,57 +2078,21 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             break 'assignment_name;
         }
 
-        bash::parameter_subscript(shell, lexer, bad_substitution, subtype)?;
+        bash::parameter_subscript(
+            shell,
+            lexer,
+            bad_substitution,
+            parameter_syntax.accepts_array_subscript(),
+        )?;
+        let name_end = lexer.output.len();
 
-        if bad_substitution {
-            /* badsub: */
-            unread_input_unit(shell);
-        } else if subtype == 0 {
-            let current_unit = lexer.input;
-
-            if lexer.check_here_document_end {
-                lexer.output.push(lexer.input.expect_byte());
-            }
-
-            if lexer.input.is(b'%') || lexer.input.is(b'#') {
-                subtype = if lexer.input.is(b'#') {
-                    PARAMETER_TRIM_PREFIX
-                } else {
-                    PARAMETER_TRIM_SUFFIX
-                };
-                lexer.input = read_unit_skipping_line_continuations(shell)?;
-                if lexer.input == current_unit {
-                    if lexer.check_here_document_end {
-                        lexer.output.push(lexer.input.expect_byte());
-                    }
-                    subtype += 1;
-                } else {
-                    unread_input_unit(shell);
-                }
-
-                nested_syntax = SyntaxContext::Base;
-            } else {
-                if lexer.input.is(b':') {
-                    subtype = PARAMETER_COLON;
-                    lexer.input = read_unit_skipping_line_continuations(shell)?;
-                    if lexer.check_here_document_end {
-                        lexer.output.push(lexer.input.expect_byte());
-                    }
-                    /*FALLTHROUGH*/
-                }
-                /* default: */
-                if let Some(at) = TYPES.iter().position(|&byte| lexer.input.is(byte)) {
-                    subtype |= u8::try_from(at).expect("parameter operator table fits in a byte")
-                        + PARAMETER_NORMAL;
-                }
-            }
-        } else {
-            if subtype == PARAMETER_LENGTH && !lexer.input.is(b'}') {
-                subtype = 0;
-            }
-            /* badsub: */
-            unread_input_unit(shell);
-        }
+        parse_parameter_operator(
+            shell,
+            lexer,
+            bad_substitution,
+            &mut parameter_syntax,
+            &mut nested_syntax,
+        )?;
 
         if nested_syntax == SyntaxContext::Arithmetic {
             nested_syntax = SyntaxContext::DoubleQuoted;
@@ -2172,7 +2100,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
 
         if (nested_syntax != lexer.current_syntax().syntax
             || lexer.current_syntax().inner_double_quote)
-            && subtype != PARAMETER_NORMAL
+            && parameter_syntax.has_operand()
         {
             syntax_stack::push(&mut lexer.syntax_frames, nested_syntax);
 
@@ -2180,16 +2108,22 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             lexer.current_syntax_mut().double_quoted = nested_syntax != SyntaxContext::Base;
         }
 
-        if subtype != PARAMETER_NORMAL {
+        if parameter_syntax.has_operand() {
             lexer.current_syntax_mut().variable_depth += 1;
             if lexer.current_syntax().double_quoted {
                 lexer.current_syntax_mut().double_quote_variable_depth += 1;
             }
         }
         if !lexer.check_here_document_end {
-            lexer.output[parameter_type_offset - 1] = LEGACY_PARAMETER;
-            lexer.output[parameter_type_offset] = subtype | PARAMETER_PRESENT;
-            lexer.output.push(b'=');
+            let name = lexer
+                .literal_bytes(name_start..name_end)
+                .unwrap_or_default();
+            lexer.output.truncate(substitution_start);
+            lexer.output.push(WordToken::ParameterStart {
+                name,
+                operation: parameter_syntax.operation,
+                colon: parameter_syntax.colon,
+            });
         }
     } else {
         unread_input_unit(shell);
@@ -2220,7 +2154,6 @@ fn parse_command_substitution(
     legacy: bool,
 ) -> Result<(), Error> {
     let mut saved_prompt_enabled = false;
-    let mut multibyte_length: usize;
     /* `grabstackstr(pout)` had to reserve the backquote's text because
      * `list(2)?` builds on the same stack; owning it says the same thing, and
      * it has to outlive the `popfile` below because `setinputstring` reads
@@ -2240,16 +2173,10 @@ fn parse_command_substitution(
         }
         return Ok(());
     }
-    /* `STADJUST(oldstyle - 1, out)` drops the '(' of `$(` and leaves the '`'
-     * of a backquote in place; either way the last byte becomes CTLBACKQ. */
-    if !legacy {
-        lexer.output.pop();
-    }
-    let last = lexer.output.len() - 1;
-    lexer.output[last] = LEGACY_COMMAND_SUBSTITUTION;
-    /* The word so far is parked while `list(2)?` runs, which is what
-     * `grabstackblock(savelen)` bought the C. */
-    let outer_word = mem::take(&mut lexer.output);
+    let introducer_length = if legacy { 1 } else { 2 };
+    lexer
+        .output
+        .truncate(lexer.output.len().saturating_sub(introducer_length));
     if legacy {
         /* We must read until the closing backquote, giving special
         treatment to some slashes, and then push the string and
@@ -2272,13 +2199,10 @@ fn parse_command_substitution(
                 {
                     substitution_text.push(b'\\');
                 }
-                multibyte_length = decode_multibyte_character_at(
-                    shell,
-                    &mut substitution_text,
-                    input,
-                    MultibyteMode::Raw,
-                )?;
-                if multibyte_length != 0 {
+                if let MultibyteInput::Character { bytes, .. } =
+                    read_multibyte_character(shell, input, MultibyteMode::Literal)?
+                {
+                    substitution_text.extend_from_slice(&bytes);
                     continue;
                 }
             } else if input == InputUnit::EndOfInput {
@@ -2289,13 +2213,6 @@ fn parse_command_substitution(
             substitution_text.push(input.expect_byte());
         }
     }
-    /* The C walks to the tail of `bqlist` and appends an empty cell, then
-     * fills its `n` after the recursive parse.  Reserving the slot first is
-     * the same order; nothing else can append to this list while `list(2)?`
-     * runs, because `bqlist` is a local of *this* `readtoken1`. */
-    let substitution_index = lexer.command_substitutions.len();
-    lexer.command_substitutions.push(None);
-
     let saved_here_documents = core::mem::take(&mut shell.input.pending_here_documents);
     let completed_at = shell.input.completed_here_documents.len();
 
@@ -2326,14 +2243,13 @@ fn parse_command_substitution(
         shell.input.prompt_before_read = saved_prompt_enabled;
     }
     shell.input.pending_here_documents = saved_here_documents;
-    lexer.output = outer_word;
     if legacy {
         /* Ignore any pushed back tokens left from the backquote
          * parsing.
          */
         shell.input.token_pushed_back = false;
     }
-    lexer.command_substitutions[substitution_index] = parsed?;
+    lexer.output.push(WordToken::Command(parsed?));
     Ok(())
 }
 
@@ -2346,13 +2262,10 @@ fn parse_arithmetic_expansion(lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     syntax_stack::push(&mut lexer.syntax_frames, SyntaxContext::Arithmetic);
     lexer.current_syntax_mut().double_quoted = true;
     if lexer.check_here_document_end {
-        lexer.output.push(lexer.input.expect_byte());
+        lexer.push_literal(lexer.input.expect_byte());
     } else {
-        /* `STADJUST(-1); out[-1] = CTLARI` — drop the second '(' of `$((`
-         * and relabel the '$'. */
-        lexer.output.pop();
-        let last = lexer.output.len() - 1;
-        lexer.output[last] = LEGACY_ARITHMETIC;
+        lexer.output.truncate(lexer.output.len().saturating_sub(2));
+        lexer.output.push(WordToken::ArithmeticStart);
     }
     Ok(())
 }
@@ -2425,6 +2338,7 @@ fn select_prompt(shell: &mut Shell, prompt: PromptKind) -> Result<(), Error> {
 }
 
 // [spec:dash:sem:parser.expandstr-fn]
+// [spec:dash:sem:expand.restore-handler-expandarg-fn]
 pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error> {
     let saved_here_documents = core::mem::take(&mut shell.input.pending_here_documents);
     let saved_prompt_state = shell.input.prompt_before_read;
@@ -2491,7 +2405,7 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
          * `restore_handler_expandarg` and there is nothing here that may
          * swallow a ^C. It is why this function returns a `Result` at all;
          * both callers are fallible and neither wanted one otherwise. */
-        recover_expansion(shell, caught)
+        caught
     });
 
     shell.input.prompt_before_read = saved_prompt_state;

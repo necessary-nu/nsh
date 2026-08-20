@@ -736,18 +736,13 @@ pub fn copy_slot_above(
 /// [`redirect`] owns a structured deferral scope and restores its caller's
 /// depth on every ordinary return, including an error caught here.
 // [spec:dash:sem:redir.redirectsafe-fn]
+// [spec:dash:sem:expand.restore-handler-expandarg-fn]
 pub(crate) fn redirect_safely(
     shell: &mut Shell,
     redirections: &[ExpandedRedirection<'_>],
     mode: RedirectionMode,
 ) -> Result<(), Error> {
-    let redirect_error = redirect(shell, redirections, mode).err();
-    let caught = crate::expand::recover_expansion(shell, redirect_error);
-    if let Some(e) = caught {
-        return Err(e);
-    }
-
-    Ok(())
+    redirect(shell, redirections, mode)
 }
 
 // [spec:dash:sem:redir.unwindredir-fn]
@@ -794,16 +789,6 @@ mod tests {
 
     use super::{LogicalDescriptor, OpenFailureContext};
     use crate::Shell;
-    use crate::error::Error;
-    use crate::expand::recover_expansion;
-
-    fn diagnostic() -> Error {
-        Error::Other {
-            line: 7,
-            status: crate::status::ExitStatus::ERROR,
-            message: bstr::BString::from(&b"Bad substitution"[..]),
-        }
-    }
 
     // [spec:posix:req:sh.exit-status-values/test]
     // [spec:posix:req:xcu.exit-status.listed-values-binding/test]
@@ -819,53 +804,6 @@ mod tests {
         );
         assert_eq!(OpenFailureContext::Ordinary.status(&missing).code(), 2,);
         assert_eq!(OpenFailureContext::CommandFile.status(&denied).code(), 2,);
-    }
-
-    /// Nothing went wrong: nothing comes back.
-    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
-    #[test]
-    fn a_clean_frame_returns_nothing() {
-        let _guard = crate::test_support::lock();
-        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        assert!(recover_expansion(&mut shell, None).is_none());
-    }
-
-    /// A diagnostic is handed straight back, text, status and line
-    /// intact -- the arm that used to be `exception == EXERROR`.
-    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
-    #[test]
-    fn caught_diagnostic_comes_back() {
-        let _guard = crate::test_support::lock();
-        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let got = recover_expansion(&mut shell, Some(diagnostic()))
-            .expect("the caught diagnostic is the frame's to return");
-        assert_eq!(got.message(), "Bad substitution");
-        assert_eq!(got.status(), crate::status::ExitStatus::ERROR);
-        assert_eq!(got.line(), 7);
-        assert!(!got.is_interrupt());
-    }
-
-    /// An interrupt comes back too, and is *not* the same arm: the C
-    /// re-raised it from here rather than swallowing it, and the frames
-    /// above must be able to tell the two apart. Getting this wrong is a
-    /// shell that stops answering `^C`.
-    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
-    #[test]
-    fn an_interrupt_comes_back_as_one() {
-        let _guard = crate::test_support::lock();
-        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let got = recover_expansion(
-            &mut shell,
-            Some(Error::Interrupted {
-                signal: crate::status::Signal::from(nsh_platform::interrupt_signal()),
-            }),
-        )
-        .expect("an interrupt must not be swallowed by this frame");
-        assert!(got.is_interrupt());
-        assert_eq!(
-            got.status(),
-            crate::status::Signal::from(nsh_platform::interrupt_signal()).as_status()
-        );
     }
 
     /// Opening directly into the target means the target was closed before

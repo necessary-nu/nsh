@@ -5371,4 +5371,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.strict-lints}
     )}
+    {id enforce-zero-cism-gates, covered_rules (
+        idiom.regression-gates
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.regression-gates}
+    )}
 )

@@ -24,7 +24,7 @@ use crate::error::Error;
 
 use bstr::{BStr, BString, ByteSlice as _};
 
-use crate::escape::{ESCAPE_OUTPUT_CAPACITY, append_escape, parse_escape};
+use crate::escape::{append_escape, parse_escape};
 use crate::evaluation::Flow;
 use crate::output::OutputDestination;
 use crate::status::ExitStatus;
@@ -645,14 +645,9 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             at += 1;
 
             if character == b'\\' {
-                /* `STARTSTACKSTR(cp); CHECKSTRSPACE(4, cp)` -- one
-                 * escape's worth of scratch and nothing else; see
-                 * `CONV_ESCAPE_SLOP` for why 4 is not the bound. */
-                let mut scratch: [u8; ESCAPE_OUTPUT_CAPACITY] = [0; ESCAPE_OUTPUT_CAPACITY];
-                let converted = parse_escape(&format[at..], &mut scratch, false);
+                let converted = parse_escape(&format[at..], false);
                 at += converted.consumed;
-                debug_assert!(converted.written <= ESCAPE_OUTPUT_CAPACITY);
-                emit(shell, &scratch[..converted.written])?;
+                emit(shell, converted.bytes())?;
                 continue;
             }
             /* A `%%` is one `%`; a `%` at the very end of the format

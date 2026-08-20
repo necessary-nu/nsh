@@ -67,6 +67,7 @@
 
 #![deny(missing_docs)]
 // [spec:nsh:req:idiom.strict-lints]
+// [spec:nsh:req:idiom.regression-gates]
 #![deny(unsafe_code)]
 #![deny(dead_code)]
 #![deny(non_camel_case_types)]

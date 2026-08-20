@@ -1,64 +1,10 @@
-//! The C escape decoder, shared by `echo`, `printf` and the parser.
+//! Shell escape decoding shared by `echo`, `printf`, and dollar-single quotes.
 //!
-//! Port of the escape half of `src/bltin/printf.c`; `conv_escape` is
-//! declared in `system.h` and shared with `parser.c` (which calls it with
-//! `mbchar = true`), so it carries both the `printf.*` and the `system.*`
-//! rule ids.
-//!
-//! It lives here rather than inside `builtins::echo` because two callers
-//! is what shared means: a decoder the parser needs cannot sit inside a
-//! builtin without the parser depending on one. `conv_escape_str` is here
-//! for the same reason -- `echo`'s words and `printf`'s `%b` argument are
-//! the same dialect, the one where an octal escape is written `\0nnn`.
-//!
-//! Cross-module signatures assumed (see the port report):
-//!   * Nothing from `crate::memalloc`.  The one buffer this file deals in
-//!     is owned, so `USTPUTC`/`STADJUST` below are the two macros
-//!     `conv_escape` still needs to write through a bare cursor and touch
-//!     no region.
-//!   * `crate::parser::{CTLESC, CTLMBCHAR}` (src/parser.h:43,47)
-//!   * `crate::syntax::SyntaxContext` for bytes that need framing inside
-//!     single quotes.
-//!     (src/mksyntax.c:147,152)
+//! `echo` and `printf` use the same escape dialect, including the special
+//! `\0nnn` spelling for octal bytes. Dollar-single quotes add quote escapes
+//! and handle control-character notation in the parser.
 
 use bstr::{BStr, BString};
-
-// ---------------------------------------------------------------------
-// src/memalloc.h:78-97 -- the two stack-string macros `conv_escape` still
-// needs.  Both are pure cursor arithmetic; neither touches the region,
-// and both are now written over a buffer and an offset rather than a raw
-// pointer, so the bound they write within is checked.
-// ---------------------------------------------------------------------
-
-///
-/// The C guards both of its calls with `CHECKSTRSPACE(4, cp)`, and 4 is not
-/// enough. `\U0001F600` takes the `len == 4` arm, which writes the four
-/// encoded bytes at `out + mboff` and *then* `USTPUTC(len, out);
-/// USTPUTC(CTLMBCHAR, out)` at `out + len` and `out + len + 1` — bytes 5 and
-/// 6 with `mbchar` false, bytes 7 and 8 with it true. It returns before them,
-/// so they are scratch the next write overwrites; but they are written, and
-/// in a 504-byte stack block nobody notices. A fixed buffer is exactly as
-/// long as it is declared to be, so the port has to size it by what the C
-/// *writes* rather than by what the C says.
-///
-/// This is the size of `conv_escape`'s destination rather than an amount
-/// callers must remember to reserve, which is why every call site can now
-/// pass a `[u8; CONV_ESCAPE_SLOP]` and stop thinking about it.
-pub const ESCAPE_OUTPUT_CAPACITY: usize = 8;
-
-fn append_output_byte(byte: u8, output: &mut [u8], output_index: &mut usize) {
-    output[*output_index] = byte;
-    *output_index += 1;
-}
-
-/// The amount is signed and is genuinely negative here — `mboff` is -2 in
-/// the non-`mbchar` case — so the arithmetic is done in `isize` and the
-/// result is asserted back into range rather than wrapped.
-fn adjust_output_index(output_index: &mut usize, amount: isize) {
-    let adjusted = *output_index as isize + amount;
-    debug_assert!(adjusted >= 0, "the escape cursor stays inside its scratch");
-    *output_index = adjusted as usize;
-}
 
 #[inline]
 pub(crate) fn is_octal_digit(byte: u8) -> bool {
@@ -70,289 +16,146 @@ fn octal_digit_value(byte: u8) -> u32 {
     u32::from(byte - b'0')
 }
 
-// Character constants used as `match` patterns; Rust cannot cast inside a
-// pattern the way a C `case` label can.
-const BACKSLASH: u8 = b'\\';
-const LOWER_X: u8 = b'x';
-const LOWER_U: u8 = b'u';
-const LOWER_A: u8 = b'a';
-const LOWER_B: u8 = b'b';
-const LOWER_F: u8 = b'f';
-const LOWER_E: u8 = b'e';
-const LOWER_N: u8 = b'n';
-const LOWER_R: u8 = b'r';
-const LOWER_T: u8 = b't';
-const LOWER_V: u8 = b'v';
-
 /// The bytes written and input bytes consumed by one escape conversion.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EscapeChunk {
-    pub written: usize,
+    bytes: [u8; 4],
+    length: u8,
     pub consumed: usize,
 }
 
-/*
- * Print "standard" escape characters
- */
-// [spec:dash:sem:printf.conv-escape-fn]
-// [spec:dash:sem:system.conv-escape-fn]
-/// The destination is a fixed scratch buffer rather than a raw cursor,
-/// and its size is the one this function needs.
-///
-/// That turns a comment into a type. The `\u` arm writes *above* the
-/// length it reports — four encoded bytes where `len` are counted, plus a
-/// closing pair — so every caller had to reserve [`CONV_ESCAPE_SLOP`]
-/// rather than the C's 4, and a caller that read the C and reserved 4
-/// would have corrupted whatever followed. Nothing in a signature said
-/// so; the `debug_assert` at the end of that arm was the only guard, and
-/// only in a debug build. An `&mut [u8; CONV_ESCAPE_SLOP]` says it at
-/// every call site, in every profile.
-///
-/// The cursor is an index, which also makes the backward `STADJUST` --
-/// `mboff` is -2 when `!mbchar`, so the framing bytes are deliberately
-/// overwritten by the payload -- ordinary arithmetic instead of pointer
-/// arithmetic that happens to stay in bounds.
-// [spec:nsh:req:idiom.lexer-tokens]
-pub fn parse_escape(
-    input: &[u8],
-    output: &mut [u8; ESCAPE_OUTPUT_CAPACITY],
-    preserve_multibyte_framing: bool,
-) -> EscapeChunk {
-    /* The C's `out`, as the offset it always was. */
-    let mut output_index: usize = 0;
-    let mut at: isize = 0;
-    let mut value: u32;
-    let digit_limit: u8;
-    let mut character: u8;
-
-    let byte_at = |at: isize| -> u8 {
-        usize::try_from(at)
-            .ok()
-            .and_then(|index| input.get(index))
-            .copied()
-            .unwrap_or(0)
-    };
-    character = byte_at(at);
-    value = u32::from(character);
-
-    // The C switch's `default:` label falls into `check_value:`, which falls
-    // into `case '\\':`; `case 'x':` falls into `hex:`, which can jump back
-    // to `check_value:` or forward to `out_noput:`. The three flags below
-    // encode those gotos; the blocks stay in source order except that the
-    // `default:` arm has to move last, as Rust requires.
-    let mut parse_hex_escape = false;
-    let mut validate_value = false;
-    let mut emit_backslash = false;
-
-    'skip_output: {
-        'dispatch_complete: {
-            match character {
-                BACKSLASH => {
-                    emit_backslash = true;
-                }
-
-                LOWER_X => {
-                    character = 2;
-                    parse_hex_escape = true;
-                }
-
-                LOWER_U => {
-                    character = 4;
-                    parse_hex_escape = true;
-                }
-
-                LOWER_A /* alert */ | LOWER_B /* backspace */ | LOWER_F /* form-feed */ => {
-                    value = value.wrapping_sub(u32::from(b'a'));
-                    value = value.wrapping_add(0x07 /* '\a' */);
-                }
-
-                LOWER_E => value = 0o33,   /* <ESC> */
-                LOWER_N => value = 0o12,   /* newline */
-                LOWER_R => value = 0o15,   /* carriage-return */
-                LOWER_T => value = 0o11,   /* tab */
-                LOWER_V => value = 0o13,   /* vertical-tab */
-
-                _ => {
-                    // default:
-                    if preserve_multibyte_framing && (character == b'"' || character == b'\'') {
-                        break 'dispatch_complete;
-                    }
-
-                    if character == b'U' {
-                        character = 8;
-                        parse_hex_escape = true;
-                        break 'dispatch_complete;
-                    }
-
-                    value = u32::from(b'\\');
-
-                    if is_octal_digit(character) {
-                        character = 3;
-                        value = 0;
-                        loop {
-                            value <<= 3;
-                            value = value.wrapping_add(octal_digit_value(byte_at(at)));
-                            at += 1;
-                            character -= 1;
-                            if !(character != 0 && is_octal_digit(byte_at(at))) {
-                                break;
-                            }
-                        }
-                    }
-
-                    at -= 1;
-
-                    validate_value = true;
-                }
-            }
+impl EscapeChunk {
+    const fn one(byte: u8, consumed: usize) -> Self {
+        Self {
+            bytes: [byte, 0, 0, 0],
+            length: 1,
+            consumed,
         }
-
-        if parse_hex_escape {
-            // hex:
-            digit_limit = character;
-            value = 0;
-            loop {
-                at += 1;
-                let byte = byte_at(at);
-                let digit: u32;
-
-                if byte.is_ascii_digit() {
-                    digit = u32::from(byte - b'0');
-                } else {
-                    let uppercase_byte = byte & !0x20;
-                    if matches!(uppercase_byte, b'A'..=b'F') {
-                        digit = u32::from(uppercase_byte - b'A') + 10;
-                    } else {
-                        at -= 1;
-                        break;
-                    }
-                }
-
-                value <<= 4;
-                value = value.wrapping_add(digit);
-
-                character -= 1;
-                if character == 0 {
-                    break;
-                }
-            }
-
-            if digit_limit <= 2 || value < 0x80 {
-                validate_value = true;
-            } else {
-                if value < 0x110000 {
-                    let multibyte_offset: isize = if preserve_multibyte_framing { 0 } else { -2 };
-                    let unicode_scalar: u32 = value;
-                    let encoded_length: usize;
-
-                    value = 0x80 << 8 | (value & 0xfc0) << 2 | 0x80 | (value & 0x3f);
-
-                    if unicode_scalar < 0x800 {
-                        value |= 0x40 << 8;
-                        encoded_length = 2;
-                    } else {
-                        value |= 0x80 << 16 | (unicode_scalar & 0x3f000) << 4;
-                        if unicode_scalar < 0x10000 {
-                            value |= 0x60 << 16;
-                            encoded_length = 3;
-                        } else {
-                            value |= 0xf0 << 24 | (unicode_scalar & !0x3ffff) << 6;
-                            encoded_length = 4;
-                        }
-                    }
-
-                    // htonl(): host order to big-endian, i.e. UTF-8 order.
-                    value = (value << ((4 - encoded_length) * 8)).to_be();
-
-                    append_output_byte(crate::parser::LEGACY_MULTIBYTE, output, &mut output_index);
-                    append_output_byte(encoded_length as u8, output, &mut output_index);
-                    adjust_output_index(&mut output_index, multibyte_offset);
-                    /* `memcpy(out, &value, 4)` — four bytes written where
-                     * `len` are counted, which is the whole reason the
-                     * scratch has to be bigger than the return value. */
-                    output[output_index..output_index + 4].copy_from_slice(&value.to_ne_bytes());
-                    adjust_output_index(&mut output_index, encoded_length as isize);
-                    append_output_byte(encoded_length as u8, output, &mut output_index);
-                    append_output_byte(crate::parser::LEGACY_MULTIBYTE, output, &mut output_index);
-                    adjust_output_index(&mut output_index, multibyte_offset);
-
-                    /* The highest byte the block above touches, counted from
-                     * the start of `out`: the four encoded bytes end at
-                     * `2 + mboff + 3` and the closing pair at
-                     * `2 + mboff + len + 1`.  It is past the length this
-                     * returns, which is why the scratch is `CONV_ESCAPE_SLOP`
-                     * and not the C's 4.  The assertion stays as
-                     * documentation; the indexing above now enforces it in
-                     * every profile rather than only in a debug build. */
-                    let highest_written_index = 2
-                        + multibyte_offset
-                        + isize::try_from((encoded_length + 1).max(3)).unwrap();
-                    debug_assert!(
-                        highest_written_index >= 0
-                            && (highest_written_index as usize) < ESCAPE_OUTPUT_CAPACITY
-                    );
-                }
-
-                break 'skip_output; /* goto out_noput */
-            }
-        }
-
-        if validate_value {
-            // check_value:
-            if crate::syntax::SyntaxContext::SingleQuoted
-                .classify(crate::syntax::InputUnit::Byte(value as u8))
-                != crate::syntax::SyntaxClass::Control
-            {
-                emit_backslash = false;
-            } else {
-                /* fall through */
-                emit_backslash = true;
-            }
-        }
-
-        if emit_backslash {
-            // case '\\':
-            if preserve_multibyte_framing {
-                append_output_byte(crate::parser::LEGACY_ESCAPE, output, &mut output_index);
-            }
-        }
-
-        append_output_byte(value as u8, output, &mut output_index);
     }
 
-    // out_noput:
-    at += 1;
-    debug_assert!(at >= 0, "an escape never consumes a negative byte count");
-    EscapeChunk {
-        written: output_index,
-        consumed: at as usize,
+    const fn empty(consumed: usize) -> Self {
+        Self {
+            bytes: [0; 4],
+            length: 0,
+            consumed,
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.length)]
     }
 }
 
-/*
- * Print SysV echo(1) style escape string
- *	Halts processing string if a \c escape is encountered.
- */
-/// Expand a whole string's escapes into `cp`, in the dialect `echo` and
+fn hexadecimal_digit_value(byte: u8) -> Option<u32> {
+    match byte {
+        b'0'..=b'9' => Some(u32::from(byte - b'0')),
+        b'a'..=b'f' => Some(u32::from(byte - b'a') + 10),
+        b'A'..=b'F' => Some(u32::from(byte - b'A') + 10),
+        _ => None,
+    }
+}
+
+fn hexadecimal_value(input: &[u8], maximum_digits: usize) -> (u32, usize) {
+    let mut value = 0u32;
+    let mut consumed = 0usize;
+    for byte in input.iter().copied().take(maximum_digits) {
+        let Some(digit) = hexadecimal_digit_value(byte) else {
+            break;
+        };
+        value = (value << 4) | digit;
+        consumed += 1;
+    }
+    (value, consumed)
+}
+
+fn unicode_bytes(value: u32, consumed: usize) -> EscapeChunk {
+    if value < 0x80 {
+        return EscapeChunk::one(value as u8, consumed);
+    }
+    if value >= 0x11_0000 {
+        return EscapeChunk::empty(consumed);
+    }
+
+    let mut bytes = [0u8; 4];
+    let length = if value < 0x800 {
+        bytes[0] = 0xc0 | (value >> 6) as u8;
+        bytes[1] = 0x80 | (value & 0x3f) as u8;
+        2
+    } else if value < 0x1_0000 {
+        bytes[0] = 0xe0 | (value >> 12) as u8;
+        bytes[1] = 0x80 | ((value >> 6) & 0x3f) as u8;
+        bytes[2] = 0x80 | (value & 0x3f) as u8;
+        3
+    } else {
+        bytes[0] = 0xf0 | (value >> 18) as u8;
+        bytes[1] = 0x80 | ((value >> 12) & 0x3f) as u8;
+        bytes[2] = 0x80 | ((value >> 6) & 0x3f) as u8;
+        bytes[3] = 0x80 | (value & 0x3f) as u8;
+        4
+    };
+    EscapeChunk {
+        bytes,
+        length,
+        consumed,
+    }
+}
+
+// [spec:dash:sem:printf.conv-escape-fn]
+// [spec:dash:sem:system.conv-escape-fn]
+// [spec:nsh:req:idiom.lexer-tokens]
+pub fn parse_escape(input: &[u8], single_quoted: bool) -> EscapeChunk {
+    let Some(&character) = input.first() else {
+        return EscapeChunk::one(b'\\', 0);
+    };
+
+    match character {
+        b'\\' => EscapeChunk::one(b'\\', 1),
+        b'a' => EscapeChunk::one(0x07, 1),
+        b'b' => EscapeChunk::one(0x08, 1),
+        b'f' => EscapeChunk::one(0x0c, 1),
+        b'e' => EscapeChunk::one(0x1b, 1),
+        b'n' => EscapeChunk::one(b'\n', 1),
+        b'r' => EscapeChunk::one(b'\r', 1),
+        b't' => EscapeChunk::one(b'\t', 1),
+        b'v' => EscapeChunk::one(0x0b, 1),
+        b'\'' | b'"' if single_quoted => EscapeChunk::one(character, 1),
+        b'x' => {
+            let (value, digits) = hexadecimal_value(&input[1..], 2);
+            EscapeChunk::one(value as u8, 1 + digits)
+        }
+        b'u' | b'U' => {
+            let maximum_digits = if character == b'u' { 4 } else { 8 };
+            let (value, digits) = hexadecimal_value(&input[1..], maximum_digits);
+            unicode_bytes(value, 1 + digits)
+        }
+        b'0'..=b'7' => {
+            let mut value = 0u32;
+            let mut consumed = 0usize;
+            for byte in input.iter().copied().take(3) {
+                if !is_octal_digit(byte) {
+                    break;
+                }
+                value = (value << 3) | octal_digit_value(byte);
+                consumed += 1;
+            }
+            EscapeChunk::one(value as u8, consumed)
+        }
+        _ => EscapeChunk::one(b'\\', 0),
+    }
+}
+
+/// Append a whole string's escapes to `output_bytes`, in the dialect `echo` and
 /// `printf`'s `%b` share.
 ///
-/// Returns 0, or 0x100 when a `\c` was found — "stop all further output",
-/// which both callers obey. Input and output are both length-delimited.
+/// Returns whether a `\c` requested that all further output stop.
 // [spec:dash:sem:printf.conv-escape-str-fn]
 pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
     let mut at = 0usize;
     let byte_at = |index: usize| -> u8 { input.get(index).copied().unwrap_or(0) };
 
-    /* convert string into a temporary buffer... */
-    /* `STARTSTACKSTR(cp)` — the buffer is the caller's, and the C's `*sp =
-     * cp` at the end is its length. */
     debug_assert!(output_bytes.is_empty());
 
     while at < input.len() {
-        /* `CHECKSTRSPACE(4, cp)` — the room `conv_escape` writes into
-         * through the raw cursor below; see `CONV_ESCAPE_SLOP`. */
-        output_bytes.reserve(ESCAPE_OUTPUT_CAPACITY);
-
         let byte = byte_at(at);
         at += 1;
         if byte != b'\\' {
@@ -373,12 +176,9 @@ pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
             at += 1;
         }
 
-        /* Finally test for sequences valid in the format string */
-        let mut scratch: [u8; ESCAPE_OUTPUT_CAPACITY] = [0; ESCAPE_OUTPUT_CAPACITY];
-        let converted_escape = parse_escape(&input[at.min(input.len())..], &mut scratch, false);
+        let converted_escape = parse_escape(&input[at.min(input.len())..], false);
         at += converted_escape.consumed;
-        debug_assert!(converted_escape.written <= ESCAPE_OUTPUT_CAPACITY);
-        output_bytes.extend_from_slice(&scratch[..converted_escape.written]);
+        output_bytes.extend_from_slice(converted_escape.bytes());
     }
 
     false
@@ -426,6 +226,17 @@ mod tests {
         let mut output = BString::new(Vec::new());
         assert!(!append_escape(b"a\0b", &mut output));
         assert_eq!(output, BString::from(b"a\0b".as_slice()));
+    }
+
+    #[test]
+    fn escape_chunks_are_owned_bytes() {
+        assert_eq!(parse_escape(b"n", false).bytes(), b"\n");
+        assert_eq!(parse_escape(b"x41z", false).bytes(), b"A");
+        assert_eq!(parse_escape(b"u20ac", true).bytes(), "€".as_bytes());
+        assert_eq!(parse_escape(b"U0001f600", true).bytes(), "😀".as_bytes());
+        assert_eq!(parse_escape(b"777", false).bytes(), &[0xff]);
+        assert_eq!(parse_escape(b"q", false).bytes(), b"\\");
+        assert_eq!(parse_escape(b"q", false).consumed, 0);
     }
 
     // [spec:dash:sem:mystring.single-quote-fn/test]

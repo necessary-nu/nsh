@@ -1,12 +1,59 @@
 use super::{
-    BackquoteContext, Error, InputUnit, LEGACY_END_PARAMETER, LEGACY_ESCAPE, MultibyteMode, Shell,
-    SyntaxContext, WordLexer, decode_multibyte_character_at, read_input_unit, unread_input_unit,
+    BackquoteContext, Error, InputUnit, MultibyteInput, MultibyteMode, Shell, SyntaxContext,
+    SyntaxFrame, WordLexer, read_input_unit, read_multibyte_character, unread_input_unit,
 };
+use crate::word::{QuoteBoundary, WordToken};
+use bstr::BString;
 
 impl WordLexer<'_> {
+    #[inline]
+    pub(super) fn current_syntax(&self) -> &SyntaxFrame {
+        self.syntax_frames.last().unwrap()
+    }
+
+    #[inline]
+    pub(super) fn current_syntax_mut(&mut self) -> &mut SyntaxFrame {
+        self.syntax_frames.last_mut().unwrap()
+    }
+
+    pub(super) fn record_quote_boundary(
+        &mut self,
+        boundary: QuoteBoundary,
+        toggle_nested_double_quote: bool,
+    ) {
+        if toggle_nested_double_quote && self.current_syntax().variable_depth != 0 {
+            self.current_syntax_mut().inner_double_quote ^= true;
+        }
+        if self.delimiter.is_none() {
+            self.output.push(WordToken::Quote(boundary));
+        }
+    }
+
+    pub(super) fn push_literal(&mut self, byte: u8) {
+        self.output.push(WordToken::Literal(byte));
+    }
+
+    pub(super) fn push_escaped(&mut self, byte: u8) {
+        self.output.push(WordToken::Escaped(byte));
+    }
+
+    pub(super) fn push_multibyte(&mut self, bytes: BString, escaped: bool) {
+        self.output.push(WordToken::Multibyte { bytes, escaped });
+    }
+
+    pub(super) fn literal_bytes(&self, range: core::ops::Range<usize>) -> Option<BString> {
+        range
+            .map(|at| match self.output.get(at) {
+                Some(WordToken::Literal(byte)) => Some(*byte),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(BString::from)
+    }
+
     pub(super) fn close_quote(&mut self) {
         if !self.delimiter.is_none() && self.current_syntax().variable_depth == 0 {
-            self.output.push(self.input.expect_byte());
+            self.push_literal(self.input.expect_byte());
             return;
         }
 
@@ -15,7 +62,9 @@ impl WordLexer<'_> {
                 let end = self
                     .output
                     .iter()
-                    .position(|&byte| byte == 0)
+                    .position(|token| {
+                        matches!(token, WordToken::Literal(0) | WordToken::Escaped(0))
+                    })
                     .unwrap_or(self.output.len());
                 self.output.truncate(end);
                 self.dollar_single_quoted = false;
@@ -26,12 +75,12 @@ impl WordLexer<'_> {
         }
 
         self.quoted = true;
-        self.record_quote_boundary(self.input.is(b'"'));
+        self.record_quote_boundary(QuoteBoundary::Close, self.input.is(b'"'));
     }
 
     pub(super) fn close_parameter_expansion(&mut self) {
         if self.current_syntax().inner_double_quote || self.current_syntax().variable_depth == 0 {
-            self.output.push(self.input.expect_byte());
+            self.push_literal(self.input.expect_byte());
             return;
         }
 
@@ -44,17 +93,17 @@ impl WordLexer<'_> {
             self.current_syntax_mut().double_quote_variable_depth -= 1;
         }
         if !self.check_here_document_end {
-            self.input = InputUnit::Byte(LEGACY_END_PARAMETER);
+            self.output.push(WordToken::ParameterEnd);
+        } else {
+            self.push_literal(self.input.expect_byte());
         }
-        self.output.push(self.input.expect_byte());
     }
 }
 
 pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     lexer.input = read_input_unit(shell)?;
     if lexer.input == InputUnit::EndOfInput {
-        lexer.output.push(LEGACY_ESCAPE);
-        lexer.output.push(b'\\');
+        lexer.push_escaped(b'\\');
         unread_input_unit(shell);
         return Ok(());
     }
@@ -68,20 +117,17 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             || (!lexer.delimiter.is_none() && lexer.current_syntax().variable_depth == 0))
         && (!lexer.input.is(b'}') || lexer.current_syntax().variable_depth == 0)
     {
-        lexer.output.push(LEGACY_ESCAPE);
-        lexer.output.push(b'\\');
+        lexer.push_escaped(b'\\');
     }
     lexer.quoted = true;
 
-    if decode_multibyte_character_at(
-        shell,
-        &mut lexer.output,
-        lexer.input,
-        MultibyteMode::Escaped,
-    )? == 0
-    {
-        lexer.output.push(LEGACY_ESCAPE);
-        lexer.output.push(lexer.input.expect_byte());
+    match read_multibyte_character(shell, lexer.input, MultibyteMode::Escaped)? {
+        MultibyteInput::Character { bytes, escaped } => {
+            lexer.push_multibyte(bytes, escaped);
+        }
+        MultibyteInput::SingleByte | MultibyteInput::FieldBoundary => {
+            lexer.push_escaped(lexer.input.expect_byte());
+        }
     }
     Ok(())
 }

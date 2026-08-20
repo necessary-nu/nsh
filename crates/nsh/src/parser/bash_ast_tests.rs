@@ -156,15 +156,17 @@ fn array_parameter_subscript_is_dialect_gated() {
     let tree = parse(b"echo ${a[1]}\n", true).unwrap();
     assert_eq!(command(&tree).arguments.len(), 2);
     let baseline = parse(b"echo ${a[1]}\n", false).unwrap();
+    let parameter_name = |node: &Node| {
+        word(node).word.parts().iter().find_map(|part| {
+            let WordPart::Parameter(parameter) = part else {
+                return None;
+            };
+            Some(parameter.name.clone())
+        })
+    };
     assert_ne!(
-        word(&command(&tree).arguments[1])
-            .word
-            .encode_legacy()
-            .bytes,
-        word(&command(&baseline).arguments[1])
-            .word
-            .encode_legacy()
-            .bytes
+        parameter_name(&command(&tree).arguments[1]),
+        parameter_name(&command(&baseline).arguments[1]),
     );
 }
 

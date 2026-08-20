@@ -64,9 +64,66 @@ fn character_literal_end(bytes: &[u8], quote: usize) -> Option<usize> {
     (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
 }
 
-fn contains_c_literal(source: &str) -> bool {
+struct SourceScan {
+    identifiers: Vec<String>,
+    contains_c_literal: bool,
+}
+
+fn string_literal_end(bytes: &[u8], start: usize) -> Option<(usize, bool)> {
+    let mut quote = start;
+    let c_literal = bytes.get(quote) == Some(&b'c');
+    if matches!(bytes.get(quote), Some(b'b' | b'c')) {
+        quote += 1;
+    }
+    let raw = if bytes.get(quote) == Some(&b'r') {
+        quote += 1;
+        true
+    } else {
+        false
+    };
+    let hashes_start = quote;
+    if raw {
+        while bytes.get(quote) == Some(&b'#') {
+            quote += 1;
+        }
+    }
+    if bytes.get(quote) != Some(&b'"') {
+        return None;
+    }
+    let hashes = quote - hashes_start;
+    quote += 1;
+
+    loop {
+        let relative = bytes[quote..].iter().position(|byte| *byte == b'"')?;
+        quote += relative;
+        if !raw {
+            let backslashes = bytes[..quote]
+                .iter()
+                .rev()
+                .take_while(|byte| **byte == b'\\')
+                .count();
+            quote += 1;
+            if backslashes % 2 == 0 {
+                return Some((quote, c_literal));
+            }
+            continue;
+        }
+
+        quote += 1;
+        if bytes
+            .get(quote..quote + hashes)
+            .is_some_and(|suffix| suffix.iter().all(|byte| *byte == b'#'))
+        {
+            return Some((quote + hashes, c_literal));
+        }
+    }
+}
+
+fn scan_rust_source(source: &str) -> SourceScan {
     let bytes = source.as_bytes();
     let mut at = 0;
+    let mut identifiers = Vec::new();
+    let mut contains_c_literal = false;
     while at < bytes.len() {
         if bytes[at..].starts_with(b"//") {
             at += bytes[at..]
@@ -104,66 +161,36 @@ fn contains_c_literal(source: &str) -> bool {
             continue;
         }
 
-        let boundary = at == 0 || !bytes[at - 1].is_ascii_alphanumeric() && bytes[at - 1] != b'_';
-        if boundary && bytes[at] == b'c' {
-            let mut quote = at + 1;
-            if bytes.get(quote) == Some(&b'r') {
-                quote += 1;
-                while bytes.get(quote) == Some(&b'#') {
-                    quote += 1;
-                }
-            }
-            if bytes.get(quote) == Some(&b'"') {
-                return true;
-            }
+        if let Some((end, is_c_literal)) = string_literal_end(bytes, at) {
+            let boundary =
+                at == 0 || !bytes[at - 1].is_ascii_alphanumeric() && bytes[at - 1] != b'_';
+            contains_c_literal |= boundary && is_c_literal;
+            at = end;
+            continue;
         }
 
-        let mut quote = at;
-        if matches!(bytes.get(quote), Some(b'b')) {
-            quote += 1;
-        }
-        let raw = if bytes.get(quote) == Some(&b'r') {
-            quote += 1;
-            while bytes.get(quote) == Some(&b'#') {
-                quote += 1;
+        if bytes[at].is_ascii_alphabetic() || bytes[at] == b'_' || bytes[at].is_ascii_digit() {
+            let start = at;
+            at += 1;
+            while bytes
+                .get(at)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                at += 1;
             }
-            true
-        } else {
-            false
-        };
-        if bytes.get(quote) == Some(&b'"') {
-            let hashes = quote.saturating_sub(at + usize::from(bytes[at] == b'b') + 1);
-            quote += 1;
-            loop {
-                let Some(relative) = bytes[quote..].iter().position(|byte| *byte == b'"') else {
-                    return false;
-                };
-                quote += relative + 1;
-                if !raw {
-                    let backslashes = bytes[..quote - 1]
-                        .iter()
-                        .rev()
-                        .take_while(|byte| **byte == b'\\')
-                        .count();
-                    if backslashes % 2 != 0 {
-                        continue;
-                    }
-                    at = quote;
-                    break;
-                }
-                if bytes
-                    .get(quote..quote + hashes)
-                    .is_some_and(|suffix| suffix.iter().all(|byte| *byte == b'#'))
-                {
-                    at = quote + hashes;
-                    break;
-                }
-            }
+            identifiers.push(String::from_utf8(bytes[start..at].to_vec()).unwrap());
             continue;
         }
         at += 1;
     }
-    false
+    SourceScan {
+        identifiers,
+        contains_c_literal,
+    }
+}
+
+fn contains_c_literal(source: &str) -> bool {
+    scan_rust_source(source).contains_c_literal
 }
 
 // [spec:nsh:req:idiom.no-port-fossils/test]
@@ -238,6 +265,178 @@ fn core_enforces_strict_rust_lints() {
     assert!(
         !LIBRARY.lines().any(|line| line.starts_with("#![allow(")),
         "core crate root retains a blanket lint allowance"
+    );
+}
+
+// [spec:nsh:req:idiom.regression-gates/test]
+#[test]
+fn zero_cism_gate_covers_boundary() {
+    const ABI_SCALARS: &[&str] = &[
+        "c_char",
+        "c_schar",
+        "c_uchar",
+        "c_short",
+        "c_ushort",
+        "c_int",
+        "c_uint",
+        "c_long",
+        "c_ulong",
+        "c_longlong",
+        "c_ulonglong",
+        "c_float",
+        "c_double",
+        "c_void",
+    ];
+    const C_STRINGS: &[&str] = &[
+        "CStr",
+        "CString",
+        "to_bytes_with_nul",
+        "from_bytes_with_nul",
+        "as_cbytes",
+        "from_cbytes",
+    ];
+    const CONTROL_BYTE_WORDS: &[&str] = &[
+        "CTLESC",
+        "CTLVAR",
+        "CTLENDVAR",
+        "CTLBACKQ",
+        "CTLARI",
+        "CTLENDARI",
+        "CTLQUOTEMARK",
+        "CTLMBCHAR",
+        "EncodedWord",
+        "encode_legacy",
+        "from_legacy_fragment",
+        "LEGACY_ESCAPE",
+        "LEGACY_VARIABLE",
+        "LEGACY_VARIABLE_END",
+        "LEGACY_COMMAND",
+        "LEGACY_ARITHMETIC",
+        "LEGACY_ARITHMETIC_END",
+        "LEGACY_QUOTE",
+        "LEGACY_MULTIBYTE",
+        "0x81",
+        "0x82",
+        "0x83",
+        "0x84",
+        "0x85",
+        "0x86",
+        "0x87",
+        "0x88",
+    ];
+    const RAW_DESCRIPTORS: &[&str] = &[
+        "RawFd",
+        "AsRawFd",
+        "IntoRawFd",
+        "FromRawFd",
+        "BorrowedFd",
+        "OwnedFd",
+    ];
+    const PRIVATE_PLATFORM_ALLOWLIST: &[&str] = &[
+        "crates/nsh-platform/src/descriptor.rs",
+        "crates/nsh-platform/src/locale.rs",
+        "crates/nsh-platform/src/signal_names.rs",
+        "crates/nsh-platform/src/terminal.rs",
+        "crates/nsh-platform/src/unix.rs",
+        "crates/nsh-platform/src/windows.rs",
+    ];
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut violations = Vec::new();
+    for root in ["crates/nsh/src", "crates/nsh-cli/src"] {
+        let mut sources = Vec::new();
+        rust_sources_below(&workspace.join(root), &mut sources);
+        sources.sort();
+        for path in sources {
+            let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+            let scan = scan_rust_source(&source);
+            let identifiers: Vec<&str> = scan.identifiers.iter().map(String::as_str).collect();
+            let relative = path.strip_prefix(&workspace).unwrap().display();
+
+            for forbidden in ABI_SCALARS
+                .iter()
+                .chain(C_STRINGS)
+                .chain(CONTROL_BYTE_WORDS)
+                .chain(RAW_DESCRIPTORS)
+                .chain(["unsafe", "libc"].iter())
+            {
+                if identifiers.contains(forbidden) {
+                    violations.push(format!("{relative} contains forbidden token {forbidden}"));
+                }
+            }
+            if scan.contains_c_literal {
+                violations.push(format!("{relative} contains a C string literal"));
+            }
+            if source
+                .lines()
+                .any(|line| line.trim_start().starts_with("#![allow"))
+            {
+                violations.push(format!("{relative} contains a blanket lint allowance"));
+            }
+            for tokens in scan.identifiers.windows(3) {
+                if matches!(tokens, [first, second, third] if first == "let" && second == "mut" && third == "pc")
+                {
+                    violations.push(format!(
+                        "{relative} contains a mutable integer program counter"
+                    ));
+                }
+            }
+            for tokens in scan.identifiers.windows(2) {
+                if matches!(tokens, [first, second] if first == "enum" && second == "Lbl")
+                    || matches!(tokens, [first, second] if first == "const" && second.starts_with("L_"))
+                {
+                    violations.push(format!("{relative} contains translated labels"));
+                }
+            }
+        }
+    }
+
+    let mut platform_sources = Vec::new();
+    rust_sources_below(
+        &workspace.join("crates/nsh-platform/src"),
+        &mut platform_sources,
+    );
+    for path in platform_sources {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        let scan = scan_rust_source(&source);
+        let low_level = scan.identifiers.iter().any(|identifier| {
+            ABI_SCALARS
+                .iter()
+                .chain(C_STRINGS)
+                .chain(RAW_DESCRIPTORS)
+                .chain(["unsafe", "libc", "rustix", "windows_sys", "ntapi"].iter())
+                .any(|forbidden| identifier == forbidden)
+        }) || scan.contains_c_literal;
+        let relative = path
+            .strip_prefix(&workspace)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        if low_level && !PRIVATE_PLATFORM_ALLOWLIST.contains(&relative.as_ref()) {
+            violations.push(format!(
+                "{relative} uses low-level host facilities outside the private allowlist"
+            ));
+        }
+    }
+
+    for manifest in ["crates/nsh/Cargo.toml", "crates/nsh-cli/Cargo.toml"] {
+        let text = std::fs::read_to_string(workspace.join(manifest)).unwrap();
+        for dependency in ["libc", "rustix", "windows-sys", "ntapi"] {
+            if text.lines().any(|line| {
+                line.split_once('=')
+                    .is_some_and(|(name, _)| name.trim() == dependency)
+            }) {
+                violations.push(format!(
+                    "{manifest} directly depends on low-level crate {dependency}"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "zero-C-ism gate violations:\n{}",
+        violations.join("\n")
     );
 }
 
@@ -658,8 +857,9 @@ fn jobs_read_startup_are_structured() {
 
     assert!(JOBS.contains("fn lookup_job"));
     assert!(JOBS.contains("fn record_child_status"));
+    assert!(BUILTIN_READ.contains("struct ReadLine"));
     assert!(BUILTIN_READ.contains("fn read_input_line"));
-    assert!(BUILTIN_READ.contains("escaped_region_end.take()"));
+    assert!(BUILTIN_READ.contains("protected: Vec<bool>"));
     assert!(RUNTIME.contains("fn run_startup_task"));
     assert!(RUNTIME.contains("const fn recovery"));
 }

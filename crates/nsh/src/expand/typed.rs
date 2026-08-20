@@ -224,7 +224,6 @@ pub(super) fn expand_argument(
         shell.expand.buffer.extend_from_slice(&field.bytes);
     }
 
-    super::clear_split_regions(&mut shell.expand);
     Ok(())
 }
 
@@ -249,6 +248,16 @@ pub(super) fn case_matches(
     Ok(pattern.matches(&shell.locale, value))
 }
 
+// Quote protection is metadata during expansion and is discarded only when
+// the final owned field is materialized; no escape marker bytes are removed.
+// [spec:dash:sem:expand.rmescapes-fn]
+// [spec:posix:req:expand.quote-removal]
+// [spec:posix:sem:expand.quote-removal-quoting-remembered]
+// [spec:posix:syn:pattern.backslash-escape-with-shell-quoting]
+// [spec:posix:syn:pattern.backslash-escape-without-shell-quoting]
+// [spec:posix:req:pattern.escaping-follows-quoting-rules]
+// [spec:posix:syn:pattern.trailing-backslash-unspecified]
+// [spec:posix:req:pattern.quote-to-match-literally]
 fn into_field(field: Field) -> ExpandedField {
     ExpandedField { text: field.bytes }
 }

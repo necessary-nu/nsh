@@ -6,8 +6,7 @@ use core::mem;
 use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{
-    LEGACY_COMMAND_SUBSTITUTION, LEGACY_ESCAPE, LEGACY_MULTIBYTE, LEGACY_QUOTE, ListMode,
-    TokenContext, TokenKind, WordLexer, command, consume_newline_without_prompt,
+    ListMode, TokenContext, TokenKind, WordLexer, command, consume_newline_without_prompt,
     expected_token_error, finalize, is_valid_name, list, parse_here_documents, read_input_unit,
     read_token, read_unit_skipping_line_continuations, set_input_string, syntax_error,
     unread_input_unit,
@@ -21,7 +20,7 @@ use crate::nodes::{
     FileRedirectionOperator, Node, NodeText, WordNode,
 };
 use crate::options::Dialect;
-use crate::word::ParsedWord;
+use crate::word::{ParsedWord, QuoteBoundary, WordPart, WordToken, WordUnit};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Quote {
@@ -149,26 +148,31 @@ pub(super) fn function(shell: &mut Shell, line: i32) -> Result<Node, Error> {
 }
 
 pub(super) fn array_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode> {
-    let encoded = arg.word.encode_legacy();
-    let bytes = encoded.bytes.as_bstr();
-    let Some(open) = bytes.iter().position(|&byte| byte == b'[') else {
+    let units = arg.word.units();
+    let Some(open) = units
+        .iter()
+        .position(|unit| matches!(unit, WordUnit::Literal(b'[')))
+    else {
         return Err(arg);
     };
-    if !is_valid_name(&shell.locale, BStr::new(&bytes[..open])) {
+    let Some(name) = literal_bytes(&units[..open]) else {
+        return Err(arg);
+    };
+    if !is_valid_name(&shell.locale, name.as_bstr()) {
         return Err(arg);
     }
-    let Some(close) = matching_bracket(bytes, open) else {
+    let Some(close) = matching_bracket(&units, open) else {
         return Err(arg);
     };
-    let Some((operator, value_start)) = assignment_operator(bytes, close + 1) else {
+    let Some((operator, value_start)) = assignment_operator(&units, close + 1) else {
         return Err(arg);
     };
 
     let assignment = BashArrayAssignment {
-        name: NodeText::from(&bytes[..open]),
+        name: NodeText::from(name.as_bstr()),
         subscript: Some(arg_part(&arg, open + 1, close)),
         operator,
-        value: BashArrayValue::Word(arg_part(&arg, value_start, bytes.len())),
+        value: BashArrayValue::Word(arg_part(&arg, value_start, units.len())),
     };
     Ok(Node::Bash(BashNode::ArrayAssignment(assignment)))
 }
@@ -239,10 +243,6 @@ pub(super) fn process_substitutions(
             return Ok(());
         }
 
-        lexer.output.push(LEGACY_COMMAND_SUBSTITUTION);
-        let parked = mem::take(&mut lexer.output);
-        let slot = lexer.command_substitutions.len();
-        lexer.command_substitutions.push(None);
         let saved_heredocs = mem::take(&mut shell.input.pending_here_documents);
         let completed_at = shell.input.completed_here_documents.len();
         let parsed = crate::resource::with_resources(shell, |shell, _resources| {
@@ -256,15 +256,14 @@ pub(super) fn process_substitutions(
             Ok(body)
         });
         shell.input.pending_here_documents = saved_heredocs;
-        lexer.output = parked;
         let body = parsed?;
 
-        lexer.command_substitutions[slot] = Some(Node::Bash(BashNode::ProcessSubstitution(
-            BashProcessSubstitution {
+        lexer.output.push(WordToken::Command(Some(Node::Bash(
+            BashNode::ProcessSubstitution(BashProcessSubstitution {
                 direction,
                 body: body.map(Box::new),
-            },
-        )));
+            }),
+        ))));
         lexer.input = super::read_unit_for_syntax(shell, lexer.current_syntax())?;
     }
 }
@@ -273,9 +272,9 @@ pub(super) fn parameter_subscript(
     shell: &mut Shell,
     lexer: &mut WordLexer<'_>,
     bad_substitution: bool,
-    subtype: u8,
+    allowed: bool,
 ) -> Result<(), Error> {
-    if bad_substitution || subtype != 0 || !lexer.input.is(b'[') || !active(shell) {
+    if bad_substitution || !allowed || !lexer.input.is(b'[') || !active(shell) {
         return Ok(());
     }
     let mut depth = 0usize;
@@ -290,7 +289,7 @@ pub(super) fn parameter_subscript(
         if input.is(b'\n') {
             consume_newline_without_prompt(shell);
         }
-        lexer.output.push(byte);
+        lexer.push_literal(byte);
 
         if escaped {
             escaped = false;
@@ -600,9 +599,9 @@ fn take_word(shell: &mut Shell, quoted: bool) -> ConditionalWord {
 
 fn compound_candidate(shell: &Shell, node: Option<&Node>) -> bool {
     match node {
-        Some(Node::Word(arg)) => plain_prefix(arg).is_some_and(|(name_end, _)| {
-            is_valid_name(&shell.locale, BStr::new(&arg.word.as_bstr()[..name_end]))
-        }),
+        Some(Node::Word(arg)) => {
+            plain_prefix(arg).is_some_and(|(name, _)| is_valid_name(&shell.locale, name.as_bstr()))
+        }
         Some(Node::Bash(BashNode::ArrayAssignment(assignment))) => {
             matches!(&assignment.value, BashArrayValue::Word(value) if value.word.as_bstr().is_empty())
         }
@@ -613,19 +612,17 @@ fn compound_candidate(shell: &Shell, node: Option<&Node>) -> bool {
 fn compound_prefix(shell: &Shell, node: Node) -> Option<BashArrayAssignment> {
     match node {
         Node::Word(arg) => {
-            let (name_end, operator) = plain_prefix(&arg)?;
-            if !is_valid_name(&shell.locale, BStr::new(&arg.word.as_bstr()[..name_end])) {
+            let (name, operator) = plain_prefix(&arg)?;
+            if !is_valid_name(&shell.locale, name.as_bstr()) {
                 return None;
             }
             Some(BashArrayAssignment {
-                name: NodeText::from(&arg.word.as_bstr()[..name_end]),
+                name: NodeText::from(name.as_bstr()),
                 subscript: None,
                 operator,
-                value: BashArrayValue::Word(arg_part(
-                    &arg,
-                    arg.word.as_bstr().len(),
-                    arg.word.as_bstr().len(),
-                )),
+                value: BashArrayValue::Word(WordNode {
+                    word: ParsedWord::new(),
+                }),
             })
         }
         Node::Bash(BashNode::ArrayAssignment(assignment)) => Some(assignment),
@@ -633,31 +630,33 @@ fn compound_prefix(shell: &Shell, node: Node) -> Option<BashArrayAssignment> {
     }
 }
 
-fn plain_prefix(arg: &WordNode) -> Option<(usize, BashAssignmentOperator)> {
-    let bytes = arg.word.as_bstr();
-    let (name_end, operator) = if bytes.ends_with(b"+=") {
-        (bytes.len() - 2, BashAssignmentOperator::Append)
-    } else if bytes.ends_with(b"=") {
-        (bytes.len() - 1, BashAssignmentOperator::Set)
+fn plain_prefix(arg: &WordNode) -> Option<(BString, BashAssignmentOperator)> {
+    let units = arg.word.units();
+    let (name_end, operator) = if matches!(
+        units.as_slice(),
+        [.., WordUnit::Literal(b'+'), WordUnit::Literal(b'=')]
+    ) {
+        (units.len() - 2, BashAssignmentOperator::Append)
+    } else if matches!(units.last(), Some(WordUnit::Literal(b'='))) {
+        (units.len() - 1, BashAssignmentOperator::Set)
     } else {
         return None;
     };
     if name_end == 0 {
         return None;
     }
-    Some((name_end, operator))
+    Some((literal_bytes(&units[..name_end])?, operator))
 }
 
 fn array_element(arg: WordNode) -> BashArrayElement {
-    let encoded = arg.word.encode_legacy();
-    let bytes = encoded.bytes.as_bstr();
-    if bytes.first() == Some(&b'[') {
-        if let Some(close) = matching_bracket(bytes, 0) {
-            if let Some((operator, value_start)) = assignment_operator(bytes, close + 1) {
+    let units = arg.word.units();
+    if matches!(units.first(), Some(WordUnit::Literal(b'['))) {
+        if let Some(close) = matching_bracket(&units, 0) {
+            if let Some((operator, value_start)) = assignment_operator(&units, close + 1) {
                 return BashArrayElement {
                     subscript: Some(arg_part(&arg, 1, close)),
                     operator,
-                    value: arg_part(&arg, value_start, bytes.len()),
+                    value: arg_part(&arg, value_start, units.len()),
                 };
             }
         }
@@ -669,25 +668,25 @@ fn array_element(arg: WordNode) -> BashArrayElement {
     }
 }
 
-fn matching_bracket(bytes: &[u8], open: usize) -> Option<usize> {
+fn matching_bracket(units: &[WordUnit], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut index = open;
     let mut quoted = false;
-    while index < bytes.len() {
-        match bytes[index] {
-            byte if byte == LEGACY_ESCAPE => index += 2,
-            byte if byte == LEGACY_QUOTE => {
-                quoted = !quoted;
+    while index < units.len() {
+        match &units[index] {
+            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open)) => {
+                quoted = true;
                 index += 1;
             }
-            byte if byte == LEGACY_MULTIBYTE => {
-                index = multibyte_end(bytes, index);
+            WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => {
+                quoted = false;
+                index += 1;
             }
-            b'[' if !quoted => {
+            WordUnit::Literal(b'[') if !quoted => {
                 depth += 1;
                 index += 1;
             }
-            b']' if !quoted => {
+            WordUnit::Literal(b']') if !quoted => {
                 depth = depth.checked_sub(1)?;
                 if depth == 0 {
                     return Some(index);
@@ -700,10 +699,16 @@ fn matching_bracket(bytes: &[u8], open: usize) -> Option<usize> {
     None
 }
 
-fn assignment_operator(bytes: &[u8], start: usize) -> Option<(BashAssignmentOperator, usize)> {
-    if bytes.get(start..start + 2) == Some(b"+=") {
+fn assignment_operator(
+    units: &[WordUnit],
+    start: usize,
+) -> Option<(BashAssignmentOperator, usize)> {
+    if matches!(
+        units.get(start..start + 2),
+        Some([WordUnit::Literal(b'+'), WordUnit::Literal(b'=')])
+    ) {
         Some((BashAssignmentOperator::Append, start + 2))
-    } else if bytes.get(start) == Some(&b'=') {
+    } else if matches!(units.get(start), Some(WordUnit::Literal(b'='))) {
         Some((BashAssignmentOperator::Set, start + 1))
     } else {
         None
@@ -712,40 +717,19 @@ fn assignment_operator(bytes: &[u8], start: usize) -> Option<(BashAssignmentOper
 
 fn arg_part(arg: &WordNode, start: usize, end: usize) -> WordNode {
     // [spec:nsh:def:idiom.word-ir]
-    let encoded = arg.word.encode_legacy();
-    let bytes = encoded.bytes.as_slice();
-    let first = backquote_count(&bytes[..start]);
-    let count = backquote_count(&bytes[start..end]);
+    let units = arg.word.units();
     WordNode {
-        word: ParsedWord::from_legacy_fragment(
-            &bytes[start..end],
-            encoded
-                .substitutions
-                .get(first..first + count)
-                .unwrap_or(&[])
-                .to_vec(),
-        ),
+        word: ParsedWord::from_units(units.get(start..end).unwrap_or_default()),
     }
 }
 
-fn backquote_count(bytes: &[u8]) -> usize {
-    let mut count = 0usize;
-    let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index] == LEGACY_ESCAPE {
-            index += 2;
-        } else if bytes[index] == LEGACY_MULTIBYTE {
-            index = multibyte_end(bytes, index);
-        } else {
-            count += usize::from(bytes[index] == LEGACY_COMMAND_SUBSTITUTION);
-            index += 1;
-        }
-    }
-    count
-}
-
-fn multibyte_end(bytes: &[u8], start: usize) -> usize {
-    let length_at = start + 1 + usize::from(bytes.get(start + 1) == Some(&(LEGACY_ESCAPE)));
-    let length = bytes.get(length_at).copied().unwrap_or(0) as usize;
-    length_at.saturating_add(length).saturating_add(3)
+fn literal_bytes(units: &[WordUnit]) -> Option<BString> {
+    units
+        .iter()
+        .map(|unit| match unit {
+            WordUnit::Literal(byte) => Some(*byte),
+            WordUnit::Part(_) => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(BString::from)
 }

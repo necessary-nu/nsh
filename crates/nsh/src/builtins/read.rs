@@ -18,32 +18,17 @@ use crate::expand::ExpandedFields;
 use crate::output::OutputDestination;
 use crate::status::ExitStatus;
 
-/* glibc <limits.h> */
-const MAX_MULTIBYTE_LENGTH: usize = 16;
+struct ReadLine {
+    bytes: BString,
+    protected: Vec<bool>,
+}
 
-/// `readcmd`'s `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`.
-///
-/// `getmbc` no longer writes through a cursor this frame makes room for --
-/// it has its own scratch and hands back the bytes to append -- so this is
-/// not a reservation any more. It survives as the assertion bound on what
-/// `getmbc` may return, and the number is still the C's for the reason it
-/// always was: with `mode` 0 it puts the character's bytes at `out + 2`
-/// and the closing length and marker at `out + 2 + ml` and `out + 3 + ml`,
-/// which for `ml == MB_LEN_MAX` is the twentieth byte and not one fewer.
-const READ_MULTIBYTE_CAPACITY: usize = (if MAX_MULTIBYTE_LENGTH > 16 {
-    MAX_MULTIBYTE_LENGTH
-} else {
-    16
-}) + 4;
-
-fn append_read_byte(line: &mut BString, input: crate::syntax::InputUnit) {
-    if input.is(crate::parser::LEGACY_ESCAPE)
-        || input.is(crate::parser::LEGACY_MULTIBYTE)
-        || input.is(crate::parser::LEGACY_QUOTE)
-    {
-        line.push(crate::parser::LEGACY_ESCAPE);
+impl ReadLine {
+    fn push(&mut self, bytes: &[u8], protected: bool) {
+        self.bytes.extend_from_slice(bytes);
+        self.protected
+            .extend(core::iter::repeat_n(protected, bytes.len()));
     }
-    line.push(input.expect_byte());
 }
 
 // [spec:nsh:req:idiom.jobs-startup-control-flow]
@@ -52,12 +37,14 @@ fn read_input_line(
     delimiter: u8,
     raw: bool,
     prompt_for_continuation: bool,
-) -> Result<(BString, ExitStatus), Error> {
-    let result = crate::resource::with_resources(shell, |shell, _resources| {
+) -> Result<(ReadLine, ExitStatus), Error> {
+    crate::resource::with_resources(shell, |shell, _resources| {
         crate::input::push_standard_input(shell);
-        let mut line = BString::default();
-        let mut region_start = 0_usize;
-        let mut escaped_region_end = None;
+        let mut line = ReadLine {
+            bytes: BString::default(),
+            protected: Vec::new(),
+        };
+        let mut escaped = false;
         let mut status = ExitStatus::SUCCESS;
 
         loop {
@@ -74,50 +61,41 @@ fn read_input_line(
                 continue;
             }
 
-            let mut scratch = [0; crate::parser::MULTIBYTE_OUTPUT_CAPACITY];
-            let multibyte_len = crate::parser::read_multibyte_character(
+            match crate::parser::read_multibyte_character(
                 shell,
                 input,
-                &mut scratch,
-                crate::parser::MultibyteMode::Framed,
-            )?;
-            if multibyte_len != 0 {
-                debug_assert!(multibyte_len <= READ_MULTIBYTE_CAPACITY);
-                line.extend_from_slice(&scratch[..multibyte_len]);
-            } else if escaped_region_end.is_some() {
+                crate::parser::MultibyteMode::Literal,
+            )? {
+                crate::parser::MultibyteInput::Character { bytes, .. } => {
+                    line.push(&bytes, escaped);
+                    escaped = false;
+                    continue;
+                }
+                crate::parser::MultibyteInput::SingleByte
+                | crate::parser::MultibyteInput::FieldBoundary => {}
+            }
+
+            if escaped {
                 if input.is(b'\n') {
                     if prompt_for_continuation {
                         let ps2 = crate::variables::continuation_prompt_value(shell);
                         shell.write_output(OutputDestination::Stderr, &ps2)?;
                     }
                 } else {
-                    append_read_byte(&mut line, input);
+                    line.push(&[input.expect_byte()], true);
                 }
+                escaped = false;
             } else if !raw && input.is(b'\\') {
-                escaped_region_end = Some(line.len());
+                escaped = true;
                 continue;
             } else if input.is(delimiter) {
                 break;
             } else {
-                append_read_byte(&mut line, input);
-            }
-
-            if let Some(region_end) = escaped_region_end.take() {
-                crate::expand::record_split_region(
-                    &mut shell.expand,
-                    region_start,
-                    region_end,
-                    false,
-                );
-                region_start = line.len();
+                line.push(&[input.expect_byte()], false);
             }
         }
-        Ok::<_, Error>((line, status, region_start))
-    });
-
-    let (line, status, region_start) = result?;
-    crate::expand::record_split_region(&mut shell.expand, region_start, line.len(), false);
-    Ok((line, status))
+        Ok::<_, Error>((line, status))
+    })
 }
 
 // ---------------------------------------------------------------------
@@ -143,14 +121,19 @@ fn read_input_line(
 // [spec:posix:def:builtin.read.operand-var]
 // [spec:posix:sem:builtin.read.operand-var-locale]
 // [spec:posix:req:builtin.read.env]
-fn assign_read_fields(shell: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
+fn assign_read_fields(shell: &mut Shell, line: &ReadLine, names: &[&BStr]) -> Result<(), Error> {
     let mut expanded_fields = ExpandedFields::new();
 
     /* An owned line already carries its bounds and there is nothing to reserve;
      * the fields `ifsbreakup` builds copy out of it rather than pointing
      * into it, so the line only has to outlive that one call. */
-    crate::expand::split_fields(shell, line, names.len(), &mut expanded_fields);
-    crate::expand::clear_split_regions(&mut shell.expand);
+    crate::expand::split_fields(
+        shell,
+        &line.bytes,
+        &line.protected,
+        names.len(),
+        &mut expanded_fields,
+    );
 
     /* The C walks the names and the fields with two cursors that advance
      * together, so the field for a name is the field at its index; a name
@@ -167,7 +150,6 @@ fn assign_read_fields(shell: &mut Shell, line: &mut BString, names: &[&BStr]) ->
             }
             Some(field) => {
                 /* set variable to field */
-                field.remove_escapes();
                 crate::variables::set_bytes(
                     shell,
                     name,
@@ -245,7 +227,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Err(shell.diagnostics().shell_error(b"arg count"));
     }
 
-    let (mut line, status) = read_input_line(shell, delimiter, raw, prompt_for_continuation)?;
-    assign_read_fields(shell, &mut line, names)?;
+    let (line, status) = read_input_line(shell, delimiter, raw, prompt_for_continuation)?;
+    assign_read_fields(shell, &line, names)?;
     Ok(Flow::Done(status))
 }

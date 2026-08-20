@@ -9,19 +9,6 @@ use bstr::{BStr, BString, ByteSlice};
 
 use crate::nodes::Node;
 
-const LEGACY_ESCAPE: u8 = (-127_i8) as u8;
-const LEGACY_PARAMETER: u8 = (-126_i8) as u8;
-const LEGACY_END_PARAMETER: u8 = (-125_i8) as u8;
-const LEGACY_COMMAND: u8 = (-124_i8) as u8;
-const LEGACY_MULTIBYTE: u8 = (-123_i8) as u8;
-const LEGACY_ARITHMETIC: u8 = (-122_i8) as u8;
-const LEGACY_END_ARITHMETIC: u8 = (-121_i8) as u8;
-const LEGACY_QUOTE: u8 = (-120_i8) as u8;
-
-const LEGACY_KIND_MASK: u8 = 0x0f;
-const LEGACY_COLON: u8 = 0x10;
-const LEGACY_PRESENT: u8 = 0x20;
-
 /// A word after lexical parsing and before expansion.
 // [spec:nsh:def:idiom.word-ir]
 #[derive(Clone, Default)]
@@ -47,6 +34,37 @@ pub(crate) enum WordPart {
     Command(Option<Box<Node>>),
     /// An arithmetic expansion.
     Arithmetic(Box<ParsedWord>),
+}
+
+/// Typed events emitted by the lexer while it constructs a nested word.
+///
+/// Start/end events are enum variants rather than byte values, so every
+/// possible input byte remains ordinary shell data.
+#[derive(Clone)]
+pub(crate) enum WordToken {
+    Literal(u8),
+    Escaped(u8),
+    Multibyte {
+        bytes: BString,
+        escaped: bool,
+    },
+    Quote(QuoteBoundary),
+    ParameterStart {
+        name: BString,
+        operation: ParameterOperation,
+        colon: bool,
+    },
+    ParameterEnd,
+    Command(Option<Node>),
+    ArithmeticStart,
+    ArithmeticEnd,
+}
+
+/// One sliceable top-level word unit used by Bash-only array syntax.
+#[derive(Clone)]
+pub(crate) enum WordUnit {
+    Literal(u8),
+    Part(WordPart),
 }
 
 /// Whether a quoting region opens or closes at this position.
@@ -79,15 +97,6 @@ pub(crate) enum ParameterOperation {
     RemoveLargestPrefix,
     Length,
     Invalid,
-}
-
-/// Temporary input for the legacy expansion engine.
-///
-/// This is deliberately owned and short-lived: the syntax tree never stores
-/// either the control-byte stream or a parallel substitution list.
-pub(crate) struct EncodedWord {
-    pub(crate) bytes: BString,
-    pub(crate) substitutions: Vec<Option<Node>>,
 }
 
 impl ParsedWord {
@@ -132,16 +141,13 @@ impl ParsedWord {
         word
     }
 
-    /// Decode one sliced legacy word while preserving its substitutions.
-    pub(crate) fn from_legacy_fragment(bytes: &[u8], substitutions: Vec<Option<Node>>) -> Self {
-        let mut decoder = Decoder {
-            bytes,
+    /// Build the structural word represented by typed lexer events.
+    pub(crate) fn from_tokens(tokens: Vec<WordToken>) -> Self {
+        let mut decoder = TokenDecoder {
+            tokens: &tokens,
             at: 0,
-            substitutions: substitutions.into_iter(),
         };
-        let word = decoder.word_until(None);
-        debug_assert!(decoder.substitutions.next().is_none());
-        word
+        decoder.word_until(TokenBoundary::Word)
     }
 
     /// Marker-free bytes suitable for grammar checks on plain words.
@@ -157,62 +163,28 @@ impl ParsedWord {
         &self.parts
     }
 
-    /// Serialize for the old expansion implementation while it is being
-    /// replaced. The result never enters the syntax tree.
-    pub(crate) fn encode_legacy(&self) -> EncodedWord {
-        let mut encoded = EncodedWord {
-            bytes: BString::new(Vec::new()),
-            substitutions: Vec::new(),
-        };
-        self.encode_into(&mut encoded);
-        encoded
-    }
-
-    fn encode_into(&self, encoded: &mut EncodedWord) {
+    pub(crate) fn units(&self) -> Vec<WordUnit> {
+        let mut units = Vec::new();
         for part in &self.parts {
             match part {
-                WordPart::Literal(bytes) => encoded.bytes.extend_from_slice(bytes),
-                WordPart::Escaped(byte) => {
-                    encoded.bytes.push(LEGACY_ESCAPE);
-                    encoded.bytes.push(*byte);
+                WordPart::Literal(bytes) => {
+                    units.extend(bytes.iter().copied().map(WordUnit::Literal));
                 }
-                WordPart::Multibyte { bytes, escaped } => {
-                    encoded.bytes.push(LEGACY_MULTIBYTE);
-                    if *escaped {
-                        encoded.bytes.push(LEGACY_ESCAPE);
-                    }
-                    encoded.bytes.push(bytes.len() as u8);
-                    encoded.bytes.extend_from_slice(bytes);
-                    encoded.bytes.push(bytes.len() as u8);
-                    encoded.bytes.push(LEGACY_MULTIBYTE);
-                }
-                WordPart::Quote(_) => encoded.bytes.push(LEGACY_QUOTE),
-                WordPart::Parameter(parameter) => {
-                    encoded.bytes.push(LEGACY_PARAMETER);
-                    let flags = parameter.operation.legacy_kind()
-                        | if parameter.colon { LEGACY_COLON } else { 0 }
-                        | LEGACY_PRESENT;
-                    encoded.bytes.push(flags);
-                    encoded.bytes.extend_from_slice(&parameter.name);
-                    encoded.bytes.push(b'=');
-                    if let Some(operand) = &parameter.operand {
-                        operand.encode_into(encoded);
-                    }
-                    if parameter.operation != ParameterOperation::Value {
-                        encoded.bytes.push(LEGACY_END_PARAMETER);
-                    }
-                }
-                WordPart::Command(command) => {
-                    encoded.bytes.push(LEGACY_COMMAND);
-                    encoded.substitutions.push(command.as_deref().cloned());
-                }
-                WordPart::Arithmetic(expression) => {
-                    encoded.bytes.push(LEGACY_ARITHMETIC);
-                    expression.encode_into(encoded);
-                    encoded.bytes.push(LEGACY_END_ARITHMETIC);
-                }
+                part => units.push(WordUnit::Part(part.clone())),
             }
         }
+        units
+    }
+
+    pub(crate) fn from_units(units: &[WordUnit]) -> Self {
+        let mut parts = Vec::new();
+        for unit in units {
+            match unit {
+                WordUnit::Literal(byte) => push_literal(&mut parts, *byte),
+                WordUnit::Part(part) => parts.push(part.clone()),
+            }
+        }
+        finish(parts)
     }
 
     /// Render a compact shell spelling for diagnostics and job display.
@@ -245,38 +217,6 @@ impl ParsedWord {
 }
 
 impl ParameterOperation {
-    fn from_legacy(kind: u8) -> Self {
-        match kind {
-            1 => Self::Value,
-            2 => Self::Default,
-            3 => Self::Alternate,
-            4 => Self::Error,
-            5 => Self::Assign,
-            6 => Self::RemoveSmallestSuffix,
-            7 => Self::RemoveLargestSuffix,
-            8 => Self::RemoveSmallestPrefix,
-            9 => Self::RemoveLargestPrefix,
-            10 => Self::Length,
-            _ => Self::Invalid,
-        }
-    }
-
-    fn legacy_kind(self) -> u8 {
-        match self {
-            Self::Invalid => 0,
-            Self::Value => 1,
-            Self::Default => 2,
-            Self::Alternate => 3,
-            Self::Error => 4,
-            Self::Assign => 5,
-            Self::RemoveSmallestSuffix => 6,
-            Self::RemoveLargestSuffix => 7,
-            Self::RemoveSmallestPrefix => 8,
-            Self::RemoveLargestPrefix => 9,
-            Self::Length => 10,
-        }
-    }
-
     fn operator(self) -> &'static [u8] {
         match self {
             Self::Value => b"",
@@ -312,114 +252,78 @@ impl ParameterExpansion {
     }
 }
 
-struct Decoder<'a, I> {
-    bytes: &'a [u8],
-    at: usize,
-    substitutions: I,
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum TokenBoundary {
+    Word,
+    Parameter,
+    Arithmetic,
 }
 
-impl<I> Decoder<'_, I>
-where
-    I: Iterator<Item = Option<Node>>,
-{
-    fn word_until(&mut self, stop: Option<u8>) -> ParsedWord {
+struct TokenDecoder<'a> {
+    tokens: &'a [WordToken],
+    at: usize,
+}
+
+impl TokenDecoder<'_> {
+    fn word_until(&mut self, boundary: TokenBoundary) -> ParsedWord {
         let mut parts = Vec::new();
-        // Quote boundaries are local to each structural word. A parameter
-        // operand begins its own word even when the containing expansion is
-        // inside double quotes, so its first marker is still an opening
-        // boundary rather than a close inherited from the parent word.
-        let mut quoted = false;
-        while self.at < self.bytes.len() {
-            let byte = self.bytes[self.at];
-            if Some(byte) == stop {
-                self.at += 1;
-                break;
-            }
+        while self.at < self.tokens.len() {
+            let token = &self.tokens[self.at];
             self.at += 1;
-            match byte {
-                LEGACY_ESCAPE => {
-                    if let Some(&escaped) = self.bytes.get(self.at) {
-                        self.at += 1;
-                        parts.push(WordPart::Escaped(escaped));
-                    }
+            match token {
+                WordToken::Literal(byte) => push_literal(&mut parts, *byte),
+                WordToken::Escaped(byte) => parts.push(WordPart::Escaped(*byte)),
+                WordToken::Multibyte { bytes, escaped } => {
+                    parts.push(WordPart::Multibyte {
+                        bytes: bytes.clone(),
+                        escaped: *escaped,
+                    });
                 }
-                LEGACY_MULTIBYTE => self.decode_multibyte(&mut parts),
-                LEGACY_QUOTE => {
-                    let boundary = if quoted {
-                        QuoteBoundary::Close
-                    } else {
-                        QuoteBoundary::Open
-                    };
-                    quoted = !quoted;
-                    parts.push(WordPart::Quote(boundary));
+                WordToken::Quote(quote) => parts.push(WordPart::Quote(*quote)),
+                WordToken::ParameterStart {
+                    name,
+                    operation,
+                    colon,
+                } => {
+                    let operand = (*operation != ParameterOperation::Value)
+                        .then(|| Box::new(self.word_until(TokenBoundary::Parameter)));
+                    parts.push(WordPart::Parameter(ParameterExpansion {
+                        name: name.clone(),
+                        operation: *operation,
+                        colon: *colon,
+                        operand,
+                    }));
                 }
-                LEGACY_PARAMETER => parts.push(WordPart::Parameter(self.decode_parameter())),
-                LEGACY_COMMAND => parts.push(WordPart::Command(
-                    self.substitutions.next().flatten().map(Box::new),
-                )),
-                LEGACY_ARITHMETIC => {
-                    parts.push(WordPart::Arithmetic(Box::new(
-                        self.word_until(Some(LEGACY_END_ARITHMETIC)),
-                    )));
+                WordToken::Command(command) => {
+                    parts.push(WordPart::Command(command.clone().map(Box::new)));
                 }
-                LEGACY_END_PARAMETER | LEGACY_END_ARITHMETIC => break,
-                0 if self.at == self.bytes.len() => break,
-                ordinary => Self::push_literal(&mut parts, ordinary),
+                WordToken::ArithmeticStart => parts.push(WordPart::Arithmetic(Box::new(
+                    self.word_until(TokenBoundary::Arithmetic),
+                ))),
+                WordToken::ParameterEnd if boundary == TokenBoundary::Parameter => break,
+                WordToken::ArithmeticEnd if boundary == TokenBoundary::Arithmetic => break,
+                WordToken::ParameterEnd | WordToken::ArithmeticEnd => break,
             }
         }
-        Self::finish(parts)
+        finish(parts)
     }
+}
 
-    fn decode_parameter(&mut self) -> ParameterExpansion {
-        let flags = self.bytes.get(self.at).copied().unwrap_or(LEGACY_PRESENT);
-        self.at += usize::from(self.at < self.bytes.len());
-        let operation = ParameterOperation::from_legacy(flags & LEGACY_KIND_MASK);
-        let name_start = self.at;
-        while self.at < self.bytes.len() && self.bytes[self.at] != b'=' {
-            self.at += 1;
-        }
-        let name = BString::from(&self.bytes[name_start..self.at]);
-        self.at += usize::from(self.at < self.bytes.len());
-        let operand = if operation == ParameterOperation::Value {
-            None
-        } else {
-            Some(Box::new(self.word_until(Some(LEGACY_END_PARAMETER))))
-        };
-        ParameterExpansion {
-            name,
-            operation,
-            colon: flags & LEGACY_COLON != 0,
-            operand,
-        }
+fn push_literal(parts: &mut Vec<WordPart>, byte: u8) {
+    if let Some(WordPart::Literal(bytes)) = parts.last_mut() {
+        bytes.push(byte);
+    } else {
+        parts.push(WordPart::Literal(BString::from(vec![byte])));
     }
+}
 
-    fn decode_multibyte(&mut self, parts: &mut Vec<WordPart>) {
-        let escaped = self.bytes.get(self.at) == Some(&LEGACY_ESCAPE);
-        self.at += usize::from(escaped);
-        let length = self.bytes.get(self.at).copied().unwrap_or(0) as usize;
-        self.at += usize::from(self.at < self.bytes.len());
-        let end = self.at.saturating_add(length).min(self.bytes.len());
-        let bytes = BString::from(&self.bytes[self.at..end]);
-        self.at = end.saturating_add(2).min(self.bytes.len());
-        parts.push(WordPart::Multibyte { bytes, escaped });
-    }
-
-    fn push_literal(parts: &mut Vec<WordPart>, byte: u8) {
-        if let Some(WordPart::Literal(bytes)) = parts.last_mut() {
-            bytes.push(byte);
-        } else {
-            parts.push(WordPart::Literal(BString::from(vec![byte])));
-        }
-    }
-
-    fn finish(parts: Vec<WordPart>) -> ParsedWord {
-        let mut word = ParsedWord {
-            parts,
-            spelling: BString::new(Vec::new()),
-        };
-        word.render_spelling();
-        word
-    }
+fn finish(parts: Vec<WordPart>) -> ParsedWord {
+    let mut word = ParsedWord {
+        parts,
+        spelling: BString::new(Vec::new()),
+    };
+    word.render_spelling();
+    word
 }
 
 impl ParsedWord {
@@ -469,20 +373,20 @@ mod tests {
 
     #[test]
     // [spec:nsh:def:idiom.word-ir/test]
-    fn legacy_transport_decodes_to_typed_parts() {
-        let encoded = BString::from(vec![
-            b'a',
-            LEGACY_QUOTE,
-            LEGACY_PARAMETER,
-            LEGACY_PRESENT | 2 | LEGACY_COLON,
-            b'x',
-            b'=',
-            b'y',
-            LEGACY_END_PARAMETER,
-            LEGACY_QUOTE,
-            LEGACY_COMMAND,
+    fn typed_tokens_build_nested_word_parts() {
+        let word = ParsedWord::from_tokens(vec![
+            WordToken::Literal(b'a'),
+            WordToken::Quote(QuoteBoundary::Open),
+            WordToken::ParameterStart {
+                name: BString::from("x"),
+                operation: ParameterOperation::Default,
+                colon: true,
+            },
+            WordToken::Literal(b'y'),
+            WordToken::ParameterEnd,
+            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::Command(None),
         ]);
-        let word = ParsedWord::from_legacy_fragment(&encoded, vec![None]);
 
         assert!(matches!(word.parts()[0], WordPart::Literal(_)));
         assert!(matches!(
@@ -499,20 +403,19 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_encoding_round_trips() {
-        let original = BString::from(vec![
-            LEGACY_QUOTE,
-            b'a',
-            LEGACY_ESCAPE,
-            b'*',
-            LEGACY_QUOTE,
-            LEGACY_ARITHMETIC,
-            b'1',
-            b'+',
-            b'2',
-            LEGACY_END_ARITHMETIC,
+    fn top_level_units_slice_without_serializing() {
+        let word = ParsedWord::from_tokens(vec![
+            WordToken::Literal(b'a'),
+            WordToken::Escaped(b'*'),
+            WordToken::ArithmeticStart,
+            WordToken::Literal(b'1'),
+            WordToken::Literal(b'+'),
+            WordToken::Literal(b'2'),
+            WordToken::ArithmeticEnd,
         ]);
-        let word = ParsedWord::from_legacy_fragment(&original, Vec::new());
-        assert_eq!(word.encode_legacy().bytes, original);
+        let units = word.units();
+        let sliced = ParsedWord::from_units(&units[1..]);
+        assert!(matches!(sliced.parts()[0], WordPart::Escaped(b'*')));
+        assert!(matches!(sliced.parts()[1], WordPart::Arithmetic(_)));
     }
 }
