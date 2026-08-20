@@ -241,14 +241,14 @@ mod tests {
     /// own `S_RESET` path is what runs and the recorded asks are the ones
     /// dash would have made.
     #[derive(Clone)]
-    struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<(core::ffi::c_int, Disposition)>>>);
+    struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<(i32, Disposition)>>>);
 
     impl Recorder {
         fn new() -> Recorder {
             Recorder(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
         }
 
-        fn installs(&self) -> Vec<(core::ffi::c_int, Disposition)> {
+        fn installs(&self) -> Vec<(i32, Disposition)> {
             self.0.lock().unwrap().clone()
         }
     }

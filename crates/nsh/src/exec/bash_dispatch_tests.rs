@@ -1,6 +1,6 @@
 use bstr::{BStr, ByteSlice as _};
 
-use super::{Command, find_command};
+use super::{Command, CommandSearch, find_command};
 
 fn set_bash(sh: &mut crate::context::Shell, on: bool) {
     // [spec:nsh:def:idiom.shell-options]
@@ -11,7 +11,7 @@ fn set_bash(sh: &mut crate::context::Shell, on: bool) {
 fn find(sh: &mut crate::context::Shell, name: &BStr) -> Command {
     let path = crate::var::pathval(sh);
     let mut entry = Command::Unknown;
-    let _ = find_command(sh, name, &mut entry, 0, path.as_bstr()).unwrap();
+    let _ = find_command(sh, name, &mut entry, CommandSearch::DEFAULT, path.as_bstr()).unwrap();
     entry
 }
 

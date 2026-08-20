@@ -2,7 +2,6 @@
 //! Rules: `docs/spec/port/src/mail.md`.
 
 use bstr::BStr;
-use core::ffi::c_int;
 use nsh_platform::ShellBytesExt as _;
 use std::io::Write;
 
@@ -19,14 +18,14 @@ pub struct MailState {
     /* times of mailboxes */
     mailtime: [i64; MAXMBOXES],
     /* Set if MAIL or MAILPATH is changed. */
-    changed: c_int,
+    changed: bool,
 }
 
 impl MailState {
     pub(crate) const fn new() -> Self {
         MailState {
             mailtime: [0; MAXMBOXES],
-            changed: 0,
+            changed: false,
         }
     }
 
@@ -53,7 +52,7 @@ impl MailState {
             if modified == 0 {
                 self.mailtime[index] = 0;
             } else {
-                if self.changed == 0 && modified != self.mailtime[index] {
+                if !self.changed && modified != self.mailtime[index] {
                     let mut notice =
                         message.map_or_else(|| b"you have mail".to_vec(), <[u8]>::to_vec);
                     notice.push(b'\n');
@@ -62,7 +61,7 @@ impl MailState {
                 self.mailtime[index] = modified;
             }
         }
-        self.changed = 0;
+        self.changed = false;
     }
 }
 
@@ -87,5 +86,5 @@ pub fn chkmail(sh: &mut crate::context::Shell) {
 // [spec:dash:def:mail.changemail-fn]
 // [spec:dash:sem:mail.changemail-fn]
 pub fn changemail(mail: &mut MailState, _value: &BStr) {
-    mail.changed += 1;
+    mail.changed = true;
 }

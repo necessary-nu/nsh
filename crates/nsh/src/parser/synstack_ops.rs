@@ -1,4 +1,4 @@
-use super::{SyntaxContext, synstack};
+use super::{BackquoteContext, SyntaxContext, synstack};
 
 // [spec:dash:def:parser.synstack-push-fn]
 // [spec:dash:sem:parser.synstack-push-fn]
@@ -6,13 +6,13 @@ use super::{SyntaxContext, synstack};
 pub(super) fn push(stack: &mut Vec<synstack>, syntax: SyntaxContext) {
     stack.push(synstack {
         syntax,
-        innerdq: 0,
-        varpushed: 0,
-        dblquote: 0,
-        backq: 0,
-        varnest: 0,
-        parenlevel: 0,
-        dqvarnest: 0,
+        inner_double_quote: false,
+        variable_context_pushed: false,
+        double_quoted: false,
+        backquote: BackquoteContext::None,
+        variable_depth: 0,
+        parenthesis_depth: 0,
+        double_quote_variable_depth: 0,
     });
 }
 
@@ -37,13 +37,13 @@ mod tests {
         assert_eq!(stack.len(), 1);
         let frame = &stack[0];
         assert_eq!(frame.syntax, syntax);
-        assert_eq!(frame.innerdq, 0);
-        assert_eq!(frame.varpushed, 0);
-        assert_eq!(frame.dblquote, 0);
-        assert_eq!(frame.backq, 0);
-        assert_eq!(frame.varnest, 0);
-        assert_eq!(frame.parenlevel, 0);
-        assert_eq!(frame.dqvarnest, 0);
+        assert!(!frame.inner_double_quote);
+        assert!(!frame.variable_context_pushed);
+        assert!(!frame.double_quoted);
+        assert_eq!(frame.backquote, BackquoteContext::None);
+        assert_eq!(frame.variable_depth, 0);
+        assert_eq!(frame.parenthesis_depth, 0);
+        assert_eq!(frame.double_quote_variable_depth, 0);
     }
 
     // [spec:dash:sem:parser.synstack-pop-fn/test]

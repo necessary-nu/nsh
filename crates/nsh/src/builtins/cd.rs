@@ -11,7 +11,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::NativeStrExt as _;
 use nsh_platform::ShellBytesExt as _;
 use std::io::Write;
@@ -20,9 +19,12 @@ use crate::cd::{Pwd, setpwd_inner};
 use crate::eval::Flow;
 use crate::options::Options;
 
-const CD_PHYSICAL: c_int = 1;
-const CD_PRINT: c_int = 2;
-const CD_ERROR_IF_UNKNOWN: c_int = 4;
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct CdOptions {
+    pub(crate) physical: bool,
+    print: bool,
+    error_if_unknown: bool,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CdResult {
@@ -39,22 +41,22 @@ enum CdResult {
 // [spec:posix:req:builtin.cd.opt-p]
 // [spec:posix:req:builtin.cd.opt-l-p-last-wins]
 // [spec:posix:req:builtin.cd.opt-e]
-pub(crate) fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Result<c_int, Error> {
-    let mut flags: c_int = 0;
-    let mut j: u8 = b'L';
+pub(crate) fn cdopt(
+    sh: &mut crate::context::Shell,
+    opts: &mut Options,
+) -> Result<CdOptions, Error> {
+    let mut options = CdOptions::default();
 
-    while let Some(i) = opts.next(&mut sh.diagnostics(), b"LPe")? {
-        if i == b'e' {
-            flags |= CD_ERROR_IF_UNKNOWN;
-            continue;
-        }
-        if i != j {
-            flags ^= CD_PHYSICAL;
-            j = i;
+    while let Some(option) = opts.next(&mut sh.diagnostics(), b"LPe")? {
+        match option {
+            b'e' => options.error_if_unknown = true,
+            b'P' => options.physical = true,
+            b'L' => options.physical = false,
+            _ => unreachable!("the option scanner returns only accepted letters"),
         }
     }
 
-    Ok(flags)
+    Ok(options)
 }
 
 // [spec:dash:def:cd.cdcmd-fn]
@@ -82,10 +84,8 @@ pub(crate) fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Resul
 // [spec:posix:req:builtin.cd.exit-status]
 // [spec:posix:req:builtin.cd.consequences-of-errors]
 pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut flags: c_int;
-
     let mut opts = Options::new(args);
-    flags = cdopt(sh, &mut opts)?;
+    let mut options = cdopt(sh, &mut opts)?;
     /* The operand outlives every reader below, which is what the C got
      * from `argv` living in `evalcommand`'s frame. */
     let operand = opts.operands().first().copied();
@@ -98,7 +98,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let dest_value = match operand {
         None => crate::var::lookup_bytes(sh, BStr::new(b"HOME")).unwrap_or_default(),
         Some(d) if d == b"-" => {
-            flags |= CD_PRINT;
+            options.print = true;
             crate::var::lookup_bytes(sh, BStr::new(b"OLDPWD")).unwrap_or_default()
         }
         Some(d) => d.to_owned(),
@@ -132,10 +132,10 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 .is_ok_and(|path| nsh_platform::path_is_directory(&path))
             {
                 if !component.is_empty() {
-                    flags |= CD_PRINT;
+                    options.print = true;
                 }
                 /* docd: */
-                match docd(sh, fullname, flags)? {
+                match docd(sh, fullname, options)? {
                     CdResult::Changed => {
                         out = true; /* goto out */
                         break;
@@ -158,7 +158,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !out {
         /* step6: */
         /* docd: */
-        match docd(sh, dest, flags)? {
+        match docd(sh, dest, options)? {
             CdResult::Changed => {}
             CdResult::ChangedPwdUnknown => pwd_unknown = true,
             CdResult::Failed => {
@@ -171,13 +171,12 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     /* out: */
-    if (flags & CD_PRINT) != 0 {
+    if options.print {
         let mut d = sh.cwd.curdir.clone().unwrap_or_default();
         d.push(b'\n');
         let _ = sh.io.stdout().write_all(&d);
     }
-    let status =
-        i32::from(pwd_unknown && (flags & CD_PHYSICAL) != 0 && (flags & CD_ERROR_IF_UNKNOWN) != 0);
+    let status = i32::from(pwd_unknown && options.physical && options.error_if_unknown);
     Ok(Flow::Done((status).into()))
 }
 
@@ -189,9 +188,9 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.cd.oldpwd-set]
 // [spec:posix:req:xcurel.change-cwd]
 // [spec:nsh:req:idiom.platform-errors]
-fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
+fn docd(sh: &mut Shell, dest: &BStr, options: CdOptions) -> Result<CdResult, Error> {
     crate::error::with_interrupts_deferred(sh, |sh| {
-        let logical = if (flags & CD_PHYSICAL) == 0 {
+        let logical = if !options.physical {
             updatepwd(sh, dest)
         } else {
             None
@@ -203,11 +202,11 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
             .as_ref()
             .map(|dir| dir.as_slice().as_bstr())
             .unwrap_or(dest);
-        let err = match target
+        let changed = match target
             .try_to_path_buf()
             .and_then(|path| nsh_platform::set_current_directory(&path))
         {
-            Ok(()) => 0,
+            Ok(()) => true,
             // [spec:posix:req:builtin.cd.step9-path-max-relative]
             // `updatepwd` constructed this absolute path by prefixing PWD. If the
             // kernel rejects only that combined spelling as too long, POSIX says
@@ -225,20 +224,20 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
                     .try_to_path_buf()
                     .and_then(|path| nsh_platform::set_current_directory(&path))
                 {
-                    Ok(()) => 0,
-                    Err(_) => -1,
+                    Ok(()) => true,
+                    Err(_) => false,
                 }
             }
-            Err(_) => -1,
+            Err(_) => false,
         };
-        if err == 0 {
+        if changed {
             match logical.as_ref() {
-                Some(dir) => setpwd_inner(sh, Pwd::New(dir.as_slice().as_bstr()), 1)?,
-                None => setpwd_inner(sh, Pwd::Unknown, 1)?,
+                Some(dir) => setpwd_inner(sh, Pwd::New(dir.as_slice().as_bstr()), true)?,
+                None => setpwd_inner(sh, Pwd::Unknown, true)?,
             }
             crate::exec::hashcd(sh);
         }
-        Ok(if err != 0 {
+        Ok(if !changed {
             CdResult::Failed
         } else if logical.is_none() && sh.cwd.curdir.is_none() {
             CdResult::ChangedPwdUnknown
@@ -280,7 +279,7 @@ mod tests {
     /// `-L` and `-P` are a toggle rather than two flags: the C tracks
     /// which it saw last and flips only when the next one differs, so a
     /// repeat is not a flip and the pair cancels.
-    fn opts(words: &[&[u8]]) -> c_int {
+    fn opts(words: &[&[u8]]) -> CdOptions {
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
         let mut scan = Options::new(&args);
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
@@ -289,24 +288,26 @@ mod tests {
 
     #[test]
     fn no_option_is_logical() {
-        assert_eq!(opts(&[b"cd"]), 0);
-        assert_eq!(opts(&[b"cd", b"/tmp"]), 0);
+        assert_eq!(opts(&[b"cd"]), CdOptions::default());
+        assert_eq!(opts(&[b"cd", b"/tmp"]), CdOptions::default());
     }
 
     #[test]
     fn physical_and_logical_toggle() {
-        assert_eq!(opts(&[b"cd", b"-P"]), CD_PHYSICAL);
-        assert_eq!(opts(&[b"cd", b"-L"]), 0);
-        assert_eq!(opts(&[b"cd", b"-P", b"-L"]), 0);
-        assert_eq!(opts(&[b"cd", b"-L", b"-P"]), CD_PHYSICAL);
+        assert!(opts(&[b"cd", b"-P"]).physical);
+        assert!(!opts(&[b"cd", b"-L"]).physical);
+        assert!(!opts(&[b"cd", b"-P", b"-L"]).physical);
+        assert!(opts(&[b"cd", b"-L", b"-P"]).physical);
     }
 
     // [spec:posix:req:builtin.cd.opt-e/test]
     #[test]
     fn error_if_pwd_unknown_is_independent() {
-        assert_eq!(opts(&[b"cd", b"-e"]), CD_ERROR_IF_UNKNOWN);
-        assert_eq!(opts(&[b"cd", b"-Pe"]), CD_PHYSICAL | CD_ERROR_IF_UNKNOWN);
-        assert_eq!(opts(&[b"cd", b"-eP", b"-L"]), CD_ERROR_IF_UNKNOWN);
+        assert!(opts(&[b"cd", b"-e"]).error_if_unknown);
+        let physical_error = opts(&[b"cd", b"-Pe"]);
+        assert!(physical_error.physical && physical_error.error_if_unknown);
+        let logical_error = opts(&[b"cd", b"-eP", b"-L"]);
+        assert!(!logical_error.physical && logical_error.error_if_unknown);
     }
 
     // [spec:posix:req:builtin.cd.opt-e/test]
@@ -352,9 +353,9 @@ mod tests {
     /// A repeat is not a flip, whether clustered or spread.
     #[test]
     fn a_repeat_is_not_a_flip() {
-        assert_eq!(opts(&[b"cd", b"-PP"]), CD_PHYSICAL);
-        assert_eq!(opts(&[b"cd", b"-P", b"-P"]), CD_PHYSICAL);
-        assert_eq!(opts(&[b"cd", b"-LL"]), 0);
+        assert!(opts(&[b"cd", b"-PP"]).physical);
+        assert!(opts(&[b"cd", b"-P", b"-P"]).physical);
+        assert!(!opts(&[b"cd", b"-LL"]).physical);
     }
 
     #[test]
@@ -362,7 +363,7 @@ mod tests {
         let args = [BStr::new("cd"), BStr::new("-P"), BStr::new("dir")];
         let mut scan = Options::new(&args);
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        assert_eq!(cdopt(&mut owned, &mut scan).unwrap(), CD_PHYSICAL);
+        assert!(cdopt(&mut owned, &mut scan).unwrap().physical);
         assert_eq!(scan.operands(), [BStr::new("dir")]);
     }
 

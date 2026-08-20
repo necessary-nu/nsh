@@ -34,7 +34,6 @@
 //! with the layout it described.
 
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 
 use crate::fd::LogicalDescriptor;
 use crate::word::ParsedWord;
@@ -95,7 +94,7 @@ impl From<&BStr> for NodeText {
 // [spec:nsh:req:idiom.structural-ast]
 #[derive(Clone)]
 pub struct SimpleCommand {
-    pub line: c_int,
+    pub line: i32,
     pub assignments: Vec<Node>,
     pub arguments: Vec<Node>,
     pub redirections: Vec<Redirection>,
@@ -111,7 +110,7 @@ pub struct Pipeline {
 /// A command wrapped by redirection, background execution, or a subshell.
 #[derive(Clone)]
 pub struct CompoundCommand {
-    pub line: c_int,
+    pub line: i32,
     pub command: Box<Node>,
     pub redirections: Vec<Redirection>,
 }
@@ -134,7 +133,7 @@ pub struct IfCommand {
 /// A for command.
 #[derive(Clone)]
 pub struct ForCommand {
-    pub line: c_int,
+    pub line: i32,
     pub words: Vec<Node>,
     pub body: Box<Node>,
     pub variable: NodeText,
@@ -143,7 +142,7 @@ pub struct ForCommand {
 /// A case command.
 #[derive(Clone)]
 pub struct CaseCommand {
-    pub line: c_int,
+    pub line: i32,
     pub word: Box<Node>,
     pub clauses: Vec<CaseClause>,
 }
@@ -159,7 +158,7 @@ pub struct CaseClause {
 /// A shell function definition.
 #[derive(Clone)]
 pub struct FunctionDefinition {
-    pub line: c_int,
+    pub line: i32,
     pub name: NodeText,
     pub body: Box<Node>,
 }

@@ -19,8 +19,6 @@
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use core::ffi::c_int;
-
 /// Serialises tests that touch shell globals.
 ///
 /// Returns the guard rather than taking a closure so a test can hold it
@@ -47,7 +45,7 @@ pub fn lock() -> MutexGuard<'static, ()> {
 /// Takes [`lock`] internally: forking a process whose other threads may
 /// hold locks is only safe if nothing else is running, and cargo runs
 /// tests on several threads by default.
-pub fn forked(body: impl FnOnce()) -> c_int {
+pub fn forked(body: impl FnOnce()) -> i32 {
     let _g = lock();
     nsh_platform::run_in_child(body).expect("forked test process failed")
 }

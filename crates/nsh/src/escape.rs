@@ -22,7 +22,6 @@
 //!     (src/mksyntax.c:147,152)
 
 use bstr::{BStr, BString};
-use core::ffi::{c_char, c_int, c_uint};
 
 // ---------------------------------------------------------------------
 // src/memalloc.h:78-97 -- the two stack-string macros `conv_escape` still
@@ -70,29 +69,36 @@ macro_rules! STADJUST {
 
 /// `#define isodigit(c) ((c) >= '0' && (c) <= '7')`
 #[inline]
-pub(crate) fn isodigit(c: c_int) -> bool {
-    c >= b'0' as c_int && c <= b'7' as c_int
+pub(crate) fn isodigit(byte: u8) -> bool {
+    matches!(byte, b'0'..=b'7')
 }
 
 /// `#define octtobin(c) ((c) - '0')`
 #[inline]
-fn octtobin(c: c_int) -> c_int {
-    c - b'0' as c_int
+fn octtobin(byte: u8) -> u32 {
+    u32::from(byte - b'0')
 }
 
 // Character constants used as `match` patterns; Rust cannot cast inside a
 // pattern the way a C `case` label can.
-const CH_BACKSLASH: c_int = b'\\' as c_int;
-const CH_X: c_int = b'x' as c_int;
-const CH_U: c_int = b'u' as c_int;
-const CH_A: c_int = b'a' as c_int;
-const CH_B: c_int = b'b' as c_int;
-const CH_F: c_int = b'f' as c_int;
-const CH_E: c_int = b'e' as c_int;
-const CH_N: c_int = b'n' as c_int;
-const CH_R: c_int = b'r' as c_int;
-const CH_T: c_int = b't' as c_int;
-const CH_V: c_int = b'v' as c_int;
+const CH_BACKSLASH: u8 = b'\\';
+const CH_X: u8 = b'x';
+const CH_U: u8 = b'u';
+const CH_A: u8 = b'a';
+const CH_B: u8 = b'b';
+const CH_F: u8 = b'f';
+const CH_E: u8 = b'e';
+const CH_N: u8 = b'n';
+const CH_R: u8 = b'r';
+const CH_T: u8 = b't';
+const CH_V: u8 = b'v';
+
+/// The bytes written and input bytes consumed by one escape conversion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EscapeChunk {
+    pub written: usize,
+    pub consumed: usize,
+}
 
 /*
  * Print "standard" escape characters
@@ -118,23 +124,23 @@ const CH_V: c_int = b'v' as c_int;
 /// overwritten by the payload -- ordinary arithmetic instead of pointer
 /// arithmetic that happens to stay in bounds.
 // [spec:nsh:req:idiom.lexer-tokens]
-pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool) -> c_uint {
+pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool) -> EscapeChunk {
     /* The C's `out`, as the offset it always was. */
     let mut o: usize = 0;
     let mut at: isize = 0;
-    let mut value: c_uint;
-    let och: c_int;
-    let mut ch: c_int;
+    let mut value: u32;
+    let och: u8;
+    let mut ch: u8;
 
-    let byte_at = |at: isize| -> c_int {
+    let byte_at = |at: isize| -> u8 {
         usize::try_from(at)
             .ok()
             .and_then(|index| input.get(index))
             .copied()
-            .unwrap_or(0) as c_char as c_int
+            .unwrap_or(0)
     };
     ch = byte_at(at);
-    value = ch as c_uint;
+    value = u32::from(ch);
 
     // The C switch's `default:` label falls into `check_value:`, which falls
     // into `case '\\':`; `case 'x':` falls into `hex:`, which can jump back
@@ -163,7 +169,7 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
                 }
 
                 CH_A /* alert */ | CH_B /* backspace */ | CH_F /* form-feed */ => {
-                    value = value.wrapping_sub(b'a' as c_uint);
+                    value = value.wrapping_sub(u32::from(b'a'));
                     value = value.wrapping_add(0x07 /* '\a' */);
                 }
 
@@ -175,24 +181,24 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
 
                 _ => {
                     // default:
-                    if mbchar && (ch == b'"' as c_int || ch == b'\'' as c_int) {
+                    if mbchar && (ch == b'"' || ch == b'\'') {
                         break 'sw;
                     }
 
-                    if ch == b'U' as c_int {
+                    if ch == b'U' {
                         ch = 8;
                         goto_hex = true;
                         break 'sw;
                     }
 
-                    value = b'\\' as c_uint;
+                    value = u32::from(b'\\');
 
                     if isodigit(ch) {
                         ch = 3;
                         value = 0;
                         loop {
                             value <<= 3;
-                            value = value.wrapping_add(octtobin(byte_at(at)) as c_uint);
+                            value = value.wrapping_add(octtobin(byte_at(at)));
                             at += 1;
                             ch -= 1;
                             if !(ch != 0 && isodigit(byte_at(at))) {
@@ -214,17 +220,17 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
             value = 0;
             loop {
                 at += 1;
-                let c: c_int = byte_at(at);
-                let d: c_int;
+                let c = byte_at(at);
+                let d: u32;
 
-                if c >= b'0' as c_int && c <= b'9' as c_int {
-                    d = c - b'0' as c_int;
+                if c.is_ascii_digit() {
+                    d = u32::from(c - b'0');
                 } else {
-                    let cl: c_int;
+                    let cl: u8;
 
                     cl = c & !0x20;
-                    if cl >= b'A' as c_int && cl <= b'F' as c_int {
-                        d = cl - b'A' as c_int + 10;
+                    if matches!(cl, b'A'..=b'F') {
+                        d = u32::from(cl - b'A') + 10;
                     } else {
                         at -= 1;
                         break;
@@ -232,7 +238,7 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
                 }
 
                 value <<= 4;
-                value = value.wrapping_add(d as c_uint);
+                value = value.wrapping_add(d);
 
                 ch -= 1;
                 if ch == 0 {
@@ -246,9 +252,9 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
                 goto_check_value = true;
             } else {
                 if value < 0x110000 {
-                    let mboff: c_int = (mbchar as c_int - 1) * 2;
-                    let uni: c_uint = value;
-                    let len: c_int;
+                    let mboff: isize = if mbchar { 0 } else { -2 };
+                    let uni: u32 = value;
+                    let len: usize;
 
                     value = 0x80 << 8 | (value & 0xfc0) << 2 | 0x80 | (value & 0x3f);
 
@@ -289,7 +295,7 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
                      * and not the C's 4.  The assertion stays as
                      * documentation; the indexing above now enforces it in
                      * every profile rather than only in a debug build. */
-                    let highest = 2 + mboff + if len + 1 > 3 { len + 1 } else { 3 };
+                    let highest = 2 + mboff + isize::try_from((len + 1).max(3)).unwrap();
                     debug_assert!(highest >= 0 && (highest as usize) < CONV_ESCAPE_SLOP);
                 }
 
@@ -323,7 +329,10 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
     // out_noput:
     at += 1;
     debug_assert!(at >= 0, "an escape never consumes a negative byte count");
-    (o as c_uint) | ((at as c_uint) << 4)
+    EscapeChunk {
+        written: o,
+        consumed: at as usize,
+    }
 }
 
 /*
@@ -337,10 +346,9 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
 /// which both callers obey. Input and output are both length-delimited.
 // [spec:dash:def:printf.conv-escape-str-fn]
 // [spec:dash:sem:printf.conv-escape-str-fn]
-pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
+pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> bool {
     let mut at = 0usize;
-    let byte_at =
-        |index: usize| -> c_int { input.get(index).copied().unwrap_or(0) as c_char as c_int };
+    let byte_at = |index: usize| -> u8 { input.get(index).copied().unwrap_or(0) };
 
     /* convert string into a temporary buffer... */
     /* `STARTSTACKSTR(cp)` — the buffer is the caller's, and the C's `*sp =
@@ -348,8 +356,8 @@ pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
     debug_assert!(cp.is_empty());
 
     while at < input.len() {
-        let ret: c_uint;
-        let ch: c_int;
+        let ret: EscapeChunk;
+        let ch: u8;
 
         /* `CHECKSTRSPACE(4, cp)` — the room `conv_escape` writes into
          * through the raw cursor below; see `CONV_ESCAPE_SLOP`. */
@@ -357,13 +365,13 @@ pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
 
         let c = byte_at(at);
         at += 1;
-        if c != b'\\' as c_int {
-            cp.push(c as u8);
+        if c != b'\\' {
+            cp.push(c);
             continue;
         } else {
             ch = byte_at(at);
-            if ch == b'c' as c_int {
-                return 0x100;
+            if ch == b'c' {
+                return true;
             }
         }
 
@@ -372,19 +380,19 @@ pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
          * They start with a \0, and are followed by 0, 1, 2,
          * or 3 octal digits.
          */
-        if ch == b'0' as c_int && isodigit(byte_at(at + 1)) {
+        if ch == b'0' && isodigit(byte_at(at + 1)) {
             at += 1;
         }
 
         /* Finally test for sequences valid in the format string */
         let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
         ret = conv_escape(&input[at.min(input.len())..], &mut scratch, false);
-        at += (ret >> 4) as usize;
-        debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-        cp.extend_from_slice(&scratch[..(ret & 15) as usize]);
+        at += ret.consumed;
+        debug_assert!(ret.written <= CONV_ESCAPE_SLOP);
+        cp.extend_from_slice(&scratch[..ret.written]);
     }
 
-    0
+    false
 }
 
 /// Quote arbitrary bytes so parsing the result produces the same bytes.
@@ -428,7 +436,7 @@ mod tests {
     #[test]
     fn escape_strings_preserve_nul_data() {
         let mut output = BString::new(Vec::new());
-        assert_eq!(conv_escape_str(b"a\0b", &mut output), 0);
+        assert!(!conv_escape_str(b"a\0b", &mut output));
         assert_eq!(output, BString::from(b"a\0b".as_slice()));
     }
 

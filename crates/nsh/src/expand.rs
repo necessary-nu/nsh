@@ -12,7 +12,6 @@ use core::mem;
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::{c_char, c_int, c_uint};
 
 use crate::error::Error;
 use crate::nodes::Node;
@@ -29,58 +28,88 @@ use mode::EscapeMode;
 pub(crate) use mode::ExpansionMode;
 
 // ---------------------------------------------------------------------
-// Constants mirrored from the headers this file includes.
-//
-// The parser's marker bytes and variable-substitution codes come from
-// `parser.h`.  They are aliased here as `c_char`/`c_int` so they can be
-// used as `match` patterns and so that the numeric type the parser
-// module happens to choose does not matter.
+// Internal marker bytes shared with the parser.
 // ---------------------------------------------------------------------
 
-pub(crate) const CTLESC: c_char = crate::parser::CTLESC as c_char;
-const CTLVAR: c_char = crate::parser::CTLVAR as c_char;
-const CTLENDVAR: c_char = crate::parser::CTLENDVAR as c_char;
-const CTLBACKQ: c_char = crate::parser::CTLBACKQ as c_char;
-pub(crate) const CTLMBCHAR: c_char = crate::parser::CTLMBCHAR as c_char;
-const CTLARI: c_char = crate::parser::CTLARI as c_char;
-const CTLENDARI: c_char = crate::parser::CTLENDARI as c_char;
-const CTLQUOTEMARK: c_char = crate::parser::CTLQUOTEMARK as c_char;
+pub(crate) const CTLESC: u8 = crate::parser::CTLESC;
+const CTLVAR: u8 = crate::parser::CTLVAR;
+const CTLENDVAR: u8 = crate::parser::CTLENDVAR;
+const CTLBACKQ: u8 = crate::parser::CTLBACKQ;
+pub(crate) const CTLMBCHAR: u8 = crate::parser::CTLMBCHAR;
+const CTLARI: u8 = crate::parser::CTLARI;
+const CTLENDARI: u8 = crate::parser::CTLENDARI;
+const CTLQUOTEMARK: u8 = crate::parser::CTLQUOTEMARK;
 
-const VSTYPE: c_int = crate::parser::VSTYPE as c_int;
-const VSNUL: c_int = crate::parser::VSNUL as c_int;
-const VSBIT: c_int = crate::parser::VSBIT as c_int;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VariableExpansion {
+    Invalid,
+    Normal,
+    Default,
+    Alternative,
+    Error,
+    Assign,
+    TrimRight,
+    TrimRightLongest,
+    TrimLeft,
+    TrimLeftLongest,
+    Length,
+}
 
-const VSNORMAL: c_int = crate::parser::VSNORMAL as c_int;
-const VSMINUS: c_int = crate::parser::VSMINUS as c_int;
-const VSPLUS: c_int = crate::parser::VSPLUS as c_int;
-const VSQUESTION: c_int = crate::parser::VSQUESTION as c_int;
-const VSASSIGN: c_int = crate::parser::VSASSIGN as c_int;
-const VSTRIMRIGHT: c_int = crate::parser::VSTRIMRIGHT as c_int;
-const VSTRIMRIGHTMAX: c_int = crate::parser::VSTRIMRIGHTMAX as c_int;
-const VSTRIMLEFT: c_int = crate::parser::VSTRIMLEFT as c_int;
-const VSTRIMLEFTMAX: c_int = crate::parser::VSTRIMLEFTMAX as c_int;
-const VSLENGTH: c_int = crate::parser::VSLENGTH as c_int;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct VariableFlags {
+    expansion: VariableExpansion,
+    null_is_unset: bool,
+}
+
+impl VariableFlags {
+    fn decode(encoded: u8) -> Self {
+        let expansion = match encoded & crate::parser::VSTYPE {
+            crate::parser::VSNORMAL => VariableExpansion::Normal,
+            crate::parser::VSMINUS => VariableExpansion::Default,
+            crate::parser::VSPLUS => VariableExpansion::Alternative,
+            crate::parser::VSQUESTION => VariableExpansion::Error,
+            crate::parser::VSASSIGN => VariableExpansion::Assign,
+            crate::parser::VSTRIMRIGHT => VariableExpansion::TrimRight,
+            crate::parser::VSTRIMRIGHTMAX => VariableExpansion::TrimRightLongest,
+            crate::parser::VSTRIMLEFT => VariableExpansion::TrimLeft,
+            crate::parser::VSTRIMLEFTMAX => VariableExpansion::TrimLeftLongest,
+            crate::parser::VSLENGTH => VariableExpansion::Length,
+            _ => VariableExpansion::Invalid,
+        };
+        Self {
+            expansion,
+            null_is_unset: encoded & crate::parser::VSNUL != 0,
+        }
+    }
+
+    const fn normal() -> Self {
+        Self {
+            expansion: VariableExpansion::Normal,
+            null_is_unset: false,
+        }
+    }
+}
 
 // C character literals used as `switch` labels; Rust `match` patterns
 // require named constants, so the ones this file switches on get names.
-pub(crate) const C_BANG: c_char = b'!' as c_char;
-const C_HASH: c_char = b'#' as c_char;
-const C_DOLLAR: c_char = b'$' as c_char;
-pub(crate) const C_STAR: c_char = b'*' as c_char;
-pub(crate) const C_MINUS: c_char = b'-' as c_char;
-const C_DOT: c_char = b'.' as c_char;
-const C_SLASH: c_char = b'/' as c_char;
-pub(crate) const C_COLON: c_char = b':' as c_char;
-pub(crate) const C_QUESTION: c_char = b'?' as c_char;
-const C_AT: c_char = b'@' as c_char;
-pub(crate) const C_LBRACKET: c_char = b'[' as c_char;
-pub(crate) const C_RBRACKET: c_char = b']' as c_char;
-const C_BACKSLASH: c_char = b'\\' as c_char;
-pub(crate) const C_CARET: c_char = b'^' as c_char;
-const C_EQUALS: c_char = b'=' as c_char;
-const C_TILDE: c_char = b'~' as c_char;
-const C_0: c_char = b'0' as c_char;
-const C_9: c_char = b'9' as c_char;
+pub(crate) const C_BANG: u8 = b'!';
+const C_HASH: u8 = b'#';
+const C_DOLLAR: u8 = b'$';
+pub(crate) const C_STAR: u8 = b'*';
+pub(crate) const C_MINUS: u8 = b'-';
+const C_DOT: u8 = b'.';
+const C_SLASH: u8 = b'/';
+pub(crate) const C_COLON: u8 = b':';
+pub(crate) const C_QUESTION: u8 = b'?';
+const C_AT: u8 = b'@';
+pub(crate) const C_LBRACKET: u8 = b'[';
+pub(crate) const C_RBRACKET: u8 = b']';
+const C_BACKSLASH: u8 = b'\\';
+pub(crate) const C_CARET: u8 = b'^';
+const C_EQUALS: u8 = b'=';
+const C_TILDE: u8 = b'~';
+const C_0: u8 = b'0';
+const C_9: u8 = b'9';
 
 // ---------------------------------------------------------------------
 // src/expand.h
@@ -269,8 +298,8 @@ fn expb(state: &mut ExpandState) -> &mut BString {
 
 /// `expdest - stackblock()`.
 #[inline]
-fn expdest_off(state: &mut ExpandState) -> c_int {
-    expb(state).len() as c_int
+fn expdest_off(state: &mut ExpandState) -> usize {
+    expb(state).len()
 }
 
 /// `p = grabstackstr(expdest)`.
@@ -366,7 +395,7 @@ impl DestinationSyntax {
 
 /// `error.h`: `#define int_pending() intpending`
 #[inline]
-fn int_pending() -> c_int {
+fn int_pending() -> bool {
     crate::error::int_pending()
 }
 
@@ -393,10 +422,10 @@ fn int_pending() -> c_int {
 /// gone: `esclen` had a single caller, `scanright`, which walks the
 /// expansion buffer by offset now and passes the subslice from `startp`,
 /// so the floor `esclen` existed to carry is the slice's own start.
-fn mesclen_bytes(s: &[u8], mut at: usize, mesc: c_char) -> usize {
+fn mesclen_bytes(s: &[u8], mut at: usize, mesc: u8) -> usize {
     let mut esc: usize = 0;
 
-    while at > 0 && s[at - 1] as c_char == mesc {
+    while at > 0 && s[at - 1] == mesc {
         at -= 1;
         esc += 1;
     }
@@ -406,43 +435,43 @@ fn mesclen_bytes(s: &[u8], mut at: usize, mesc: c_char) -> usize {
 // [spec:dash:def:expand.mbnext-fn]
 // [spec:dash:sem:expand.mbnext-fn]
 //
-// Returns `start | end << 8`: the low byte is the offset from `p` to the
-// character's data (past any markers), the next byte the span *from that
-// data position* to the end of the encoded character.  The total span
-// from `p` is therefore `(mb & 0xff) + (mb >> 8)`, which is why that
-// expression appears at every call site.
+#[derive(Clone, Copy)]
+struct EncodedCharacterSpan {
+    prefix: usize,
+    remainder: usize,
+}
+
 // The pointer form is gone with its last caller.  It existed to answer
 // "how much of this may I read?" for a walker holding a bare `*const
-// c_char` -- three bytes when the first is CTLMBCHAR, one otherwise --
+// i8` -- three bytes when the first is CTLMBCHAR, one otherwise --
 // and every walker that asked now holds a slice that answers it.
 //
 // The decoding itself, over a slice, so the framing is bounds-checked
 // rather than trusted.
-pub(crate) fn mbnext_bytes(p: &[u8]) -> c_uint {
-    let mut start: c_uint = 0;
-    let mut end: c_uint = 0;
-    let ml: c_uint;
+fn mbnext_bytes(p: &[u8]) -> EncodedCharacterSpan {
+    let mut prefix = 0usize;
+    let mut remainder = 0usize;
 
-    let c = byte_at(p, end as usize);
-    end += 1;
+    let c = byte_at(p, remainder);
+    remainder += 1;
 
     match c {
         CTLMBCHAR => {
-            if byte_at(p, end as usize) == CTLESC {
-                end += 1;
+            if byte_at(p, remainder) == CTLESC {
+                remainder += 1;
             }
-            ml = byte_at(p, end as usize) as u8 as c_uint;
-            end += 1;
-            start = end;
-            end = ml + 2;
+            let payload = usize::from(byte_at(p, remainder));
+            remainder += 1;
+            prefix = remainder;
+            remainder = payload + 2;
         }
         CTLESC => {
-            start += 1;
+            prefix += 1;
         }
         _ => {}
     }
 
-    start | end << 8
+    EncodedCharacterSpan { prefix, remainder }
 }
 
 // [spec:dash:def:expand.getpwhome-fn]
@@ -564,26 +593,26 @@ fn argstr(
     mut mode: ExpansionMode,
 ) -> Result<usize, Error> {
     static spclchars: [u8; 10] = [
-        C_EQUALS as u8,
-        C_COLON as u8,
-        CTLQUOTEMARK as u8,
-        CTLENDVAR as u8,
-        CTLESC as u8,
-        CTLVAR as u8,
-        CTLBACKQ as u8,
-        CTLMBCHAR as u8,
-        CTLARI as u8,
-        CTLENDARI as u8,
+        C_EQUALS,
+        C_COLON,
+        CTLQUOTEMARK,
+        CTLENDVAR,
+        CTLESC,
+        CTLVAR,
+        CTLBACKQ,
+        CTLMBCHAR,
+        CTLARI,
+        CTLENDARI,
     ];
     /* The C advances a pointer into `spclchars`; the offset is the whole of
      * what it carries. The slice spells that set directly. */
     let mut reject: usize = 0;
-    let mut c: c_int;
+    let mut c: u8;
     let break_all =
         mode.contains(ExpansionMode::PARAMETER_WORD) && !mode.contains(ExpansionMode::QUOTED);
     let mut in_quotes: bool;
     let mut length: usize;
-    let mut startloc: c_int;
+    let mut startloc: usize;
 
     reject += usize::from(mode.contains(ExpansionMode::COLON_TILDE));
     reject += if mode.contains(ExpansionMode::ASSIGNMENT_TILDE) {
@@ -604,8 +633,8 @@ fn argstr(
     'expansion: loop {
         startloc = expdest_off(state);
         loop {
-            let ml: c_uint;
-            let mb: c_uint;
+            let payload_length: usize;
+            let span: EncodedCharacterSpan;
             let closes_word: bool;
 
             /* The run of bytes outside the active control set. Counted
@@ -626,25 +655,20 @@ fn argstr(
                     expb(state).extend_from_slice(&text[p..]);
                     let newloc = expdest_off(state);
                     if break_all && !in_quotes && newloc > startloc {
-                        recordregion(
-                            state,
-                            usize::try_from(startloc).expect("expansion offsets are nonnegative"),
-                            usize::try_from(newloc).expect("expansion offsets are nonnegative"),
-                            false,
-                        );
+                        recordregion(state, startloc, newloc, false);
                     }
                 }
                 return Ok(text.len());
             };
-            c = control as c_int;
-            if (c & 0x80) == 0 || c == CTLENDARI as c_int || c == CTLENDVAR as c_int {
+            c = control;
+            if (c & 0x80) == 0 || c == CTLENDARI || c == CTLENDVAR {
                 length += 1;
-                closes_word = c == CTLENDARI as c_int || c == CTLENDVAR as c_int;
+                closes_word = c == CTLENDARI || c == CTLENDVAR;
             } else {
                 closes_word = false;
             }
             if length > 0 && !mode.contains(ExpansionMode::DISCARD) {
-                let newloc: c_int;
+                let newloc: usize;
 
                 /* `p` walks the word
                  * text and never the expansion buffer, which is what the
@@ -653,14 +677,9 @@ fn argstr(
                 let b = expb(state);
                 let emitted = length - usize::from(closes_word);
                 b.extend_from_slice(&text[p..p + emitted]);
-                newloc = b.len() as c_int;
+                newloc = b.len();
                 if break_all && !in_quotes && newloc > startloc {
-                    recordregion(
-                        state,
-                        usize::try_from(startloc).expect("expansion offsets are nonnegative"),
-                        usize::try_from(newloc).expect("expansion offsets are nonnegative"),
-                        false,
-                    );
+                    recordregion(state, startloc, newloc, false);
                 }
                 startloc = newloc;
             }
@@ -671,9 +690,9 @@ fn argstr(
                 return Ok(p - 1);
             }
 
-            match c as c_char {
+            match c {
                 C_EQUALS | C_COLON => {
-                    if (c as c_char) == C_EQUALS {
+                    if c == C_EQUALS {
                         mode = mode | ExpansionMode::COLON_TILDE;
                         reject += 1;
                         /* fall through */
@@ -694,11 +713,11 @@ fn argstr(
                     /* These are the five bytes the parser emits for a bare
                      * `"$@"`. */
                     let quoted_at_tail = [
-                        CTLVAR as u8,
-                        (VSNORMAL | VSBIT) as u8,
+                        CTLVAR,
+                        crate::parser::VSNORMAL | crate::parser::VSBIT,
                         b'@',
                         b'=',
-                        CTLQUOTEMARK as u8,
+                        CTLQUOTEMARK,
                     ];
                     if !in_quotes && text.get(p..).unwrap_or_default() == quoted_at_tail {
                         p = evalvar(sh, state, text, p + 1, mode | ExpansionMode::QUOTED)? + 1;
@@ -713,24 +732,24 @@ fn argstr(
                     }
                 }
                 CTLMBCHAR => {
-                    c = byte_at(text, p) as c_int;
+                    c = byte_at(text, p);
                     p -= 1;
-                    mb = mbnext_bytes(text.get(p..).unwrap_or_default());
-                    ml = (mb >> 8) - 2;
+                    span = mbnext_bytes(text.get(p..).unwrap_or_default());
+                    payload_length = span.remainder - 2;
                     if mode.escapes_quotes() || mode.contains(ExpansionMode::PRESERVE_MULTIBYTE) {
-                        length = ((mb >> 8) + (mb & 0xff)) as usize;
-                        if (c as c_char) == CTLESC {
-                            startloc += length as c_int;
+                        length = span.prefix + span.remainder;
+                        if c == CTLESC {
+                            startloc += length;
                         }
                     } else {
-                        if c == CTLESC as c_int {
-                            startloc += ml as c_int;
+                        if c == CTLESC {
+                            startloc += payload_length;
                         }
-                        p += (mb & 0xff) as usize;
+                        p += span.prefix;
                         if !mode.contains(ExpansionMode::DISCARD) {
-                            expb(state).extend_from_slice(&text[p..p + ml as usize]);
+                            expb(state).extend_from_slice(&text[p..p + payload_length]);
                         }
-                        p += (mb >> 8) as usize;
+                        p += span.remainder;
                     }
                 }
                 CTLESC => {
@@ -796,7 +815,7 @@ fn exptilde(
     startp: usize,
     mode: ExpansionMode,
 ) -> usize {
-    let mut c: c_char;
+    let mut c: u8;
     let name: usize;
     let mut p: usize;
 
@@ -806,7 +825,7 @@ fn exptilde(
     loop {
         p += 1;
         let Some(&byte) = text.get(p) else { break };
-        c = byte as c_char;
+        c = byte;
         match c {
             CTLESC => return startp,
             CTLQUOTEMARK => return startp,
@@ -897,8 +916,8 @@ fn expari(
     start: usize,
     mode: ExpansionMode,
 ) -> Result<usize, Error> {
-    let begoff: c_int;
-    let len: c_int;
+    let begoff: usize;
+    let len: usize;
     let result: i64;
     /* The C's `p` doubles as a scratch `stackblock()` before it becomes the
      * return value; only the second use survives. */
@@ -919,28 +938,20 @@ fn expari(
          * the stack allocator's restored cursor.  The expression has value
          * semantics now: copy the counted bytes before rewinding the output
          * buffer, then lend that slice to the arithmetic parser. */
-        let arithmetic = BStr::new(&expb(state)[begoff as usize..]).to_owned();
-        expb(state).truncate(begoff as usize);
+        let arithmetic = BStr::new(&expb(state)[begoff..]).to_owned();
+        expb(state).truncate(begoff);
 
-        removerecordregions(
-            state,
-            usize::try_from(begoff).expect("expansion offsets are nonnegative"),
-        );
+        removerecordregions(state, begoff);
 
         /* `arith` returns its diagnostic now instead of raising it, and as
          * of this commit so does `expari`, so the bridge that stood here is
          * gone and the value travels. */
         result = crate::arith_yacc::arith(sh, arithmetic.as_bstr())?;
 
-        len = cvtnum(&sh.locale, result, mode, expb(state)) as c_int;
+        len = cvtnum(&sh.locale, result, mode, expb(state));
 
         if !mode.contains(ExpansionMode::QUOTED) {
-            recordregion(
-                state,
-                usize::try_from(begoff).expect("expansion offsets are nonnegative"),
-                usize::try_from(begoff + len).expect("expansion offsets are nonnegative"),
-                false,
-            );
+            recordregion(state, begoff, begoff + len, false);
         }
     }
 
@@ -1008,16 +1019,11 @@ fn expbackq(
         /* Eat all trailing newlines. The cursor is the length, so the
          * walk is over the buffer's own bytes and `STADJUST` is a
          * `truncate`. */
-        nsh_platform::trim_command_substitution_output(expb(state), startloc as usize);
+        nsh_platform::trim_command_substitution_output(expb(state), startloc);
 
         if !mode.contains(ExpansionMode::QUOTED) {
             let endloc = expdest_off(state);
-            recordregion(
-                state,
-                usize::try_from(startloc).expect("expansion offsets are nonnegative"),
-                usize::try_from(endloc).expect("expansion offsets are nonnegative"),
-                false,
-            );
+            recordregion(state, startloc, endloc, false);
         }
     }
 
@@ -1031,8 +1037,8 @@ fn expbackq(
 ///
 /// A struct rather than seven parameters because the function-pointer type
 /// `subevalvar` selects between them with was the reason this cluster was
-/// called indivisible: a `fn(*mut c_char, *mut c_char, *mut c_char, *mut
-/// c_char, *mut c_char, c_int, c_int) -> *mut c_char` cannot be changed one
+/// called indivisible: a `fn(*mut i8, *mut i8, *mut i8, *mut
+/// i8, *mut i8, i32, i32) -> *mut i8` cannot be changed one
 /// argument at a time. Named, it can.
 ///
 /// Both scanners take the buffer by `&[u8]`. The C mutates it — it writes a
@@ -1075,7 +1081,7 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
     let mut loc2: usize = a.rmesc;
     loop {
         let s = loc;
-        let c: c_char = byte_at(b, s);
+        let c = byte_at(b, s);
 
         /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
          * *loc = c;` — the temporary terminator, as a subslice that ends
@@ -1085,7 +1091,7 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
         } else {
             b.get(s..).unwrap_or_default()
         };
-        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) != 0 {
+        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) {
             return Some(if a.quotes { loc } else { loc2 });
         }
 
@@ -1093,10 +1099,13 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
             break;
         }
 
-        let mb: c_uint = mbnext_bytes(b.get(loc..).unwrap_or_default());
-        loc += ((mb & 0xff) + (mb >> 8)) as usize;
-        let ml: c_uint = if (mb >> 8) > 3 { (mb >> 8) - 2 } else { 1 };
-        loc2 += ml as usize;
+        let span = mbnext_bytes(b.get(loc..).unwrap_or_default());
+        loc += span.prefix + span.remainder;
+        loc2 += if span.remainder > 3 {
+            span.remainder - 2
+        } else {
+            1
+        };
     }
     None
 }
@@ -1124,7 +1133,7 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
         } else {
             b.get(s.max(0) as usize..).unwrap_or_default()
         };
-        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) != 0 {
+        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) {
             return Some(if a.quotes { loc } else { loc2 } as usize);
         }
         loc -= 1;
@@ -1141,18 +1150,14 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
             esc -= 1;
             loc -= 1;
         } else if byte_at_i(b, loc) == CTLMBCHAR {
-            let ml: c_uint;
-
             loc -= 1;
-            ml = byte_at_i(b, loc) as u8 as c_uint;
-            loc -= (ml + 2) as isize;
+            let payload_length = usize::from(byte_at_i(b, loc));
+            loc -= isize::try_from(payload_length + 2).expect("encoded character fits isize");
             if byte_at_i(b, loc) == CTLESC {
                 loc -= 1;
             }
-            /* `loc2 -= ml - 1` with `ml` unsigned: when `ml` is 0 the C
-             * subtracts UINT_MAX, not 1, and the widening is zero-extending
-             * on both sides. */
-            loc2 -= ml.wrapping_sub(1) as isize;
+            loc2 -= isize::try_from(payload_length.saturating_sub(1))
+                .expect("encoded character fits isize");
         }
         loc2 -= 1;
     }
@@ -1171,12 +1176,11 @@ fn subevalvar(
      * a type; the C then reuses the same local for the pattern, which is
      * why the pattern has a name of its own below. */
     str: Option<usize>,
-    strloc: c_int,
-    startloc: c_int,
-    varflags: c_int,
+    strloc: usize,
+    startloc: usize,
+    variable: VariableFlags,
     mode: ExpansionMode,
 ) -> Result<usize, Error> {
-    let mut subtype: c_int = varflags & VSTYPE;
     let quotes = mode.escapes_quotes();
     /* Every one of the C's `char *` locals here is a position in the
      * expansion buffer and only ever used as one.  As offsets they stop
@@ -1213,9 +1217,9 @@ fn subevalvar(
         return Ok(p);
     }
 
-    startp = startloc as usize;
+    startp = startloc;
 
-    if subtype == VSASSIGN {
+    if variable.expansion == VariableExpansion::Assign {
         let name = BStr::new(&text[str.expect("VSASSIGN carries the variable's name")..]);
         let name = crate::var::varname(name);
         let value = BStr::new(&expb(state)[startp..]);
@@ -1223,7 +1227,7 @@ fn subevalvar(
 
         loc = startp;
     } else {
-        if subtype == VSQUESTION {
+        if variable.expansion == VariableExpansion::Error {
             /* `varunset` stopped diverging with this commit, so this
              * has to be a `return` and not a bare call. It was a stop
              * before — docs/errors-are-values.md 0.2 is the bug that
@@ -1231,12 +1235,17 @@ fn subevalvar(
              * `#[must_use]` so the compiler now names it. */
             let umsg = BStr::new(&expb(state)[startp..]);
             let var = str.expect("VSQUESTION carries the variable's name");
-            return Err(varunset(sh, text, start, var, Some(umsg), varflags));
+            return Err(varunset(
+                sh,
+                text,
+                start,
+                var,
+                Some(umsg),
+                variable.null_is_unset,
+            ));
         }
 
-        subtype -= VSTRIMRIGHT;
-
-        rmescend = strloc as usize;
+        rmescend = strloc;
         /* `str = preglob(rmescend, 0, NULL)` — the pattern is unescaped in
          * place, so its result remains a position in this buffer. */
         rmescapes_buffer(&mut expb(state)[rmescend..], EscapeMode::Glob);
@@ -1257,16 +1266,15 @@ fn subevalvar(
         }
         rmescend -= 1;
 
-        /* zero = subtype == VSTRIMLEFT || subtype == VSTRIMLEFTMAX */
-        zero = subtype >= 2;
-        /* VSTRIMLEFT/VSTRIMRIGHTMAX -> scanleft */
-        scan = if ((subtype & 1) != 0) ^ zero {
-            scanleft
-        } else {
-            scanright
+        (zero, scan) = match variable.expansion {
+            VariableExpansion::TrimRight => (false, scanright as ScanFn),
+            VariableExpansion::TrimRightLongest => (false, scanleft as ScanFn),
+            VariableExpansion::TrimLeft => (true, scanleft as ScanFn),
+            VariableExpansion::TrimLeftLongest => (true, scanright as ScanFn),
+            _ => unreachable!("subevalvar only trims, assigns, or reports an unset variable"),
         };
 
-        endp = strloc as usize - 1;
+        endp = strloc - 1;
         let found = scan(
             &sh.locale,
             expb(state),
@@ -1317,10 +1325,7 @@ fn subevalvar(
     b.truncate(loc);
 
     /* Remove any recorded regions beyond start of variable */
-    removerecordregions(
-        state,
-        usize::try_from(startloc).expect("expansion offsets are nonnegative"),
-    );
+    removerecordregions(state, startloc);
 
     Ok(p)
 }
@@ -1356,33 +1361,32 @@ fn evalvar(
     mut p: usize,
     mut mode: ExpansionMode,
 ) -> Result<usize, Error> {
-    let mut subtype: c_int;
-    let mut varflags: c_int;
+    let mut variable: VariableFlags;
     let var: usize;
-    let patloc: c_int;
-    let startloc: c_int;
-    let mut varlen: isize;
+    let patloc: usize;
+    let startloc: usize;
+    let mut value_length: Option<usize>;
     let mut discard: bool;
     let quoted = mode.contains(ExpansionMode::QUOTED);
     let multibyte_mode: ExpansionMode;
 
-    varflags = (byte_at(text, p) as c_int) & !VSBIT;
+    variable = VariableFlags::decode(byte_at(text, p));
     p += 1;
-    subtype = varflags & VSTYPE;
 
     var = p;
     startloc = expdest_off(state);
     /* The parser always writes the `=` that ends the variable name, and
      * the C dereferences `strchr`'s result without checking. */
     p += BStr::new(text.get(p..).unwrap_or_default())
-        .find_byte(C_EQUALS as u8)
+        .find_byte(C_EQUALS)
         .expect("the parser ends a variable name with `=`")
         + 1;
 
-    multibyte_mode = match subtype {
-        VSTRIMLEFT | VSTRIMLEFTMAX | VSTRIMRIGHT | VSTRIMRIGHTMAX => {
-            ExpansionMode::PRESERVE_MULTIBYTE
-        }
+    multibyte_mode = match variable.expansion {
+        VariableExpansion::TrimLeft
+        | VariableExpansion::TrimLeftLongest
+        | VariableExpansion::TrimRight
+        | VariableExpansion::TrimRightLongest => ExpansionMode::PRESERVE_MULTIBYTE,
         _ => ExpansionMode::PLAIN,
     };
 
@@ -1392,22 +1396,24 @@ fn evalvar(
     }
 
     let record_policy = loop {
-        varlen = varvalue(
+        value_length = varvalue(
             sh,
             state,
             BStr::new(&text[var..p]),
-            varflags,
+            variable.expansion,
             mode | multibyte_mode,
         )?;
-        if (varflags & VSNUL) != 0 {
-            varlen -= 1;
+        if variable.null_is_unset && value_length == Some(0) {
+            value_length = None;
         }
 
-        discard = varlen < 0;
+        discard = value_length.is_none();
 
-        match subtype {
-            VSPLUS | 0 | VSMINUS => {
-                if subtype == VSPLUS {
+        match variable.expansion {
+            VariableExpansion::Alternative
+            | VariableExpansion::Invalid
+            | VariableExpansion::Default => {
+                if variable.expansion == VariableExpansion::Alternative {
                     discard = !discard;
                     /* fall through */
                 }
@@ -1423,7 +1429,7 @@ fn evalvar(
                 break RecordPolicy::IfPresent;
             }
 
-            VSASSIGN | VSQUESTION => {
+            VariableExpansion::Assign | VariableExpansion::Error => {
                 p = subevalvar(
                     sh,
                     state,
@@ -1432,7 +1438,7 @@ fn evalvar(
                     Some(var),
                     0,
                     startloc,
-                    varflags,
+                    variable,
                     mode.without(ExpansionMode::SPLIT | ExpansionMode::CASE_PATTERN)
                         .with_if(ExpansionMode::DISCARD, !discard),
                 )?;
@@ -1441,8 +1447,7 @@ fn evalvar(
                     break RecordPolicy::IfPresent;
                 }
 
-                varflags &= !VSNUL;
-                subtype = VSNORMAL;
+                variable = VariableFlags::normal();
                 continue;
             }
             _ => {}
@@ -1453,31 +1458,31 @@ fn evalvar(
             && sh.options.enabled(ShellOption::Nounset)
         {
             /* A stop before `varunset` stopped diverging, and still one. */
-            return Err(varunset(sh, text, p, var, None, 0));
+            return Err(varunset(sh, text, p, var, None, false));
         }
 
-        if subtype == VSLENGTH {
+        if variable.expansion == VariableExpansion::Length {
             p += 1;
             if mode.contains(ExpansionMode::DISCARD) {
                 return Ok(p);
             }
             cvtnum(
                 &sh.locale,
-                (if varlen > 0 { varlen } else { 0 }) as i64,
+                i64::try_from(value_length.unwrap_or(0)).unwrap_or(i64::MAX),
                 mode,
                 expb(state),
             );
             break RecordPolicy::Always;
         }
 
-        if subtype == VSNORMAL {
+        if variable.expansion == VariableExpansion::Normal {
             break RecordPolicy::IfPresent;
         }
 
         mode = mode.with_if(ExpansionMode::DISCARD, discard);
         /* `patloc` is the length-delimited boundary between value and pattern. */
         patloc = expdest_off(state);
-        p = subevalvar(sh, state, text, p, None, patloc, startloc, varflags, mode)?;
+        p = subevalvar(sh, state, text, p, None, patloc, startloc, variable, mode)?;
         break RecordPolicy::IfPresent;
     };
 
@@ -1496,12 +1501,7 @@ fn evalvar(
         return Ok(p);
     }
     let endloc = expdest_off(state);
-    recordregion(
-        state,
-        usize::try_from(startloc).expect("expansion offsets are nonnegative"),
-        usize::try_from(endloc).expect("expansion offsets are nonnegative"),
-        quoted_at,
-    );
+    recordregion(state, startloc, endloc, quoted_at);
     Ok(p)
 }
 
@@ -1509,21 +1509,19 @@ fn evalvar(
 // [spec:dash:sem:expand.chtodest-fn]
 /// The cursor the C returns is the destination's own length now, so this
 /// appends and returns nothing. It performs no unsafe operation at all.
-fn chtodest(c: c_int, syntax: DestinationSyntax, out: &mut BString) {
-    if syntax.escapes(c as u8) {
+fn chtodest(c: u8, syntax: DestinationSyntax, out: &mut BString) {
+    if syntax.escapes(c) {
         /* USTPUTC(CTLESC, out) */
-        out.push(CTLESC as u8);
+        out.push(CTLESC);
     }
     /* USTPUTC(c, out) */
-    out.push(c as u8);
+    out.push(c);
 }
 
 // [spec:dash:def:expand.mbpair]
-#[repr(C)]
-pub struct mbpair {
-    pub ml: c_uint,
-    pub ql: c_uint,
-}
+// The translated `mbpair { ml, ql }` record is gone. The destination owns
+// its cursor, so only the number of additional source bytes remains a return
+// value.
 
 // [spec:dash:def:expand.mbtodest-fn]
 // [spec:dash:sem:expand.mbtodest-fn]
@@ -1545,26 +1543,22 @@ fn mbtodest(
     at: usize,
     dst: &mut BString,
     syntax: DestinationSyntax,
-) -> mbpair {
-    let mbp: mbpair;
-    /* The C's `q0`: where this call started writing. A length, because
-     * the cursor is one. */
-    let q0: usize = dst.len();
+) -> usize {
     let mut ml: usize;
 
     /* `p = p - 1` */
     let p: &[u8] = &src[at - 1..];
     ml = locale.multibyte_len(p).unwrap_or(usize::MAX);
     if ml == (0 as usize).wrapping_sub(2) || ml == (0 as usize).wrapping_sub(1) || ml < 2 {
-        chtodest(p[0] as c_char as c_int, syntax, dst);
+        chtodest(p[0], syntax, dst);
         ml = 1;
     } else {
         /* `syntax[CTLMBCHAR]` — CTLMBCHAR is negative; see the note in
          * `memtodest` about the unbiased `is_type` table. Negative is an
          * ordinary index now, and a checked one. */
-        if syntax.escapes(CTLMBCHAR as u8) {
+        if syntax.escapes(CTLMBCHAR) {
             /* USTPUTC(CTLMBCHAR, q); USTPUTC(ml, q); */
-            dst.push(CTLMBCHAR as u8);
+            dst.push(CTLMBCHAR);
             dst.push(ml as u8);
         }
 
@@ -1574,22 +1568,14 @@ fn mbtodest(
          * over this same slice, so it cannot exceed it. */
         dst.extend_from_slice(&p[..ml]);
 
-        if syntax.escapes(CTLMBCHAR as u8) {
+        if syntax.escapes(CTLMBCHAR) {
             /* USTPUTC(ml, q); USTPUTC(CTLMBCHAR, q); */
             dst.push(ml as u8);
-            dst.push(CTLMBCHAR as u8);
+            dst.push(CTLMBCHAR);
         }
     }
 
-    /* `ql` is the C's "how far did q move", which the destination's own
-     * length now answers for the only caller. It is still returned
-     * because `mbpair` is the C's return type and carries a spec rule;
-     * what changed is that nobody has to trust it. */
-    mbp = mbpair {
-        ml: (ml.wrapping_sub(1)) as c_uint,
-        ql: (dst.len() - q0) as c_uint,
-    };
-    mbp
+    ml.wrapping_sub(1)
 }
 
 /*
@@ -1693,7 +1679,7 @@ fn memtodest(
 
     /* for (; len; len--) */
     while i < src.len() {
-        let c: c_int = src[i] as c_char as c_int;
+        let c = src[i];
         i += 1;
 
         if c == 0 && !mode.contains(ExpansionMode::KEEP_NUL) {
@@ -1702,16 +1688,12 @@ fn memtodest(
 
         count += 1;
 
-        if c < 0 {
+        if c & 0x80 != 0 {
             /* `mbtodest(p, ...)` is called with `p` already past the
              * byte it is about to decode, and starts by stepping
              * back over it; `i` is that same position. */
-            let mbp: mbpair = mbtodest(locale, src, i, dst, syntax);
-            let mlm: c_uint;
-
-            /* `q += mbp.ql` — the append did it. */
-            mlm = mbp.ml;
-            i += mlm as usize;
+            let additional = mbtodest(locale, src, i, dst, syntax);
+            i += additional;
             continue;
         }
 
@@ -1767,10 +1749,9 @@ fn varvalue(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
     name: &BStr,
-    varflags: c_int,
+    expansion: VariableExpansion,
     mut mode: ExpansionMode,
-) -> Result<isize, Error> {
-    let subtype: c_int = varflags & VSTYPE;
+) -> Result<Option<usize>, Error> {
     let mut seplen: usize;
     /* The C's `const char *seps` plus its length.  The comment that stood
      * at the assignment below owed a conversion — it said the pointer was
@@ -1778,17 +1759,20 @@ fn varvalue(
      * a slice does not have to make.  Both sources are bytes the shell
      * owns for the whole call, so both are slices. */
     let mut seps: &[u8];
-    let mut len: isize = 0;
+    let mut len: usize = 0;
     let start: usize;
     let discard: bool;
     let name = crate::var::varname(name);
-    let name_byte = name.first().copied().unwrap_or_default() as c_char;
+    let name_byte = name.first().copied().unwrap_or_default();
 
-    discard = subtype == VSPLUS || subtype == VSLENGTH || mode.contains(ExpansionMode::DISCARD);
+    discard = matches!(
+        expansion,
+        VariableExpansion::Alternative | VariableExpansion::Length
+    ) || mode.contains(ExpansionMode::DISCARD);
 
-    if subtype == 0 {
+    if expansion == VariableExpansion::Invalid {
         if discard {
-            return Ok(-1);
+            return Ok(None);
         }
 
         return Err(sh.diagnostics().sh_error_value(b"Bad substitution"));
@@ -1802,23 +1786,23 @@ fn varvalue(
      * separator is a NUL. */
     seps = &[0u8];
     seplen = usize::from(mode.contains(ExpansionMode::SPLIT));
-    start = expdest_off(state) as usize;
+    start = expdest_off(state);
 
     match name_byte {
         C_DOLLAR | C_QUESTION | C_HASH | C_BANG => {
             let num = match name_byte {
                 C_DOLLAR => i64::from(sh.root_pid.get()),
                 C_QUESTION => i64::from(sh.status.code()),
-                C_HASH => i64::from(sh.options.shellparam.nparam),
+                C_HASH => i64::try_from(sh.options.shellparam.nparam).unwrap_or(i64::MAX),
                 C_BANG => {
                     let Some(pid) = sh.backgndpid else {
-                        return Ok(-1);
+                        return Ok(None);
                     };
                     i64::from(pid.get())
                 }
                 _ => unreachable!(),
             };
-            len = cvtnum(&sh.locale, num, mode, expb(state)) as isize;
+            len = cvtnum(&sh.locale, num, mode, expb(state));
         }
         C_MINUS => {
             for spec in OPTION_SPECS.iter().rev() {
@@ -1856,38 +1840,34 @@ fn varvalue(
                         &seps[..seplen],
                         mode | ExpansionMode::KEEP_NUL,
                         expb(state),
-                    ) as isize;
+                    );
                 }
 
-                len += strtodest(&sh.locale, param, mode, expb(state)) as isize;
+                len += strtodest(&sh.locale, param, mode, expb(state));
             }
         }
         c if (C_0..=C_9).contains(&c) => {
             let position = crate::number::parse_decimal(name)
-                .unwrap_or(0)
-                .min(c_int::MAX as u64) as c_int;
+                .and_then(|number| usize::try_from(number).ok())
+                .unwrap_or(0);
             if position > sh.options.shellparam.nparam {
-                return Ok(-1);
+                return Ok(None);
             }
             let value = if position != 0 {
-                sh.options
-                    .shellparam
-                    .words()
-                    .get(position as usize - 1)
-                    .cloned()
+                sh.options.shellparam.words().get(position - 1).cloned()
             } else {
                 sh.options.arg0().map(BStr::to_owned)
             };
             let Some(value) = value else {
-                return Ok(-1);
+                return Ok(None);
             };
-            len = strtodest(&sh.locale, &value, mode, expb(state)) as isize;
+            len = strtodest(&sh.locale, &value, mode, expb(state));
         }
         _ => {
             let Some(value) = crate::var::lookup_bytes(sh, name) else {
-                return Ok(-1);
+                return Ok(None);
             };
-            len = strtodest(&sh.locale, &value, mode, expb(state)) as isize;
+            len = strtodest(&sh.locale, &value, mode, expb(state));
         }
     }
 
@@ -1895,7 +1875,7 @@ fn varvalue(
         expb(state).truncate(start);
     }
 
-    Ok(len)
+    Ok(Some(len))
 }
 
 /*
@@ -1973,7 +1953,7 @@ fn ifsbreakup_slow(
     string: &[u8],
     mut p: usize,
 ) -> usize {
-    let ifschar: c_uint;
+    let character: EncodedCharacterSpan;
     let isdefifs: bool;
     let multibyte_len: usize;
     let isifs: bool;
@@ -1981,10 +1961,10 @@ fn ifsbreakup_slow(
 
     q = p;
 
-    ifschar = mbnext_bytes(string.get(p..).unwrap_or_default());
-    p += (ifschar & 0xff) as usize;
-    multibyte_len = if (ifschar >> 8) > 3 {
-        ((ifschar >> 8) - 2) as usize
+    character = mbnext_bytes(string.get(p..).unwrap_or_default());
+    p += character.prefix;
+    multibyte_len = if character.remainder > 3 {
+        character.remainder - 2
     } else {
         0
     };
@@ -1995,7 +1975,7 @@ fn ifsbreakup_slow(
         multibyte_len,
         ifst.nulonly,
     );
-    p += (ifschar >> 8) as usize;
+    p += character.remainder;
 
     isifs = membership.separator;
     isdefifs = membership.default_whitespace;
@@ -2233,23 +2213,21 @@ pub(crate) fn ifsfree(state: &mut ExpandState) {
 // [spec:dash:def:expand.changeifs-fn]
 // [spec:dash:sem:expand.changeifs-fn]
 pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
-    let mut mb: c_uint = 0;
+    let mut has_multibyte = false;
     sh.ifs.ncifs = ifs.to_owned();
 
     sh.ifs.ifsmap = [false; 128];
 
     let len = sh.ifs.ncifs.len();
     for &byte in sh.ifs.ncifs.iter() {
-        let c = byte as c_uint;
-
-        mb |= c >> 7;
-        if (c >> 7) == 0 {
-            sh.ifs.ifsmap[c as usize] = true;
+        has_multibyte |= !byte.is_ascii();
+        if byte.is_ascii() {
+            sh.ifs.ifsmap[usize::from(byte)] = true;
         }
     }
 
-    sh.ifs.ifsmb0len = (len != 0) as usize;
-    sh.ifs.wcifs = if mb == 0 {
+    sh.ifs.ifsmb0len = usize::from(!sh.ifs.ncifs.is_empty());
+    sh.ifs.wcifs = if !has_multibyte {
         Vec::new()
     } else {
         let (first_len, wide) = sh.locale.wide_chars(&sh.ifs.ncifs[..len]);
@@ -2445,7 +2423,7 @@ fn expmeta(
     let start: usize;
     let pat: &[u8];
     let mut p: usize;
-    let c: c_char;
+    let c: u8;
     /* Scratch for the encoded form of each directory entry; see the
      * `memtodest` call below.  A local rather than a static because
      * `expmeta` recurses, one frame per path component. */
@@ -2591,7 +2569,7 @@ fn expmeta(
                 &mut globenc,
             );
             let subject = globenc.as_slice();
-            if crate::pmatch::pmatch_slices(locale, pat, subject) != 0 {
+            if crate::pmatch::pmatch_slices(locale, pat, subject) {
                 /* `enddir = stnputs(dname, len, enddir)` — an
                  * append at a cursor below the end, which is
                  * truncate-then-append. */
@@ -2611,7 +2589,7 @@ fn expmeta(
                 }
             }
         }
-        if int_pending() != 0 {
+        if int_pending() {
             break;
         }
     }
@@ -2637,7 +2615,7 @@ fn expmeta(
 fn expsort(locale: &nsh_platform::Locale, str: &mut [strlist]) {
     /* The C walks the chain to count it and hands the count to `msort`,
      * because a singly-linked list does not know its own length. */
-    msort(locale, str, str.len() as c_int)
+    msort(locale, str)
 }
 
 // [spec:dash:def:expand.msort-fn]
@@ -2654,8 +2632,8 @@ fn expsort(locale: &nsh_platform::Locale, str: &mut [strlist]) {
 ///     stable is stable.  `strcoll` can return 0 for byte-different
 ///     strings under a collating locale, so this is not vacuous.
 ///     `slice::sort_by` is stable.
-fn msort(locale: &nsh_platform::Locale, list: &mut [strlist], len: c_int) {
-    if len <= 1 {
+fn msort(locale: &nsh_platform::Locale, list: &mut [strlist]) {
+    if list.len() <= 1 {
         return;
     }
     list.sort_by(|p, q| locale.collate(&p.text, &q.text));
@@ -2696,70 +2674,70 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
     let mut q: usize = at;
 
     while p < buf.len() {
-        let mut c: c_int = byte_at(buf, p) as c_int;
+        let mut c = byte_at(buf, p);
         let mut newly_not_escaped = globbing;
-        let mb: c_uint;
-        let mut ml: c_uint;
+        let span: EncodedCharacterSpan;
+        let mut span_to_copy: usize;
 
-        let copy_byte = if c == CTLQUOTEMARK as c_int {
+        let copy_byte = if c == CTLQUOTEMARK {
             p += 1;
             in_quotes ^= globbing;
             continue;
-        } else if c == C_BACKSLASH as c_int {
+        } else if c == C_BACKSLASH {
             /* naked back slash */
             newly_not_escaped ^= not_escaped;
             /* naked backslashes can only occur outside quotes */
             in_quotes = false;
             if not_escaped {
-                c = CTLESC as c_int;
+                c = CTLESC;
             }
             true
-        } else if c == CTLESC as c_int {
+        } else if c == CTLESC {
             if !not_escaped && in_quotes {
                 /* Reaches back one byte.  `notescaped` is cleared only by
                  * the naked-backslash arm, which writes a byte first, so
                  * `q` has advanced before this is reachable. */
-                buf[q - 1] = C_BACKSLASH as u8;
+                buf[q - 1] = C_BACKSLASH;
             }
             if globbing {
-                buf[q] = CTLESC as u8;
+                buf[q] = CTLESC;
                 q += 1;
             }
 
             p += 1;
-            c = byte_at(buf, p) as c_int;
+            c = byte_at(buf, p);
             true
-        } else if c == CTLMBCHAR as c_int {
-            let mut tail: c_uint = 2;
+        } else if c == CTLMBCHAR {
+            let mut suffix = 2usize;
 
             if globbing ^ not_escaped {
                 q -= 1;
             }
 
-            mb = mbnext_bytes(buf.get(p..).unwrap_or_default());
-            ml = mb >> 8;
+            span = mbnext_bytes(buf.get(p..).unwrap_or_default());
+            span_to_copy = span.remainder;
 
             if !globbing {
-                p += (mb & 0xff) as usize;
-                ml -= 2;
+                p += span.prefix;
+                span_to_copy -= 2;
             } else {
-                ml += mb & 0xff;
-                tail = 0;
+                span_to_copy += span.prefix;
+                suffix = 0;
             }
 
             /* `q` trails `p` through the same buffer, which
              * `copy_within` already knows -- it is the C's
              * `memmove`, bounds-checked. */
-            buf.copy_within(p..p + ml as usize, q);
-            q += ml as usize;
-            p += (ml + tail) as usize;
+            buf.copy_within(p..p + span_to_copy, q);
+            q += span_to_copy;
+            p += span_to_copy + suffix;
             false
         } else {
             true
         };
 
         if copy_byte {
-            buf[q] = c as u8;
+            buf[q] = c;
             q += 1;
             p += 1;
         }
@@ -2767,7 +2745,7 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
     }
     if globbing ^ not_escaped {
         /* The same reach-back, and the same argument. */
-        buf[q - 1] = C_BACKSLASH as u8;
+        buf[q - 1] = C_BACKSLASH;
     }
     q
 }
@@ -2856,42 +2834,13 @@ pub fn casematch(
     sh: &mut crate::context::Shell,
     pattern: &crate::nodes::Node,
     val: &BStr,
-) -> Result<c_int, Error> {
+) -> Result<bool, Error> {
     let Node::Word(word) = pattern else {
         return Err(sh
             .diagnostics()
             .sh_error_value(b"case matching requires a word node"));
     };
-    typed::case_matches(sh, &word.word, val).map(c_int::from)
-}
-
-fn casematch_inner(
-    sh: &mut crate::context::Shell,
-    state: &mut ExpandState,
-    pattern: &[u8],
-    val: &BStr,
-) -> Result<c_int, Error> {
-    let result: c_int;
-
-    /* `setstackmark(&smark)` — it released what `argstr` allocated from the
-     * region for backquotes and arithmetic.  Neither allocates from it. */
-    /* STARTSTACKSTR(expdest) */
-    expb(state).clear();
-    /* As in `expandarg`: this `?` returns past the `ifsfree()`, which is
-     * where the longjmp went too, and the catch frame reclaims the
-     * regions. */
-    argstr(
-        sh,
-        state,
-        pattern,
-        0,
-        ExpansionMode::TILDE | ExpansionMode::CASE_PATTERN,
-    )?;
-    ifsfree(state);
-    /* The C reads the word back as `stackblock()`. */
-    rmescapes_buffer(expb(state), EscapeMode::Glob);
-    result = crate::pmatch::pmatch_slices(&sh.locale, BStr::new(expb(state)), val);
-    Ok(result)
+    typed::case_matches(sh, &word.word, val)
 }
 
 /*
@@ -2918,7 +2867,7 @@ fn varunset(
     end: usize,
     var: usize,
     umsg: Option<&[u8]>,
-    varflags: c_int,
+    null_is_unset: bool,
 ) -> Error {
     /* The C's three `char *` here are a NULL test and two `%s` arguments,
      * and every one of them is spent on the next five lines.  `nullstr` was
@@ -2932,7 +2881,7 @@ fn varunset(
     let mut msg: &[u8] = b"parameter not set";
     if let Some(umsg) = umsg {
         if byte_at(text, end) == CTLENDVAR {
-            if (varflags & VSNUL) != 0 {
+            if null_is_unset {
                 tail = b" or null";
             }
         } else {
@@ -2948,7 +2897,7 @@ fn varunset(
     message.extend_from_slice(b": ");
     message.extend_from_slice(msg);
     message.extend_from_slice(tail);
-    if sh.eval.inps4 != 0 {
+    if sh.eval.inps4 {
         sh.diagnostics().sh_error_value(&message)
     } else {
         // [spec:nsh:req:compat.smoosh.error-contracts]
@@ -3002,13 +2951,7 @@ pub fn restore_handler_expandarg(
 #[allow(unused_imports)]
 pub use crate::arith_yacc::arith;
 
-/// `int expcmd(int, char **)` — declared in `expand.h` but defined
-/// nowhere in the C tree; a vestige of a removed builtin.  There is
-/// nothing to port, so this is an unreachable stub kept purely as the
-/// symbol's target site.
+// The `expcmd(int, char **)` declaration in `expand.h` has no definition
+// or caller. It is intentionally represented by no Rust item.
 // [spec:dash:def:expand.expcmd-fn]
 // [spec:dash:sem:expand.expcmd-fn]
-pub fn expcmd(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
-    /* No definition exists in the C tree; calling this is a bug. */
-    unreachable!("expcmd: declared in expand.h, never defined")
-}

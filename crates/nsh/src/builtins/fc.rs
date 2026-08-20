@@ -17,7 +17,6 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::NativeStrExt as _;
 use std::fs::File;
 use std::io::Write;
@@ -28,7 +27,7 @@ use crate::histedit::{history_active, history_mut, record_history_line};
 use crate::linedit::HistoryEvent;
 
 /// max recursions through fc
-const MAXHISTLOOPS: c_int = 4;
+const MAX_HISTORY_LOOPS: usize = 4;
 /// default editor *should* be $EDITOR
 const DEFEDITOR: &[u8] = b"ed";
 
@@ -39,10 +38,10 @@ const DEFEDITOR: &[u8] = b"ed";
 /// `histcmd` is long enough without it.
 struct Flags {
     editor: Option<BString>,
-    lflg: c_int,
-    nflg: c_int,
-    rflg: c_int,
-    sflg: c_int,
+    list: bool,
+    suppress_numbers: bool,
+    reverse: bool,
+    substitute: bool,
     operand_start: usize,
 }
 
@@ -58,10 +57,10 @@ struct Flags {
 fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags, Error> {
     let mut flags = Flags {
         editor: None,
-        lflg: 0,
-        nflg: 0,
-        rflg: 0,
-        sflg: 0,
+        list: false,
+        suppress_numbers: false,
+        reverse: false,
+        substitute: false,
         operand_start: 1,
     };
 
@@ -93,10 +92,10 @@ fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags,
                     }
                     option = word.len();
                 }
-                b'l' => flags.lflg = 1,
-                b'n' => flags.nflg = 1,
-                b'r' => flags.rflg = 1,
-                b's' => flags.sflg = 1,
+                b'l' => flags.list = true,
+                b'n' => flags.suppress_numbers = true,
+                b'r' => flags.reverse = true,
+                b's' => flags.substitute = true,
                 unknown => {
                     let mut message = b"unknown option: -".to_vec();
                     message.push(unknown);
@@ -151,10 +150,10 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
     drop(args);
     let mut operand_start = flags.operand_start;
     let mut editor = flags.editor;
-    let mut lflg: c_int = flags.lflg;
-    let nflg: c_int = flags.nflg;
-    let rflg: c_int = flags.rflg;
-    let mut sflg: c_int = flags.sflg;
+    let mut list = flags.list;
+    let suppress_numbers = flags.suppress_numbers;
+    let reverse = flags.reverse;
+    let mut substitute = flags.substitute;
     let mut editfile: Option<PathBuf> = None;
     let mut edit_file: Option<File> = None;
     // The `(void) &var` statements at src/histedit.c:196-210 exist only to
@@ -178,9 +177,9 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
      * the shape: the guarded body is a closure, and what the C's non-zero
      * arm did is the code after the call.
      */
-    let executing = lflg == 0 || editor.is_some() || sflg != 0;
+    let executing = !list || editor.is_some() || substitute;
     if executing {
-        lflg = 0; /* ignore */
+        list = false;
         editfile = None;
         /*
          * Catch interrupts to reset active counter and
@@ -191,9 +190,9 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         let mut result_status = crate::status::ExitStatus::SUCCESS;
         if executing {
             sh.histedit.fc_depth += 1;
-            if sh.histedit.fc_depth > MAXHISTLOOPS {
+            if sh.histedit.fc_depth > MAX_HISTORY_LOOPS {
                 sh.histedit.fc_depth = 0;
-                sh.displayhist = 0;
+                sh.displayhist = false;
                 return Err(sh
                     .diagnostics()
                     .sh_error_value(b"called recursively too many times"));
@@ -201,7 +200,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             /*
              * Set editor.
              */
-            if sflg == 0 {
+            if !substitute {
                 if editor.is_none() {
                     editor = crate::var::lookup_bytes(sh, BStr::new(b"FCEDIT"))
                         .or_else(|| crate::var::lookup_bytes(sh, BStr::new(b"EDITOR")));
@@ -211,7 +210,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                     .as_ref()
                     .is_some_and(|value| value.as_slice() == b"-")
                 {
-                    sflg = 1; /* no edit */
+                    substitute = true;
                     editor = None;
                 }
             }
@@ -222,7 +221,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
          */
         let mut pattern: Option<BString> = None;
         let mut replacement = BString::default();
-        if sflg != 0 {
+        if substitute {
             if let Some(field) = fields.get_mut(operand_start) {
                 let word = field.as_bstr();
                 if let Some(at) = word.find_byte(b'=') {
@@ -247,12 +246,12 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
          */
         let (firststr, laststr) = match operands.as_slice() {
             [] => (
-                BStr::new(if lflg != 0 { &b"-16"[..] } else { &b"-1"[..] }),
+                BStr::new(if list { &b"-16"[..] } else { &b"-1"[..] }),
                 BStr::new(b"-1"),
             ),
             [first] => (
                 BStr::new(first.as_slice()),
-                if lflg != 0 {
+                if list {
                     BStr::new(b"-1")
                 } else {
                     BStr::new(first.as_slice())
@@ -266,10 +265,10 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         /*
          * Turn into event numbers.
          */
-        let mut first = str_to_event(sh, firststr, 0)?;
-        let mut last = str_to_event(sh, laststr, 1)?;
+        let mut first = str_to_event(sh, firststr, false)?;
+        let mut last = str_to_event(sh, laststr, true)?;
 
-        if rflg != 0 {
+        if reverse {
             core::mem::swap(&mut first, &mut last);
         }
         let editing = editor.is_some();
@@ -290,14 +289,14 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                 let events = history_mut(sh)
                     .map(|history| history.range(first, last))
                     .unwrap_or_default();
-                if lflg == 0 && discard_input_entry {
+                if !list && discard_input_entry {
                     if let Some(history) = history_mut(sh) {
                         history.discard_input_entry();
                     }
                 }
                 for event in events {
-                    if lflg != 0 {
-                        let _ = write_listing(sh.io.stdout(), &event, nflg == 0);
+                    if list {
+                        let _ = write_listing(sh.io.stdout(), &event, !suppress_numbers);
                         continue;
                     }
 
@@ -306,8 +305,8 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                         &mut pattern,
                         BStr::new(replacement.as_slice()),
                     );
-                    if sflg != 0 {
-                        if sh.displayhist != 0 {
+                    if substitute {
+                        if sh.displayhist {
                             let _ = sh.io.stderr().write_all(&line);
                         }
                         if history_active(sh) {
@@ -396,11 +395,11 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             }
         }
 
-        if lflg == 0 && sh.histedit.fc_depth > 0 {
+        if !list && sh.histedit.fc_depth > 0 {
             sh.histedit.fc_depth -= 1;
         }
-        if sh.displayhist != 0 {
-            sh.displayhist = 0;
+        if sh.displayhist {
+            sh.displayhist = false;
         }
         Ok(Flow::Done((result_status).into()))
     };
@@ -518,13 +517,13 @@ pub fn is_fc_number(word: &BStr) -> bool {
 pub fn str_to_event(
     sh: &mut crate::context::Shell,
     word: &BStr,
-    last: c_int,
-) -> Result<c_int, Error> {
+    use_previous_for_missing_last: bool,
+) -> Result<i32, Error> {
     let mut number_bytes = word;
-    let mut relative: c_int = 0;
+    let mut relative = false;
     match word.first().copied() {
         Some(b'-') => {
-            relative = 1;
+            relative = true;
             number_bytes = BStr::new(&word[1..]);
         }
         Some(b'+') => {
@@ -534,8 +533,8 @@ pub fn str_to_event(
     }
     let numeric = crate::number::parse_decimal(number_bytes);
     let event: Option<HistoryEvent> = if let Some(number) = numeric {
-        let i = number.min(c_int::MAX as u64) as c_int;
-        if relative != 0 {
+        let i = number.min(i32::MAX as u64) as i32;
+        if relative {
             history_mut(sh).and_then(|history| {
                 usize::try_from(i)
                     .ok()
@@ -545,7 +544,7 @@ pub fn str_to_event(
         } else {
             history_mut(sh).and_then(|history| {
                 history.numbered(i).or_else(|| {
-                    if last != 0 {
+                    if use_previous_for_missing_last {
                         history.relative(1)
                     } else {
                         history.oldest()

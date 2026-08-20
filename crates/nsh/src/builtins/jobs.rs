@@ -45,7 +45,7 @@ pub fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         for spec in operands {
             /* `getjob` and `showjob` both take the receiver, so the
              * lookup is its own statement rather than an argument. */
-            let jp = getjob(sh, Some(spec), 0)?;
+            let jp = getjob(sh, Some(spec), false)?;
             showjob(sh, Dest::Stdout, jp, mode);
         }
     } else {

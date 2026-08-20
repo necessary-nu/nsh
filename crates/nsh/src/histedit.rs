@@ -19,7 +19,6 @@
 //!   * `crate::shellmain::readcmdfile` (src/main.c:283)
 
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 use nsh_platform::ShellBytesExt as _;
 use nshedit::domain::EditingMode;
 use std::fs::File;
@@ -42,7 +41,7 @@ pub(crate) struct HistEditState {
     history: Option<History>,
     history_file: Option<File>,
     editor: Option<LineEditor>,
-    pub(crate) fc_depth: c_int,
+    pub(crate) fc_depth: usize,
 }
 
 impl HistEditState {

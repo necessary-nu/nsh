@@ -27,7 +27,7 @@ use bstr::BStr;
 // [spec:posix:req:builtin.exit.interfaces]
 // [spec:posix:sem:builtin.exit.exit-status]
 pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    if crate::jobs::stoppedjobs(sh) != 0 {
+    if crate::jobs::stoppedjobs(sh) {
         return Ok(Flow::Done((0).into()));
     }
 

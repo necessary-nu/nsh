@@ -9,7 +9,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 use std::io::Write;
 
 use crate::eval::Flow;
@@ -62,7 +61,6 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         b"Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\nkill -l [exitstatus]";
     let mut signal = None;
     let mut list = false;
-    let mut i: c_int;
     let mut jp: JobId;
 
     if args.len() <= 1 {
@@ -139,7 +137,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done((0).into()));
     }
 
-    i = 0;
+    let mut failed = false;
     for spec in operands {
         let target = if spec.first() == Some(&b'%') {
             // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
@@ -147,10 +145,10 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             // happened to be recorded for a background command. Requiring
             // a job-control job here prevents the latter from silently
             // becoming the former while monitor mode is disabled.
-            jp = getjob(sh, Some(spec), 1)?;
+            jp = getjob(sh, Some(spec), true)?;
             let Some(leader) = ps_pid(sh, jp, 0) else {
                 sh.diagnostics().sh_warnx(b"No such process\n");
-                i = 1;
+                failed = true;
                 continue;
             };
             nsh_platform::ProcessTarget::ProcessGroup(nsh_platform::ProcessGroupId::from_leader(
@@ -172,9 +170,9 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let mut message = sh.locale.error_message(&error).into_bytes();
             message.push(b'\n');
             sh.diagnostics().sh_warnx(&message);
-            i = 1;
+            failed = true;
         }
     }
 
-    Ok(Flow::Done((i).into()))
+    Ok(Flow::Done(i32::from(failed).into()))
 }

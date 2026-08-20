@@ -20,6 +20,9 @@ const ALIASES: &str = include_str!("../src/alias.rs");
 const ERRORS: &str = include_str!("../src/error.rs");
 const INPUT: &str = include_str!("../src/input.rs");
 const MAIL: &str = include_str!("../src/mail.rs");
+const EXECUTION: &str = include_str!("../src/exec.rs");
+const VARIABLES: &str = include_str!("../src/var.rs");
+const ULIMIT: &str = include_str!("../src/builtins/ulimit.rs");
 const OUTPUT: &str = include_str!("../src/output.rs");
 const BUILTINS: &str = include_str!("../src/builtins/mod.rs");
 const LIBRARY: &str = include_str!("../src/lib.rs");
@@ -35,6 +38,27 @@ fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
             sources.push(path);
         }
     }
+}
+
+fn character_literal_end(bytes: &[u8], quote: usize) -> Option<usize> {
+    let mut cursor = quote + 1;
+    let first = *bytes.get(cursor)?;
+    if first == b'\\' {
+        cursor += 1;
+        match *bytes.get(cursor)? {
+            b'x' => cursor += 3,
+            b'u' => {
+                cursor += bytes[cursor..].iter().position(|byte| *byte == b'}')? + 1;
+            }
+            _ => cursor += 1,
+        }
+    } else {
+        cursor += match first.leading_ones() {
+            0 => 1,
+            width => width as usize,
+        };
+    }
+    (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
 }
 
 fn contains_c_literal(source: &str) -> bool {
@@ -62,6 +86,18 @@ fn contains_c_literal(source: &str) -> bool {
                     at += 1;
                 }
             }
+            continue;
+        }
+
+        let character_quote = if bytes[at] == b'\'' {
+            Some(at)
+        } else if bytes[at..].starts_with(b"b'") {
+            Some(at + 1)
+        } else {
+            None
+        };
+        if let Some(end) = character_quote.and_then(|quote| character_literal_end(bytes, quote)) {
+            at = end;
             continue;
         }
 
@@ -340,6 +376,56 @@ fn core_strings_are_length_delimited() {
                 path.display()
             );
         }
+    }
+}
+
+// [spec:nsh:req:idiom.no-abi-scalars-core/test]
+#[test]
+fn core_avoids_abi_scalars() {
+    let mut sources = Vec::new();
+    rust_sources_below(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut sources,
+    );
+    sources.sort();
+
+    let aliases = [
+        "c_char",
+        "c_schar",
+        "c_uchar",
+        "c_short",
+        "c_ushort",
+        "c_int",
+        "c_uint",
+        "c_long",
+        "c_ulong",
+        "c_longlong",
+        "c_ulonglong",
+        "c_float",
+        "c_double",
+        "c_void",
+    ];
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        for alias in aliases {
+            let retained = source
+                .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                .any(|identifier| identifier == alias);
+            assert!(!retained, "{} retains ABI scalar {alias}", path.display());
+        }
+    }
+
+    for (source, domain_type) in [
+        (EXECUTION, "struct CommandSearch"),
+        (EXECUTION, "path_index: Option<usize>"),
+        (ERRORS, "enum Operation"),
+        (ERRORS, "fn int_pending() -> bool"),
+        (EXPANDER, "enum VariableExpansion"),
+        (MAIL, "changed: bool"),
+        (VARIABLES, "push: bool"),
+        (ULIMIT, "struct LimitSelection"),
+    ] {
+        assert!(source.contains(domain_type), "missing {domain_type}");
     }
 }
 

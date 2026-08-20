@@ -10,7 +10,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 
 use crate::eval::Flow;
 
@@ -23,12 +22,11 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.shift.exit-status]
 // [spec:posix:sem:builtin.shift.utility-defaults]
 pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let n: c_int;
-
-    n = match args.get(1) {
+    let parsed = match args.get(1) {
         Some(count) => crate::number::parse_nonnegative(&mut sh.diagnostics(), count)?,
         None => 1,
     };
+    let n = parsed as usize;
     if n > sh.options.shellparam.nparam {
         return Err(sh.diagnostics().sh_error_value(b"can't shift that many"));
     }

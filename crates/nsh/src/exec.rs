@@ -8,14 +8,13 @@
 //! tagged union or borrowed C argument vector crosses this module.
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use crate::builtins::BuiltinSpec;
-use crate::error::{E_EXEC, Error};
+use crate::error::{Error, Operation};
 use crate::nodes::FunctionDefinition;
 
 mod dialect_dispatch;
@@ -24,12 +23,62 @@ pub(crate) use dialect_dispatch::dispatch_changed;
 #[cfg(test)]
 mod bash_dispatch_tests;
 
-/* action to find_command() */
-pub const DO_ERR: c_int = 0x01; /* prints errors */
-pub const DO_ABS: c_int = 0x02; /* checks absolute paths */
-pub const DO_NOFUNC: c_int = 0x04; /* don't return shell functions, for command */
-pub const DO_ALTPATH: c_int = 0x08; /* using alternate path */
-pub const DO_REGBLTIN: c_int = 0x10; /* regular built-ins and functions only */
+/// Semantic controls for command lookup.
+///
+/// These used to be the `DO_*` integer bitmask copied from dash.  Keeping the
+/// questions as named booleans makes invalid or accidental flag combinations
+/// impossible to manufacture with arithmetic.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CommandSearch {
+    report_errors: bool,
+    check_absolute: bool,
+    skip_functions: bool,
+    alternate_path: bool,
+    regular_builtins_only: bool,
+}
+
+impl CommandSearch {
+    pub const DEFAULT: Self = Self {
+        report_errors: false,
+        check_absolute: false,
+        skip_functions: false,
+        alternate_path: false,
+        regular_builtins_only: false,
+    };
+
+    pub const fn reporting_errors(mut self) -> Self {
+        self.report_errors = true;
+        self
+    }
+
+    pub const fn checking_absolute(mut self) -> Self {
+        self.check_absolute = true;
+        self
+    }
+
+    pub const fn skipping_functions(mut self) -> Self {
+        self.skip_functions = true;
+        self
+    }
+
+    pub const fn using_alternate_path(mut self) -> Self {
+        self.alternate_path = true;
+        self
+    }
+
+    pub const fn regular_builtins_only(mut self) -> Self {
+        self.regular_builtins_only = true;
+        self
+    }
+
+    pub const fn is_default(self) -> bool {
+        !self.report_errors
+            && !self.check_absolute
+            && !self.skip_functions
+            && !self.alternate_path
+            && !self.regular_builtins_only
+    }
+}
 
 // ---------------------------------------------------------------------
 // src/exec.h types
@@ -44,7 +93,7 @@ pub const DO_REGBLTIN: c_int = 0x10; /* regular built-ins and functions only */
 #[derive(Clone)]
 pub(crate) enum Command {
     Unknown,
-    External { path_index: c_int },
+    External { path_index: Option<usize> },
     // [spec:nsh:req:idiom.structural-ast]
     Function(FunctionDefinition),
     Builtin(&'static BuiltinSpec),
@@ -63,16 +112,18 @@ pub struct tblentry {
 }
 
 impl tblentry {
-    /// `builtinloc` arrives as a value rather than being read here, and
+    /// `builtin_location` arrives as a value rather than being read here, and
     /// that is not a style choice: the only caller is `clearcmdentry`'s
     /// `retain`, whose closure already holds the table borrowed. Reading
     /// the sibling field from inside it would be a second borrow of the
-    /// same `Shell`. Copying the `c_int` out first is the whole fix, and
+    /// same `Shell`. Copying the option out first is the whole fix, and
     /// it is exact -- nothing in the closure can change it.
-    pub(crate) fn path_dependent(&self, builtinloc: c_int) -> bool {
+    pub(crate) fn path_dependent(&self, builtin_location: Option<usize>) -> bool {
         match self.command {
             Command::External { .. } => true,
-            Command::Builtin(cmd) => !cmd.attributes().is_regular() && builtinloc > 0,
+            Command::Builtin(cmd) => {
+                !cmd.attributes().is_regular() && builtin_location.is_some_and(|index| index > 0)
+            }
             _ => false,
         }
     }
@@ -92,31 +143,30 @@ impl tblentry {
 pub struct CmdTable {
     /// Command names are shell bytes, without an artificial C terminator.
     map: BTreeMap<BString, tblentry>,
-    /// index in path of %builtin, or -1
-    builtinloc: c_int,
+    /// Index in `PATH` of `%builtin`, when present.
+    builtin_location: Option<usize>,
     /// Dialect under which cached built-in entries were classified.
     dispatch_dialect: crate::options::Dialect,
 }
 
 impl CmdTable {
-    /// An empty hash and `builtinloc = -1`, which is what the two
-    /// statics were declared with.
+    /// An empty hash with no `%builtin` component.
     pub(crate) const fn new() -> Self {
         CmdTable {
             map: BTreeMap::new(),
-            builtinloc: -1,
+            builtin_location: None,
             dispatch_dialect: crate::options::Dialect::Posix,
         }
     }
 
     /// Whether an entry would be invalidated by a `PATH` change.
     ///
-    /// Reads `builtinloc` on the caller's behalf, so a caller holding an
+    /// Reads `builtin_location` on the caller's behalf, so a caller holding an
     /// entry does not have to reach for the sibling field itself. The
     /// two in-module walks cannot use this — they hold the map borrowed
-    /// and take the `c_int` by value instead.
+    /// and take the option by value instead.
     pub(crate) fn path_dependent(&self, cmdp: &tblentry) -> bool {
-        cmdp.path_dependent(self.builtinloc)
+        cmdp.path_dependent(self.builtin_location)
     }
 
     /// Every entry, in name order — what `hash` with no operand prints.
@@ -161,7 +211,7 @@ pub fn shellexec(
     sh: &mut crate::context::Shell,
     argv: &[&BStr],
     path: &BStr,
-    mut idx: c_int,
+    path_index: Option<usize>,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     let command = argv.first().expect("shellexec needs a command name");
 
@@ -201,9 +251,9 @@ pub fn shellexec(
         let mut search_error =
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
         let mut cursor = PathCursor::new(path);
+        let mut candidate_index = 0usize;
         while let Some(candidate) = padvance(&mut cursor, command) {
-            idx -= 1;
-            if idx < 0 && candidate.option.is_none() {
+            if candidate_index >= path_index.unwrap_or(0) && candidate.option.is_none() {
                 let candidate = match candidate.path.try_to_path_buf() {
                     Ok(candidate) => candidate,
                     Err(error) => return native_exec_failure(sh, command, &error),
@@ -217,6 +267,7 @@ pub fn shellexec(
                     search_error = candidate_error;
                 }
             }
+            candidate_index += 1;
         }
         search_error
     };
@@ -252,7 +303,11 @@ fn exec_failure(
     let mut message = Vec::new();
     message.extend_from_slice(command);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(&sh.locale, &error, E_EXEC));
+    message.extend_from_slice(&crate::error::errmsg(
+        &sh.locale,
+        &error,
+        Operation::Execute,
+    ));
     /* `exerror(EXEND, msg)`: text *and* control flow, which is why the
      * bridge took the code as a parameter rather than reading it off the
      * value. The text is written here, where dash writes it, and the value
@@ -433,7 +488,7 @@ pub fn find_command(
     sh: &mut crate::context::Shell,
     name: &BStr,
     entry: &mut Command,
-    mut act: c_int,
+    mut search: CommandSearch,
     path: &BStr,
 ) -> Result<crate::eval::Flow, Error> {
     let dialect = sh.options.dialect();
@@ -441,7 +496,7 @@ pub fn find_command(
 
     /* If name contains a slash, don't use PATH or hash table */
     if nsh_platform::shell_path_has_separator(name) {
-        if (act & DO_ABS) != 0 {
+        if search.check_absolute {
             let environment = crate::var::environment(sh)
                 .map_err(|error| native_string_error(sh, name, &error))?;
             let native = name
@@ -456,14 +511,14 @@ pub fn find_command(
                 return Ok(crate::eval::Flow::Done((0).into()));
             }
         }
-        *entry = Command::External { path_index: -1 };
+        *entry = Command::External { path_index: None };
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     let configured_path = crate::var::pathval(sh);
     let mut update_table = path.as_bytes() == configured_path.as_slice();
     if !update_table {
-        act |= DO_ALTPATH;
+        search = search.using_alternate_path();
     }
 
     let mut cached = sh
@@ -473,19 +528,17 @@ pub fn find_command(
         .map(|stored| (stored.command.clone(), stored.rehash));
 
     if let Some((command, rehash)) = &cached {
-        let bit = match command {
-            Command::Function(_) => DO_NOFUNC,
+        let conflicts_with_search = match command {
+            Command::Function(_) => search.skip_functions,
             Command::Builtin(command) => {
-                if command.attributes().is_regular() {
-                    0
-                } else {
-                    DO_REGBLTIN
-                }
+                !command.attributes().is_regular() && search.regular_builtins_only
             }
-            _ => DO_ALTPATH | DO_REGBLTIN,
+            Command::External { .. } | Command::Unknown => {
+                search.alternate_path || search.regular_builtins_only
+            }
         };
-        if (act & bit) != 0 {
-            if (act & bit & DO_REGBLTIN) != 0 {
+        if conflicts_with_search {
+            if search.regular_builtins_only && !matches!(command, Command::Function(_)) {
                 *entry = Command::Unknown;
                 return Ok(crate::eval::Flow::Done((0).into()));
             }
@@ -500,8 +553,8 @@ pub fn find_command(
     let builtin_command = builtin(sh, name);
     if let Some(command) = builtin_command
         && (command.attributes().is_regular()
-            || (act & DO_ALTPATH) != 0
-            || sh.commands.builtinloc <= 0)
+            || search.alternate_path
+            || !sh.commands.builtin_location.is_some_and(|index| index > 0))
     {
         if update_table {
             addcmdentry(&mut sh.commands, name, Command::Builtin(command));
@@ -510,25 +563,27 @@ pub fn find_command(
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
-    if (act & DO_REGBLTIN) != 0 {
+    if search.regular_builtins_only {
         *entry = Command::Unknown;
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     let environment =
         crate::var::environment(sh).map_err(|error| native_string_error(sh, name, &error))?;
-    let previous = cached
-        .as_ref()
-        .filter(|(_, rehash)| *rehash)
-        .map_or(-1, |(command, _)| match command {
-            Command::Builtin(_) => sh.commands.builtinloc,
-            Command::External { path_index } => *path_index,
-            _ => -1,
-        });
+    let previous: Option<usize> =
+        cached
+            .as_ref()
+            .filter(|(_, rehash)| *rehash)
+            .and_then(|(command, _)| match command {
+                Command::Builtin(_) => sh.commands.builtin_location,
+                Command::External { path_index } => *path_index,
+                _ => None,
+            });
     let mut error = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
-    let mut index = -1;
     let mut cursor = PathCursor::new(path);
+    let mut index = 0usize;
     while let Some(candidate) = padvance(&mut cursor, name) {
+        let candidate_index = index;
         index += 1;
         if let Some(option) = &candidate.option {
             if option.first() == Some(&b'b') {
@@ -541,14 +596,16 @@ pub fn find_command(
                 }
                 continue;
             }
-            if (act & DO_NOFUNC) != 0 {
+            if search.skip_functions {
                 continue;
             }
         }
 
         let fullname = candidate.path;
-        if nsh_platform::shell_path_is_absolute(&fullname) && index <= previous {
-            if index < previous {
+        if nsh_platform::shell_path_is_absolute(&fullname)
+            && previous.is_some_and(|previous| candidate_index <= previous)
+        {
+            if previous.is_some_and(|previous| candidate_index < previous) {
                 continue;
             }
             if let Some((command, _)) = cached {
@@ -605,20 +662,28 @@ pub fn find_command(
             addcmdentry(
                 &mut sh.commands,
                 name,
-                Command::External { path_index: index },
+                Command::External {
+                    path_index: Some(candidate_index),
+                },
             );
         }
-        *entry = Command::External { path_index: index };
+        *entry = Command::External {
+            path_index: Some(candidate_index),
+        };
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     if cached.is_some() && update_table {
         delete_cmd_entry(&mut sh.interrupt_deferral, &mut sh.commands, name);
     }
-    if (act & DO_ERR) != 0 {
+    if search.report_errors {
         let mut message = name.to_vec();
         message.extend_from_slice(b": ");
-        message.extend_from_slice(&crate::error::errmsg(&sh.locale, &error, E_EXEC));
+        message.extend_from_slice(&crate::error::errmsg(
+            &sh.locale,
+            &error,
+            Operation::Execute,
+        ));
         sh.diagnostics().sh_warnx(&message);
     }
     *entry = Command::Unknown;
@@ -665,9 +730,9 @@ pub fn builtin(sh: &crate::context::Shell, name: &BStr) -> Option<&'static Built
 pub fn hashcd(sh: &mut crate::context::Shell) {
     /* Copied out for the same reason `clearcmdentry` copies it: the
      * walk below holds the table borrowed. */
-    let builtinloc = sh.commands.builtinloc;
+    let builtin_location = sh.commands.builtin_location;
     for cmdp in sh.commands.map.values_mut() {
-        if cmdp.path_dependent(builtinloc) {
+        if cmdp.path_dependent(builtin_location) {
             cmdp.rehash = true;
         }
     }
@@ -687,11 +752,10 @@ pub fn changepath(
     commands: &mut CmdTable,
     newval: &BStr,
 ) {
-    let bltin = newval
+    let builtin_location = newval
         .split(|&byte| byte == nsh_platform::search_path_separator())
-        .position(|component| component.starts_with(b"%builtin"))
-        .map_or(-1, |index| index as c_int);
-    commands.builtinloc = bltin;
+        .position(|component| component.starts_with(b"%builtin"));
+    commands.builtin_location = builtin_location;
     clearcmdentry(interrupts, commands);
 }
 
@@ -707,10 +771,10 @@ pub(crate) fn clearcmdentry(
     commands: &mut CmdTable,
 ) {
     interrupts.run_with(commands, |commands| {
-        let builtinloc = commands.builtinloc;
+        let builtin_location = commands.builtin_location;
         commands
             .map
-            .retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
+            .retain(|_, cmdp| !cmdp.path_dependent(builtin_location));
     });
 }
 
@@ -835,7 +899,7 @@ mod tests {
             &mut sh.commands,
             BStr::new(&first),
         );
-        assert_eq!(sh.commands.builtinloc, 1);
+        assert_eq!(sh.commands.builtin_location, Some(1));
 
         let second = [b"%builtin".as_slice(), b"/bin"].join(separator.as_slice());
         changepath(
@@ -843,7 +907,7 @@ mod tests {
             &mut sh.commands,
             BStr::new(&second),
         );
-        assert_eq!(sh.commands.builtinloc, 0);
+        assert_eq!(sh.commands.builtin_location, Some(0));
 
         let third = [b"/bin".as_slice(), b"/usr/bin"].join(separator.as_slice());
         changepath(
@@ -851,13 +915,13 @@ mod tests {
             &mut sh.commands,
             BStr::new(&third),
         );
-        assert_eq!(sh.commands.builtinloc, -1, "no %builtin is -1, not 0");
+        assert_eq!(sh.commands.builtin_location, None);
     }
 
     /// What `clearcmdentry` keeps, which is the predicate the walk runs
     /// while it holds the table borrowed. An external command is always
     /// invalidated by a `PATH` change; an entry that names nothing is
-    /// not. Pinned because the `builtinloc` the predicate reads is now
+    /// not. Pinned because the built-in location the predicate reads is now
     /// copied out before the walk rather than read inside it, and a
     /// wrong copy would show up here as the wrong survivor.
     // [spec:dash:sem:exec.clearcmdentry-fn/test]
@@ -872,7 +936,9 @@ mod tests {
         addcmdentry(
             &mut sh.commands,
             external,
-            Command::External { path_index: 0 },
+            Command::External {
+                path_index: Some(0),
+            },
         );
         cmdlookup(&mut sh.commands, unknown, true);
 

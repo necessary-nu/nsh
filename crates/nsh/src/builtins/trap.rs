@@ -89,7 +89,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done((0).into()));
     }
     sh.traps.end_subshell_listing();
-    if sh.traps.ptrap != 0 {
+    if sh.traps.parent_traps_pending {
         clear_traps(sh, None);
     }
     /* `trap SIG...` resets, and `trap ACTION SIG...` sets: the first word
@@ -124,7 +124,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 } else if text.is_empty() {
                     newtrap = TrapAction::Ignore;
                 } else {
-                    sh.traps.trapcnt += 1;
+                    sh.traps.trap_count += 1;
                     newtrap = TrapAction::Command(text.clone());
                 }
             }
@@ -134,7 +134,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let replacing_an_action =
                 matches!(sh.traps.action(signal.index()), TrapAction::Command(_));
             if replacing_an_action {
-                sh.traps.trapcnt -= 1;
+                sh.traps.trap_count -= 1;
             }
             /* The C frees the old action and *then* stores the new one, so the
              * slot is briefly a dangling non-NULL pointer; `onsig` only tests it

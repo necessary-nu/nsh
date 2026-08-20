@@ -57,7 +57,7 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         /* Hoisted out of `shellexec`'s argument list, which also takes
          * the shell; see the note in `eval.rs`'s `evalcommand`. */
         let path = crate::var::pathval(sh);
-        let outcome = shellexec(sh, utility, path.as_slice().as_bstr(), 0);
+        let outcome = shellexec(sh, utility, path.as_slice().as_bstr(), None);
 
         if interactive_root {
             /* A successful exec never returns. On failure, restore the

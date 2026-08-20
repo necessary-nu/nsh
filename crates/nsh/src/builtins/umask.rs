@@ -10,7 +10,6 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use core::ffi::c_int;
 use std::io::Write as _;
 
 use bstr::BStr;
@@ -51,18 +50,18 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.umask.exit-status]
 pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mask: u32;
-    let mut symbolic_mode: c_int = 0;
+    let mut symbolic_mode = false;
 
     let mut opts = crate::options::Options::new(args);
     while opts.next(&mut sh.diagnostics(), b"S")?.is_some() {
-        symbolic_mode = 1;
+        symbolic_mode = true;
     }
     let mode = opts.operands().first().copied();
 
     mask = crate::error::with_interrupts_deferred(sh, |_| nsh_platform::creation_mask());
 
     if mode.is_none() {
-        if symbolic_mode != 0 {
+        if symbolic_mode {
             let allowed = !mask;
             let mut record = Vec::with_capacity(18);
             for i in 0..3 {

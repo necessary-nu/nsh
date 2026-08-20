@@ -12,12 +12,11 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::io::Write;
 
 use crate::eval::Flow;
-use crate::exec::{Command, DO_ABS, PathCursor, find_command, padvance};
+use crate::exec::{Command, CommandSearch, PathCursor, find_command, padvance};
 use crate::output::Dest;
 
 // [spec:dash:def:exec.typecmd-fn]
@@ -33,17 +32,17 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.type.interfaces]
 // [spec:posix:req:builtin.type.exit-status]
 pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut err: c_int = 0;
+    let mut failed = false;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(&mut sh.diagnostics(), b"")?;
     for name in opts.operands() {
-        match describe_command(sh, Dest::Stdout, name, None, 1)? {
-            Flow::Done(status) => err |= i32::from(status.code()),
+        match describe_command(sh, Dest::Stdout, name, None, true)? {
+            Flow::Done(status) => failed |= !status.success(),
             control => return Ok(control),
         }
     }
-    Ok(Flow::Done((err).into()))
+    Ok(Flow::Done(i32::from(failed).into()))
 }
 
 // [spec:dash:def:exec.describe-command-fn]
@@ -54,7 +53,7 @@ pub(crate) fn describe_command(
     dest: Dest,
     command: &BStr,
     path: Option<&BStr>,
-    verbose: c_int,
+    verbose: bool,
 ) -> Result<Flow, Error> {
     let standard_search = path.is_none();
     let path_value = path
@@ -63,13 +62,13 @@ pub(crate) fn describe_command(
     let path = path_value.as_slice().as_bstr();
 
     'out_label: {
-        if verbose != 0 {
+        if verbose {
             let _ = sh.io.get(dest).write_all(command);
         }
 
         /* First look at the keywords */
         if crate::parser::findkwd(command).is_some() {
-            let bytes = if verbose != 0 {
+            let bytes = if verbose {
                 b" is a shell keyword" as &[u8]
             } else {
                 command.as_bytes()
@@ -80,7 +79,7 @@ pub(crate) fn describe_command(
 
         /* Then look at the aliases */
         if let Some(alias) = sh.aliases.lookup(command, false) {
-            if verbose != 0 {
+            if verbose {
                 let mut record = b" is an alias for ".to_vec();
                 record.extend_from_slice(&alias);
                 let _ = sh.io.get(dest).write_all(&record);
@@ -104,7 +103,13 @@ pub(crate) fn describe_command(
         let mut entry = tracked.unwrap_or(Command::Unknown);
         if !was_tracked {
             /* Finally use brute force */
-            match find_command(sh, command, &mut entry, DO_ABS, path)? {
+            match find_command(
+                sh,
+                command,
+                &mut entry,
+                CommandSearch::DEFAULT.checking_absolute(),
+                path,
+            )? {
                 Flow::Done(_) => {}
                 control => return Ok(control),
             }
@@ -112,11 +117,20 @@ pub(crate) fn describe_command(
 
         match entry {
             Command::External { path_index } => {
-                let mut j = path_index;
                 let resolved: BString;
-                let path_bytes: &BStr = if j == -1 {
+                let path_bytes: &BStr = if let Some(path_index) = path_index {
+                    let mut cursor = PathCursor::new(path);
+                    let candidate = (0..=path_index)
+                        .map(|_| padvance(&mut cursor, command))
+                        .last()
+                        .flatten();
+                    resolved = candidate
+                        .expect("a resolved PATH index must name a PATH element")
+                        .path;
+                    resolved.as_bstr()
+                } else {
                     // [spec:posix:req:builtin.command.opt-v]
-                    if verbose == 0 && nsh_platform::shell_path_has_separator(command) {
+                    if !verbose && nsh_platform::shell_path_has_separator(command) {
                         resolved = command
                             .try_to_path_buf()
                             .and_then(|path| nsh_platform::absolute_path(&path))
@@ -126,21 +140,8 @@ pub(crate) fn describe_command(
                     } else {
                         command
                     }
-                } else {
-                    let mut cursor = PathCursor::new(path);
-                    let candidate = loop {
-                        let candidate = padvance(&mut cursor, command);
-                        j -= 1;
-                        if j < 0 {
-                            break candidate;
-                        }
-                    };
-                    resolved = candidate
-                        .expect("a resolved PATH index must name a PATH element")
-                        .path;
-                    resolved.as_bstr()
                 };
-                if verbose != 0 {
+                if verbose {
                     let mut record = b" is".to_vec();
                     if was_tracked {
                         record.extend_from_slice(b" a tracked alias for");
@@ -154,7 +155,7 @@ pub(crate) fn describe_command(
             }
 
             Command::Function(_) => {
-                if verbose != 0 {
+                if verbose {
                     let _ = sh.io.get(dest).write_all(b" is a shell function");
                 } else {
                     let _ = sh.io.get(dest).write_all(command);
@@ -162,7 +163,7 @@ pub(crate) fn describe_command(
             }
 
             Command::Builtin(builtin) => {
-                if verbose != 0 {
+                if verbose {
                     let record: &[u8] = if builtin.attributes().is_special() {
                         b" is a special shell builtin"
                     } else {
@@ -175,7 +176,7 @@ pub(crate) fn describe_command(
             }
 
             Command::Unknown => {
-                if verbose != 0 {
+                if verbose {
                     let _ = sh.io.get(dest).write_all(b": not found\n");
                 }
                 return Ok(Flow::Done((127).into()));

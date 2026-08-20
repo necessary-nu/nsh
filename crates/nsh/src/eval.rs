@@ -29,14 +29,13 @@ use crate::error::Error;
 use crate::fd::LogicalDescriptor;
 use crate::status::ExitStatus;
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::Descriptor;
 use std::io::Write as _;
 
 use crate::builtins::{BuiltinHandler, BuiltinId, BuiltinSpec};
-use crate::exec::{Command, DO_ERR, DO_NOFUNC, DO_REGBLTIN, find_command, shellexec};
+use crate::exec::{Command, CommandSearch, find_command, shellexec};
 use crate::expand::{ExpansionMode, arglist, strlist};
-use crate::jobs::{FORK_NOJOB, JobId};
+use crate::jobs::{ForkMode, JobId};
 // [spec:nsh:def:idiom.job-control-model]
 use crate::nodes::{
     BinaryCommand, CaseCommand, CompoundCommand, DescriptorTarget, ForCommand, FunctionDefinition,
@@ -134,13 +133,13 @@ pub struct backcmd {
 ///
 pub struct EvalState {
     /// Current loop nesting level.
-    pub(crate) loopnest: c_int,
+    pub(crate) loopnest: usize,
     /// starting line number of current function, or 0
     ///
     /// Private: `eval.rs` is the only module that names it.
-    funcline: c_int,
+    funcline: i32,
     /// Prevent PS4 nesting.
-    pub(crate) inps4: c_int,
+    pub(crate) inps4: bool,
     /// exit status of backquoted command
     pub(crate) back_exitstatus: ExitStatus,
     /// Number of signal trap actions currently being evaluated.
@@ -166,7 +165,7 @@ pub struct EvalState {
     /// It has no row of its own in `docs/api-design.md` §5; it lands
     /// beside `commandname` because they are written by the same frames
     /// and read by the same one function.
-    pub(crate) errlinno: c_int,
+    pub(crate) errlinno: i32,
     /// The name the running builtin was invoked by, for the error prefix.
     ///
     /// dash points this at `argv[0]` and relies on the word outliving the
@@ -187,7 +186,7 @@ impl EvalState {
         EvalState {
             loopnest: 0,
             funcline: 0,
-            inps4: 0,
+            inps4: false,
             back_exitstatus: ExitStatus::SUCCESS,
             signal_trap_depth: 0,
             trap_default_exit_status: None,
@@ -373,7 +372,7 @@ pub fn evalstring(sh: &mut Shell, s: &BStr, context: EvalContext) -> Result<Flow
 pub(crate) fn parse_execute(sh: &mut Shell, context: EvalContext) -> Result<Flow, Error> {
     let mut status = ExitStatus::SUCCESS;
     loop {
-        let n: Option<Node> = match crate::parser::parsecmd(sh, 0)? {
+        let n: Option<Node> = match crate::parser::parsecmd(sh, false)? {
             crate::parser::ParseResult::Eof => break,
             crate::parser::ParseResult::Tree(n) => n,
         };
@@ -499,7 +498,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
         && let Some(node) = n
     {
         flow!(crate::trap::dotrap(sh));
-        sh.displayhist = 1;
+        sh.displayhist = true;
         // [spec:nsh:req:idiom.structural-ast]
         status = match node {
             Node::Redirect(redirection) => {
@@ -810,7 +809,7 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, context: EvalContext) -> Resu
             let mut selected = fallthrough;
             if !selected {
                 for patp in &clause.patterns {
-                    if crate::expand::casematch(sh, patp, arglist.list[0].as_bstr())? != 0 {
+                    if crate::expand::casematch(sh, patp, arglist.list[0].as_bstr())? {
                         selected = true;
                         break;
                     }
@@ -855,7 +854,11 @@ fn evalsubshell(
     background: bool,
     context: EvalContext,
 ) -> Result<Flow, Error> {
-    let backgnd: c_int = background as c_int;
+    let fork_mode = if background {
+        ForkMode::Background
+    } else {
+        ForkMode::Foreground
+    };
     let mut status = ExitStatus::SUCCESS;
     let mut context = context;
 
@@ -870,24 +873,24 @@ fn evalsubshell(
      * process. The structured scope restores the caller's interrupt depth
      * before either tail continues. */
     let forked = crate::error::with_interrupts_deferred(sh, |sh| {
-        if backgnd == 0 && context.exits() && crate::trap::have_traps(sh) == 0 {
+        if !background && context.exits() && !crate::trap::have_traps(sh) {
             sh.prepare_fork_child(None);
             return Ok(Some(false));
         }
         let jp = crate::jobs::makejob(sh, 1);
         if matches!(
-            crate::jobs::forkshell(sh, Some(jp), Some(command.command.as_ref()), backgnd)?,
+            crate::jobs::forkshell(sh, Some(jp), Some(command.command.as_ref()), fork_mode)?,
             nsh_platform::ForkResult::Child
         ) {
             context = context.with_exit();
-            if backgnd != 0 {
+            if background {
                 context = context.without_tested();
             }
             return Ok(Some(true));
         }
         /* the parent tail of the C function; the child path below
          * never returns, so it is reached only from here */
-        if backgnd == 0 {
+        if !background {
             status = crate::jobs::waitforjob(sh, Some(jp))?;
         }
         Ok::<_, Error>(None)
@@ -992,7 +995,7 @@ fn expredir<'a>(
 }
 
 fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<LogicalDescriptor>, Error> {
-    if text.len() == 1 && crate::syntax::is_digit(text[0] as c_int) {
+    if text.len() == 1 && text[0].is_ascii_digit() {
         Ok(Some(
             LogicalDescriptor::from_digit(text[0])
                 .expect("an ASCII digit names a logical descriptor"),
@@ -1035,7 +1038,7 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, context: EvalContext) -> Result
     }
 
     let start = crate::error::with_interrupts_deferred(sh, |sh| {
-        let jp = crate::jobs::makejob(sh, pipeline.commands.len() as c_int);
+        let jp = crate::jobs::makejob(sh, pipeline.commands.len());
         let mut previous = None;
         for (index, command) in pipeline.commands.iter().enumerate() {
             let has_next = index + 1 < pipeline.commands.len();
@@ -1049,7 +1052,16 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, context: EvalContext) -> Result
                 None
             };
             if matches!(
-                crate::jobs::forkshell(sh, Some(jp), Some(command), pipeline.background as c_int,)?,
+                crate::jobs::forkshell(
+                    sh,
+                    Some(jp),
+                    Some(command),
+                    if pipeline.background {
+                        ForkMode::Background
+                    } else {
+                        ForkMode::Foreground
+                    },
+                )?,
                 nsh_platform::ForkResult::Child
             ) {
                 let output = pipe.take().map(|pipe| {
@@ -1129,7 +1141,7 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
         let pipe = crate::redir::sh_pipe(sh, false)?.0;
         jp = crate::jobs::makejob(sh, 1);
         if matches!(
-            crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?,
+            crate::jobs::forkshell(sh, Some(jp), n, ForkMode::WithoutJob)?,
             nsh_platform::ForkResult::Child
         ) {
             crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
@@ -1223,7 +1235,7 @@ fn parse_command_args(
     path: &mut Option<BString>,
     standard_path: &BStr,
     head: &mut usize,
-) -> Result<c_int, Error> {
+) -> Result<Option<CommandSearch>, Error> {
     let mut sp: usize = *head;
 
     loop {
@@ -1233,7 +1245,7 @@ fn parse_command_args(
         } else {
             match fill_arglist(sh, arglist, argpp)? {
                 Some(i) => i,
-                None => return Ok(0),
+                None => return Ok(None),
             }
         };
         let word = arglist.list[sp].as_bstr();
@@ -1246,7 +1258,7 @@ fn parse_command_args(
         }
         if options == b"-" {
             if sp + 1 >= arglist.list.len() && fill_arglist(sh, arglist, argpp)?.is_none() {
-                return Ok(0);
+                return Ok(None);
             }
             sp += 1;
             break;
@@ -1258,14 +1270,14 @@ fn parse_command_args(
                 }
                 _ => {
                     /* run 'typecmd' for other options */
-                    return Ok(0);
+                    return Ok(None);
                 }
             }
         }
     }
 
     *head = sp;
-    Ok(DO_NOFUNC)
+    Ok(Some(CommandSearch::DEFAULT.skipping_functions()))
 }
 
 /*
@@ -1317,7 +1329,7 @@ fn evalcommand_in_scope(
     let mut argp: &[Node];
     let mut arglist: arglist = arglist::new();
     let mut varlist: arglist = arglist::new();
-    let mut argc: c_int;
+    let mut argument_count: usize;
     let osp: Option<usize>;
     /* The C's `arglist.list`, which `parse_command_args` moves past the
      * `command [-p]` words while `osp` keeps the original head for `set -x`. */
@@ -1328,7 +1340,7 @@ fn evalcommand_in_scope(
     let mut path: Option<BString> = None;
     let standard_path = crate::var::defpath();
     let mut special_builtin: Option<bool>;
-    let mut cmd_flag: c_int;
+    let mut command_search: CommandSearch;
     let mut exec_builtin: bool;
     let mut status: ExitStatus;
     let mut variable_attributes: VariableAttributes;
@@ -1354,12 +1366,12 @@ fn evalcommand_in_scope(
     /* First expand the arguments. */
     sh.eval.back_exitstatus = ExitStatus::SUCCESS;
 
-    cmd_flag = 0;
+    command_search = CommandSearch::DEFAULT;
     exec_builtin = false;
     special_builtin = None;
     variable_attributes = VariableAttributes::NONE;
     use_local_variables = false;
-    argc = 0;
+    argument_count = 0;
     argp = command.arguments.as_slice();
     osp = fill_arglist(sh, &mut arglist, &mut argp)?;
     if osp.is_some() {
@@ -1379,7 +1391,7 @@ fn evalcommand_in_scope(
                 sh,
                 arglist.list[head].as_bstr(),
                 &mut resolved_command,
-                cmd_flag | DO_REGBLTIN,
+                command_search.regular_builtins_only(),
                 BStr::new(regpath.as_slice()),
             )? {
                 Flow::Done(_) => {}
@@ -1405,17 +1417,18 @@ fn evalcommand_in_scope(
                 break;
             }
 
-            cmd_flag = parse_command_args(
+            let Some(next_search) = parse_command_args(
                 sh,
                 &mut arglist,
                 &mut argp,
                 &mut path,
                 standard_path.as_slice().as_bstr(),
                 &mut head,
-            )?;
-            if cmd_flag == 0 {
+            )?
+            else {
                 break;
-            }
+            };
+            command_search = next_search;
         }
 
         for a in argp {
@@ -1430,7 +1443,7 @@ fn evalcommand_in_scope(
                             if crate::parser::isassignment(
                                 &sh.locale,
                                 word.word.as_bstr(),
-                            ) != 0
+                            )
                     )
                 {
                     ExpansionMode::ASSIGNMENT_TILDE
@@ -1440,16 +1453,19 @@ fn evalcommand_in_scope(
             )?;
         }
 
-        argc = (arglist.list.len() - head) as c_int;
+        argument_count = arglist.list.len() - head;
 
-        if exec_builtin && argc > 1 {
+        if exec_builtin && argument_count > 1 {
             variable_attributes = VariableAttributes::EXPORTED;
         }
     }
 
     resources.begin_local_variables(sh, use_local_variables);
 
-    lastarg = if sh.options.enabled(ShellOption::Interactive) && sh.eval.funcline == 0 && argc > 0 {
+    lastarg = if sh.options.enabled(ShellOption::Interactive)
+        && sh.eval.funcline == 0
+        && argument_count > 0
+    {
         Some(arglist.list.len() - 1)
     } else {
         None
@@ -1517,8 +1533,8 @@ fn evalcommand_in_scope(
             }
 
             /* Print the command if xflag is set. */
-            if sh.options.enabled(ShellOption::Xtrace) && sh.eval.inps4 == 0 {
-                let mut sep: c_int;
+            if sh.options.enabled(ShellOption::Xtrace) && !sh.eval.inps4 {
+                let mut already_printed: bool;
 
                 /* This block is why `Dest` exists. It used to open with
                  * `out = previous_stderr()` and then hold that pointer
@@ -1529,15 +1545,15 @@ fn evalcommand_in_scope(
                  * comes from `&mut sh.io`. Naming the destination defers
                  * the resolution to each write, so nothing spans a call. */
                 let dest = Dest::PreviousStderr;
-                sh.eval.inps4 = 1;
+                sh.eval.inps4 = true;
                 /* Hoisted out of `expandstr`'s argument list; see the
                  * note in `evalcommand`. */
                 let ps4 = crate::var::ps4val(sh);
                 let prompt = crate::parser::expandstr(sh, BStr::new(ps4.as_slice()))?;
                 let _ = sh.io.get(dest).write_all(&prompt);
-                sh.eval.inps4 = 0;
-                sep = 0;
-                sep = eprintlist(sh.io.get(dest), &varlist.list, sep);
+                sh.eval.inps4 = false;
+                already_printed = false;
+                already_printed = eprintlist(sh.io.get(dest), &varlist.list, already_printed);
                 /* `eprintlist(sh, out, osp, sep)` prints from the *original*
                  * head, so `command -p foo` traces as it was written and not
                  * as `parse_command_args` left it.  A NULL `osp` prints
@@ -1545,7 +1561,7 @@ fn evalcommand_in_scope(
                 eprintlist(
                     sh.io.get(dest),
                     &arglist.list[osp.unwrap_or(arglist.list.len())..],
-                    sep,
+                    already_printed,
                 );
                 let _ = sh.io.get(dest).write_all(b"\n");
             }
@@ -1565,7 +1581,7 @@ fn evalcommand_in_scope(
                     sh,
                     command_name,
                     &mut resolved_command,
-                    cmd_flag | DO_ERR,
+                    command_search.reporting_errors(),
                     search_path,
                 )? {
                     Flow::Done(_) => {}
@@ -1654,7 +1670,7 @@ fn evalcommand_in_scope(
                     let args = crate::builtins::args(&arglist.list[head..]);
 
                     /* Fork off a child process if necessary. */
-                    if !context.exits() || crate::trap::have_traps(sh) != 0 {
+                    if !context.exits() || crate::trap::have_traps(sh) {
                         let syntax = Node::Command(command.clone());
                         status = crate::error::with_interrupts_deferred(sh, |sh| {
                             let job = crate::jobs::forkexec(
@@ -1829,8 +1845,8 @@ fn evalfun(
     context: EvalContext,
 ) -> Result<Flow, Error> {
     let saveparam: crate::options::shparam; /* volatile */
-    let savefuncline: c_int;
-    let saveloopnest: c_int;
+    let savefuncline: i32;
+    let saveloopnest: usize;
 
     /* `saveparam = shellparam` plus the `shellparam.malloc = 0` that the C
      * puts inside the protected region so the epilogue's `freeparam` cannot
@@ -1881,7 +1897,7 @@ fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
 
     if let Node::Command(command) = n
         && let Some(Node::Word(word)) = command.arguments.first()
-        && crate::parser::goodname(&sh.locale, word.word.as_bstr()) != 0
+        && crate::parser::goodname(&sh.locale, word.word.as_bstr())
     {
         /* Hoisted out of the argument list; see the note in
          * `evalcommand`. */
@@ -1890,7 +1906,7 @@ fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
             sh,
             word.word.as_bstr(),
             &mut entry,
-            0,
+            CommandSearch::DEFAULT,
             BStr::new(path.as_slice()),
         );
     }
@@ -1967,20 +1983,22 @@ fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
-fn eprintlist(output: &mut crate::output::Output, list: &[strlist], sep: c_int) -> c_int {
-    let mut sep: c_int = sep;
-
+fn eprintlist(
+    output: &mut crate::output::Output,
+    list: &[strlist],
+    mut already_printed: bool,
+) -> bool {
     for sp in list {
         let mut record = Vec::new();
-        if sep != 0 {
+        if already_printed {
             record.push(b' ');
         }
         record.extend_from_slice(sp.as_bstr());
-        sep |= 1;
+        already_printed = true;
         let _ = output.write_all(&record);
     }
 
-    sep
+    already_printed
 }
 
 #[cfg(test)]
@@ -2002,7 +2020,7 @@ mod tests {
         let _guard = crate::testutil::lock();
         let mut sh = crate::context::Shell::builder().build().unwrap();
         crate::input::setinputstring(&mut sh, BStr::new(b": >\"$target\"\n"));
-        let tree = match crate::parser::parsecmd(&mut sh, 0).unwrap() {
+        let tree = match crate::parser::parsecmd(&mut sh, false).unwrap() {
             crate::parser::ParseResult::Tree(Some(tree)) => tree,
             _ => panic!("expected a command"),
         };
@@ -2122,10 +2140,10 @@ mod tests {
 
         sh.status = ExitStatus::from_code(9);
         sh.eval.loopnest = 3;
-        sh.eval.inps4 = 1;
+        sh.eval.inps4 = true;
         sh.clear_evaluation_resources();
         assert_eq!(sh.status, ExitStatus::from_code(9));
         assert_eq!(sh.eval.loopnest, 0);
-        assert_eq!(sh.eval.inps4, 0);
+        assert!(!sh.eval.inps4);
     }
 }

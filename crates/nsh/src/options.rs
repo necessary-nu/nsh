@@ -8,7 +8,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 use std::io::Write;
 
 mod dialect;
@@ -33,9 +32,9 @@ mod bash_mode_tests;
 /// moved back when the function returns. This is the same observable
 /// behaviour (including `shift`) without a pointer-lifetime mode.
 pub struct shparam {
-    pub nparam: c_int, /* # of positional parameters (without $0) */
-    pub optind: c_int, /* next parameter to be processed by getopts */
-    pub optoff: c_int, /* used by getopts */
+    pub nparam: usize,         /* # of positional parameters (without $0) */
+    pub optind: usize,         /* next parameter to be processed by getopts */
+    pub optoff: Option<usize>, /* offset in getopts' current word */
     words: Vec<BString>,
 }
 
@@ -44,7 +43,7 @@ impl shparam {
         shparam {
             nparam: 0,
             optind: 0,
-            optoff: 0,
+            optoff: None,
             words: Vec::new(),
         }
     }
@@ -54,11 +53,11 @@ impl shparam {
     ///
     /// A function's parameter list is a call-scoped owned copy, so shifting
     /// it mutates exactly the list that is restored away on return.
-    pub(crate) fn drop_first(&mut self, n: c_int) {
+    pub(crate) fn drop_first(&mut self, n: usize) {
         self.nparam -= n;
-        self.words.drain(..n as usize);
+        self.words.drain(..n);
         self.optind = 1;
-        self.optoff = -1;
+        self.optoff = None;
     }
 
     /// Snapshot positional parameters for expansion and `getopts`.
@@ -67,10 +66,10 @@ impl shparam {
     }
 
     fn replace(&mut self, words: Vec<BString>) {
-        self.nparam = words.len().min(c_int::MAX as usize) as c_int;
+        self.nparam = words.len();
         self.words = words;
         self.optind = 1;
-        self.optoff = -1;
+        self.optoff = None;
     }
 }
 
@@ -162,9 +161,9 @@ impl ShellOptions {
 /// this function's callers is teardown. See `jobs::setjobctl`.
 pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     crate::exec::dispatch_changed(sh);
-    crate::trap::setinteractive(sh, sh.options.enabled(ShellOption::Interactive) as c_int);
+    crate::trap::setinteractive(sh, sh.options.enabled(ShellOption::Interactive));
     crate::histedit::histedit(sh);
-    crate::jobs::setjobctl(sh, sh.options.enabled(ShellOption::Monitor) as c_int)
+    crate::jobs::setjobctl(sh, sh.options.enabled(ShellOption::Monitor))
 }
 
 /// Apply the side effects of a changed option set.
@@ -418,7 +417,7 @@ pub fn restoreparam(sh: &mut Shell, saved: shparam) {
 // [spec:posix:sem:builtin.getopts.reset]
 pub fn getoptsreset(sh: &mut crate::context::Shell, _value: &BStr) {
     sh.options.shellparam.optind = 1;
-    sh.options.shellparam.optoff = -1;
+    sh.options.shellparam.optoff = None;
 }
 
 /*

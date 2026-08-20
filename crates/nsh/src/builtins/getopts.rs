@@ -4,7 +4,6 @@
 //! owned snapshot of either the positional parameters or explicit operands.
 
 use bstr::{BStr, BString};
-use core::ffi::{c_int, c_uint};
 use std::io::Write;
 
 use crate::context::Shell;
@@ -38,15 +37,15 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     let words: Vec<BString> = if operands.len() == 2 {
         let words = sh.options.shellparam.words();
-        if (sh.options.shellparam.optind as c_uint) > (sh.options.shellparam.nparam + 1) as c_uint {
+        if sh.options.shellparam.optind > sh.options.shellparam.nparam + 1 {
             sh.options.shellparam.optind = 1;
-            sh.options.shellparam.optoff = -1;
+            sh.options.shellparam.optoff = None;
         }
         words
     } else {
-        if (sh.options.shellparam.optind as c_uint) > (operands.len() - 1) as c_uint {
+        if sh.options.shellparam.optind > operands.len() - 1 {
             sh.options.shellparam.optind = 1;
-            sh.options.shellparam.optoff = -1;
+            sh.options.shellparam.optoff = None;
         }
         operands[2..]
             .iter()
@@ -55,7 +54,7 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     };
 
     Ok(Flow::Done(
-        (getopts(sh, operands[0], operands[1], &words)?).into(),
+        i32::from(getopts(sh, operands[0], operands[1], &words)?).into(),
     ))
 }
 
@@ -74,25 +73,16 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:sem:builtin.getopts.optstring-first-character]
 // [spec:posix:req:builtin.getopts.stderr-diagnostic]
 // [spec:posix:req:builtin.getopts.exit-status]
-fn getopts(
-    sh: &mut Shell,
-    optstr: &BStr,
-    optvar: &BStr,
-    words: &[BString],
-) -> Result<c_int, Error> {
+fn getopts(sh: &mut Shell, optstr: &BStr, optvar: &BStr, words: &[BString]) -> Result<bool, Error> {
     let mut option = b'?';
-    let mut done = 0;
-    let mut next = sh.options.shellparam.optind.saturating_sub(1) as usize;
+    let mut done = false;
+    let mut next = sh.options.shellparam.optind.saturating_sub(1);
     let offset = sh.options.shellparam.optoff;
-    sh.options.shellparam.optind = -1;
 
     let mut cursor = if next > 0
-        && offset >= 0
-        && words
-            .get(next - 1)
-            .is_some_and(|word| word.len() >= offset as usize)
+        && offset.is_some_and(|offset| words.get(next - 1).is_some_and(|word| word.len() >= offset))
     {
-        Some((next - 1, offset as usize))
+        Some((next - 1, offset.expect("validated option offset")))
     } else {
         None
     };
@@ -100,18 +90,18 @@ fn getopts(
     'scan: loop {
         if cursor.is_none() || cursor.is_some_and(|(word, at)| at >= words[word].len()) {
             let Some(word) = words.get(next) else {
-                done = 1;
+                done = true;
                 cursor = None;
                 break 'scan;
             };
             if word.first() != Some(&b'-') || word.len() == 1 {
-                done = 1;
+                done = true;
                 cursor = None;
                 break 'scan;
             }
             next += 1;
             if word.as_slice() == b"--" {
-                done = 1;
+                done = true;
                 cursor = None;
                 break 'scan;
             }
@@ -204,15 +194,15 @@ fn getopts(
         break 'scan;
     }
 
-    if done != 0 {
+    if done {
         unset_bytes(sh, BStr::new(b"OPTARG"))?;
     }
 
-    let index = next as c_int + 1;
+    let index = next + 1;
     setvarint_bytes(
         sh,
         BStr::new(b"OPTIND"),
-        index as i64,
+        i64::try_from(index).unwrap_or(i64::MAX),
         VariableAttributes::NONE,
         CallbackPolicy::Suppress,
     )?;
@@ -222,7 +212,7 @@ fn getopts(
         Some(BStr::new(&[option])),
         VariableAttributes::NONE,
     )?;
-    sh.options.shellparam.optoff = cursor.map_or(-1, |(_, at)| at as c_int);
+    sh.options.shellparam.optoff = cursor.map(|(_, at)| at);
     sh.options.shellparam.optind = index;
     Ok(done)
 }
@@ -247,7 +237,7 @@ mod tests {
         let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         shell.options.shellparam.optind = 1;
-        shell.options.shellparam.optoff = -1;
+        shell.options.shellparam.optoff = None;
 
         assert_eq!(
             getoptscmd(&mut shell, &args).unwrap(),
@@ -278,7 +268,7 @@ mod tests {
         let mut shell = Shell::new(crate::streams::Streams::capture().unwrap());
         shell.options.set_arg0(BStr::new(b"my-program"));
         shell.options.shellparam.optind = 1;
-        shell.options.shellparam.optoff = -1;
+        shell.options.shellparam.optoff = None;
 
         assert_eq!(
             getoptscmd(&mut shell, &args).unwrap(),
@@ -290,7 +280,7 @@ mod tests {
         let loud_words = ["getopts", "a", "o", "-z"];
         let loud_args: Vec<&BStr> = loud_words.iter().map(|word| BStr::new(*word)).collect();
         shell.options.shellparam.optind = 1;
-        shell.options.shellparam.optoff = -1;
+        shell.options.shellparam.optoff = None;
         assert_eq!(
             getoptscmd(&mut shell, &loud_args).unwrap(),
             Flow::Done((0).into())

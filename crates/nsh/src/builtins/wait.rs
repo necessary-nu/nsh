@@ -10,9 +10,7 @@
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
-use crate::jobs::{
-    DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JobId, dowait, getjob, getstatus, remove_waited_job,
-};
+use crate::jobs::{JobId, WaitMode, dowait, getjob, getstatus, remove_waited_job};
 use bstr::BStr;
 
 // [spec:nsh:def:idiom.job-control-model]
@@ -61,7 +59,7 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     /* no running procs */
                     break 'out_lbl;
                 }
-                if dowait(sh, DOWAIT_WAITCMD_ALL, None)? == 0 {
+                if !dowait(sh, WaitMode::CommandAll, None)? {
                     // sigout:
                     retval = crate::siginbox::signals()
                         .pending_signal()
@@ -97,10 +95,10 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         break 'repeat;
                     }
                 } else {
-                    jobp = Some(getjob(sh, Some(spec), 0)?);
+                    jobp = Some(getjob(sh, Some(spec), false)?);
                 }
                 /* loop until process terminated or stopped */
-                if dowait(sh, DOWAIT_WAITCMD, jobp)? == 0 {
+                if !dowait(sh, WaitMode::Command, jobp)? {
                     // sigout:
                     retval = crate::siginbox::signals()
                         .pending_signal()

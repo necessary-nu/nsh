@@ -259,7 +259,7 @@ impl Builder {
                     .as_bytes(),
                 )
             })?;
-            crate::cd::setpwd_inner(&mut sh, crate::cd::Pwd::Unknown, 0)?;
+            crate::cd::setpwd_inner(&mut sh, crate::cd::Pwd::Unknown, false)?;
         }
         Ok(sh)
     }

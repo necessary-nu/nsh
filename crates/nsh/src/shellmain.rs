@@ -9,7 +9,6 @@
 // [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
 use bstr::BStr;
-use core::ffi::c_int;
 use std::io::Write;
 
 use crate::eval::EvalContext;
@@ -20,8 +19,8 @@ use crate::source::Startup;
 
 /// Whether this is the top-level shell rather than one of its children.
 #[inline]
-pub(crate) fn rootshell(sh: &Shell) -> c_int {
-    (sh.shell_level == 0) as c_int
+pub(crate) fn rootshell(sh: &Shell) -> bool {
+    sh.shell_level == 0
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -122,7 +121,7 @@ fn run_startup_task(
                 Ok(StartupAdvance::Finished)
             }
         }
-        StartupTask::CommandLoop => Ok(match cmdloop(sh, 1)? {
+        StartupTask::CommandLoop => Ok(match cmdloop(sh, true)? {
             crate::eval::Flow::Done(_) => StartupAdvance::Finished,
             crate::eval::Flow::Exit { status } => StartupAdvance::Exit(status),
             control => unreachable!("command loop returned local control: {control:?}"),
@@ -134,7 +133,7 @@ fn configure_startup(sh: &mut Shell, startup: &Startup) -> Result<(), crate::err
     sh.options.command_source = startup.has_command();
     sh.options.set(ShellOption::Stdin, startup.reads_stdin());
 
-    if startup.reads_stdin() && sh.input.stdin_istty < 0 {
+    if startup.reads_stdin() && sh.input.stdin_is_tty.is_none() {
         crate::input::input_init(sh);
     }
     if let Some(path) = startup.script_path() {
@@ -230,16 +229,15 @@ pub(crate) fn run(sh: &mut Shell, startup: &Startup) -> crate::status::ExitStatu
 // [spec:posix:req:builtin.set.opt-o-ignoreeof]
 pub(crate) fn cmdloop(
     sh: &mut Shell,
-    top: c_int,
+    top_level: bool,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    let mut inter: c_int;
     let mut status = crate::status::ExitStatus::SUCCESS;
-    let mut numeof: c_int = 0;
+    let mut eof_count = 0usize;
     /* `set -i` can change prompting and the other live interactive option
      * effects, but it cannot turn a command file into an interactive input
      * source. Capture that property before the first command can mutate the
      * option table. */
-    let interactive_input = sh.options.enabled(ShellOption::Interactive) && top != 0;
+    let interactive_input = sh.options.enabled(ShellOption::Interactive) && top_level;
 
     loop {
         /* `setstackmark`/`popstackmark` per iteration: the parse tree and
@@ -251,16 +249,15 @@ pub(crate) fn cmdloop(
              * through the read-eval loop, like any other. */
             crate::jobs::showjobs(sh, crate::output::Dest::Stderr, JobDisplay::Changed)?;
         }
-        inter = 0;
-        if sh.options.enabled(ShellOption::Interactive) && top != 0 {
-            inter += 1;
+        let interactive = sh.options.enabled(ShellOption::Interactive) && top_level;
+        if interactive {
             crate::mail::chkmail(sh);
         }
-        let parsed = crate::parser::parsecmd(sh, inter)?;
+        let parsed = crate::parser::parsecmd(sh, interactive)?;
         if let crate::parser::ParseResult::Tree(n) = parsed {
-            sh.jobs.job_warning = if sh.jobs.job_warning == 2 { 1 } else { 0 };
-            numeof = 0;
-            let flow = if top != 0 {
+            sh.jobs.job_warning = sh.jobs.job_warning.advance();
+            eof_count = 0;
+            let flow = if top_level {
                 crate::eval::eval_top_level(sh, n.as_ref(), EvalContext::DEFAULT)
             } else {
                 crate::eval::evaltree(sh, n.as_ref(), EvalContext::DEFAULT)
@@ -296,17 +293,19 @@ pub(crate) fn cmdloop(
                 }
                 break;
             }
-            if !sh.options.enabled(ShellOption::IgnoreEof) && numeof >= 50 {
+            if !sh.options.enabled(ShellOption::IgnoreEof) && eof_count >= 50 {
                 break;
             }
-            if crate::jobs::stoppedjobs(sh) == 0 {
+            if !crate::jobs::stoppedjobs(sh) {
                 if !sh.options.enabled(ShellOption::IgnoreEof) {
                     // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
                     // A real terminal needs a line ending after the user's
                     // EOF keystroke. A forced-interactive pipe has no echoed
                     // keystroke to terminate, so the prompt is already the
                     // complete byte stream.
-                    if sh.options.enabled(ShellOption::Interactive) && sh.input.stdin_istty != 0 {
+                    if sh.options.enabled(ShellOption::Interactive)
+                        && sh.input.stdin_is_tty == Some(true)
+                    {
                         let _ = sh.io.stderr().write_all(b"\n");
                     }
                     break;
@@ -317,7 +316,7 @@ pub(crate) fn cmdloop(
                     .write_all(b"\nUse \"exit\" to leave shell.\n");
             }
             crate::input::rearm_stdin_after_eof(sh);
-            numeof = numeof.saturating_add(1);
+            eof_count = eof_count.saturating_add(1);
         }
     }
 
@@ -377,14 +376,14 @@ fn read_profile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate:
         if !crate::input::setinputfile(
             sh,
             BStr::new(&name),
-            crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
+            crate::input::InputFileOptions::OPTIONAL_PUSHED,
         )? {
             return Ok(crate::eval::Flow::Done((0).into()));
         }
 
         /* An `exit` in a profile travels out as control flow after the
          * structured input scope has restored the previous frame. */
-        cmdloop(sh, 0)
+        cmdloop(sh, false)
     })
 }
 
@@ -401,8 +400,8 @@ pub(crate) fn readcmdfile(
     name: &BStr,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     crate::resource::with_resources(sh, |sh, _resources| {
-        crate::input::setinputfile(sh, name, crate::input::INPUT_PUSH_FILE)?;
-        cmdloop(sh, 0)
+        crate::input::setinputfile(sh, name, crate::input::InputFileOptions::PUSHED)?;
+        cmdloop(sh, false)
     })
 }
 

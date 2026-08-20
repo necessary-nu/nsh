@@ -5331,4 +5331,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.no-c-strings-core}
     )}
+    {id remove-core-abi-scalars, covered_rules (
+        idiom.no-abi-scalars-core
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-abi-scalars-core}
+    )}
 )

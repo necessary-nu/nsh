@@ -3,14 +3,10 @@
 //! Rules: `docs/spec/port/src/alias.md`.
 
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 use std::collections::BTreeMap;
 
 use crate::context::Shell;
 use crate::error::Error;
-
-pub const ALIASINUSE: c_int = 1;
-pub const ALIASDEAD: c_int = 2;
 
 #[derive(Clone, Debug)]
 struct Alias {
@@ -84,16 +80,16 @@ impl AliasTable {
         }
     }
 
-    fn remove(&mut self, name: &BStr) -> c_int {
+    fn remove(&mut self, name: &BStr) -> bool {
         let Some(alias) = self.map.get_mut(name) else {
-            return 1;
+            return false;
         };
         if alias.in_use {
             alias.dead = true;
         } else {
             self.map.remove(name);
         }
-        0
+        true
     }
 
     fn clear(&mut self) {
@@ -145,7 +141,7 @@ pub(crate) fn unalias(
     interrupts: &mut crate::error::InterruptDeferral,
     aliases: &mut AliasTable,
     name: &BStr,
-) -> c_int {
+) -> bool {
     interrupts.run_with(aliases, |aliases| aliases.remove(name))
 }
 
@@ -203,10 +199,11 @@ mod tests {
         setalias(&mut shell, name, BStr::new(b"old")).unwrap();
         shell.aliases.begin_expansion(name);
         assert!(shell.aliases.lookup(name, true).is_none());
-        assert_eq!(
-            unalias(&mut shell.interrupt_deferral, &mut shell.aliases, name),
-            0
-        );
+        assert!(unalias(
+            &mut shell.interrupt_deferral,
+            &mut shell.aliases,
+            name
+        ));
         assert_eq!(
             shell
                 .aliases
@@ -226,10 +223,11 @@ mod tests {
                 .map(|value| value.as_slice()),
             Some(b"new".as_slice())
         );
-        assert_eq!(
-            unalias(&mut shell.interrupt_deferral, &mut shell.aliases, name),
-            0
-        );
+        assert!(unalias(
+            &mut shell.interrupt_deferral,
+            &mut shell.aliases,
+            name
+        ));
         assert!(shell.aliases.lookup(name, false).is_none());
     }
 }

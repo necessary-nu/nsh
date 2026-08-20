@@ -7,8 +7,6 @@
 //! input boundaries and syntax context explicitly and classifies ordinary
 //! bytes without offset arithmetic.
 
-use core::ffi::{c_int, c_uint};
-
 /// One item returned by the shell's byte input stream.
 // [spec:nsh:req:idiom.lexer-tokens]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,25 +44,22 @@ impl InputUnit {
 
     #[inline]
     pub(crate) fn begins_name(self, locale: &nsh_platform::Locale) -> bool {
-        self.byte()
-            .is_some_and(|byte| is_name(locale, byte as c_int))
+        self.byte().is_some_and(|byte| is_name(locale, byte))
     }
 
     #[inline]
     pub(crate) fn continues_name(self, locale: &nsh_platform::Locale) -> bool {
-        self.byte()
-            .is_some_and(|byte| is_in_name(locale, byte as c_int))
+        self.byte().is_some_and(|byte| is_in_name(locale, byte))
     }
 
     #[inline]
     pub(crate) fn is_digit(self) -> bool {
-        self.byte().is_some_and(|byte| is_digit(byte as c_int))
+        self.byte().is_some_and(|byte| byte.is_ascii_digit())
     }
 
     #[inline]
     pub(crate) fn is_special_parameter(self) -> bool {
-        self.byte()
-            .is_some_and(|byte| is_special(byte as c_int) != 0)
+        self.byte().is_some_and(is_special)
     }
 }
 
@@ -160,43 +155,37 @@ impl SyntaxContext {
     }
 }
 
-/// `#define is_digit(c) ((unsigned)((c) - '0') <= 9)`.
-#[inline]
-pub fn is_digit(c: c_int) -> bool {
-    (c.wrapping_sub(b'0' as c_int)) as c_uint <= 9
-}
-
 /// Locale-sensitive alphabetic-byte classification.
 #[inline]
-pub fn is_alpha(locale: &nsh_platform::Locale, c: c_int) -> bool {
-    locale.is_alpha(c as u8)
+pub fn is_alpha(locale: &nsh_platform::Locale, byte: u8) -> bool {
+    locale.is_alpha(byte)
 }
 
 /// Whether a byte can begin a shell name.
 #[inline]
-pub fn is_name(locale: &nsh_platform::Locale, c: c_int) -> bool {
-    c == b'_' as c_int || locale.is_alpha(c as u8)
+pub fn is_name(locale: &nsh_platform::Locale, byte: u8) -> bool {
+    byte == b'_' || locale.is_alpha(byte)
 }
 
 /// Whether a byte can continue a shell name.
 #[inline]
-pub fn is_in_name(locale: &nsh_platform::Locale, c: c_int) -> bool {
-    c == b'_' as c_int || locale.is_alphanumeric(c as u8)
+pub fn is_in_name(locale: &nsh_platform::Locale, byte: u8) -> bool {
+    byte == b'_' || locale.is_alphanumeric(byte)
 }
 
 /// Whether a byte names a positional or special parameter.
 #[inline]
-pub fn is_special(c: c_int) -> c_int {
+pub fn is_special(byte: u8) -> bool {
     matches!(
-        c as u8,
+        byte,
         b'0'..=b'9' | b'!' | b'$' | b'-' | b'?' | b'@' | b'#' | b'*'
-    ) as c_int
+    )
 }
 
 /// The numeric value of an ASCII digit.
 #[inline]
-pub fn digit_val(c: c_int) -> c_int {
-    c - b'0' as c_int
+pub fn digit_val(byte: u8) -> u8 {
+    byte - b'0'
 }
 
 #[cfg(test)]

@@ -3,7 +3,6 @@
 
 use crate::error::Error;
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 use nsh_platform::{Descriptor, ShellBytesExt as _};
 use std::io::Write;
 
@@ -201,21 +200,21 @@ fn sh_open_fail_with_context(
     error: &std::io::Error,
     context: OpenFailureContext,
 ) -> Error {
-    let (word, action): (&[u8], c_int) = if mode.creates() {
-        (b"create", crate::error::E_CREAT)
+    let (word, operation): (&[u8], crate::error::Operation) = if mode.creates() {
+        (b"create", crate::error::Operation::Create)
     } else {
-        (b"open", crate::error::E_OPEN)
+        (b"open", crate::error::Operation::Open)
     };
     let mut message = b"cannot ".to_vec();
     message.extend_from_slice(word);
     message.push(b' ');
     message.extend_from_slice(pathname);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, action));
+    message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, operation));
     let status = context.status(error);
     let line = sh.eval.errlinno;
     sh.diagnostics()
-        .report(Error::other(line, c_int::from(status.code()), &message))
+        .report(Error::other(line, i32::from(status.code()), &message))
 }
 
 #[derive(Copy, Clone)]
@@ -247,16 +246,16 @@ pub fn sh_open(
     sh: &mut Shell,
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
-    mayfail: c_int,
+    may_fail: bool,
 ) -> Result<Option<Descriptor>, Error> {
-    sh_open_with_context(sh, pathname, mode, mayfail, OpenFailureContext::Ordinary)
+    sh_open_with_context(sh, pathname, mode, may_fail, OpenFailureContext::Ordinary)
 }
 
 fn sh_open_with_context(
     sh: &mut Shell,
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
-    mayfail: c_int,
+    may_fail: bool,
     context: OpenFailureContext,
 ) -> Result<Option<Descriptor>, Error> {
     loop {
@@ -279,14 +278,14 @@ fn sh_open_with_context(
                 if crate::siginbox::signals().pending_signal().is_none() {
                     continue;
                 }
-                if mayfail != 0 {
+                if may_fail {
                     return Ok(None);
                 }
                 return Err(sh_open_fail_with_context(
                     sh, pathname, mode, &error, context,
                 ));
             }
-            Err(error) if mayfail != 0 => return Ok(None),
+            Err(error) if may_fail => return Ok(None),
             Err(error) => {
                 return Err(sh_open_fail_with_context(
                     sh, pathname, mode, &error, context,
@@ -301,9 +300,9 @@ fn sh_open_with_context(
 pub fn sh_open_read(
     sh: &mut Shell,
     pathname: &BStr,
-    mayfail: c_int,
+    may_fail: bool,
 ) -> Result<Option<Descriptor>, Error> {
-    sh_open(sh, pathname, nsh_platform::OpenMode::ReadOnly, mayfail)
+    sh_open(sh, pathname, nsh_platform::OpenMode::ReadOnly, may_fail)
 }
 
 /// Open `sh`'s command-file operand, preserving its POSIX status class.
@@ -312,7 +311,7 @@ pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<Descripto
         sh,
         pathname,
         nsh_platform::OpenMode::ReadOnly,
-        0,
+        false,
         OpenFailureContext::CommandFile,
     )
     .map(|fd| fd.expect("a mandatory command-file open returns a descriptor"))
@@ -359,11 +358,11 @@ fn open_file_redirection(
 ) -> Result<RedirectSource, Error> {
     let source = match operator {
         FileRedirectionOperator::Read => RedirectSource::Owned(
-            sh_open(sh, target, nsh_platform::OpenMode::ReadOnly, 0)?
+            sh_open(sh, target, nsh_platform::OpenMode::ReadOnly, false)?
                 .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::ReadWrite => RedirectSource::Owned(
-            sh_open(sh, target, nsh_platform::OpenMode::ReadWriteCreate, 0)?
+            sh_open(sh, target, nsh_platform::OpenMode::ReadWriteCreate, false)?
                 .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::Write | FileRedirectionOperator::Clobber => {
@@ -378,8 +377,13 @@ fn open_file_redirection(
                     {
                         /* goto do_open */
                         return Ok(RedirectSource::Owned(
-                            sh_open(sh, target, nsh_platform::OpenMode::WriteCreateExclusive, 0)?
-                                .expect("a mandatory open returns a descriptor"),
+                            sh_open(
+                                sh,
+                                target,
+                                nsh_platform::OpenMode::WriteCreateExclusive,
+                                false,
+                            )?
+                            .expect("a mandatory open returns a descriptor"),
                         ));
                     }
 
@@ -399,7 +403,7 @@ fn open_file_redirection(
                         ));
                     }
 
-                    let fv = sh_open(sh, target, nsh_platform::OpenMode::WriteOnly, 0)?
+                    let fv = sh_open(sh, target, nsh_platform::OpenMode::WriteOnly, false)?
                         .expect("a mandatory open returns a descriptor");
                     if nsh_platform::fd_is_regular_file(&fv).unwrap_or(false) {
                         drop(fv);
@@ -421,15 +425,20 @@ fn open_file_redirection(
             }
             if fell_through {
                 RedirectSource::Owned(
-                    sh_open(sh, target, nsh_platform::OpenMode::WriteCreateTruncate, 0)?
-                        .expect("a mandatory open returns a descriptor"),
+                    sh_open(
+                        sh,
+                        target,
+                        nsh_platform::OpenMode::WriteCreateTruncate,
+                        false,
+                    )?
+                    .expect("a mandatory open returns a descriptor"),
                 )
             } else {
                 RedirectSource::Owned(opened.expect("the noclobber path opened a descriptor"))
             }
         }
         FileRedirectionOperator::Append => RedirectSource::Owned(
-            sh_open(sh, target, nsh_platform::OpenMode::WriteCreateAppend, 0)?
+            sh_open(sh, target, nsh_platform::OpenMode::WriteCreateAppend, false)?
                 .expect("a mandatory open returns a descriptor"),
         ),
     };
@@ -566,7 +575,7 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
     }
 
     if matches!(
-        crate::jobs::forkshell(sh, None, None, crate::jobs::FORK_NOJOB)?,
+        crate::jobs::forkshell(sh, None, None, crate::jobs::ForkMode::WithoutJob)?,
         nsh_platform::ForkResult::Child
     ) {
         drop(pip.read);
@@ -596,7 +605,7 @@ fn here_document_write_error(sh: &mut Shell, error: std::io::Error) -> Error {
 
 // [spec:dash:def:redir.popredir-fn]
 // [spec:dash:sem:redir.popredir-fn]
-pub fn popredir(sh: &mut Shell, drop: c_int) {
+pub fn popredir(sh: &mut Shell, discard: bool) {
     crate::error::with_interrupts_deferred(sh, |sh| {
         let rp = sh.redirs.list.len() - 1;
         let mut i = 0;
@@ -611,7 +620,7 @@ pub fn popredir(sh: &mut Shell, drop: c_int) {
 
             match renamed {
                 SavedDescriptor::Saved(saved) => {
-                    if drop == 0 {
+                    if !discard {
                         let descriptor = LogicalDescriptor::from_index(i)
                             .expect("a redirection frame has only logical descriptors");
                         if descriptor == LogicalDescriptor::STDIN {
@@ -638,7 +647,7 @@ impl Shell {
     /// Restore every command-scoped redirection before recovery or shutdown.
     pub(crate) fn restore_saved_redirections(&mut self) {
         while !self.redirs.list.is_empty() {
-            popredir(self, 0);
+            popredir(self, false);
         }
     }
 
@@ -710,7 +719,7 @@ pub(crate) fn redirectsafe(
 /// the same thing with the depth to unwind back to.
 pub fn unwindredir(sh: &mut Shell, stop: usize) {
     while sh.redirs.list.len() != stop {
-        popredir(sh, 0);
+        popredir(sh, false);
     }
 }
 

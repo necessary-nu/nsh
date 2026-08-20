@@ -1,14 +1,13 @@
 //! Bash-only productions in the existing recursive-descent parser.
 
 // [spec:nsh:req:idiom.operation-modes]
-use core::ffi::c_int;
 use core::mem;
 
 use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{
-    CTLBACKQ, CTLESC, CTLMBCHAR, CTLQUOTEMARK, Rt1, TokenContext, TokenKind, command, finalize,
-    goodname, list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, pungetc, readtoken,
+    CTLBACKQ, CTLESC, CTLMBCHAR, CTLQUOTEMARK, ListMode, Rt1, TokenContext, TokenKind, command,
+    finalize, goodname, list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, pungetc, readtoken,
     readtoken_with_flags, setinputstring, synerror, synexpect, wordtext,
 };
 use crate::context::Shell;
@@ -41,7 +40,7 @@ pub(super) fn active(sh: &Shell) -> bool {
 pub(super) fn command_prefix(
     sh: &mut Shell,
     token: TokenKind,
-    line: c_int,
+    line: i32,
 ) -> Result<Option<Node>, Error> {
     if !active(sh) {
         return Ok(None);
@@ -68,7 +67,7 @@ pub(super) fn arithmetic_command(sh: &mut Shell) -> Result<Node, Error> {
     )))
 }
 
-pub(super) fn arithmetic_for(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
+pub(super) fn arithmetic_for(sh: &mut Shell, line: i32) -> Result<Node, Error> {
     let text = arithmetic_text(sh)?;
     let [init, test, update] = for_clauses(sh, text.as_bstr())?;
 
@@ -87,7 +86,7 @@ pub(super) fn arithmetic_for(sh: &mut Shell, line: c_int) -> Result<Node, Error>
         return Err(synexpect(sh, Some(TokenKind::Do)));
     }
 
-    let body = list(sh, 0)?
+    let body = list(sh, ListMode::Compound)?
         .into_node()
         .ok_or_else(|| synexpect(sh, None))?;
     Ok(Node::Bash(BashNode::ArithmeticFor(BashArithmeticFor {
@@ -119,7 +118,7 @@ pub(super) fn conditional(sh: &mut Shell) -> Result<Node, Error> {
 }
 
 // [spec:nsh:req:idiom.structural-ast]
-pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
+pub(super) fn function(sh: &mut Shell, line: i32) -> Result<Node, Error> {
     let name_token = readtoken_with_flags(sh, TokenContext::NONE)?;
     if name_token.kind != TokenKind::Word || wordtext(sh).is_empty() {
         return Err(synerror(sh, b"invalid Bash function name"));
@@ -153,7 +152,7 @@ pub(super) fn array_word(sh: &Shell, arg: WordNode) -> Result<Node, WordNode> {
     let Some(open) = bytes.iter().position(|&byte| byte == b'[') else {
         return Err(arg);
     };
-    if goodname(&sh.locale, BStr::new(&bytes[..open])) == 0 {
+    if !goodname(&sh.locale, BStr::new(&bytes[..open])) {
         return Err(arg);
     }
     let Some(close) = matching_bracket(bytes, open) else {
@@ -245,7 +244,7 @@ pub(super) fn process_substitutions(
         let saved_heredocs = mem::take(&mut sh.input.heredoclist);
         let completed_at = sh.input.completed_heredocs.len();
         let parsed = crate::resource::with_resources(sh, |sh, _resources| {
-            let mut body = list(sh, 2)?.into_node();
+            let mut body = list(sh, ListMode::StopAtTerminator)?.into_node();
             if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
                 return Err(synexpect(sh, Some(TokenKind::RightParen)));
             }
@@ -272,7 +271,7 @@ pub(super) fn parameter_subscript(
     sh: &mut Shell,
     st: &mut Rt1<'_>,
     badsub: bool,
-    subtype: c_int,
+    subtype: u8,
 ) -> Result<(), Error> {
     if badsub || subtype != 0 || !st.input.is(b'[') || !active(sh) {
         return Ok(());
@@ -595,7 +594,7 @@ fn take_word(sh: &mut Shell, quoted: bool) -> ConditionalWord {
 fn compound_candidate(sh: &Shell, node: Option<&Node>) -> bool {
     match node {
         Some(Node::Word(arg)) => plain_prefix(arg).is_some_and(|(name_end, _)| {
-            goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end])) != 0
+            goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end]))
         }),
         Some(Node::Bash(BashNode::ArrayAssignment(assignment))) => {
             matches!(&assignment.value, BashArrayValue::Word(value) if value.word.as_bstr().is_empty())
@@ -608,7 +607,7 @@ fn compound_prefix(sh: &Shell, node: Node) -> Option<BashArrayAssignment> {
     match node {
         Node::Word(arg) => {
             let (name_end, operator) = plain_prefix(&arg)?;
-            if goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end])) == 0 {
+            if !goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end])) {
                 return None;
             }
             Some(BashArrayAssignment {

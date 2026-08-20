@@ -11,7 +11,7 @@ use bstr::BStr;
 ///
 /// A `u8`, because that is the range `$?` has. `exit 300` leaves 44 — in
 /// dash and in this port — and the type says so rather than leaving a
-/// `c_int` that can hold values the shell cannot produce.
+/// `i32` that can hold values the shell cannot produce.
 // [spec:nsh:req:idiom.status-flow-signal]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExitStatus(u8);
@@ -217,26 +217,26 @@ mod tests {
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         for (source, fragments) in [
-            ("context.rs", &["pub(crate) status: c_int"][..]),
+            ("context.rs", &["pub(crate) status: i32"][..]),
             (
                 "eval.rs",
                 &[
-                    "Done(c_int)",
-                    "Exit { status: Option<c_int>",
-                    "back_exitstatus: c_int",
-                    "trap_default_exit_status: Option<c_int>",
+                    "Done(i32)",
+                    "Exit { status: Option<i32>",
+                    "back_exitstatus: i32",
+                    "trap_default_exit_status: Option<i32>",
                 ][..],
             ),
             (
                 "siginbox.rs",
                 &[
-                    "fn pending_signal(&self) -> c_int",
-                    "fn signal_pending(&self, signo: c_int)",
+                    "fn pending_signal(&self) -> i32",
+                    "fn signal_pending(&self, signo: i32)",
                 ][..],
             ),
             (
                 "trap.rs",
-                &["fn setsignal(sh: &mut crate::context::Shell, signo: c_int)"][..],
+                &["fn setsignal(sh: &mut crate::context::Shell, signo: i32)"][..],
             ),
         ] {
             let text = std::fs::read_to_string(root.join(source)).unwrap();

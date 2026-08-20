@@ -10,7 +10,6 @@
 //! `docs/divergences.md`.
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -147,7 +146,7 @@ pub struct LocalVarList {
 // [spec:posix:sem:param.variable-creation]
 pub struct VarTable {
     tab: BTreeMap<BString, Var>,
-    pub(crate) lineno: c_int,
+    pub(crate) lineno: i32,
     locals: Vec<LocalVarList>,
 }
 
@@ -465,8 +464,10 @@ impl Shell {
             nsh_platform::path_is_same_file(&path, &dot)
         });
         match valid_pwd {
-            Some(path) => crate::cd::setpwd_inner(self, crate::cd::Pwd::New(BStr::new(path)), 0),
-            None => crate::cd::setpwd_inner(self, crate::cd::Pwd::Unknown, 0),
+            Some(path) => {
+                crate::cd::setpwd_inner(self, crate::cd::Pwd::New(BStr::new(path)), false)
+            }
+            None => crate::cd::setpwd_inner(self, crate::cd::Pwd::Unknown, false),
         }
     }
 
@@ -792,9 +793,9 @@ pub(crate) fn make_local_bytes(
 
 // [spec:dash:def:var.pushlocalvars-fn]
 // [spec:dash:sem:var.pushlocalvars-fn]
-pub fn pushlocalvars(sh: &mut Shell, push: c_int) -> usize {
+pub fn pushlocalvars(sh: &mut Shell, push: bool) -> usize {
     let top = sh.vars.locals.len();
-    if push != 0 {
+    if push {
         crate::error::with_interrupts_deferred(sh, |sh| {
             sh.vars.locals.push(LocalVarList {
                 entries: Vec::new(),
@@ -970,7 +971,7 @@ mod tests {
 
         initvar(&mut shell);
         shell.options.shellparam.optind = 7;
-        shell.options.shellparam.optoff = 3;
+        shell.options.shellparam.optoff = Some(3);
 
         setvarint_bytes(
             &mut shell,
@@ -981,7 +982,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(shell.options.shellparam.optind, 7);
-        assert_eq!(shell.options.shellparam.optoff, 3);
+        assert_eq!(shell.options.shellparam.optoff, Some(3));
 
         set_bytes(
             &mut shell,
@@ -991,7 +992,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(shell.options.shellparam.optind, 1);
-        assert_eq!(shell.options.shellparam.optoff, -1);
+        assert_eq!(shell.options.shellparam.optoff, None);
         assert_eq!(
             variable_attributes(&shell, BStr::new(b"OPTIND")),
             Some(VariableAttributes::FIXED),
@@ -1010,7 +1011,7 @@ mod tests {
             VariableAttributes::NONE,
         )
         .unwrap();
-        let stop = pushlocalvars(&mut shell, 1);
+        let stop = pushlocalvars(&mut shell, true);
         make_local_bytes(
             &mut shell,
             BStr::new(b"Tframe=two"),

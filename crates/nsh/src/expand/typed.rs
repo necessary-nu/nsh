@@ -756,7 +756,7 @@ fn parameter_error(
             message.extend_from_slice(b" or null");
         }
     }
-    if sh.eval.inps4 != 0 {
+    if sh.eval.inps4 {
         sh.diagnostics().sh_error_value(&message)
     } else {
         sh.diagnostics().expansion_error_value(&message)

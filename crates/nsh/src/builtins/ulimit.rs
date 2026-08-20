@@ -1,7 +1,6 @@
 //! The `ulimit` builtin.
 
 use bstr::BStr;
-use core::ffi::c_int;
 use std::io::Write as _;
 
 use crate::context::Shell;
@@ -101,15 +100,32 @@ static LIMITS: [Limit; 12] = [
 ];
 
 // [spec:dash:def:miscbltin.limtype]
-type LimitType = c_int;
-const SOFT: LimitType = 0x1;
-const HARD: LimitType = 0x2;
+#[derive(Clone, Copy)]
+struct LimitSelection {
+    current: bool,
+    maximum: bool,
+}
+
+impl LimitSelection {
+    const BOTH: Self = Self {
+        current: true,
+        maximum: true,
+    };
+    const CURRENT: Self = Self {
+        current: true,
+        maximum: false,
+    };
+    const MAXIMUM: Self = Self {
+        current: false,
+        maximum: true,
+    };
+}
 
 // [spec:dash:def:miscbltin.printlim-fn]
 // [spec:dash:sem:miscbltin.printlim-fn]
 // [spec:posix:req:builtin.ulimit.stdout-single-limit-format]
-fn print_limit(sh: &mut Shell, how: LimitType, values: ResourceLimit, limit: Limit) {
-    let value = if how & SOFT != 0 {
+fn print_limit(sh: &mut Shell, selection: LimitSelection, values: ResourceLimit, limit: Limit) {
+    let value = if selection.current {
         values.current
     } else {
         values.maximum
@@ -161,14 +177,14 @@ fn parse_value(sh: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, 
 // [spec:posix:req:builtin.ulimit.interfaces]
 // [spec:posix:req:builtin.ulimit.exit-status]
 pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut how = SOFT | HARD;
+    let mut selection = LimitSelection::BOTH;
     let mut all = false;
     let mut selected = b'f';
     let mut options = crate::options::Options::new(args);
     while let Some(option) = options.next(&mut sh.diagnostics(), b"HSatfdscmlpnvwr")? {
         match option {
-            b'H' => how = HARD,
-            b'S' => how = SOFT,
+            b'H' => selection = LimitSelection::MAXIMUM,
+            b'S' => selection = LimitSelection::CURRENT,
             b'a' => all = true,
             option => selected = option,
         }
@@ -191,7 +207,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             label.push(limit.option);
             label.extend_from_slice(b") ");
             let _ = sh.io.stdout().write_all(&label);
-            print_limit(sh, how, values, limit);
+            print_limit(sh, selection, values, limit);
         }
         return Ok(Flow::Done((0).into()));
     }
@@ -200,10 +216,10 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         nsh_platform::resource_limit(limit.resource).expect("a supported resource has a limit");
     if let Some(argument) = operands.first() {
         let value = parse_value(sh, argument, limit.factor)?;
-        if how & HARD != 0 {
+        if selection.maximum {
             values.maximum = value;
         }
-        if how & SOFT != 0 {
+        if selection.current {
             values.current = value;
         }
         if let Err(error) = nsh_platform::set_resource_limit(limit.resource, values) {
@@ -211,7 +227,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return Err(sh.diagnostics().sh_error_value(message.as_bytes()));
         }
     } else {
-        print_limit(sh, how, values, limit);
+        print_limit(sh, selection, values, limit);
     }
     Ok(Flow::Done((0).into()))
 }

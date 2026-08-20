@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 
 use bstr::BString;
-use core::ffi::c_int;
 
 /// A quote-aware shell pattern.
 // [spec:nsh:sem:idiom.typed-expansion]
@@ -312,12 +311,8 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
 }
 
 /// Compatibility entry for callers whose pattern contains no quoted bytes.
-pub(crate) fn pmatch_slices(
-    locale: &nsh_platform::Locale,
-    pattern: &[u8],
-    subject: &[u8],
-) -> c_int {
-    Pattern::unquoted(BString::from(pattern)).matches(locale, subject) as c_int
+pub(crate) fn pmatch_slices(locale: &nsh_platform::Locale, pattern: &[u8], subject: &[u8]) -> bool {
+    Pattern::unquoted(BString::from(pattern)).matches(locale, subject)
 }
 
 #[cfg(test)]
@@ -325,7 +320,7 @@ mod tests {
     use super::*;
 
     fn matches(locale: &nsh_platform::Locale, pattern: &[u8], subject: &[u8]) -> bool {
-        pmatch_slices(locale, pattern, subject) != 0
+        pmatch_slices(locale, pattern, subject)
     }
 
     #[test]

@@ -11,7 +11,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 
 use crate::eval::Flow;
 
@@ -31,19 +30,17 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.continue.interfaces]
 // [spec:posix:req:builtin.continue.exit-status]
 pub fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut n: c_int = 1;
+    let mut levels = 1usize;
 
     if let Some(count) = args.get(1) {
-        n = crate::number::parse_nonnegative(&mut sh.diagnostics(), count)?;
-        if n <= 0 {
+        let parsed = crate::number::parse_nonnegative(&mut sh.diagnostics(), count)?;
+        if parsed <= 0 {
             return Err(crate::number::invalid_number(&mut sh.diagnostics(), count));
         }
+        levels = parsed as usize;
     }
-    if n > sh.eval.loopnest {
-        n = sh.eval.loopnest;
-    }
-    if n > 0 {
-        let levels = n as usize;
+    levels = levels.min(sh.eval.loopnest);
+    if levels > 0 {
         Ok(if args[0].first() == Some(&b'c') {
             Flow::Continue {
                 levels,
@@ -66,7 +63,7 @@ mod tests {
 
     /// The two names are told apart by the word the builtin was called
     /// as, so the flag each sets is the thing to check.
-    fn run(name: &[u8], count: Option<&[u8]>, nest: c_int) -> Flow {
+    fn run(name: &[u8], count: Option<&[u8]>, nest: usize) -> Flow {
         let _guard = crate::testutil::lock();
         let mut args = vec![BStr::new(name)];
         if let Some(count) = count {

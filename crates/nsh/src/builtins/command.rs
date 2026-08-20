@@ -11,7 +11,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 
 use crate::builtins::r#type::describe_command;
 use crate::eval::Flow;
@@ -31,23 +30,21 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.command.interfaces]
 // [spec:posix:req:builtin.command.exit-status-v-options]
 pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    const VERIFY_BRIEF: c_int = 1;
-    const VERIFY_VERBOSE: c_int = 2;
-    let mut verify: c_int = 0;
+    let mut describe = None;
     let mut use_default_path = false;
 
     let mut opts = crate::options::Options::new(args);
     while let Some(c) = opts.next(&mut sh.diagnostics(), b"pvV")? {
         if c == b'V' {
-            verify |= VERIFY_VERBOSE;
+            describe = Some(true);
         } else if c == b'v' {
-            verify |= VERIFY_BRIEF;
+            describe.get_or_insert(false);
         } else {
             use_default_path = true;
         }
     }
 
-    if verify != 0 {
+    if let Some(verbose) = describe {
         if let Some(cmd) = opts.operands().first() {
             let default_path = use_default_path.then(crate::var::defpath);
             return describe_command(
@@ -55,7 +52,7 @@ pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 crate::output::Dest::Stdout,
                 cmd,
                 default_path.as_ref().map(|path| BStr::new(path.as_slice())),
-                verify - VERIFY_BRIEF,
+                verbose,
             );
         }
     }

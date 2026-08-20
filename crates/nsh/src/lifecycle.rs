@@ -27,7 +27,7 @@ impl Shell {
     // [spec:dash:sem:init.exitreset-fn]
     pub(crate) fn clear_evaluation_resources(&mut self) {
         self.eval.loopnest = 0;
-        self.eval.inps4 = 0;
+        self.eval.inps4 = false;
         crate::expand::ifsfree(&mut self.expand);
         self.restore_saved_redirections();
     }
@@ -75,8 +75,8 @@ mod tests {
         );
         assert!(crate::input::cur_pf(&mut shell.input).uses_stdin());
         shell.eval.loopnest = 3;
-        shell.eval.inps4 = 1;
+        shell.eval.inps4 = true;
         shell.clear_evaluation_resources();
-        assert_eq!((shell.eval.loopnest, shell.eval.inps4), (0, 0));
+        assert_eq!((shell.eval.loopnest, shell.eval.inps4), (0, false));
     }
 }

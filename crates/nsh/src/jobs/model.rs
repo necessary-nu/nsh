@@ -1,7 +1,6 @@
 //! Typed identities and states owned by the job table.
 
 use bstr::BString;
-use core::ffi::c_int;
 use nsh_platform::{ChildStatus, Descriptor, ProcessGroupState, ProcessId};
 use std::ops::{Index, IndexMut};
 
@@ -137,6 +136,24 @@ mod tests {
     }
 }
 
+/// The grace period around a stopped-job exit warning.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum JobWarning {
+    #[default]
+    Ready,
+    Reported,
+    Grace,
+}
+
+impl JobWarning {
+    pub(crate) fn advance(self) -> Self {
+        match self {
+            Self::Reported => Self::Grace,
+            Self::Ready | Self::Grace => Self::Ready,
+        }
+    }
+}
+
 /// The shell's jobs and the terminal state needed for job control.
 // [spec:nsh:req:idiom.job-storage]
 pub(crate) struct JobTable {
@@ -146,7 +163,7 @@ pub(crate) struct JobTable {
     pub(crate) initialpgrp: Option<ProcessGroupState>,
     pub(crate) ttyfd: Option<Descriptor>,
     pub(crate) shell_terminal_settings: Option<nsh_platform::TerminalSettings>,
-    pub(crate) job_warning: c_int,
+    pub(crate) job_warning: JobWarning,
 }
 
 // [spec:dash:def:jobs.set-curjob-fn]
@@ -160,7 +177,7 @@ impl JobTable {
             initialpgrp: None,
             ttyfd: None,
             shell_terminal_settings: None,
-            job_warning: 0,
+            job_warning: JobWarning::Ready,
         }
     }
 

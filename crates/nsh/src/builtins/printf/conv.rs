@@ -22,8 +22,6 @@
 //! The digit text those conversions are assembled from -- and the ways
 //! Rust spells it differently from C -- is [`digits`].
 
-use core::ffi::c_int;
-
 mod digits;
 
 use digits::{Number, hex_digit, push_exponent, split_exponent, trim_fraction};
@@ -37,7 +35,7 @@ use digits::{Number, hex_digit, push_exponent, split_exponent, trim_fraction};
 /// `%2147483648d` is an error with no output at all. Both the width and
 /// precision a specification writes out and the length of what it
 /// renders are held to this.
-pub(super) const LIMIT: usize = c_int::MAX as usize;
+pub(super) const LIMIT: usize = i32::MAX as usize;
 
 /// The most places after the point `format!` is ever asked for.
 ///
@@ -106,14 +104,14 @@ impl Spec {
     /// negative -- C reads that as the `-` flag applied to its
     /// magnitude, and a magnitude one past the range is how `INT_MIN`
     /// reaches [`LIMIT`].
-    pub(super) fn set_width(&mut self, value: c_int) {
+    pub(super) fn set_width(&mut self, value: i32) {
         self.left |= value < 0;
         self.width = value.unsigned_abs() as usize;
     }
 
     /// Set the precision from a `*` argument. A negative one means "no
     /// precision".
-    pub(super) fn set_precision(&mut self, value: c_int) {
+    pub(super) fn set_precision(&mut self, value: i32) {
         self.precision = if value < 0 {
             None
         } else {
@@ -172,7 +170,7 @@ impl Spec {
              * extension. A written-out width that large never reaches
              * here, having been refused for running past the limit. */
             let spelt = if self.width > LIMIT {
-                i64::from(c_int::MIN) as u64
+                i64::from(i32::MIN) as u64
             } else {
                 self.width as u64
             };
@@ -864,7 +862,7 @@ mod tests {
 
         /* The width C could not negate is spelt as its sign extension. */
         let mut floor = Spec::bare();
-        floor.set_width(c_int::MIN);
+        floor.set_width(i32::MIN);
         floor.set_unreadable(b'*', b"ld");
         assert_eq!(text(floor.signed(1)), "%-18446744071562067968*ld");
         let mut empty = spec(".0");
@@ -898,7 +896,7 @@ mod tests {
          * negate and so never padded with: it refuses a field with
          * bytes in it and prints an empty one as nothing. */
         let mut star = Spec::bare();
-        star.set_width(c_int::MIN);
+        star.set_width(i32::MIN);
         assert!(star.signed(1).is_none());
         assert_eq!(bytes(star.string(b"")), b"");
         star.set_precision(0);

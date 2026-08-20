@@ -7,7 +7,7 @@ use bstr::BStr;
 #[test]
 fn dialect_changes_apply_next_parse_unit() {
     let mut sh = Shell::builder().build().unwrap();
-    let parse_tree = |sh: &mut Shell| match parsecmd(sh, 0).unwrap() {
+    let parse_tree = |sh: &mut Shell| match parsecmd(sh, false).unwrap() {
         ParseResult::Tree(Some(tree)) => tree,
         ParseResult::Tree(None) => panic!("expected a command, found a blank unit"),
         ParseResult::Eof => panic!("expected a command, found EOF"),

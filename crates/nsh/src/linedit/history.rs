@@ -2,7 +2,6 @@
 
 use super::{text_from_bytes, text_to_bytes};
 use bstr::BString;
-use core::ffi::c_int;
 use nshedit::domain::{Direction, EditingMode, Text, TextUnit};
 use nshedit::editor::effect::{
     HistoryMatch, HistoryPosition, HistoryResponse, HistoryWordPosition, HistoryWordResponse,
@@ -13,7 +12,7 @@ use std::fmt;
 
 /// A displayed shell-history number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct EventNumber(c_int);
+struct EventNumber(i32);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EntryMetadata {
@@ -25,7 +24,7 @@ struct EntryMetadata {
 /// An owned history record safe to retain across evaluation re-entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryEvent {
-    pub number: c_int,
+    pub number: i32,
     pub line: BString,
 }
 
@@ -57,7 +56,7 @@ impl StdError for HistoryError {}
 pub struct History {
     store: HistoryStore<EntryMetadata>,
     limit: usize,
-    next_number: Option<c_int>,
+    next_number: Option<i32>,
     append_target: Option<HistoryId>,
     input_entry: Option<HistoryId>,
 }
@@ -97,14 +96,14 @@ impl History {
     }
 
     #[must_use]
-    pub(crate) fn next_number(&self) -> Option<c_int> {
+    pub(crate) fn next_number(&self) -> Option<i32> {
         self.next_number
     }
 
     /// Insert a complete first physical line and make it the append target.
     // [spec:posix:req:builtin.fc.history-numbering]
     // [spec:posix:req:builtin.fc.history-number-wrap]
-    pub fn enter(&mut self, bytes: &[u8], from_input: bool) -> Result<c_int, HistoryError> {
+    pub fn enter(&mut self, bytes: &[u8], from_input: bool) -> Result<i32, HistoryError> {
         let number = self.next_number.ok_or(HistoryError::NumberExhausted)?;
         self.next_number = number.checked_add(1);
         let metadata = EntryMetadata {
@@ -198,7 +197,7 @@ impl History {
     }
 
     #[must_use]
-    pub fn numbered(&self, number: c_int) -> Option<HistoryEvent> {
+    pub fn numbered(&self, number: i32) -> Option<HistoryEvent> {
         self.store
             .iter()
             .find(|entry| entry.metadata().number.0 == number)
@@ -217,7 +216,7 @@ impl History {
     /// The owned result permits `fc -s` to re-enter evaluation without
     /// retaining a borrow into history.
     #[must_use]
-    pub fn range(&self, first: c_int, last: c_int) -> Vec<HistoryEvent> {
+    pub fn range(&self, first: i32, last: i32) -> Vec<HistoryEvent> {
         let entries: Vec<&HistoryEntry<EntryMetadata>> = self.store.iter().collect();
         let Some(first_index) = entries
             .iter()
@@ -396,7 +395,7 @@ impl History {
                     })
             }
             HistoryPosition::Number(number) => {
-                let Ok(number) = c_int::try_from(number.get()) else {
+                let Ok(number) = i32::try_from(number.get()) else {
                     return HistoryResponse::boundary();
                 };
                 let Some(index) = self
@@ -501,7 +500,7 @@ fn shell_history_pattern_matches(
     }
     expression.extend_from_slice(pattern);
     expression.push(b'*');
-    crate::pmatch::pmatch_slices(locale, &expression, &line) != 0
+    crate::pmatch::pmatch_slices(locale, &expression, &line)
 }
 
 fn is_history_space(unit: &TextUnit) -> bool {

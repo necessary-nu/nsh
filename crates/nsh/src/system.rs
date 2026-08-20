@@ -15,13 +15,6 @@
 //! [spec:dash:def:system.globfree64-fn]
 //! [spec:dash:sem:system.globfree64-fn]
 
-use core::ffi::c_int;
-
-/// The calling thread's current OS error number.
-pub fn errno() -> c_int {
-    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
-}
-
 /// Unblock every signal in the calling thread.
 // [spec:dash:def:system.sigclearmask-fn]
 // [spec:dash:sem:system.sigclearmask-fn]

@@ -8,12 +8,11 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, ByteSlice};
-use core::ffi::c_int;
 use std::io::Write;
 
 use crate::eval::Flow;
 use crate::exec::{
-    Command, DO_ERR, PathCursor, clearcmdentry, delete_cmd_entry, find_command, padvance,
+    Command, CommandSearch, PathCursor, clearcmdentry, delete_cmd_entry, find_command, padvance,
 };
 
 // [spec:dash:def:exec.hashcmd-fn]
@@ -35,7 +34,6 @@ use crate::exec::{
 // [spec:posix:req:builtin.hash.exit-status]
 // [spec:nsh:req:idiom.command-dispatch]
 pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut c: c_int;
     let mut entry = Command::Unknown;
     let mut clear: bool;
 
@@ -56,7 +54,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * reading `sh.vars` through the receiver inside it would borrow
          * the shell twice. This is the "copy the scalar out before the
          * walk" technique the command table already needed for
-         * `builtinloc`, with a pointer in place of a flag -- and the
+         * built-in location, with a pointer in place of a flag -- and the
          * value is the same one `printentry` read for itself, since
          * nothing in the loop assigns to `PATH`. */
         let path = crate::var::pathval(sh);
@@ -67,9 +65,12 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let Command::External { path_index } = &cmdp.command else {
                     return None;
                 };
+                let Some(path_index) = *path_index else {
+                    return None;
+                };
                 Some(printentry(
                     name.as_slice().as_bstr(),
-                    *path_index,
+                    path_index,
                     cmdp.rehash,
                     path.as_slice().as_bstr(),
                 ))
@@ -80,7 +81,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
         return Ok(Flow::Done((0).into()));
     }
-    c = 0;
+    let mut failed = false;
     for name in operands {
         if sh
             .commands
@@ -92,15 +93,21 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         /* Hoisted out of the argument list; see the note in `eval.rs`'s
          * `evalcommand`. */
         let path = crate::var::pathval(sh);
-        match find_command(sh, name, &mut entry, DO_ERR, path.as_bstr())? {
+        match find_command(
+            sh,
+            name,
+            &mut entry,
+            CommandSearch::DEFAULT.reporting_errors(),
+            path.as_bstr(),
+        )? {
             crate::eval::Flow::Done(_) => {}
             control => return Ok(control),
         }
         if matches!(&entry, Command::Unknown) {
-            c = 1;
+            failed = true;
         }
     }
-    Ok(Flow::Done((c).into()))
+    Ok(Flow::Done(i32::from(failed).into()))
 }
 
 // [spec:dash:def:exec.printentry-fn]
@@ -111,15 +118,12 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// that walks the command table holds it borrowed across this call, so the
 /// read has to happen before the walk starts. Passing it in is what makes
 /// that visible rather than a surprise.
-fn printentry(name: &BStr, mut idx: c_int, rehash: bool, pathval: &BStr) -> Vec<u8> {
+fn printentry(name: &BStr, path_index: usize, rehash: bool, pathval: &BStr) -> Vec<u8> {
     let mut path = PathCursor::new(pathval);
-    let candidate = loop {
-        let candidate = padvance(&mut path, name);
-        idx -= 1;
-        if idx < 0 {
-            break candidate;
-        }
-    };
+    let candidate = (0..=path_index)
+        .map(|_| padvance(&mut path, name))
+        .last()
+        .flatten();
     let fullname = candidate
         .expect("a cached PATH index must still name a PATH element")
         .path;

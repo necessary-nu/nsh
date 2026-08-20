@@ -27,7 +27,7 @@ impl ResourceScope {
             input_mark: shell.input.mark(),
             input_floor: shell.input.floor(),
             redirection_mark: None,
-            local_mark: crate::var::pushlocalvars(shell, 0),
+            local_mark: crate::var::pushlocalvars(shell, false),
             redirection_frame: false,
             active: true,
         }
@@ -35,7 +35,7 @@ impl ResourceScope {
 
     /// Start a command-local variable frame when the command requires one.
     pub(crate) fn begin_local_variables(&mut self, shell: &mut Shell, enabled: bool) {
-        let mark = crate::var::pushlocalvars(shell, i32::from(enabled));
+        let mark = crate::var::pushlocalvars(shell, enabled);
         debug_assert_eq!(
             mark, self.local_mark,
             "a resource scope owns its local frame"
@@ -64,7 +64,7 @@ impl ResourceScope {
     /// shell's current descriptors instead of being restored on scope exit.
     pub(crate) fn retain_redirections(&mut self, shell: &mut Shell) {
         if self.redirection_frame {
-            crate::redir::popredir(shell, 1);
+            crate::redir::popredir(shell, true);
             self.redirection_frame = false;
         }
     }
@@ -119,7 +119,7 @@ mod tests {
         )
         .unwrap();
         let input_mark = shell.input.mark();
-        let local_mark = crate::var::pushlocalvars(&mut shell, 0);
+        let local_mark = crate::var::pushlocalvars(&mut shell, false);
 
         let outcome: Result<(), Error> = with_resources(&mut shell, |shell, resources| {
             crate::input::setinputstring(shell, BStr::new(b"temporary input"));
@@ -140,7 +140,7 @@ mod tests {
 
         assert!(outcome.is_err());
         assert_eq!(shell.input.mark(), input_mark);
-        assert_eq!(crate::var::pushlocalvars(&mut shell, 0), local_mark);
+        assert_eq!(crate::var::pushlocalvars(&mut shell, false), local_mark);
         assert!(shell.fds.is_open(LogicalDescriptor::STDOUT));
         assert_eq!(
             crate::var::lookup_bytes(&mut shell, BStr::new(b"scope_value"))

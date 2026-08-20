@@ -10,7 +10,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 use std::io::Write;
 
 use crate::builtins::cd::cdopt;
@@ -21,12 +20,10 @@ use crate::options::Options;
 // [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
 pub fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let flags: c_int;
-
-    flags = cdopt(sh, &mut Options::new(args))?;
-    let mut dir = if flags != 0 {
+    let options = cdopt(sh, &mut Options::new(args))?;
+    let mut dir = if options.physical {
         if sh.cwd.physdir.is_none() {
-            setpwd_inner(sh, Pwd::Current, 0)?;
+            setpwd_inner(sh, Pwd::Current, false)?;
         }
         sh.cwd.physdir.clone().unwrap_or_default()
     } else {

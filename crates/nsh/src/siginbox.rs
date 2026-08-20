@@ -20,7 +20,7 @@
 //! delivered on the thread that was running, so the handler and the code
 //! it interrupted are the same thread; atomic accesses to one location
 //! from one thread are coherent whatever the ordering. Relaxed is what
-//! `volatile sig_atomic_t` bought the C, which is what these were.
+//! volatile signal flags bought the C implementation, which is what these were.
 
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 

@@ -24,7 +24,6 @@ use crate::error::Error;
 use std::io::Write as _;
 
 use bstr::{BStr, BString, ByteSlice as _};
-use core::ffi::c_int;
 
 use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
 use crate::eval::Flow;
@@ -619,7 +618,7 @@ fn print_escape_str(
     sh: &mut crate::context::Shell,
     spec: &Spec,
     word: &BStr,
-) -> Result<c_int, Error> {
+) -> Result<bool, Error> {
     let mut buf = BString::default();
     let done = conv_escape_str(word, &mut buf);
     emit_field(sh, spec.string(&buf))?;
@@ -663,10 +662,10 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                  * escape's worth of scratch and nothing else; see
                  * `CONV_ESCAPE_SLOP` for why 4 is not the bound. */
                 let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
-                let ret = conv_escape(&format[at..], &mut scratch, false);
-                at += (ret >> 4) as usize;
-                debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-                emit(sh, &scratch[..(ret & 15) as usize]);
+                let converted = conv_escape(&format[at..], &mut scratch, false);
+                at += converted.consumed;
+                debug_assert!(converted.written <= CONV_ESCAPE_SLOP);
+                emit(sh, &scratch[..converted.written]);
                 continue;
             }
             /* A `%%` is one `%`; a `%` at the very end of the format
@@ -694,7 +693,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
             if format.get(at) == Some(&b'*') {
                 at += 1;
-                spec.set_width(operands.getuintmax(sh, true) as c_int);
+                spec.set_width(operands.getuintmax(sh, true) as i32);
             } else {
                 /* skip to possible '.', get following precision */
                 let digits = span(&format[..end], at, WIDTH);
@@ -711,7 +710,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 at += 1;
                 if format.get(at) == Some(&b'*') {
                     at += 1;
-                    let value = operands.getuintmax(sh, true) as c_int;
+                    let value = operands.getuintmax(sh, true) as i32;
                     if stop.is_none() {
                         spec.set_precision(value);
                     }
@@ -744,7 +743,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             match conversion {
                 b'b' => {
                     /* escape if a \c was encountered */
-                    if print_escape_str(sh, &spec, BStr::new(operands.getstr()))? != 0 {
+                    if print_escape_str(sh, &spec, BStr::new(operands.getstr()))? {
                         break 'out;
                     }
                 }

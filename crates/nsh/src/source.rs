@@ -293,7 +293,11 @@ impl Shell {
                 }
                 Kind::File(path) => {
                     let path = path.to_shell_bytes();
-                    crate::input::setinputfile(shell, BStr::new(&path), 0)?;
+                    crate::input::setinputfile(
+                        shell,
+                        BStr::new(&path),
+                        crate::input::InputFileOptions::CURRENT,
+                    )?;
                 }
                 Kind::Stream => {}
             }
@@ -308,8 +312,8 @@ impl Shell {
                 Kind::Bytes(_) => {
                     crate::eval::parse_execute(shell, crate::eval::EvalContext::DEFAULT)
                 }
-                Kind::File(_) => crate::shellmain::cmdloop(shell, 0),
-                Kind::Stream => crate::shellmain::cmdloop(shell, 1),
+                Kind::File(_) => crate::shellmain::cmdloop(shell, false),
+                Kind::Stream => crate::shellmain::cmdloop(shell, true),
             }
         });
         match outcome {

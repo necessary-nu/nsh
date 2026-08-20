@@ -26,7 +26,6 @@ use crate::error::Error;
 use std::io::Write as _;
 
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 
 use crate::escape::conv_escape_str;
 use crate::eval::Flow;
@@ -46,20 +45,19 @@ fn emit(output: &mut crate::output::Output, bytes: &[u8]) {
 /// `%s ` or `%s\n`, so it passes the byte itself.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-fn print_escape_str(output: &mut crate::output::Output, separator: u8, s: &BStr) -> c_int {
-    let done: c_int;
+fn print_escape_str(output: &mut crate::output::Output, separator: u8, s: &BStr) -> bool {
     /* The C's `q` is a cursor into the stack block and `stackblock()` its
      * base.  Both are this buffer: `len` is its length and `q[-1]` its
      * last byte. */
     let mut buf = BString::default();
 
-    done = conv_escape_str(s, &mut buf);
+    let stopped = conv_escape_str(s, &mut buf);
     emit(output, &buf);
-    if done == 0 && separator != 0 {
+    if !stopped && separator != 0 {
         emit(output, &[separator]);
     }
 
-    done
+    stopped
 }
 
 // [spec:dash:def:printf.echocmd-fn]
@@ -69,7 +67,6 @@ pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * that ever differed was the byte after the conversion, so what is
      * chosen here is that byte. `-n` closes with nothing. */
     let mut last: u8 = b'\n';
-    let mut nonl: c_int;
 
     let mut words = &args[1..];
     if words.first().is_some_and(|w| &w[..] == b"-n") {
@@ -91,9 +88,9 @@ pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             separator = last;
         }
 
-        nonl = print_escape_str(output, separator, s.copied().unwrap_or(BStr::new(b"")));
+        let stopped = print_escape_str(output, separator, s.copied().unwrap_or(BStr::new(b"")));
 
-        if !(nonl == 0 && words.get(index).is_some()) {
+        if stopped || words.get(index).is_none() {
             break;
         }
     }

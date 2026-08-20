@@ -12,13 +12,12 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 use std::io::Write;
 
 use crate::eval::Flow;
 use crate::jobs::{
-    FORK_BG, FORK_FG, JobId, apply_saved_job_terminal_settings, capture_shell_terminal_settings,
-    getjob, jobno, outcmd, ps_pid, showpipe, terminal_settings_error, waitforjob, xxtcsetpgrp,
+    ForkMode, JobId, apply_saved_job_terminal_settings, capture_shell_terminal_settings, getjob,
+    jobno, outcmd, ps_pid, showpipe, terminal_settings_error, waitforjob, xxtcsetpgrp,
 };
 use crate::output::Dest;
 
@@ -47,12 +46,12 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.fg.interfaces]
 pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: JobId;
-    let mode: c_int;
+    let mode: ForkMode;
 
     mode = if args[0].first() == Some(&b'f') {
-        FORK_FG
+        ForkMode::Foreground
     } else {
-        FORK_BG
+        ForkMode::Background
     };
     let mut opts = crate::options::Options::new(args);
     opts.next(&mut sh.diagnostics(), b"")?;
@@ -61,8 +60,8 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * when there is no operand, otherwise one pass per operand. */
     let mut index = 0usize;
     let retval = loop {
-        jp = getjob(sh, operands.get(index).copied(), 1)?;
-        if mode == FORK_BG {
+        jp = getjob(sh, operands.get(index).copied(), true)?;
+        if mode == ForkMode::Background {
             sh.jobs.position_running(jp);
             let _ = write!(sh.io.get(Dest::Stdout), "[{}] ", jobno(jp));
         }
@@ -91,21 +90,25 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.background-job-brought-to-foreground]
 // [spec:posix:req:jobctl.continue-suspended-job]
 // [spec:posix:req:jobctl.fg-terminal-settings-restore]
-fn restartjob(sh: &mut Shell, jp: JobId, mode: c_int) -> Result<crate::status::ExitStatus, Error> {
+fn restartjob(
+    sh: &mut Shell,
+    jp: JobId,
+    mode: ForkMode,
+) -> Result<crate::status::ExitStatus, Error> {
     let (status, terminal_error) = crate::error::with_interrupts_deferred(sh, |sh| {
         let mut terminal_error = None;
         'out_lbl: {
             if !sh.jobs[jp].restart() {
                 break 'out_lbl;
             }
-            if mode == FORK_FG {
+            if mode == ForkMode::Foreground {
                 capture_shell_terminal_settings(sh)?;
             }
             let Some(leader) = ps_pid(sh, jp, 0) else {
                 return Err(sh.diagnostics().sh_error_value(b"job has no process"));
             };
             let process_group = nsh_platform::ProcessGroupId::from_leader(leader);
-            if mode == FORK_FG {
+            if mode == ForkMode::Foreground {
                 xxtcsetpgrp(sh, process_group)?;
                 if let Err(error) = apply_saved_job_terminal_settings(sh, jp) {
                     terminal_error = Some(error);
@@ -121,7 +124,7 @@ fn restartjob(sh: &mut Shell, jp: JobId, mode: c_int) -> Result<crate::status::E
                 }
             }
         }
-        let status = if mode == FORK_FG {
+        let status = if mode == ForkMode::Foreground {
             waitforjob(sh, Some(jp))?
         } else {
             crate::status::ExitStatus::SUCCESS

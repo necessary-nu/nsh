@@ -12,7 +12,6 @@
 //!     and typed results rather than translated label blocks.
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::{
     ChildStatus, Descriptor, NativeStrExt as _, ProcessGroupId, ProcessGroupState, ProcessId,
     ProcessSelector, ProcessTarget,
@@ -30,25 +29,28 @@ use crate::output::Dest;
 
 mod model;
 
-pub(crate) use model::{Job, JobId, JobState, JobTable, ProcStat};
+pub(crate) use model::{Job, JobId, JobState, JobTable, JobWarning, ProcStat};
 
 /// Append an already-rendered ASCII fragment with `fmtstr`'s historical
 /// clamp-to-capacity convention.
-fn append_ascii(out: &mut Vec<u8>, capacity: usize, text: &str) -> c_int {
+fn append_ascii(out: &mut Vec<u8>, capacity: usize, text: &str) -> usize {
     debug_assert!(text.is_ascii());
     let copied = text.len().min(capacity.saturating_sub(1));
     out.extend_from_slice(&text.as_bytes()[..copied]);
-    text.len().min(capacity) as c_int
+    text.len().min(capacity)
 }
 
 // ---------------------------------------------------------------------
 // src/jobs.h
 // ---------------------------------------------------------------------
 
-/* Mode argument to forkshell.  Don't change FORK_FG or FORK_BG. */
-pub const FORK_FG: c_int = 0;
-pub const FORK_BG: c_int = 1;
-pub const FORK_NOJOB: c_int = 2;
+/// How a newly forked shell participates in job control.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ForkMode {
+    Foreground,
+    Background,
+    WithoutJob,
+}
 
 /// The four supported job-list presentations.
 ///
@@ -69,21 +71,42 @@ pub(crate) enum JobDisplay {
 // src/jobs.c module state
 // ---------------------------------------------------------------------
 
-/* mode flags for dowait */
-const DOWAIT_NONBLOCK: c_int = 0;
-const DOWAIT_BLOCK: c_int = 1;
-pub(crate) const DOWAIT_WAITCMD: c_int = 2;
-pub(crate) const DOWAIT_WAITCMD_ALL: c_int = 4;
+/// How child collection waits when no status is immediately available.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum WaitMode {
+    Poll,
+    Block,
+    Command,
+    CommandAll,
+}
+
+impl WaitMode {
+    fn kernel_nonblocking(self) -> bool {
+        !matches!(self, Self::Block)
+    }
+
+    fn suspends_for_signal(self) -> bool {
+        !matches!(self, Self::Poll)
+    }
+
+    fn after_observation(self) -> Self {
+        if matches!(self, Self::CommandAll) {
+            Self::Poll
+        } else {
+            self
+        }
+    }
+}
 
 fn notify_completion_now(
-    block: c_int,
+    mode: WaitMode,
     state: JobState,
     shell_jobctl: bool,
     notify: bool,
     job_jobctl: bool,
     is_waited_for: bool,
 ) -> bool {
-    block == DOWAIT_BLOCK
+    mode == WaitMode::Block
         && state == JobState::Done
         && shell_jobctl
         && notify
@@ -215,7 +238,7 @@ fn acquire_control_terminal(sh: &mut crate::context::Shell) -> Result<Option<Des
         sh,
         BStr::new(&terminal_path),
         nsh_platform::OpenMode::ReadWrite,
-        1,
+        true,
     )? {
         return crate::redir::move_fd_above(sh, opened).map(Some);
     }
@@ -276,12 +299,11 @@ fn await_foreground_group(
 /// callers that *are* ordinary code (`set -m`, `exec`, startup) keep
 /// dash's behaviour of abandoning the command, and the teardown callers
 /// drop it where the C already swallowed it.
-pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
-    let enabled = on != 0;
+pub fn setjobctl(sh: &mut crate::context::Shell, enabled: bool) -> Result<(), Error> {
     let process_group: Option<ProcessGroupState>;
     let mut fd: Option<Descriptor>;
 
-    if enabled == sh.jobs.jobctl || crate::shellmain::rootshell(sh) == 0 {
+    if enabled == sh.jobs.jobctl || !crate::shellmain::rootshell(sh) {
         return Ok(());
     }
     /* Turning job control *on* is three operations on the host's process:
@@ -364,18 +386,18 @@ fn sprint_status(
     locale: &nsh_platform::Locale,
     out: &mut Vec<u8>,
     status: ChildStatus,
-    sigonly: c_int,
-) -> c_int {
+    signal_only: bool,
+) -> usize {
     let start = out.len();
     match status {
-        ChildStatus::Exited(code) if sigonly == 0 => {
+        ChildStatus::Exited(code) if !signal_only => {
             if code == 0 {
                 append_ascii(out, 5, "Done");
             } else {
                 append_ascii(out, 16, &format!("Done({code})"));
             }
         }
-        ChildStatus::Stopped(signal) if sigonly == 0 => {
+        ChildStatus::Stopped(signal) if !signal_only => {
             let signal_name = crate::signames::signal_names
                 .get(signal.number() as usize)
                 .map_or(BStr::new(b""), |name| BStr::new(name.to_bytes()));
@@ -389,7 +411,7 @@ fn sprint_status(
         ChildStatus::Signaled {
             signal,
             core_dumped,
-        } if sigonly == 0
+        } if !signal_only
             || (signal != nsh_platform::interrupt_signal()
                 && signal != nsh_platform::pipe_signal()) =>
         {
@@ -406,12 +428,12 @@ fn sprint_status(
                 append_ascii(out, 15, " (core dumped)");
             }
         }
-        ChildStatus::Continued if sigonly == 0 => {
+        ChildStatus::Continued if !signal_only => {
             append_ascii(out, 8, "Running");
         }
         _ => {}
     }
-    (out.len() - start) as c_int
+    out.len() - start
 }
 
 // [spec:dash:def:jobs.showjob-fn]
@@ -425,8 +447,8 @@ fn sprint_status(
 // [spec:posix:req:jobctl.suspended-job-message]
 pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mode: JobDisplay) {
     let psend: usize;
-    let mut col: c_int;
-    let indent: c_int;
+    let mut column: usize;
+    let indent: usize;
     let mut s: Vec<u8> = Vec::with_capacity(80);
 
     if matches!(mode, JobDisplay::ProcessGroup) {
@@ -441,25 +463,25 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
     }
 
     let heading = format!("[{}]   ", jobno(jp));
-    col = append_ascii(&mut s, 16, &heading);
-    indent = col;
+    column = append_ascii(&mut s, 16, &heading);
+    indent = column;
 
     if Some(jp) == sh.jobs.current() {
-        s[(col - 2) as usize] = b'+';
+        s[column - 2] = b'+';
     } else if Some(jp) == sh.jobs.previous() {
-        s[(col - 2) as usize] = b'-';
+        s[column - 2] = b'-';
     }
 
     if matches!(mode, JobDisplay::Long) {
         let pid = format!("{} ", process_id_text(ps_pid(sh, jp, 0)));
-        col += append_ascii(&mut s, 16, &pid);
+        column += append_ascii(&mut s, 16, &pid);
     }
 
     psend = sh.jobs[jp].ps.len();
 
     if sh.jobs[jp].is_running() {
         /* scopy("Running", s + col) */
-        col += append_ascii(&mut s, 8, "Running");
+        column += append_ascii(&mut s, 8, "Running");
     } else {
         /* `psend[-1]`: a job leaves the running state only through `waitone`,
          * which needs a process to have exited to do it. */
@@ -471,7 +493,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
                 .stopstatus
                 .expect("a stopped job records its stop status");
         }
-        col += sprint_status(&sh.locale, &mut s, status, 0);
+        column += sprint_status(&sh.locale, &mut s, status, false);
     }
 
     let line_count = if matches!(mode, JobDisplay::Long) {
@@ -481,20 +503,20 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
     };
     for ps in 0..line_count {
         let (mut record, line_column) = if ps == 0 {
-            (s.clone(), col)
+            (s.clone(), column)
         } else {
             let continuation = format!(
                 " |\n{space:>width$}{} ",
                 process_id_text(ps_pid(sh, jp, ps)),
                 space = ' ',
-                width = indent.max(0) as usize,
+                width = indent,
             );
             let mut prefix = Vec::with_capacity(48);
             let column = append_ascii(&mut prefix, 48, &continuation) - 3;
             (prefix, column)
         };
 
-        let width = (33 - line_column).max(0) as usize;
+        let width = 33usize.saturating_sub(line_column);
         record.resize(record.len() + width.max(1), b' ');
         let _ = sh.io.get(dest).write_all(&record);
         outcmd(sh, jp, ps, dest);
@@ -531,7 +553,7 @@ pub(crate) fn showjobs(
     /* `DOWAIT_NONBLOCK`, so the wait cannot block and the poll inside it
      * has nothing to notice; the `?` is the type saying so rather than a
      * path anyone expects to take. */
-    dowait(sh, DOWAIT_NONBLOCK, None)?;
+    dowait(sh, WaitMode::Poll, None)?;
 
     /* `showjob` may remove a completed entry, so traverse a stable copy of
      * the explicit presentation order. */
@@ -636,10 +658,10 @@ fn lookup_job(sh: &crate::context::Shell, name: Option<&BStr>) -> Result<JobId, 
 pub(crate) fn getjob(
     sh: &mut crate::context::Shell,
     name: Option<&BStr>,
-    getctl: c_int,
+    require_control: bool,
 ) -> Result<JobId, Error> {
     let result = lookup_job(sh, name).and_then(|id| {
-        if getctl != 0 && !sh.jobs[id].jobctl {
+        if require_control && !sh.jobs[id].jobctl {
             Err(JobLookupError::NoControl)
         } else {
             Ok(id)
@@ -681,7 +703,7 @@ pub(crate) fn getjob(
 // [spec:posix:req:cmd.async-job-number]
 // [spec:posix:sem:cmd.async-job-control]
 // [spec:posix:req:cmd.async-known-pid-retention]
-pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
+pub fn makejob(sh: &mut crate::context::Shell, process_capacity: usize) -> JobId {
     let jp: JobId;
     let mut i: usize;
 
@@ -710,8 +732,8 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
      * an array otherwise; all that decided was where the room came from,
      * so it is the capacity here and the processes are pushed as
      * `forkparent` forks them. */
-    if nprocs > 0 {
-        job.ps.reserve_exact(nprocs as usize);
+    if process_capacity > 0 {
+        job.ps.reserve_exact(process_capacity);
     }
     if sh.jobs.jobctl {
         job.jobctl = true;
@@ -774,22 +796,27 @@ fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
 // [spec:posix:req:shenv.subshell-isolation]
 // [spec:posix:req:cmd.async-stdin-devnull]
 // [spec:nsh:req:idiom.no-raw-fd-core]
-fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>, mode: c_int) {
-    let oldlvl: c_int;
+fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>, mode: ForkMode) {
+    let oldlvl: usize;
 
     crate::shell::reset_coverage();
 
     oldlvl = sh.shell_level;
     sh.shell_level += 1;
 
-    sh.prepare_fork_child(if mode == FORK_NOJOB { n } else { None });
+    sh.prepare_fork_child(if mode == ForkMode::WithoutJob {
+        n
+    } else {
+        None
+    });
 
     /* do job control only in root shell */
     sh.jobs.jobctl = false;
 
     /* The C tests `jp->jobctl` without checking `jp`; `jp` is NULL only
      * under FORK_NOJOB, which the first conjunct has already excluded. */
-    let ownpgrp = mode != FORK_NOJOB && oldlvl == 0 && jp.is_some_and(|i| sh.jobs[i].jobctl);
+    let ownpgrp =
+        mode != ForkMode::WithoutJob && oldlvl == 0 && jp.is_some_and(|i| sh.jobs[i].jobctl);
     if ownpgrp {
         let process_group: ProcessGroupId;
         let ji: JobId = jp.unwrap();
@@ -802,12 +829,12 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
         /* This can fail because we are doing it in the parent also */
         let _ =
             nsh_platform::set_process_group(ProcessSelector::CurrentProcess, process_group.into());
-        if mode == FORK_FG {
+        if mode == ForkMode::Foreground {
             xxtcsetpgrp(sh, process_group).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
         crate::trap::setsignal_in_child(sh, nsh_platform::terminal_stop_signal().into());
         crate::trap::setsignal_in_child(sh, nsh_platform::terminal_output_signal().into());
-    } else if mode == FORK_BG {
+    } else if mode == ForkMode::Background {
         crate::trap::ignoresig_in_child(sh, nsh_platform::interrupt_signal().into());
         crate::trap::ignoresig_in_child(sh, nsh_platform::quit_signal().into());
         if jp.map_or(false, |i| sh.jobs[i].ps.is_empty()) {
@@ -820,7 +847,7 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
                 sh,
                 BStr::new(&null_path),
                 nsh_platform::OpenMode::ReadOnly,
-                0,
+                false,
             )
             .unwrap_or_else(|e| forkchild_fatal(sh, e))
             .expect("a mandatory open returns a descriptor");
@@ -845,7 +872,7 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
 
     freejob(&mut sh.interrupt_deferral, &mut sh.jobs, ji);
 
-    if crate::parser::issimplecmd(n, BStr::new(b"jobs")) != 0 {
+    if crate::parser::issimplecmd(n, BStr::new(b"jobs")) {
         return;
     }
 
@@ -864,13 +891,13 @@ fn forkparent(
     sh: &mut crate::context::Shell,
     jp: Option<JobId>,
     n: Option<&Node>,
-    mode: c_int,
+    mode: ForkMode,
     pid: ProcessId,
 ) {
     let Some(ji) = jp else {
         return;
     };
-    if mode != FORK_NOJOB && sh.jobs[ji].jobctl {
+    if mode != ForkMode::WithoutJob && sh.jobs[ji].jobctl {
         let process_group: ProcessGroupId;
 
         if sh.jobs[ji].ps.is_empty() {
@@ -882,7 +909,7 @@ fn forkparent(
         let _ =
             nsh_platform::set_process_group(ProcessSelector::Process(pid), process_group.into());
     }
-    if mode == FORK_BG {
+    if mode == ForkMode::Background {
         sh.backgndpid = Some(pid); /* set $! */
         sh.jobs.position_running(ji);
         if sh.options.enabled(ShellOption::Interactive) {
@@ -911,11 +938,11 @@ pub fn forkshell(
     sh: &mut crate::context::Shell,
     jp: Option<JobId>,
     n: Option<&Node>,
-    mode: c_int,
+    mode: ForkMode,
 ) -> Result<nsh_platform::ForkResult, Error> {
     sh.flush_input();
 
-    if mode == FORK_FG && jp.is_some_and(|i| sh.jobs[i].jobctl) {
+    if mode == ForkMode::Foreground && jp.is_some_and(|i| sh.jobs[i].jobctl) {
         capture_shell_terminal_settings(sh)?;
     }
 
@@ -953,7 +980,7 @@ pub fn forkexec(
     n: &Node,
     argv: &[&BStr],
     path: &BStr,
-    idx: c_int,
+    path_index: Option<usize>,
 ) -> Result<JobId, Error> {
     let jp: JobId;
     jp = makejob(sh, 1);
@@ -964,8 +991,8 @@ pub fn forkexec(
 
     let pid = match nsh_platform::fork_process() {
         Ok(nsh_platform::ForkResult::Child) => {
-            forkchild(sh, Some(jp), Some(n), FORK_FG);
-            let outcome = crate::exec::shellexec(sh, argv, path, idx);
+            forkchild(sh, Some(jp), Some(n), ForkMode::Foreground);
+            let outcome = crate::exec::shellexec(sh, argv, path, path_index);
             crate::shellmain::exit_from_child(sh, outcome);
         }
         Ok(nsh_platform::ForkResult::Parent(pid)) => pid,
@@ -974,7 +1001,7 @@ pub fn forkexec(
             return Err(sh.diagnostics().sh_error_value(b"Cannot fork"));
         }
     };
-    forkparent(sh, Some(jp), Some(n), FORK_FG, pid);
+    forkparent(sh, Some(jp), Some(n), ForkMode::Foreground, pid);
 
     Ok(jp)
 }
@@ -1016,9 +1043,9 @@ pub fn waitforjob(
     dowait(
         sh,
         if jp.is_some() {
-            DOWAIT_BLOCK
+            WaitMode::Block
         } else {
-            DOWAIT_NONBLOCK
+            WaitMode::Poll
         },
         jp,
     )?;
@@ -1118,7 +1145,7 @@ fn record_child_status(job: &mut Job, process: ProcessId, status: ChildStatus) -
 // [spec:posix:req:builtin.set.opt-b-notify]
 fn waitone(
     sh: &mut crate::context::Shell,
-    block: c_int,
+    mode: WaitMode,
     jobp: Option<JobId>,
 ) -> Result<WaitOutcome, Error> {
     let mut thisjob: Option<JobId> = None;
@@ -1126,7 +1153,7 @@ fn waitone(
     let mut reported_status = None;
 
     let waited = crate::error::with_interrupts_deferred(sh, |sh| {
-        let waited = waitproc(sh, block)?;
+        let waited = waitproc(sh, mode)?;
         if let WaitOutcome::Reaped { process, status } = waited {
             reported_status = Some(status);
             for id in sh.jobs.order_snapshot() {
@@ -1159,7 +1186,7 @@ fn waitone(
             &sh.locale,
             &mut message,
             reported_status.expect("a matched job has a reaped status"),
-            1,
+            true,
         );
         if !message.is_empty() {
             message.push(b'\n');
@@ -1178,7 +1205,7 @@ fn waitone(
      * jobs themselves, and a waited-for job is reported by its caller. */
     if let Some(changed_job) = thisjob {
         if notify_completion_now(
-            block,
+            mode,
             state,
             sh.jobs.jobctl,
             sh.options.enabled(ShellOption::Notify),
@@ -1195,31 +1222,31 @@ fn waitone(
 // [spec:dash:sem:jobs.dowait-fn]
 pub(crate) fn dowait(
     sh: &mut crate::context::Shell,
-    block: c_int,
+    mode: WaitMode,
     jp: Option<JobId>,
-) -> Result<c_int, Error> {
-    let gotchld: c_int = crate::siginbox::signals().child_pending() as c_int;
-    let mut wait_completed: c_int;
+) -> Result<bool, Error> {
+    let child_pending = crate::siginbox::signals().child_pending();
+    let mut wait_completed: bool;
     let mut waited: WaitOutcome;
-    let mut block: c_int = block;
+    let mut mode = mode;
 
     if jp.is_some_and(|i| !sh.jobs[i].is_running()) {
-        block = DOWAIT_NONBLOCK;
+        mode = WaitMode::Poll;
     }
 
-    if block == DOWAIT_NONBLOCK && gotchld == 0 {
-        return Ok(1);
+    if mode == WaitMode::Poll && !child_pending {
+        return Ok(true);
     }
 
-    wait_completed = 1;
+    wait_completed = true;
 
     loop {
-        waited = waitone(sh, block, jp)?;
-        wait_completed &= (waited != WaitOutcome::Interrupted) as c_int;
+        waited = waitone(sh, mode, jp)?;
+        wait_completed &= waited != WaitOutcome::Interrupted;
 
-        block &= !DOWAIT_WAITCMD_ALL;
+        mode = mode.after_observation();
         if waited == WaitOutcome::Interrupted || jp.is_some_and(|i| !sh.jobs[i].is_running()) {
-            block = DOWAIT_NONBLOCK;
+            mode = WaitMode::Poll;
         }
         if waited == WaitOutcome::Exhausted {
             break;
@@ -1246,8 +1273,8 @@ pub(crate) fn dowait(
 
 // [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
-fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<WaitOutcome, Error> {
-    let nonblocking = block != DOWAIT_BLOCK;
+fn waitproc(sh: &mut crate::context::Shell, mode: WaitMode) -> Result<WaitOutcome, Error> {
+    let nonblocking = mode.kernel_nonblocking();
     let mut waited: WaitOutcome;
 
     let signals = crate::siginbox::signals();
@@ -1283,7 +1310,7 @@ fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<WaitOutcome,
         if waited != WaitOutcome::Interrupted {
             break;
         }
-        if block == DOWAIT_NONBLOCK {
+        if !mode.suspends_for_signal() {
             waited = WaitOutcome::Exhausted;
             break;
         }
@@ -1311,16 +1338,16 @@ fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<WaitOutcome,
 
 // [spec:dash:def:jobs.stoppedjobs-fn]
 // [spec:dash:sem:jobs.stoppedjobs-fn]
-pub fn stoppedjobs(sh: &mut crate::context::Shell) -> c_int {
-    if sh.jobs.job_warning != 0 {
-        return 0;
+pub fn stoppedjobs(sh: &mut crate::context::Shell) -> bool {
+    if sh.jobs.job_warning != JobWarning::Ready {
+        return false;
     }
     if sh.jobs.current().is_some_and(|id| sh.jobs[id].is_stopped()) {
         let _ = sh.io.stderr().write_all(b"You have stopped jobs.\n");
-        sh.jobs.job_warning = 2;
-        1
+        sh.jobs.job_warning = JobWarning::Reported;
+        true
     } else {
-        0
+        false
     }
 }
 
@@ -1391,7 +1418,7 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
             cmdputs(b"for ", text);
             cmdputs(command.variable.as_bstr(), text);
             cmdputs(b" in ", text);
-            cmdlist(&command.words, 1, text);
+            cmdlist(&command.words, true, text);
             cmdputs(b"; do ", text);
             cmdtxt(Some(command.body.as_ref()), text);
             cmdputs(b"; done", text);
@@ -1401,7 +1428,7 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
             cmdputs(b"() { ... }", text);
         }
         Node::Command(command) => {
-            cmdlist(&command.arguments, 1, text);
+            cmdlist(&command.arguments, true, text);
             cmdredirs(&command.redirections, text);
         }
         Node::Word(word) => word.word.render(text),
@@ -1439,13 +1466,13 @@ fn cmdtxt_binary(command: &crate::nodes::BinaryCommand, separator: &[u8], text: 
 
 // [spec:dash:def:jobs.cmdlist-fn]
 // [spec:dash:sem:jobs.cmdlist-fn]
-fn cmdlist(np: &[Node], sep: c_int, text: &mut BString) {
+fn cmdlist(np: &[Node], space_between: bool, text: &mut BString) {
     for (i, node) in np.iter().enumerate() {
-        if sep == 0 {
+        if !space_between {
             cmdputs(b" ", text);
         }
         cmdtxt(Some(node), text);
-        if sep != 0 && i + 1 < np.len() {
+        if space_between && i + 1 < np.len() {
             cmdputs(b" ", text);
         }
     }
@@ -1627,7 +1654,7 @@ mod tests {
     #[test]
     fn immediate_notification_gates() {
         assert!(notify_completion_now(
-            DOWAIT_BLOCK,
+            WaitMode::Block,
             JobState::Done,
             true,
             true,
@@ -1635,7 +1662,7 @@ mod tests {
             false,
         ));
         assert!(!notify_completion_now(
-            DOWAIT_NONBLOCK,
+            WaitMode::Poll,
             JobState::Done,
             true,
             true,
@@ -1643,7 +1670,7 @@ mod tests {
             false,
         ));
         assert!(!notify_completion_now(
-            DOWAIT_BLOCK,
+            WaitMode::Block,
             JobState::Stopped,
             true,
             true,
@@ -1651,7 +1678,7 @@ mod tests {
             false,
         ));
         assert!(!notify_completion_now(
-            DOWAIT_BLOCK,
+            WaitMode::Block,
             JobState::Done,
             false,
             true,
@@ -1659,7 +1686,7 @@ mod tests {
             false,
         ));
         assert!(!notify_completion_now(
-            DOWAIT_BLOCK,
+            WaitMode::Block,
             JobState::Done,
             true,
             false,
@@ -1667,7 +1694,7 @@ mod tests {
             false,
         ));
         assert!(!notify_completion_now(
-            DOWAIT_BLOCK,
+            WaitMode::Block,
             JobState::Done,
             true,
             true,
@@ -1675,7 +1702,7 @@ mod tests {
             false,
         ));
         assert!(!notify_completion_now(
-            DOWAIT_BLOCK,
+            WaitMode::Block,
             JobState::Done,
             true,
             true,

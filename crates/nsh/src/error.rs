@@ -14,21 +14,15 @@ use core::sync::atomic::{Ordering, compiler_fence};
 use std::io::Write;
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 
-/*
- * Types of operations (passed to the errmsg routine).
- */
-
-pub const E_OPEN: c_int = 0o1; /* opening a file */
-pub const E_CREAT: c_int = 0o2; /* creating a file */
-pub const E_EXEC: c_int = 0o4; /* executing a program */
-
-/*
- * `sig_atomic_t` is not re-exported by the `libc` crate; on every
- * platform dash targets it is `int`.
- */
-pub type sig_atomic_t = c_int;
+/// Operation whose failure is being described.
+// [spec:nsh:req:idiom.no-abi-scalars-core]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Operation {
+    Open,
+    Create,
+    Execute,
+}
 
 /* `jmp_buf`, `struct jmploc`, the four exception codes, `handler` and
  * `exception` were all here, along with the C's comment about saving
@@ -169,7 +163,7 @@ impl crate::context::Shell {
 
 #[inline]
 pub(crate) fn poll_interrupt(context: InterruptContext) -> Option<Error> {
-    if !context.deferred && int_pending() != 0 {
+    if !context.deferred && int_pending() {
         Some(onint(context))
     } else {
         None
@@ -202,8 +196,8 @@ pub fn rearm_interrupt(e: Error) {
 
 /* `#define int_pending() intpending` */
 #[inline(always)]
-pub fn int_pending() -> sig_atomic_t {
-    crate::siginbox::signals().interrupt_pending() as sig_atomic_t
+pub fn int_pending() -> bool {
+    crate::siginbox::signals().interrupt_pending()
 }
 
 /*
@@ -308,14 +302,14 @@ pub enum Error {
         ///
         /// A [`Signal`](crate::status::Signal) since `public-api` step 5.
         /// `docs/api-design.md` §3.4 recorded that the variant would
-        /// "carry a `c_int` until then", and this is then.
+        /// "carry a plain integer until then", and this is then.
         signal: crate::status::Signal,
     },
     /// A command input source failed before it reached end-of-file.
     // [spec:posix:req:exit.unrecoverable-read-error]
     UnrecoverableRead {
         /// `errlinno` as it stood when the read failed.
-        line: c_int,
+        line: i32,
         /// The already-rendered read diagnostic.
         message: BString,
     },
@@ -328,14 +322,14 @@ pub enum Error {
     // [spec:nsh:req:compat.smoosh.error-contracts]
     Expansion {
         /// `errlinno` as it stood when expansion failed.
-        line: c_int,
+        line: i32,
         /// The diagnostic without a shell or command prefix.
         message: BString,
     },
     /// A diagnostic with no more specific variant.
     Other {
         /// `errlinno` as it stood when the diagnostic was produced.
-        line: c_int,
+        line: i32,
         /// The status the shell takes from it.
         status: crate::status::ExitStatus,
         /// dash's text, without the `sh: N: cd: ` prefix.
@@ -354,7 +348,7 @@ impl Error {
     /// the value exists to carry. Now the raise says what it took and the
     /// frame that catches it is the frame that writes it. Same shape as
     /// [`Error::reported`], which always took it this way.
-    pub fn other(line: c_int, status: impl Into<crate::status::ExitStatus>, msg: &[u8]) -> Error {
+    pub fn other(line: i32, status: impl Into<crate::status::ExitStatus>, msg: &[u8]) -> Error {
         Error::Other {
             line,
             status: status.into(),
@@ -376,7 +370,7 @@ impl Error {
     /// constructed through it. An empty message is therefore never
     /// rendered, and it must stay that way — a caller that reports one of
     /// these would emit a bare prefix and a newline dash does not.
-    pub fn reported(line: c_int, status: impl Into<crate::status::ExitStatus>) -> Error {
+    pub fn reported(line: i32, status: impl Into<crate::status::ExitStatus>) -> Error {
         Error::Other {
             line,
             status: status.into(),
@@ -386,7 +380,7 @@ impl Error {
 
     /// Build a command-input read error, retaining the special-builtin
     /// treatment required for the file operand of `.`.
-    pub fn unrecoverable_read(line: c_int, msg: &[u8], dot_operand: bool) -> Error {
+    pub fn unrecoverable_read(line: i32, msg: &[u8], dot_operand: bool) -> Error {
         if dot_operand {
             Error::other(line, 2, msg)
         } else {
@@ -450,7 +444,7 @@ impl Error {
     }
 
     /// The line the error was reported at.
-    pub fn line(&self) -> c_int {
+    pub fn line(&self) -> i32 {
         match self {
             /* No line: an interrupt did not happen *at* a line the way a
              * diagnostic did, and reading `eval.errlinno` here would report
@@ -493,7 +487,7 @@ pub(crate) struct Diagnostics<'a> {
     arg0: Option<&'a BStr>,
     invocation_name: Option<&'a BString>,
     command_name: Option<&'a BString>,
-    line: c_int,
+    line: i32,
     io: &'a mut crate::output::ShellIo,
 }
 
@@ -657,18 +651,16 @@ impl Diagnostics<'_> {
 pub fn errmsg(
     locale: &nsh_platform::Locale,
     error: &std::io::Error,
-    action: c_int,
+    operation: Operation,
 ) -> bstr::BString {
     if !nsh_platform::is_path_error(error, nsh_platform::PathErrorKind::NotFound) {
         return bstr::BString::from(locale.error_message(error));
     }
 
-    if action & E_OPEN != 0 {
-        bstr::BString::from("No such file")
-    } else if action & E_CREAT != 0 {
-        bstr::BString::from("Directory nonexistent")
-    } else {
-        bstr::BString::from("not found")
+    match operation {
+        Operation::Open => bstr::BString::from("No such file"),
+        Operation::Create => bstr::BString::from("Directory nonexistent"),
+        Operation::Execute => bstr::BString::from("not found"),
     }
 }
 
@@ -872,7 +864,7 @@ mod tests {
         });
         assert_eq!(failed, Err(()));
         assert_eq!(sh.interrupt_deferral.depth, 0);
-        assert_eq!(int_pending(), 1, "still pending, waiting for a poll site");
+        assert!(int_pending(), "still pending, waiting for a poll site");
         assert!(
             poll_interrupt(sh.interrupt_context()).is_some(),
             "and due again once unsuppressed"
@@ -894,7 +886,7 @@ mod tests {
         rearm_interrupt(Error::Interrupted {
             signal: crate::status::Signal::from(nsh_platform::interrupt_signal()),
         });
-        assert_eq!(int_pending(), 1);
+        assert!(int_pending());
         assert!(
             poll_interrupt(sh.interrupt_context()).is_some(),
             "the next poll site takes it"

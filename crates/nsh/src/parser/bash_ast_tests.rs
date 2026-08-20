@@ -18,7 +18,7 @@ fn parse(source: &[u8], bash: bool) -> Result<Node, Error> {
         crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), true).unwrap();
     }
     crate::input::setinputstring(&mut sh, BStr::new(source));
-    match parsecmd(&mut sh, 0)? {
+    match parsecmd(&mut sh, false)? {
         ParseResult::Tree(Some(tree)) => Ok(tree),
         ParseResult::Tree(None) => panic!("expected a command, found a blank parse unit"),
         ParseResult::Eof => panic!("expected a command, found EOF"),

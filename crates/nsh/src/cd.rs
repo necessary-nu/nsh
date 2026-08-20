@@ -7,7 +7,6 @@
 
 use crate::error::Error;
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 use nsh_platform::NativeStrExt as _;
 
 use crate::var::{VariableAttributes, set_bytes};
@@ -78,9 +77,9 @@ pub(crate) enum Pwd<'a> {
 pub(crate) fn setpwd_inner(
     sh: &mut crate::context::Shell,
     val: Pwd,
-    setold: c_int,
+    set_old: bool,
 ) -> Result<(), Error> {
-    if setold != 0 {
+    if set_old {
         let old = sh.cwd.curdir.clone().unwrap_or_default();
         set_bytes(
             sh,

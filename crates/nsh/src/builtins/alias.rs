@@ -7,7 +7,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 use std::io::Write;
 
 use crate::alias::{printalias, setalias};
@@ -26,7 +25,7 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.alias.interfaces]
 // [spec:posix:req:builtin.alias.exit-status]
 pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut ret: c_int = 0;
+    let mut failed = false;
 
     if args.len() == 1 {
         /* Rendered inside the walk, written after it: the walk holds
@@ -62,7 +61,7 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 message.extend_from_slice(word);
                 message.extend_from_slice(b" not found\n");
                 let _ = sh.io.stderr().write_all(&message);
-                ret = 1;
+                failed = true;
             }
         } else {
             let equals = equals.expect("the definition branch");
@@ -74,7 +73,7 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
 
-    Ok(Flow::Done((ret).into()))
+    Ok(Flow::Done(i32::from(failed).into()))
 }
 
 #[cfg(test)]

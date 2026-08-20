@@ -40,8 +40,6 @@
 //! the destination as `fn(&mut Shell, &[&BStr]) -> Result<ExitStatus,
 //! Error>`, and the receiver in that signature is this.
 
-use core::ffi::c_int;
-
 /// The shell, as an instance rather than as a process.
 ///
 /// `docs/api-design.md` §5 is the list this fills from, one table per
@@ -56,7 +54,7 @@ pub struct Shell {
     /// Every alias, by name. `alias.rs` owns the shape; this owns the
     /// value.
     pub(crate) aliases: crate::alias::AliasTable,
-    /// The command hash and `builtinloc`. Function definitions live
+    /// The command hash and `%builtin` location. Function definitions live
     /// here too, because dash stores them in the same table.
     pub(crate) commands: crate::exec::CmdTable,
     /// The shell's option flags. `options.rs` owns the shape; the
@@ -81,7 +79,7 @@ pub struct Shell {
     /// PID of the process that created this shell instance.
     pub(crate) root_pid: nsh_platform::ProcessId,
     /// Zero in the root shell and incremented in forked shell children.
-    pub(crate) shell_level: c_int,
+    pub(crate) shell_level: usize,
     /// Nesting depth of regions that defer delivery of SIGINT.
     pub(crate) interrupt_deferral: crate::error::InterruptDeferral,
     /// The shell-language descriptor namespace. Open entries own hidden
@@ -118,7 +116,7 @@ pub struct Shell {
     /// nested frame.
     pub(crate) expand: crate::expand::ExpandState,
     /// `fc -l`: list the history rather than re-running it.
-    pub(crate) displayhist: c_int,
+    pub(crate) displayhist: bool,
     /// Interactive history, the line editor, and `fc` recursion state.
     /// `histedit.rs` owns the shape; keeping it here makes two shell
     /// instances independent instead of sharing a process-global editor.
@@ -229,7 +227,7 @@ impl Shell {
             mail: crate::mail::MailState::new(),
             ifs: crate::expand::IfsCache::new(),
             expand: crate::expand::ExpandState::new(),
-            displayhist: 0,
+            displayhist: false,
             histedit: crate::histedit::HistEditState::new(),
             traps: crate::trap::TrapTable::new(),
             input: crate::input::InputStack::new(),

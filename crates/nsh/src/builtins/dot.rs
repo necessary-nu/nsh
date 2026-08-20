@@ -96,7 +96,7 @@ fn dotcmd_with_missing_status(
             crate::input::setinputfile(
                 sh,
                 fullname.as_slice().as_bstr(),
-                crate::input::INPUT_PUSH_FILE | crate::input::INPUT_DOT_FILE,
+                crate::input::InputFileOptions::DOT,
             )?;
             /* `evalbltin`'s epilogue reads `commandname` after this returns.
              * The owned path remains valid independently of the input frame. */
@@ -107,7 +107,7 @@ fn dotcmd_with_missing_status(
             // [spec:nsh:req:compat.smoosh.control-boundaries]
             let caller_loopnest = sh.eval.loopnest;
             sh.eval.loopnest = 0;
-            let outcome = cmdloop(sh, 0);
+            let outcome = cmdloop(sh, false);
             sh.eval.loopnest = caller_loopnest;
             outcome
         });

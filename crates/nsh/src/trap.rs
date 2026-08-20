@@ -7,7 +7,6 @@
 // [spec:nsh:req:idiom.operation-modes]
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 
 use crate::error::Error;
 use crate::eval::Flow;
@@ -64,14 +63,14 @@ pub struct TrapTable {
     /// `trap` command with operands.  Live dispositions are still reset on
     /// entry; POSIX requires only the pre-entry commands to remain reportable.
     subshell_listing: Option<Box<[TrapAction; NSIG]>>,
-    /// traps have not been fully cleared
-    pub(crate) ptrap: c_int,
+    /// Traps have not been fully cleared in this child.
+    pub(crate) parent_traps_pending: bool,
     /// number of non-null traps
-    pub(crate) trapcnt: c_int,
+    pub(crate) trap_count: usize,
     /// Current disposition knowledge, indexed by `signo - 1`.
     dispositions: [DispositionState; NSIG - 1],
-    /// Cached `setinteractive` mode (`on + 1`, preserving dash's sentinel).
-    interactive: c_int,
+    /// Cached interactive signal policy.
+    interactive: bool,
 }
 
 impl TrapTable {
@@ -91,10 +90,10 @@ impl TrapTable {
         TrapTable {
             action: [const { TrapAction::Default }; NSIG],
             subshell_listing: None,
-            ptrap: 0,
-            trapcnt: 0,
+            parent_traps_pending: false,
+            trap_count: 0,
             dispositions: [DispositionState::Unknown; NSIG - 1],
-            interactive: 0,
+            interactive: false,
         }
     }
 
@@ -166,8 +165,8 @@ impl TrapTable {
 
 // [spec:dash:def:trap.have-traps-fn]
 // [spec:dash:sem:trap.have-traps-fn]
-pub fn have_traps(sh: &crate::context::Shell) -> c_int {
-    sh.traps.trapcnt
+pub fn have_traps(sh: &crate::context::Shell) -> bool {
+    sh.traps.trap_count != 0
 }
 
 impl crate::context::Shell {
@@ -205,23 +204,23 @@ impl crate::context::Shell {
 ///   child.
 /// * `prepare_fork_child`'s other caller is `evalsubshell`'s no-fork arm,
 ///   which runs in the shell's own process — but it is guarded by
-///   `have_traps(sh) == 0`, and `trapcnt` counts exactly the slots with a
+///   `!have_traps(sh)`, and `trap_count` counts exactly the slots with a
 ///   non-empty action, which is exactly what the loop below skips. The
 ///   loop body is unreachable from there. (It is also `EV_EXIT`-only, so
 ///   `Shell::run` cannot reach it at all.)
-/// * `builtins::trap::trapcmd` calls it under `ptrap != 0`, and only this
-///   function ever writes `ptrap`, from `simplecmd` — which is non-zero
+/// * `builtins::trap::trapcmd` calls it while `parent_traps_pending`, and only
+///   this function writes that flag from `simple_command` — which is true
 ///   only when a fork was made *for* a `trap` command. So that `trapcmd`
-///   is running in that child, and the parent's `ptrap` stays 0.
+///   is running in that child, and the parent's flag stays false.
 // [spec:dash:def:trap.clear-traps-fn]
 // [spec:dash:sem:trap.clear-traps-fn]
 // [spec:posix:req:builtin.trap.persistence]
 // [spec:posix:req:builtin.trap.subshell-reset]
 // [spec:posix:req:builtin.trap.subshell-lexical-check]
 pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
-    let simplecmd: c_int;
+    let simple_command: bool;
 
-    simplecmd = crate::parser::issimplecmd(n, BStr::new(b"trap"));
+    simple_command = crate::parser::issimplecmd(n, BStr::new(b"trap"));
 
     crate::error::with_interrupts_deferred(sh, |sh| {
         /* One guard for the whole loop rather than one per slot. The
@@ -239,14 +238,14 @@ pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
                 setsignal_in_child(sh, signal);
             }
 
-            if simplecmd != 0 {
+            if simple_command {
                 drop(sh.traps.set(&blocked, signo, previous));
             }
             /* The C leaks the previous action in the non-simple-command arm.
              * This owned value drops it after the last possible restore. */
         }
-        sh.traps.trapcnt = 0;
-        sh.traps.ptrap = simplecmd;
+        sh.traps.trap_count = 0;
+        sh.traps.parent_traps_pending = simple_command;
         drop(blocked);
     });
 }
@@ -376,7 +375,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
         TrapAction::Ignore => crate::host::Disposition::Ignore,
         TrapAction::Command(_) => crate::host::Disposition::Catch,
     };
-    if crate::shellmain::rootshell(sh) != 0 && desired == crate::host::Disposition::Default {
+    if crate::shellmain::rootshell(sh) && desired == crate::host::Disposition::Default {
         match signal {
             signal if signal == Signal::from(nsh_platform::interrupt_signal()) => {
                 if sh.options.enabled(ShellOption::Interactive)
@@ -503,7 +502,6 @@ pub fn onsig(signal: nsh_platform::Signal) {
 // [spec:posix:req:builtin.trap.action-executed-as-eval]
 // [spec:posix:sem:signal.pending-trap-order]
 pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
-    let mut i: c_int;
     let status: crate::status::ExitStatus;
 
     /* The poll site the shell reaches most often: `evaltree` calls
@@ -529,11 +527,9 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
     signals.set_pending_signal(None);
     crate::error::barrier();
 
-    i = 0;
-    while i < NSIG as c_int - 1 {
-        let signal = Signal::from_number(i + 1).expect("trap loop visits positive signals");
+    for number in 1..NSIG {
+        let signal = Signal::from_number(number as i32).expect("trap loop visits positive signals");
         if !signals.signal_pending(signal) {
-            i += 1;
             continue;
         }
 
@@ -546,7 +542,6 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
         let command = match sh.traps.action(signal.number() as usize) {
             TrapAction::Command(command) => command.clone(),
             TrapAction::Default | TrapAction::Ignore => {
-                i += 1;
                 continue;
             }
         };
@@ -574,7 +569,6 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
             }
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
-        i += 1;
     }
 
     Ok(Flow::Done((sh.status).into()))
@@ -586,8 +580,7 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
 
 // [spec:dash:def:trap.setinteractive-fn]
 // [spec:dash:sem:trap.setinteractive-fn]
-pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
-    let on = on + 1;
+pub fn setinteractive(sh: &mut crate::context::Shell, on: bool) {
     if on == sh.traps.interactive {
         return;
     }
@@ -643,7 +636,7 @@ pub fn exitshell(
          * action alive for exactly as long and gives the buffer back. */
         let action = sh.traps.take_exit_action();
         if let TrapAction::Command(command) = action {
-            if sh.traps.ptrap != 0 {
+            if sh.traps.parent_traps_pending {
                 break 'out;
             }
             /* An error in the EXIT trap is reported and dropped -- the
@@ -701,7 +694,7 @@ pub fn exitshell(
      * raise inside the job-control teardown must not prevent the `_exit`
      * below. Dropping the diagnostic is that frame, exactly -- it caught
      * and went on -- and it is why the frame itself can go. */
-    drop(crate::jobs::setjobctl(sh, 0));
+    drop(crate::jobs::setjobctl(sh, false));
     let _ = sh.io.flushall();
     crate::shell::flush_coverage();
     sh.status

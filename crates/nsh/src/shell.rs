@@ -3,8 +3,6 @@
 
 // [spec:nsh:req:idiom.no-port-fossils]
 
-use core::ffi::c_int;
-
 /*
  * Hack to calculate maximum length.
  * (length * 8 - 1) * log10(2) + 1 + 1 + 12
@@ -13,8 +11,8 @@ use core::ffi::c_int;
 // [spec:dash:def:shell.max-int-length-fn]
 // [spec:dash:sem:shell.max-int-length-fn]
 #[inline]
-pub fn max_int_length(bytes: c_int) -> c_int {
-    ((bytes * 8 - 1) as f64 * 0.30102999566398119521 + 14.0) as c_int
+pub fn max_int_length(bytes: i32) -> i32 {
+    ((bytes * 8 - 1) as f64 * 0.30102999566398119521 + 14.0) as i32
 }
 
 /// Flush the coverage profile before a `_exit`.
