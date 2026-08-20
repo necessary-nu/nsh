@@ -162,6 +162,23 @@ fn filesystem_apis_keep_native_strings() {
     );
 }
 
+// [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot/test]
+#[test]
+fn logical_parent_requires_directory() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for source in [
+        "crates/nsh-platform/src/unix.rs",
+        "crates/nsh-platform/src/windows.rs",
+    ] {
+        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+        let parent_arm = text
+            .split_once("[spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]")
+            .expect("logical parent handling carries its POSIX rule")
+            .1;
+        assert!(parent_arm.contains("path_is_directory"));
+    }
+}
+
 // [spec:nsh:def:idiom.process-identity/test]
 // [spec:nsh:req:idiom.process-group-zero-state/test]
 #[test]

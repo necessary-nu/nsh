@@ -396,6 +396,7 @@ pub fn logical_path(current: Option<&Path>, directory: &Path) -> Option<PathBuf>
             continue;
         }
         if component == b".." {
+            // [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]
             if new.len() > limit && !path_is_directory(Path::new(OsStr::from_bytes(&new))) {
                 return None;
             }

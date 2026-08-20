@@ -506,21 +506,21 @@ pub fn absolute_path(path: &Path) -> std::io::Result<PathBuf> {
 /// Construct a logical Windows path while retaining drive and UNC roots and
 /// without resolving reparse points.
 pub fn logical_path(current: Option<&Path>, directory: &Path) -> Option<PathBuf> {
-    let combined = if directory.is_absolute() {
-        directory.to_path_buf()
-    } else if directory.has_root() {
-        match current {
-            Some(current) => current.join(directory),
-            None => absolute_path(directory).ok()?,
-        }
-    } else {
-        current?.join(directory)
+    let combined = match (directory.is_absolute(), current) {
+        (true, _) => directory.to_path_buf(),
+        (false, Some(current)) => current.join(directory),
+        (false, None) if directory.has_root() => absolute_path(directory).ok()?,
+        (false, None) => return None,
     };
     let mut normalized = PathBuf::new();
     for component in combined.components() {
         match component {
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
+                // [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]
+                if normalized.parent().is_some() && !path_is_directory(&normalized) {
+                    return None;
+                }
                 normalized.pop();
             }
             component => normalized.push(component.as_os_str()),
