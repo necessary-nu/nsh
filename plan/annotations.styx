@@ -1,4 +1,7 @@
 sites (
+    {path crates/nsh/src/lib.rs, spec (
+        [spec:nsh:req:idiom.no-port-fossils]
+    )}
     {path src/alias.c, symbol __lookupalias, spec (
         [spec:dash:def:alias.lookupalias-fn]
         [spec:dash:sem:alias.lookupalias-fn]
@@ -1414,9 +1417,6 @@ sites (
         [spec:dash:def:redir.pushredir-fn]
         [spec:dash:sem:redir.pushredir-fn]
     )}
-    {path src/redir.c, symbol redirtab, spec (
-        [spec:dash:def:redir.redirtab]
-    )}
     {path src/redir.c, symbol redirect, spec (
         [spec:dash:def:redir.redirect-fn]
         [spec:dash:sem:redir.redirect-fn]
@@ -1424,6 +1424,9 @@ sites (
     {path src/redir.c, symbol redirectsafe, spec (
         [spec:dash:def:redir.redirectsafe-fn]
         [spec:dash:sem:redir.redirectsafe-fn]
+    )}
+    {path src/redir.c, symbol redirtab, spec (
+        [spec:dash:def:redir.redirtab]
     )}
     {path src/redir.c, symbol savefd, spec (
         [spec:dash:def:redir.savefd-fn]
