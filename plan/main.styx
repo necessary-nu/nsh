@@ -6121,6 +6121,13 @@ children (
                                         kind @decision
                                         text "Operator paused Bash compatibility work on 2026-08-20 before further implementation. Preserve the current uncommitted arrays/declarations WIP and resume only after the C-shaped core surface (`mystring`, run-together identifiers, C ABI scalar types, and blanket lint suppressions) has been specified and idiomatized."
                                     }
+
+                                    {
+                                        at 2026-08-20T03:48:47.75753982Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "Operator paused Bash implementation until the idiomatic-core prerequisite chain is complete; partial arrays work is preserved in stash 642f76c."
+                                    }
                                 )
                             }
 
@@ -6940,6 +6947,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @decision
                                 text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+
+                            {
+                                at 2026-08-20T03:29:46.108228139Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }

@@ -676,6 +676,7 @@ pub fn expandarg(
     typed::expand_argument(sh, &word.word, arglist, flag)
 }
 
+// [spec:nsh:req:idiom.parser-control-flow]
 fn expandarg_inner(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
@@ -694,12 +695,7 @@ fn expandarg_inner(
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
     argstr(sh, state, text, 0, flag)?;
-    'out: {
-        let Some(arglist) = arglist else {
-            /* here document expanded — the caller reads the buffer back
-             * through `expansion_result()`. */
-            break 'out;
-        };
+    if let Some(arglist) = arglist {
         p = grabexpdest(state);
         /* `exparg.lastp = &exparg.list`.  It re-points the tail at the
          * head, which discards whatever the previous call left there —
@@ -736,7 +732,6 @@ fn expandarg_inner(
         arglist.list.append(expargl(state));
     }
 
-    /* out: */
     ifsfree(state);
     Ok(())
 }
@@ -784,23 +779,14 @@ fn argstr(
     inquotes = 0;
     length = 0;
 
-    /* `tilde:` is a label inside this `if`; `goto tilde` re-runs only the
-     * `*p == '~'` test, which is what `do_tilde` models. */
-    let mut do_tilde = false;
     if (flag & EXP_TILDE) != 0 {
         flag &= !EXP_TILDE;
-        do_tilde = true;
+        if byte_at(text, p) == C_TILDE {
+            p = exptilde(sh, state, text, p, flag);
+        }
     }
 
-    'start: loop {
-        if do_tilde {
-            /* tilde: */
-            do_tilde = false;
-            if byte_at(text, p) == C_TILDE {
-                p = exptilde(sh, state, text, p, flag);
-            }
-        }
-        /* start: */
+    'expansion: loop {
         startloc = expdest_off(state);
         loop {
             let ml: c_uint;
@@ -862,7 +848,7 @@ fn argstr(
             length = 0;
 
             if end != 0 {
-                break 'start;
+                return Ok(p - 1);
             }
 
             match c as c_char {
@@ -878,8 +864,8 @@ fn argstr(
                      */
                     p -= 1;
                     if byte_at(text, p) == C_TILDE {
-                        do_tilde = true;
-                        continue 'start; /* goto tilde */
+                        p = exptilde(sh, state, text, p, flag);
+                        continue 'expansion;
                     }
                     continue;
                 }
@@ -892,7 +878,7 @@ fn argstr(
                         && crate::mystring::cstr_prefix(slice_from(text, p)) == &dolat[1..6]
                     {
                         p = evalvar(sh, state, text, p + 1, flag | EXP_QUOTED)? + 1;
-                        continue 'start; /* goto start */
+                        continue 'expansion;
                     }
                     inquotes ^= EXP_QUOTED;
                     /* addquote: */
@@ -926,7 +912,6 @@ fn argstr(
                 CTLESC => {
                     startloc += 1;
                     length += 1;
-                    /* goto addquote */
                     if (flag & QUOTES_ESC) != 0 {
                         p -= 1;
                         length += 1;
@@ -935,24 +920,23 @@ fn argstr(
                 }
                 CTLVAR => {
                     p = evalvar(sh, state, text, p, flag | inquotes)?;
-                    continue 'start; /* goto start */
+                    continue 'expansion;
                 }
                 CTLBACKQ => {
                     let at = state.next_backquote;
                     state.next_backquote += 1;
                     let cmd = state.backquotes.get_mut(at).and_then(Option::take);
                     expbackq(sh, state, cmd.as_ref(), flag | inquotes)?;
-                    continue 'start; /* goto start */
+                    continue 'expansion;
                 }
                 CTLARI => {
                     p = expari(sh, state, text, p, flag | inquotes)?;
-                    continue 'start; /* goto start */
+                    continue 'expansion;
                 }
                 _ => {}
             }
         }
     }
-    Ok(p - 1)
 }
 
 // [spec:dash:def:expand.exptilde-fn]
@@ -989,18 +973,14 @@ fn exptilde(
             CTLQUOTEMARK => return startp,
             C_COLON => {
                 if (flag & EXP_VARTILDE) != 0 {
-                    break; /* goto done */
+                    break;
                 }
             }
-            C_SLASH | CTLENDVAR => break, /* goto done */
+            C_SLASH | CTLENDVAR => break,
             _ => {}
         }
     }
-    /* done: */
-    'out: {
-        if (flag & EXP_DISCARD) != 0 {
-            break 'out;
-        }
+    if (flag & EXP_DISCARD) == 0 {
         /* `c = *p; *p = '\0'; ...; *p = c;` — the C terminates the user
          * name in place because `getpwnam` and `lookupvar` want a C string
          * and the only one to hand is the word itself.  The word is shared,
@@ -1026,7 +1006,6 @@ fn exptilde(
             memtodest(&sh.locale, &home, flag | EXP_QUOTED, expb(state));
         }
     }
-    /* out: */
     p
 }
 
@@ -1089,11 +1068,7 @@ fn expari(
     begoff = expdest_off(state);
     p = argstr(sh, state, text, start, flag & EXP_DISCARD)?;
 
-    'out: {
-        if (flag & EXP_DISCARD) != 0 {
-            break 'out;
-        }
-
+    if (flag & EXP_DISCARD) == 0 {
         /* `start = stackblock() + begoff; STADJUST(start - expdest, expdest)`
          * made the C parser read the expression through a pointer beyond
          * the stack allocator's restored cursor.  The expression has value
@@ -1116,7 +1091,6 @@ fn expari(
         }
     }
 
-    /* out: */
     Ok(p)
 }
 
@@ -1141,11 +1115,7 @@ fn expbackq(
     let mut buf: [u8; 128] = [0; 128];
     let startloc: c_int;
 
-    'out: {
-        if (flag & EXP_DISCARD) != 0 {
-            break 'out;
-        }
-
+    if (flag & EXP_DISCARD) == 0 {
         crate::error::INTOFF(sh);
         startloc = expdest_off(state);
         /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
@@ -1159,12 +1129,9 @@ fn expbackq(
          * them. */
         crate::eval::evalbackcmd(sh, cmd, &mut in_)?;
 
-        /* The C could return bytes already buffered in `backcmd`. This
-         * implementation never did: `evalbackcmd` always returned a pipe
-         * with an empty read-ahead area. With those dead fields removed,
-         * the loop starts directly at the `read:` label. */
+        /* `evalbackcmd` always returns a pipe with an empty read-ahead
+         * area, so reading starts directly from that pipe. */
         loop {
-            /* read: */
             let Some(fd) = in_.fd.as_ref() else {
                 break;
             };
@@ -1212,7 +1179,6 @@ fn expbackq(
         /* TRACE(("evalbackq: size=%d: \"%.*s\"\n", ...)); */
     }
 
-    /* out: */
     Ok(())
 }
 
@@ -1311,47 +1277,40 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
      * buffer here. */
     let mut loc: isize = a.endp as isize;
     let mut loc2: isize = a.rmescend as isize;
-    /* `for (;; loc2--)` — the `continue`s below must still run `loc2--`,
-     * hence the inner labelled block. */
-    'forloop: loop {
-        'cont: {
-            let s: isize = if FNMATCH_IS_ENABLED { loc2 } else { loc };
-            let ml: c_uint;
+    loop {
+        let s: isize = if FNMATCH_IS_ENABLED { loc2 } else { loc };
 
-            /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
-             * *loc = c;` — see [`Scan`]: the subslice ends where the C's
-             * temporary NUL went, so nothing is written. */
-            let subject: &[u8] = if a.zero != 0 {
-                let from = if FNMATCH_IS_ENABLED {
-                    a.rmesc
-                } else {
-                    a.startp
-                };
-                between(b, from, s.max(0) as usize)
+        /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
+         * *loc = c;` — see [`Scan`]: the subslice ends where the C's
+         * temporary NUL went, so nothing is written. */
+        let subject: &[u8] = if a.zero != 0 {
+            let from = if FNMATCH_IS_ENABLED {
+                a.rmesc
             } else {
-                slice_from(b, s.max(0) as usize)
+                a.startp
             };
-            if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
-                return Some(if a.quotes != 0 { loc } else { loc2 } as usize);
-            }
+            between(b, from, s.max(0) as usize)
+        } else {
+            slice_from(b, s.max(0) as usize)
+        };
+        if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
+            return Some(if a.quotes != 0 { loc } else { loc2 } as usize);
+        }
+        loc -= 1;
+        if loc < a.startp as isize {
+            break;
+        }
+        /* if (!esc--) esc = esclen(startp, loc); */
+        let was: usize = esc;
+        esc = esc.wrapping_sub(1);
+        if was == 0 {
+            esc = mesclen_bytes(&b[a.startp..], loc as usize - a.startp, CTLESC);
+        }
+        if esc % 2 != 0 {
+            esc -= 1;
             loc -= 1;
-            if loc < a.startp as isize {
-                break 'forloop;
-            }
-            /* if (!esc--) esc = esclen(startp, loc); */
-            let was: usize = esc;
-            esc = esc.wrapping_sub(1);
-            if was == 0 {
-                esc = mesclen_bytes(&b[a.startp..], loc as usize - a.startp, CTLESC);
-            }
-            if esc % 2 != 0 {
-                esc -= 1;
-                loc -= 1;
-                break 'cont; /* continue */
-            }
-            if byte_at_i(b, loc) != CTLMBCHAR {
-                break 'cont; /* continue */
-            }
+        } else if byte_at_i(b, loc) == CTLMBCHAR {
+            let ml: c_uint;
 
             loc -= 1;
             ml = byte_at_i(b, loc) as u8 as c_uint;
@@ -1419,31 +1378,25 @@ fn subevalvar(
 
     startp = startloc as usize;
 
-    'out: {
-        match subtype {
-            VSASSIGN => {
-                let name = crate::mystring::cstr_prefix(
-                    &text[str.expect("VSASSIGN carries the variable's name")..],
-                );
-                let name = crate::var::varname(name);
-                let value = crate::mystring::cstr_prefix(&expb(state)[startp..]);
-                crate::var::set_bytes(sh, name, Some(value), 0)?;
+    if subtype == VSASSIGN {
+        let name = crate::mystring::cstr_prefix(
+            &text[str.expect("VSASSIGN carries the variable's name")..],
+        );
+        let name = crate::var::varname(name);
+        let value = crate::mystring::cstr_prefix(&expb(state)[startp..]);
+        crate::var::set_bytes(sh, name, Some(value), 0)?;
 
-                loc = startp;
-                break 'out;
-            }
-
-            VSQUESTION => {
-                /* `varunset` stopped diverging with this commit, so this
-                 * has to be a `return` and not a bare call. It was a stop
-                 * before — docs/errors-are-values.md 0.2 is the bug that
-                 * happens when one of these is missed, and `Error` is
-                 * `#[must_use]` so the compiler now names it. */
-                let umsg = crate::mystring::cstr_prefix(&expb(state)[startp..]);
-                let var = str.expect("VSQUESTION carries the variable's name");
-                return Err(varunset(sh, text, start, var, Some(umsg), varflags));
-            }
-            _ => {}
+        loc = startp;
+    } else {
+        if subtype == VSQUESTION {
+            /* `varunset` stopped diverging with this commit, so this
+             * has to be a `return` and not a bare call. It was a stop
+             * before — docs/errors-are-values.md 0.2 is the bug that
+             * happens when one of these is missed, and `Error` is
+             * `#[must_use]` so the compiler now names it. */
+            let umsg = crate::mystring::cstr_prefix(&expb(state)[startp..]);
+            let var = str.expect("VSQUESTION carries the variable's name");
+            return Err(varunset(sh, text, start, var, Some(umsg), varflags));
         }
 
         subtype -= VSTRIMRIGHT;
@@ -1529,7 +1482,6 @@ fn subevalvar(
         loc = startp + (rmescend - rmesc);
     }
 
-    /* out: */
     /* `*loc = '\0'; STADJUST(loc - expdest, expdest)` — the terminator is
      * written *at* the new cursor, so it lands one past the length rather
      * than inside it.  `push` then `pop` is how an owned buffer says
@@ -1611,10 +1563,12 @@ fn evalvar(
         _ => 0,
     };
 
-    /* `record:` and `really_record:` are the two joins at the bottom. */
-    let mut really_record = false;
+    enum RecordPolicy {
+        IfPresent,
+        Always,
+    }
 
-    'again: loop {
+    let record_policy = loop {
         varlen = varvalue(
             sh,
             state,
@@ -1642,7 +1596,7 @@ fn evalvar(
                     p,
                     flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD),
                 )?;
-                break 'again; /* goto record */
+                break RecordPolicy::IfPresent;
             }
 
             VSASSIGN | VSQUESTION => {
@@ -1659,12 +1613,12 @@ fn evalvar(
                 )?;
 
                 if ((flag | !discard) & EXP_DISCARD) != 0 {
-                    break 'again; /* goto record */
+                    break RecordPolicy::IfPresent;
                 }
 
                 varflags &= !VSNUL;
                 subtype = VSNORMAL;
-                continue 'again;
+                continue;
             }
             _ => {}
         }
@@ -1685,12 +1639,11 @@ fn evalvar(
                 flag,
                 expb(state),
             );
-            really_record = true;
-            break 'again; /* goto really_record */
+            break RecordPolicy::Always;
         }
 
         if subtype == VSNORMAL {
-            break 'again; /* goto record */
+            break RecordPolicy::IfPresent;
         }
 
         /* #ifdef DEBUG
@@ -1715,17 +1668,13 @@ fn evalvar(
 
         patloc = expdest_off(state);
         p = subevalvar(sh, state, text, p, None, patloc, startloc, varflags, flag)?;
-        break 'again;
+        break RecordPolicy::IfPresent;
+    };
+
+    if matches!(record_policy, RecordPolicy::IfPresent) && ((flag | discard) & EXP_DISCARD) != 0 {
+        return Ok(p);
     }
 
-    /* record: */
-    if !really_record {
-        if ((flag | discard) & EXP_DISCARD) != 0 {
-            return Ok(p);
-        }
-    }
-
-    /* really_record: */
     if quoted != 0 {
         quoted = (byte_at(text, var) == C_AT && sh.options.shellparam.nparam != 0) as c_int;
         if quoted == 0 {
@@ -1787,13 +1736,10 @@ fn mbtodest(
     /* `p = p - 1` */
     let p: &[u8] = &src[at - 1..];
     ml = locale.multibyte_len(p).unwrap_or(usize::MAX);
-    'out: {
-        if ml == (0 as usize).wrapping_sub(2) || ml == (0 as usize).wrapping_sub(1) || ml < 2 {
-            chtodest(p[0] as c_char as c_int, syntax, dst);
-            ml = 1;
-            break 'out;
-        }
-
+    if ml == (0 as usize).wrapping_sub(2) || ml == (0 as usize).wrapping_sub(1) || ml < 2 {
+        chtodest(p[0] as c_char as c_int, syntax, dst);
+        ml = 1;
+    } else {
         /* `syntax[CTLMBCHAR]` — CTLMBCHAR is negative; see the note in
          * `memtodest` about the unbiased `is_type` table. Negative is an
          * ordinary index now, and a checked one. */
@@ -1816,7 +1762,6 @@ fn mbtodest(
         }
     }
 
-    /* out: */
     /* `ql` is the C's "how far did q move", which the destination's own
      * length now answers for the only caller. It is still returned
      * because `mbpair` is the C's return type and carries a spec rule;
@@ -1927,31 +1872,29 @@ fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut 
 
     /* for (; len; len--) */
     while i < src.len() {
-        'cont: {
-            let c: c_int = src[i] as c_char as c_int;
-            i += 1;
+        let c: c_int = src[i] as c_char as c_int;
+        i += 1;
 
-            if c == 0 && (flags & EXP_KEEPNUL) == 0 {
-                break 'cont; /* continue */
-            }
-
-            count += 1;
-
-            if c < 0 {
-                /* `mbtodest(p, ...)` is called with `p` already past the
-                 * byte it is about to decode, and starts by stepping
-                 * back over it; `i` is that same position. */
-                let mbp: mbpair = mbtodest(locale, src, i, dst, syntax);
-                let mlm: c_uint;
-
-                /* `q += mbp.ql` — the append did it. */
-                mlm = mbp.ml;
-                i += mlm as usize;
-                break 'cont; /* continue */
-            }
-
-            chtodest(c, syntax, dst);
+        if c == 0 && (flags & EXP_KEEPNUL) == 0 {
+            continue;
         }
+
+        count += 1;
+
+        if c < 0 {
+            /* `mbtodest(p, ...)` is called with `p` already past the
+             * byte it is about to decode, and starts by stepping
+             * back over it; `i` is that same position. */
+            let mbp: mbpair = mbtodest(locale, src, i, dst, syntax);
+            let mlm: c_uint;
+
+            /* `q += mbp.ql` — the append did it. */
+            mlm = mbp.ml;
+            i += mlm as usize;
+            continue;
+        }
+
+        chtodest(c, syntax, dst);
     }
 
     /* The C's `expdest = q` was this port's `set_len` over bytes a raw
@@ -2017,8 +1960,6 @@ fn varvalue(
     let mut len: isize = 0;
     let start: usize;
     let discard: c_int;
-    let mut num: c_int = 0;
-    let mut value: Option<BString> = None;
     let name = crate::var::varname(name);
     let name_byte = name.first().copied().unwrap_or_default() as c_char;
 
@@ -2045,118 +1986,48 @@ fn varvalue(
     seplen = ((flags as c_int) & EXP_FULL) as usize;
     start = expdest_off(state) as usize;
 
-    'sw: {
-        'value: {
-            'param: {
-                'numvar: {
-                    match name_byte {
-                        C_DOLLAR => {
-                            num = sh.root_pid;
-                            break 'numvar;
-                        }
-                        C_QUESTION => {
-                            num = sh.status;
-                            break 'numvar;
-                        }
-                        C_HASH => {
-                            num = sh.options.shellparam.nparam;
-                            break 'numvar;
-                        }
-                        C_BANG => {
-                            num = sh.backgndpid as c_int;
-                            if num == 0 {
-                                return Ok(-1);
-                            }
-                            break 'numvar;
-                        }
-                        C_MINUS => {
-                            /* `makestrspace(NOPTS, expdest)` and a run of
-                             * `USTPUTC` through the cursor, committed by
-                             * assigning `expdest`.  Appending writes the
-                             * same bytes in the same order and makes the
-                             * reservation the allocator's business rather
-                             * than a bound this loop has to keep -- the
-                             * same trade the encoder took in `02bf791`. */
-                            let mut i = crate::options::NOPTS;
-                            while i > 0 {
-                                i -= 1;
-                                let letter = crate::options::optletters[i];
-                                if sh.options.flag(i) != 0 && letter != 0 {
-                                    expb(state).push(letter as u8);
-                                    len += 1;
-                                }
-                            }
-                            break 'sw;
-                        }
-                        C_AT | C_STAR => {
-                            if name_byte == C_AT {
-                                if ((flags as c_int) & (EXP_QUOTED | EXP_FULL))
-                                    == (EXP_QUOTED | EXP_FULL)
-                                {
-                                    break 'param;
-                                }
-                                /* fall through to case '*' */
-                            }
-                            /* We will set seplen to 0 or !0 depending on
-                             * whether we're doing field splitting.  We
-                             * won't do field splitting if either we're
-                             * quoted or seplen is zero.
-                             *
-                             * Instead of testing (quoted || !sep) the
-                             * following trick optimises away any branches
-                             * by using the fact that EXP_QUOTED (which is
-                             * the only bit that can be set in quoted) is
-                             * the same as EXP_FULL << CHAR_BIT (which is
-                             * the only bit that can be set in sep).
-                             */
-                            seplen &= (!(flags >> CHAR_BIT)) as usize;
-                            if seplen == 0 {
-                                seps = sh.ifs.ncifs.as_slice();
-                            }
-                            seplen = (seplen.wrapping_sub(1) & sh.ifs.ifsmb0len.wrapping_sub(1))
-                                .wrapping_add(1);
-                            break 'param;
-                        }
-                        c if c >= C_0 && c <= C_9 => {
-                            num = crate::mystring::decimal_digits(name)
-                                .unwrap_or(0)
-                                .min(c_int::MAX as u64) as c_int;
-                            if num > sh.options.shellparam.nparam {
-                                return Ok(-1);
-                            }
-                            value = if num != 0 {
-                                sh.options.shellparam.words().get(num as usize - 1).cloned()
-                            } else {
-                                sh.options.arg0().map(BStr::to_owned)
-                            };
-                            break 'value;
-                        }
-                        _ => {
-                            /* default: */
-                            value = crate::var::lookup_bytes(sh, name);
-                            break 'value;
-                        }
+    match name_byte {
+        C_DOLLAR | C_QUESTION | C_HASH | C_BANG => {
+            let num = match name_byte {
+                C_DOLLAR => sh.root_pid,
+                C_QUESTION => sh.status,
+                C_HASH => sh.options.shellparam.nparam,
+                C_BANG => {
+                    let pid = sh.backgndpid as c_int;
+                    if pid == 0 {
+                        return Ok(-1);
                     }
+                    pid
                 }
-                /* numvar: */
-                len = cvtnum(&sh.locale, num as i64, flags as c_int, expb(state)) as isize;
-                break 'sw;
+                _ => unreachable!(),
+            };
+            len = cvtnum(&sh.locale, num as i64, flags as c_int, expb(state)) as isize;
+        }
+        C_MINUS => {
+            let mut i = crate::options::NOPTS;
+            while i > 0 {
+                i -= 1;
+                let letter = crate::options::optletters[i];
+                if sh.options.flag(i) != 0 && letter != 0 {
+                    expb(state).push(letter as u8);
+                    len += 1;
+                }
             }
-            /* param: */
-            let params = sh.options.shellparam.words();
-            if params.is_empty() {
-                break 'sw;
+        }
+        C_AT | C_STAR => {
+            if name_byte != C_AT
+                || ((flags as c_int) & (EXP_QUOTED | EXP_FULL)) != (EXP_QUOTED | EXP_FULL)
+            {
+                seplen &= (!(flags >> CHAR_BIT)) as usize;
+                if seplen == 0 {
+                    seps = sh.ifs.ncifs.as_slice();
+                }
+                seplen =
+                    (seplen.wrapping_sub(1) & sh.ifs.ifsmb0len.wrapping_sub(1)).wrapping_add(1);
             }
-            for (index, param) in params.iter().enumerate() {
+
+            for (index, param) in sh.options.shellparam.words().iter().enumerate() {
                 if index != 0 {
-                    /* `memtodest(seps, seplen, ...)` — the C reads `seplen`
-                     * bytes from `seps`, and the two are set together above:
-                     * one byte of `nullstr`, or `ifsmb0len` bytes of `IFS`,
-                     * which is the length of its first character and so at
-                     * most `IFS`'s own.  Asserted rather than clamped: a
-                     * clamp would turn the C reading past its buffer into a
-                     * shorter separator and say nothing, which is the one
-                     * outcome worse than either. */
                     debug_assert!(
                         seplen <= seps.len(),
                         "varvalue: separator length {seplen} exceeds the {} bytes it names",
@@ -2177,19 +2048,44 @@ fn varvalue(
                     expb(state),
                 ) as isize;
             }
-            break 'sw;
         }
-        /* value: */
-        let Some(value) = value.as_ref() else {
-            return Ok(-1);
-        };
-
-        len = strtodest(
-            &sh.locale,
-            crate::mystring::cstr_prefix(value).as_bytes(),
-            flags as c_int,
-            expb(state),
-        ) as isize;
+        c if (C_0..=C_9).contains(&c) => {
+            let position = crate::mystring::decimal_digits(name)
+                .unwrap_or(0)
+                .min(c_int::MAX as u64) as c_int;
+            if position > sh.options.shellparam.nparam {
+                return Ok(-1);
+            }
+            let value = if position != 0 {
+                sh.options
+                    .shellparam
+                    .words()
+                    .get(position as usize - 1)
+                    .cloned()
+            } else {
+                sh.options.arg0().map(BStr::to_owned)
+            };
+            let Some(value) = value else {
+                return Ok(-1);
+            };
+            len = strtodest(
+                &sh.locale,
+                crate::mystring::cstr_prefix(&value).as_bytes(),
+                flags as c_int,
+                expb(state),
+            ) as isize;
+        }
+        _ => {
+            let Some(value) = crate::var::lookup_bytes(sh, name) else {
+                return Ok(-1);
+            };
+            len = strtodest(
+                &sh.locale,
+                crate::mystring::cstr_prefix(&value).as_bytes(),
+                flags as c_int,
+                expb(state),
+            ) as isize;
+        }
     }
 
     if discard != 0 {
@@ -2238,38 +2134,34 @@ fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
         sh.ifs.ncifs.as_slice()
     };
 
-    'out: {
-        if ifs[0] != 0 && !sh.ifs.wcifs.is_empty() {
-            if (wc & 0x80) != 0 {
-                /* `ml` came from `mbnext` over this same slice, so the
-                 * clamp can only bite where the C read past the word's
-                 * end -- and a short read fails the `!= ml` test exactly
-                 * as a malformed character does.  The same trade
-                 * `ccmatch_bytes` records. */
-                let n = (ml as usize).min(s.len());
-                let Some(wc2) = sh.locale.decode_exact(&s[..n], ml as usize) else {
-                    break 'out;
-                };
-                wc = wc2;
-            }
-
-            isifs = wcifs_chr(&sh.ifs.wcifs, wc);
-            ifs0 = sh.ifs.wcifs[0];
-        } else if ml == 0 {
-            /* `strchr` matches the terminator, so a NUL character --
-             * which is what `ml == 0` means -- counts as an IFS byte.
-             * The counted terminator on `ncifs` keeps that, and it is why
-             * the slice is searched whole rather than trimmed. */
-            isifs = ifs.contains(&(wc as u8));
-            ifs0 = ifs[0] as i32;
+    if ifs[0] != 0 && !sh.ifs.wcifs.is_empty() {
+        if (wc & 0x80) != 0 {
+            /* `ml` came from `mbnext` over this same slice, so the
+             * clamp can only bite where the C read past the word's
+             * end -- and a short read fails the `!= ml` test exactly
+             * as a malformed character does.  The same trade
+             * `ccmatch_bytes` records. */
+            let n = (ml as usize).min(s.len());
+            let Some(wc2) = sh.locale.decode_exact(&s[..n], ml as usize) else {
+                return 0;
+            };
+            wc = wc2;
         }
 
-        if isifs {
-            isdefifs = sh.locale.wide_is_space(if wc != 0 { wc } else { ifs0 });
-        }
+        isifs = wcifs_chr(&sh.ifs.wcifs, wc);
+        ifs0 = sh.ifs.wcifs[0];
+    } else if ml == 0 {
+        /* `strchr` matches the terminator, so a NUL character --
+         * which is what `ml == 0` means -- counts as an IFS byte.
+         * The counted terminator on `ncifs` keeps that, and it is why
+         * the slice is searched whole rather than trimmed. */
+        isifs = ifs.contains(&(wc as u8));
+        ifs0 = ifs[0] as i32;
     }
 
-    /* out: */
+    if isifs {
+        isdefifs = sh.locale.wide_is_space(if wc != 0 { wc } else { ifs0 });
+    }
     (isifs as c_uint) << 1 | (isdefifs as c_uint)
 }
 
@@ -2325,41 +2217,39 @@ fn ifsbreakup_slow(
      * of the characters to remove, or NULL
      * if no characters should be removed.
      */
-    'out_zero_ifsspc: {
-        if ifst.maxargs == 0 {
-            if isdefifs {
-                if ifst.r.is_none() {
-                    ifst.r = Some(q);
-                }
-                return p;
+    if ifst.maxargs == 0 {
+        if isdefifs {
+            if ifst.r.is_none() {
+                ifst.r = Some(q);
             }
+            return p;
+        }
 
-            if !(isifs && ifst.ifsspc != 0) {
-                ifst.r = None;
-            }
-        } else if ifst.ifsspc != 0 {
-            if isifs {
-                q = p;
-            }
+        if !(isifs && ifst.ifsspc != 0) {
+            ifst.r = None;
+        }
+    } else if ifst.ifsspc != 0 {
+        if isifs {
+            q = p;
+        }
 
-            ifst.start = q;
+        ifst.start = q;
 
-            if isdefifs {
-                return p;
-            }
-        } else if isifs {
-            let mut ifsspc: c_int = ifst.ifsspc;
+        if isdefifs {
+            return p;
+        }
+    } else if isifs {
+        let mut ifsspc: c_int = ifst.ifsspc;
 
-            if nulonly == 0 {
-                ifsspc = isdefifs as c_int;
-                ifst.ifsspc = ifsspc;
-            }
+        if nulonly == 0 {
+            ifsspc = isdefifs as c_int;
+            ifst.ifsspc = ifsspc;
+        }
 
-            /* Ignore IFS whitespace at start */
-            if q == ifst.start && ifsspc != 0 {
-                ifst.start = p;
-                break 'out_zero_ifsspc; /* goto out_zero_ifsspc */
-            }
+        /* Ignore IFS whitespace at start. */
+        if q == ifst.start && ifsspc != 0 {
+            ifst.start = p;
+        } else {
             /* if (ifst->maxargs > 0 && !--ifst->maxargs) */
             if ifst.maxargs > 0 && {
                 ifst.maxargs -= 1;
@@ -2375,7 +2265,6 @@ fn ifsbreakup_slow(
         }
     }
 
-    /* out_zero_ifsspc: */
     ifst.ifsspc = 0;
     p
 }
@@ -2412,105 +2301,102 @@ fn ifsbreakup_regions(
     };
     let mut nulonly: c_int;
     let mut p: usize;
+    let mut preserve_nul_field = false;
 
-    'add: {
-        if !regions.is_empty() {
+    if !regions.is_empty() {
+        ifst.ifsspc = 0;
+        nulonly = 0;
+        /* `realifs = ifsset() ? ncifs : nullstr` is gone with the
+         * pointer it cached: `ifsisifs` reads `IFS` off the shell,
+         * and what it needs from here is the one bit below. */
+        ifsp = 0;
+        loop {
+            let afternul: c_int;
+            let endoff: c_int = regions[ifsp].endoff;
+
+            p = regions[ifsp].begoff as usize;
+            debug_assert!(
+                endoff as usize <= string.len(),
+                "a recorded region ends past the word it was recorded in"
+            );
+            afternul = nulonly;
+            nulonly = regions[ifsp].nulonly;
+            ifst.nulonly = nulonly;
             ifst.ifsspc = 0;
-            nulonly = 0;
-            /* `realifs = ifsset() ? ncifs : nullstr` is gone with the
-             * pointer it cached: `ifsisifs` reads `IFS` off the shell,
-             * and what it needs from here is the one bit below. */
-            ifsp = 0;
             loop {
-                let afternul: c_int;
-                let endoff: c_int = regions[ifsp].endoff;
+                let p0: usize = p;
 
-                p = regions[ifsp].begoff as usize;
-                debug_assert!(
-                    endoff as usize <= string.len(),
-                    "a recorded region ends past the word it was recorded in"
-                );
-                afternul = nulonly;
-                nulonly = regions[ifsp].nulonly;
-                ifst.nulonly = nulonly;
-                ifst.ifsspc = 0;
-                loop {
-                    let p0: usize = p;
+                /* `stackblock() + endoff - p >= 8` — eight bytes of
+                 * this region left to look at.  As offsets it is also
+                 * the bound that makes the load below a checked one. */
+                while endoff as usize >= p + 8 {
+                    /* union { uint64_t qw; unsigned char b[8]; } x; */
+                    let b: [u8; 8] = string[p..p + 8].try_into().unwrap();
+                    let qw: u64 = u64::from_ne_bytes(b);
 
-                    /* `stackblock() + endoff - p >= 8` — eight bytes of
-                     * this region left to look at.  As offsets it is also
-                     * the bound that makes the load below a checked one. */
-                    while endoff as usize >= p + 8 {
-                        /* union { uint64_t qw; unsigned char b[8]; } x; */
-                        let b: [u8; 8] = string[p..p + 8].try_into().unwrap();
-                        let qw: u64 = u64::from_ne_bytes(b);
-
-                        if (qw & 0x8080808080808080) != 0 {
-                            break;
-                        }
-                        if (sh.ifs.ifsmap[b[0] as usize]
-                            | sh.ifs.ifsmap[b[1] as usize]
-                            | sh.ifs.ifsmap[b[2] as usize]
-                            | sh.ifs.ifsmap[b[3] as usize]
-                            | sh.ifs.ifsmap[b[4] as usize]
-                            | sh.ifs.ifsmap[b[5] as usize]
-                            | sh.ifs.ifsmap[b[6] as usize]
-                            | sh.ifs.ifsmap[b[7] as usize])
-                            != 0
-                        {
-                            break;
-                        }
-                        p += 8;
-                    }
-
-                    if p != p0 {
-                        if ifst.maxargs == 0 {
-                            ifst.r = None;
-                        } else if ifst.ifsspc != 0 {
-                            ifst.start = p0;
-                        }
-                        ifst.ifsspc = 0;
-                    }
-
-                    if p >= endoff as usize {
+                    if (qw & 0x8080808080808080) != 0 {
                         break;
                     }
-
-                    p = ifsbreakup_slow(sh, &mut ifst, fields, afternul | nulonly, string, p);
+                    if (sh.ifs.ifsmap[b[0] as usize]
+                        | sh.ifs.ifsmap[b[1] as usize]
+                        | sh.ifs.ifsmap[b[2] as usize]
+                        | sh.ifs.ifsmap[b[3] as usize]
+                        | sh.ifs.ifsmap[b[4] as usize]
+                        | sh.ifs.ifsmap[b[5] as usize]
+                        | sh.ifs.ifsmap[b[6] as usize]
+                        | sh.ifs.ifsmap[b[7] as usize])
+                        != 0
+                    {
+                        break;
+                    }
+                    p += 8;
                 }
 
-                ifsp += 1;
-                if ifsp >= regions.len() {
+                if p != p0 {
+                    if ifst.maxargs == 0 {
+                        ifst.r = None;
+                    } else if ifst.ifsspc != 0 {
+                        ifst.start = p0;
+                    }
+                    ifst.ifsspc = 0;
+                }
+
+                if p >= endoff as usize {
                     break;
                 }
+
+                p = ifsbreakup_slow(sh, &mut ifst, fields, afternul | nulonly, string, p);
             }
-            if nulonly != 0 {
-                break 'add; /* goto add */
-            }
-            if let Some(r) = ifst.r {
-                /* This is the one write into `string` that happens after
-                 * `ifsbreakup_slow` has stopped emitting fields, and the
-                 * fields no longer alias `string` — they copied out at the
-                 * instant each was terminated.  So it has to land in the
-                 * field that has *not* been created yet, which is the one
-                 * `add:` below takes from `ifst.start`.  It does: `r` is
-                 * only ever set once `maxargs` has reached 0, and the two
-                 * branches that set it both return without emitting, so no
-                 * field is taken between the two points. */
-                debug_assert!(
-                    r >= ifst.start,
-                    "the trailing-IFS truncation lands in an already-taken field"
-                );
-                string[r] = C_NUL as u8;
+
+            ifsp += 1;
+            if ifsp >= regions.len() {
+                break;
             }
         }
-
-        if byte_at(string, ifst.start) == C_NUL {
-            return;
+        if nulonly != 0 {
+            preserve_nul_field = true;
+        } else if let Some(r) = ifst.r {
+            /* This is the one write into `string` that happens after
+             * `ifsbreakup_slow` has stopped emitting fields, and the
+             * fields no longer alias `string` — they copied out at the
+             * instant each was terminated.  So it has to land in the
+             * field that has *not* been created yet, which is the one
+             * `add:` below takes from `ifst.start`.  It does: `r` is
+             * only ever set once `maxargs` has reached 0, and the two
+             * branches that set it both return without emitting, so no
+             * field is taken between the two points. */
+            debug_assert!(
+                r >= ifst.start,
+                "the trailing-IFS truncation lands in an already-taken field"
+            );
+            string[r] = C_NUL as u8;
         }
     }
 
-    /* add: */
+    if !preserve_nul_field && byte_at(string, ifst.start) == C_NUL {
+        return;
+    }
+
     fields.push(strlist::from_cbytes(&string[ifst.start..]));
 }
 
@@ -2625,76 +2511,62 @@ fn expandmeta(
     let mut globbuf: BString = BString::new(Vec::new());
 
     for mut str in words {
-        let savelastp: usize;
-        'sw: {
-            'nometa: {
-                if fflag(sh) != 0 {
-                    break 'nometa;
-                }
-                let text = crate::mystring::cstr_prefix(&str.text);
-                if text.find_byteset(b"*?]").is_none() || text == b"]" {
-                    break 'nometa;
-                }
-                /* `savelastp = exparg.lastp` — where this word's matches
-                 * will start, so that the sort below covers them and not
-                 * the words already in the list. */
-                savelastp = expargl(state).len();
+        let text = crate::mystring::cstr_prefix(&str.text);
+        let has_meta = fflag(sh) == 0 && text.find_byteset(b"*?]").is_some() && text != b"]";
+        if has_meta {
+            /* `savelastp = exparg.lastp` — where this word's matches
+             * will start, so that the sort below covers them and not
+             * the words already in the list. */
+            let savelastp = expargl(state).len();
 
-                crate::error::INTOFF(sh);
-                pattern.clear();
-                pattern.extend_from_slice(text);
-                pattern.push(0);
-                let pattern_len = rmescapes_buffer(&mut pattern, RMESCAPE_GLOB);
-                pattern.truncate(pattern_len + 1);
+            crate::error::INTOFF(sh);
+            pattern.clear();
+            pattern.extend_from_slice(text);
+            pattern.push(0);
+            let pattern_len = rmescapes_buffer(&mut pattern, RMESCAPE_GLOB);
+            pattern.truncate(pattern_len + 1);
 
-                /* The C's top-level `expmeta` starts on whatever block the
-                 * region is on and gets away with it because `expdir_len`
-                 * is 0: it writes from the base and never reads what was
-                 * there.  An owned buffer's length is not 0 — the previous
-                 * glob's `addfnamealt` left it at that glob's `expdir_len`
-                 * — and every consequence of carrying it in is benign,
-                 * which is the reason to clear rather than to argue.  The
-                 * frame invariant is then an equality, and an equality is
-                 * what `expmeta` can assert on entry.
-                 *
-                 * `p` is `pattern`'s buffer (or `str.text`, when
-                 * `_rmescapes` found nothing to remove and returned its
-                 * argument).  Neither is the glob buffer, which is what
-                 * makes lending both to `expmeta` at once sound; the
-                 * pattern is read-only from here down. */
-                globbuf.clear();
-                expmeta(
-                    &sh.locale,
-                    state,
-                    &mut globbuf,
-                    crate::mystring::cstr_prefix(&pattern),
-                    0,
-                );
-                /* `if (p != str->text) ckfree(p)` — the C's way of asking
-                 * "did `_rmescapes` allocate?".  `pattern` owns the bytes
-                 * either way now, and the next iteration reuses it. */
-                crate::error::INTON(sh);
-                if expargl(state).len() == savelastp {
-                    /*
-                     * no matches
-                     */
-                    break 'nometa;
-                } else {
-                    /* `*exparg.lastp = NULL; sp = expsort(*savelastp);
-                     * *savelastp = sp; while (sp->next) sp = sp->next;
-                     * exparg.lastp = &sp->next;` — terminate the run this
-                     * word added, sort it, splice it back and walk to its
-                     * new end.  Three of those four exist to re-find the
-                     * tail of a list the sort reordered; a slice's tail
-                     * does not move. */
-                    expsort(&sh.locale, &mut expargl(state)[savelastp..]);
-                    break 'sw;
-                }
+            /* The C's top-level `expmeta` starts on whatever block the
+             * region is on and gets away with it because `expdir_len`
+             * is 0: it writes from the base and never reads what was
+             * there.  An owned buffer's length is not 0 — the previous
+             * glob's `addfnamealt` left it at that glob's `expdir_len`
+             * — and every consequence of carrying it in is benign,
+             * which is the reason to clear rather than to argue.  The
+             * frame invariant is then an equality, and an equality is
+             * what `expmeta` can assert on entry.
+             *
+             * `p` is `pattern`'s buffer (or `str.text`, when
+             * `_rmescapes` found nothing to remove and returned its
+             * argument).  Neither is the glob buffer, which is what
+             * makes lending both to `expmeta` at once sound; the
+             * pattern is read-only from here down. */
+            globbuf.clear();
+            expmeta(
+                &sh.locale,
+                state,
+                &mut globbuf,
+                crate::mystring::cstr_prefix(&pattern),
+                0,
+            );
+            /* `if (p != str->text) ckfree(p)` — the C's way of asking
+             * "did `_rmescapes` allocate?".  `pattern` owns the bytes
+             * either way now, and the next iteration reuses it. */
+            crate::error::INTON(sh);
+            if expargl(state).len() != savelastp {
+                /* `*exparg.lastp = NULL; sp = expsort(*savelastp);
+                 * *savelastp = sp; while (sp->next) sp = sp->next;
+                 * exparg.lastp = &sp->next;` — terminate the run this
+                 * word added, sort it, splice it back and walk to its
+                 * new end.  Three of those four exist to re-find the
+                 * tail of a list the sort reordered; a slice's tail
+                 * does not move. */
+                expsort(&sh.locale, &mut expargl(state)[savelastp..]);
+                continue;
             }
-            /* nometa: */
-            str.rmescapes();
-            expargl(state).push(str);
         }
+        str.rmescapes();
+        expargl(state).push(str);
     }
     Ok(())
 }
@@ -2853,223 +2725,201 @@ fn expmeta(
      * `expmeta` recurses, one frame per path component. */
     let mut globenc: BString = BString::new(Vec::new());
 
-    /* The C has `if (unlikely(err = setjmp(jmploc.loc))) goto out;` here
-     * and a matching `longjmp` at `out_opendir`, over a `jmploc` it never
-     * installs — `handler = &jmploc` is missing, so nothing can jump into
-     * it, `setjmp` can only return 0, and both arms are unreachable. The
-     * port reproduced that verbatim rather than "fixing" it. It went with
-     * the machinery: there is no `jmploc` left to be dead code over, and
-     * the `sem` rule's claim that the handler is installed was never true
-     * of either language. */
+    /* The glob buffer's frame invariant, stated where it is relied
+     * on: this frame's prefix is `[0, expdir_len)` and it is
+     * exactly what the buffer counts as written.  `expandmeta`
+     * clears for the top-level call; a recursive one arrives
+     * straight out of the append that wrote the component.
+     *
+     * The C's `growstackto(expdir_len + name_len + 1)` was a
+     * *bound*, because everything below wrote through a raw
+     * cursor.  Appending needs no bound, so the same number is
+     * only a hint that says how big this frame's candidate will
+     * be before its component. */
+    debug_assert_eq!(b.len(), expdir_len);
+    b.reserve(name.len() + 1);
 
-    'out_opendir: {
-        'out: {
-            if false {
-                break 'out; /* the C's unreachable `goto out` */
-            }
-
-            /* The glob buffer's frame invariant, stated where it is relied
-             * on: this frame's prefix is `[0, expdir_len)` and it is
-             * exactly what the buffer counts as written.  `expandmeta`
-             * clears for the top-level call; a recursive one arrives
-             * straight out of the append that wrote the component.
-             *
-             * The C's `growstackto(expdir_len + name_len + 1)` was a
-             * *bound*, because everything below wrote through a raw
-             * cursor.  Appending needs no bound, so the same number is
-             * only a hint that says how big this frame's candidate will
-             * be before its component. */
+    /* `for (;;) { p = strpbrk(p + esc, "*?]"); ... }` — find the
+     * first metacharacter that is not itself escaped. */
+    p = 0;
+    esc = 0;
+    let meta: Option<usize> = loop {
+        let from = p + esc;
+        let Some(at) = name[from..].find_byteset(b"*?]") else {
+            break None;
+        };
+        p = from + at;
+        esc = mesclen_bytes(name, p, mesc) & 1;
+        if esc == 0 {
+            break Some(p);
+        }
+    };
+    /* No meta characters */
+    let Some(meta) = meta else {
+        if expdir_len == 0 {
             debug_assert_eq!(b.len(), expdir_len);
-            b.reserve(name.len() + 1);
+            return;
+        }
+        expmeta_rmescapes(b, name);
+        /* The C's `enddir` is on the NUL `expmeta_rmescapes` wrote
+         * and `addfnamealt` is handed `enddir + 1`, so the
+         * terminator is part of the candidate.  Appending it here
+         * says that, and `lstat` needs it anyway. */
+        b.push(0);
+        let exists = b[..b.len() - 1]
+            .try_to_path_buf()
+            .is_ok_and(|path| nsh_platform::path_metadata(&path, false).is_ok());
+        if exists {
+            addfnamealt(state, b, expdir_len);
+        } else {
+            /* The C leaves its uncounted bytes where they are and
+             * returns the base; counted bytes have to be rewound,
+             * so that this frame returns with the buffer holding
+             * its prefix and nothing else. */
+            b.truncate(expdir_len);
+        }
+        debug_assert_eq!(b.len(), expdir_len);
+        return;
+    };
+    match name[..meta].rfind_byte(C_SLASH as u8) {
+        Some(at) => {
+            /* `c = *start; *start = 0; expmeta_rmescapes(enddir,
+             * name); *start = c;` — the C borrows the pattern as
+             * the directory prefix by terminating it in place.  A
+             * subslice is that without the write, and without the
+             * restore. */
+            start = at + 1;
+            expmeta_rmescapes(b, &name[..start]);
+            /* `expdir_len = enddir - cp` — this frame's prefix
+             * grew by the unescaped directory part, and the bytes
+             * it grew over are counted because they were
+             * appended. */
+            expdir_len = b.len();
+        }
+        None => start = 0,
+    }
 
-            /* `for (;;) { p = strpbrk(p + esc, "*?]"); ... }` — find the
-             * first metacharacter that is not itself escaped. */
-            p = 0;
-            esc = 0;
-            let meta: Option<usize> = loop {
-                let from = p + esc;
-                let Some(at) = name[from..].find_byteset(b"*?]") else {
-                    break None;
-                };
-                p = from + at;
-                esc = mesclen_bytes(name, p, mesc) & 1;
-                if esc == 0 {
-                    break Some(p);
-                }
+    let directory = if expdir_len != 0 {
+        &b[..expdir_len]
+    } else {
+        b"."
+    };
+    let Ok(directory) = directory.try_to_path_buf() else {
+        debug_assert_eq!(b.len(), expdir_len);
+        return;
+    };
+    let Ok(entries) = nsh_platform::read_directory(&directory) else {
+        debug_assert_eq!(b.len(), expdir_len);
+        return;
+    };
+    /* `p = strchrnul(p + 1, '/')` — the end of the component the
+     * metacharacter is in.  The C's `esc = 0` before this is a
+     * dead store in both languages: `esc` is read only inside the
+     * branch that sets it. */
+    p = name[meta + 1..]
+        .find_byte(C_SLASH as u8)
+        .map_or(name.len(), |at| meta + 1 + at);
+    zeroedp = p;
+    endname = p;
+    if p != name.len() {
+        let esc = mesclen_bytes(name, p, mesc) & 1;
+        zeroedp -= esc;
+        endname += 1;
+    }
+    /* `c = *zeroedp; *zeroedp = 0;` — the C reads the byte it is
+     * about to overwrite so it can put it back, and everything
+     * below tests `c` for "is there another component?".  The
+     * component is a subslice, so nothing is overwritten and
+     * nothing is put back; `c` is just the byte that follows it,
+     * or NUL at the end of the pattern.
+     *
+     * `name_len -= endname - name` is the recursion's argument and
+     * is `name[endname..].len()`, which is why it stopped being a
+     * parameter. */
+    c = byte_at(name, zeroedp);
+    matchdot = false;
+    pat = &name[start..zeroedp];
+    p = 0;
+    if byte_at(pat, p) == mesc {
+        p += 1;
+    }
+    if byte_at(pat, p) == C_DOT {
+        matchdot = true;
+    }
+    /* `read_dir` intentionally omits `.` and `..`; `readdir`
+     * included both, so put them back before the native entries. */
+    let synthetic = [(b".".to_vec(), true), (b"..".to_vec(), true)];
+    let entries = synthetic.into_iter().chain(
+        entries
+            .into_iter()
+            .map(|entry| (entry.name.to_shell_bytes(), entry.may_descend)),
+    );
+    for (mut dname, may_descend) in entries {
+        dname.push(0);
+
+        let eligible = (dname[0] != C_DOT as u8 || matchdot) && (c == 0 || may_descend);
+        if eligible {
+            /* `len = strlen(dname) + 1` — the terminator is part
+             * of what gets appended, because the candidate is a C
+             * string and the next component overwrites it. */
+            let dname: &[u8] = &dname;
+            let len: usize = dname.len();
+            let subject: &[u8] = if !FNMATCH_IS_ENABLED {
+                /* The C encodes the directory entry's name at
+                 * `enddir` — inside the glob buffer, past the
+                 * prefix — by parking `enddir` in the global
+                 * `expdest` for the length of the call.  Those bytes
+                 * are pure scratch: they exist only for `pmatch`
+                 * below, and the branch that keeps the entry
+                 * immediately overwrites them with the raw name via
+                 * `stnputs`.  So the encoding goes to its own buffer
+                 * and the candidate path never holds it.  That is
+                 * what let the expansion buffer and this one be
+                 * converted separately.
+                 *
+                 * `cp = stackblock(); enddir = cp + expdir_len` is
+                 * gone with the pointers: it was the C's re-read
+                 * after a possible growth, and an index does not
+                 * move. */
+                globenc.clear();
+                memtodest(locale, dname, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
+                debug_assert_eq!(
+                    globenc.last(),
+                    Some(&0),
+                    "EXP_KEEPNUL carries the entry's terminator through"
+                );
+                &globenc
+            } else {
+                dname
             };
-            /* No meta characters */
-            let Some(meta) = meta else {
-                if expdir_len == 0 {
-                    break 'out_opendir; /* goto out_opendir */
-                }
-                expmeta_rmescapes(b, name);
-                /* The C's `enddir` is on the NUL `expmeta_rmescapes` wrote
-                 * and `addfnamealt` is handed `enddir + 1`, so the
-                 * terminator is part of the candidate.  Appending it here
-                 * says that, and `lstat` needs it anyway. */
-                b.push(0);
-                let exists = b[..b.len() - 1]
-                    .try_to_path_buf()
-                    .is_ok_and(|path| nsh_platform::path_metadata(&path, false).is_ok());
-                if exists {
+            if crate::pmatch::pmatch_slices(locale, pat, subject) != 0 {
+                /* `enddir = stnputs(dname, len, enddir)` — an
+                 * append at a cursor below the end, which is
+                 * truncate-then-append. */
+                b.truncate(expdir_len);
+                b.extend_from_slice(dname);
+                if c == 0 {
                     addfnamealt(state, b, expdir_len);
                 } else {
-                    /* The C leaves its uncounted bytes where they are and
-                     * returns the base; counted bytes have to be rewound,
-                     * so that this frame returns with the buffer holding
-                     * its prefix and nothing else. */
-                    b.truncate(expdir_len);
-                }
-                break 'out_opendir; /* goto out_opendir */
-            };
-            match name[..meta].rfind_byte(C_SLASH as u8) {
-                Some(at) => {
-                    /* `c = *start; *start = 0; expmeta_rmescapes(enddir,
-                     * name); *start = c;` — the C borrows the pattern as
-                     * the directory prefix by terminating it in place.  A
-                     * subslice is that without the write, and without the
-                     * restore. */
-                    start = at + 1;
-                    expmeta_rmescapes(b, &name[..start]);
-                    /* `expdir_len = enddir - cp` — this frame's prefix
-                     * grew by the unescaped directory part, and the bytes
-                     * it grew over are counted because they were
+                    /* `*enddir.offset(-1) = C_SLASH` — the entry's
+                     * terminator becomes the separator. */
+                    let last = b.len() - 1;
+                    b[last] = C_SLASH as u8;
+                    expmeta(locale, state, b, &name[endname..], expdir_len + len);
+                    /* `enddir = cp + expdir_len` — the frame's
+                     * rewind, said out loud.  The child returns
+                     * with the buffer holding *its* prefix, which
+                     * is this one plus the component just
                      * appended. */
-                    expdir_len = b.len();
-                }
-                None => start = 0,
-            }
-
-            let directory = if expdir_len != 0 {
-                &b[..expdir_len]
-            } else {
-                b"."
-            };
-            let Ok(directory) = directory.try_to_path_buf() else {
-                break 'out_opendir;
-            };
-            let Ok(entries) = nsh_platform::read_directory(&directory) else {
-                break 'out_opendir; /* goto out_opendir */
-            };
-            /* `p = strchrnul(p + 1, '/')` — the end of the component the
-             * metacharacter is in.  The C's `esc = 0` before this is a
-             * dead store in both languages: `esc` is read only inside the
-             * branch that sets it. */
-            p = name[meta + 1..]
-                .find_byte(C_SLASH as u8)
-                .map_or(name.len(), |at| meta + 1 + at);
-            zeroedp = p;
-            endname = p;
-            if p != name.len() {
-                let esc = mesclen_bytes(name, p, mesc) & 1;
-                zeroedp -= esc;
-                endname += 1;
-            }
-            /* `c = *zeroedp; *zeroedp = 0;` — the C reads the byte it is
-             * about to overwrite so it can put it back, and everything
-             * below tests `c` for "is there another component?".  The
-             * component is a subslice, so nothing is overwritten and
-             * nothing is put back; `c` is just the byte that follows it,
-             * or NUL at the end of the pattern.
-             *
-             * `name_len -= endname - name` is the recursion's argument and
-             * is `name[endname..].len()`, which is why it stopped being a
-             * parameter. */
-            c = byte_at(name, zeroedp);
-            matchdot = false;
-            pat = &name[start..zeroedp];
-            p = 0;
-            if byte_at(pat, p) == mesc {
-                p += 1;
-            }
-            if byte_at(pat, p) == C_DOT {
-                matchdot = true;
-            }
-            /* `read_dir` intentionally omits `.` and `..`; `readdir`
-             * included both, so put them back before the native entries. */
-            let synthetic = [(b".".to_vec(), true), (b"..".to_vec(), true)];
-            let entries = synthetic.into_iter().chain(
-                entries
-                    .into_iter()
-                    .map(|entry| (entry.name.to_shell_bytes(), entry.may_descend)),
-            );
-            for (mut dname, may_descend) in entries {
-                dname.push(0);
-
-                'check_int: {
-                    if dname[0] == C_DOT as u8 && !matchdot {
-                        break 'check_int; /* goto check_int */
-                    }
-                    if c != 0 && !may_descend {
-                        break 'check_int; /* goto check_int */
-                    }
-                    /* `len = strlen(dname) + 1` — the terminator is part
-                     * of what gets appended, because the candidate is a C
-                     * string and the next component overwrites it. */
-                    let dname: &[u8] = &dname;
-                    let len: usize = dname.len();
-                    let subject: &[u8] = if !FNMATCH_IS_ENABLED {
-                        /* The C encodes the directory entry's name at
-                         * `enddir` — inside the glob buffer, past the
-                         * prefix — by parking `enddir` in the global
-                         * `expdest` for the length of the call.  Those bytes
-                         * are pure scratch: they exist only for `pmatch`
-                         * below, and the branch that keeps the entry
-                         * immediately overwrites them with the raw name via
-                         * `stnputs`.  So the encoding goes to its own buffer
-                         * and the candidate path never holds it.  That is
-                         * what let the expansion buffer and this one be
-                         * converted separately.
-                         *
-                         * `cp = stackblock(); enddir = cp + expdir_len` is
-                         * gone with the pointers: it was the C's re-read
-                         * after a possible growth, and an index does not
-                         * move. */
-                        globenc.clear();
-                        memtodest(locale, dname, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
-                        debug_assert_eq!(
-                            globenc.last(),
-                            Some(&0),
-                            "EXP_KEEPNUL carries the entry's terminator through"
-                        );
-                        &globenc
-                    } else {
-                        dname
-                    };
-                    if crate::pmatch::pmatch_slices(locale, pat, subject) != 0 {
-                        /* `enddir = stnputs(dname, len, enddir)` — an
-                         * append at a cursor below the end, which is
-                         * truncate-then-append. */
-                        b.truncate(expdir_len);
-                        b.extend_from_slice(dname);
-                        if c == 0 {
-                            addfnamealt(state, b, expdir_len);
-                        } else {
-                            /* `*enddir.offset(-1) = C_SLASH` — the entry's
-                             * terminator becomes the separator. */
-                            let last = b.len() - 1;
-                            b[last] = C_SLASH as u8;
-                            expmeta(locale, state, b, &name[endname..], expdir_len + len);
-                            /* `enddir = cp + expdir_len` — the frame's
-                             * rewind, said out loud.  The child returns
-                             * with the buffer holding *its* prefix, which
-                             * is this one plus the component just
-                             * appended. */
-                            b.truncate(expdir_len);
-                        }
-                    }
-                }
-                /* check_int: */
-                if int_pending() != 0 {
-                    break;
+                    b.truncate(expdir_len);
                 }
             }
         }
-
-        /* out: the `ReadDir` value closes its descriptor on drop. */
+        if int_pending() != 0 {
+            break;
+        }
     }
 
-    /* out_opendir: */
     /* The C returns `cp`, the block's base, and every caller immediately
      * recomputes `cp + expdir_len`.  What that is really saying is a
      * postcondition, and it is this: on return the buffer holds this
@@ -3167,82 +3017,85 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
     let mut p: usize = at;
     let mut q: usize = at;
 
-    'whileloop: while byte_at(buf, p) != C_NUL {
+    while byte_at(buf, p) != C_NUL {
         let mut c: c_int = byte_at(buf, p) as c_int;
         let mut newnesc: c_int = globbing;
         let mb: c_uint;
         let mut ml: c_uint;
 
-        'setnesc: {
-            if c == CTLQUOTEMARK as c_int {
-                p += 1;
-                inquotes ^= globbing;
-                continue 'whileloop;
-            } else if c == C_BACKSLASH as c_int {
-                /* naked back slash */
-                newnesc ^= notescaped;
-                /* naked backslashes can only occur outside quotes */
-                inquotes = 0;
-                if !FNMATCH_IS_ENABLED && notescaped != 0 {
-                    c = CTLESC as c_int;
-                }
-            } else if c == CTLESC as c_int {
-                if ((notescaped ^ inquotes) & inquotes) != 0 {
-                    if FNMATCH_IS_ENABLED {
-                        buf[q] = C_BACKSLASH as u8;
-                        q += 1;
-                    } else {
-                        /* Reaches back one byte.  `notescaped` is cleared
-                         * only by the naked-backslash arm, which writes a
-                         * byte first, so `q` has advanced at least once
-                         * before this is reachable -- and the index is
-                         * checked, where the C's was not. */
-                        buf[q - 1] = C_BACKSLASH as u8;
-                    }
-                }
-                if globbing != 0 {
-                    buf[q] = if FNMATCH_IS_ENABLED {
-                        C_BACKSLASH
-                    } else {
-                        CTLESC
-                    } as u8;
+        let copy_byte = if c == CTLQUOTEMARK as c_int {
+            p += 1;
+            inquotes ^= globbing;
+            continue;
+        } else if c == C_BACKSLASH as c_int {
+            /* naked back slash */
+            newnesc ^= notescaped;
+            /* naked backslashes can only occur outside quotes */
+            inquotes = 0;
+            if !FNMATCH_IS_ENABLED && notescaped != 0 {
+                c = CTLESC as c_int;
+            }
+            true
+        } else if c == CTLESC as c_int {
+            if ((notescaped ^ inquotes) & inquotes) != 0 {
+                if FNMATCH_IS_ENABLED {
+                    buf[q] = C_BACKSLASH as u8;
                     q += 1;
-                }
-
-                p += 1;
-                c = byte_at(buf, p) as c_int;
-            } else if c == CTLMBCHAR as c_int {
-                let mut tail: c_uint = 2;
-
-                if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
-                    q -= 1;
-                }
-
-                mb = mbnext_bytes(slice_from(buf, p));
-                ml = mb >> 8;
-
-                if globbing == 0 || FNMATCH_IS_ENABLED {
-                    p += (mb & 0xff) as usize;
-                    ml -= 2;
                 } else {
-                    ml += mb & 0xff;
-                    tail = 0;
+                    /* Reaches back one byte.  `notescaped` is cleared
+                     * only by the naked-backslash arm, which writes a
+                     * byte first, so `q` has advanced at least once
+                     * before this is reachable -- and the index is
+                     * checked, where the C's was not. */
+                    buf[q - 1] = C_BACKSLASH as u8;
                 }
-
-                /* `q` trails `p` through the same buffer, which
-                 * `copy_within` already knows -- it is the C's
-                 * `memmove`, bounds-checked. */
-                buf.copy_within(p..p + ml as usize, q);
-                q += ml as usize;
-                p += (ml + tail) as usize;
-                break 'setnesc; /* goto setnesc */
+            }
+            if globbing != 0 {
+                buf[q] = if FNMATCH_IS_ENABLED {
+                    C_BACKSLASH
+                } else {
+                    CTLESC
+                } as u8;
+                q += 1;
             }
 
+            p += 1;
+            c = byte_at(buf, p) as c_int;
+            true
+        } else if c == CTLMBCHAR as c_int {
+            let mut tail: c_uint = 2;
+
+            if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
+                q -= 1;
+            }
+
+            mb = mbnext_bytes(slice_from(buf, p));
+            ml = mb >> 8;
+
+            if globbing == 0 || FNMATCH_IS_ENABLED {
+                p += (mb & 0xff) as usize;
+                ml -= 2;
+            } else {
+                ml += mb & 0xff;
+                tail = 0;
+            }
+
+            /* `q` trails `p` through the same buffer, which
+             * `copy_within` already knows -- it is the C's
+             * `memmove`, bounds-checked. */
+            buf.copy_within(p..p + ml as usize, q);
+            q += ml as usize;
+            p += (ml + tail) as usize;
+            false
+        } else {
+            true
+        };
+
+        if copy_byte {
             buf[q] = c as u8;
             q += 1;
             p += 1;
         }
-        /* setnesc: */
         notescaped = newnesc;
     }
     if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {

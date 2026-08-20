@@ -1288,7 +1288,7 @@ assertions (
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
     {id specify-bash-compatibility-profile, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:36:22.237930781Z}
     {id fix-nplan-cpp-format-check, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:45:28.732506317Z}
-    {id implement-bash-arrays-declarations, kind @doing, author "brendan@necessary.nu", at 2026-08-19T21:08:42.993320915Z}
+    {id implement-bash-arrays-declarations, kind @blocked, reason "Operator paused Bash implementation until the idiomatic-core prerequisite chain is complete; partial arrays work is preserved in stash 642f76c.", author "brendan@necessary.nu", at 2026-08-20T03:48:47.75753982Z}
     {id refresh-project-readmes, kind @complete, author "brendan@necessary.nu", at 2026-08-19T22:47:09.703433578Z}
     {id specify-idiomatic-core-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-20T00:12:33.787954465Z}
 )
@@ -5069,5 +5069,10 @@ impl_evidence (
         idiom.typed-expansion
     ), covered_claims (
         {impl_name nsh-library, rule idiom.typed-expansion}
+    )}
+    {id structure-parser-expander-control-flow, covered_rules (
+        idiom.parser-control-flow
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.parser-control-flow}
     )}
 )

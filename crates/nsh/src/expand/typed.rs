@@ -191,6 +191,7 @@ impl Context {
 }
 
 // [spec:nsh:sem:idiom.typed-expansion]
+// [spec:nsh:req:idiom.parser-control-flow]
 pub(super) fn expand_argument(
     sh: &mut Shell,
     word: &ParsedWord,
