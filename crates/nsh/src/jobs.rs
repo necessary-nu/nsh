@@ -29,6 +29,7 @@ use nsh_platform::{
 use std::io::Write as _;
 
 use crate::error::{Error, INTOFF, INTON};
+use crate::fd::LogicalDescriptor;
 use crate::nodes::{
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirectionOperator, Node, Redirection,
 };
@@ -425,6 +426,7 @@ pub(crate) fn terminal_settings_error(
 // [spec:dash:sem:jobs.setjobctl-fn]
 // [spec:posix:def:jobctl.definition]
 // [spec:posix:req:jobctl.initial-foreground-process-group]
+// [spec:nsh:def:idiom.logical-descriptors]
 /// Turn job control on or off.
 ///
 /// Returns its diagnostic rather than raising it. Two of its three
@@ -492,15 +494,17 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                          * that order -- which is the shell's stderr,
                          * stdout and stdin, not the numbers for their
                          * own sake. */
-                        let candidates = [2, 1, 0];
+                        let candidates = [
+                            LogicalDescriptor::STDERR,
+                            LogicalDescriptor::STDOUT,
+                            LogicalDescriptor::STDIN,
+                        ];
                         let mut i: usize = 0;
                         let mut candidate = None;
                         while i < candidates.len() {
                             if sh
                                 .fds
                                 .get(candidates[i])
-                                .ok()
-                                .flatten()
                                 .as_ref()
                                 .is_some_and(|fd| nsh_platform::is_terminal(fd))
                             {
@@ -1148,8 +1152,8 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
             )
             .unwrap_or_else(|e| forkchild_fatal(sh, e))
             .expect("a mandatory open returns a descriptor");
-            if let Err(error) = sh.fds.install_owned(0, f) {
-                let error = crate::redir::descriptor_error(sh, 0, error);
+            if let Err(error) = sh.fds.install_owned(LogicalDescriptor::STDIN, f) {
+                let error = crate::redir::descriptor_error(sh, LogicalDescriptor::STDIN, error);
                 forkchild_fatal(sh, error);
             }
             /* Should call reset_input here, but it's harmless
@@ -1811,10 +1815,6 @@ fn cmdtxt_binary(command: &crate::nodes::BinaryCommand, separator: &[u8], text: 
     cmdtxt(Some(command.right.as_ref()), text);
 }
 
-fn cmdtxt_descriptor(descriptor: c_int, text: &mut BString) {
-    cmdputs(&[(descriptor + b'0' as c_int) as u8], text);
-}
-
 // [spec:dash:def:jobs.cmdlist-fn]
 // [spec:dash:sem:jobs.cmdlist-fn]
 fn cmdlist(np: &[Node], sep: c_int, text: &mut BString) {
@@ -1834,7 +1834,7 @@ fn cmdredirs(redirections: &[Redirection], text: &mut BString) {
         cmdputs(b" ", text);
         match redirection {
             Redirection::File(redirection) => {
-                cmdtxt_descriptor(redirection.descriptor, text);
+                cmdputs(&[redirection.descriptor.as_digit()], text);
                 cmdputs(
                     match redirection.operator {
                         FileRedirectionOperator::Write => b">",
@@ -1848,7 +1848,7 @@ fn cmdredirs(redirections: &[Redirection], text: &mut BString) {
                 redirection.target.word.render(text);
             }
             Redirection::Descriptor(redirection) => {
-                cmdtxt_descriptor(redirection.descriptor, text);
+                cmdputs(&[redirection.descriptor.as_digit()], text);
                 cmdputs(
                     match redirection.operator {
                         DescriptorRedirectionOperator::Input => b"<&",
@@ -1857,7 +1857,7 @@ fn cmdredirs(redirections: &[Redirection], text: &mut BString) {
                     text,
                 );
                 match &redirection.target {
-                    DescriptorTarget::Number(descriptor) => cmdtxt_descriptor(*descriptor, text),
+                    DescriptorTarget::Number(descriptor) => cmdputs(&[descriptor.as_digit()], text),
                     DescriptorTarget::Close => cmdputs(b"-", text),
                     DescriptorTarget::Word(word) => word.word.render(text),
                 }

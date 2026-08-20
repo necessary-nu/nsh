@@ -30,6 +30,7 @@
 
 use crate::context::Shell;
 use crate::error::Error;
+use crate::fd::LogicalDescriptor;
 use crate::status::ExitStatus;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
@@ -885,6 +886,7 @@ fn evalsubshell(
 // [spec:posix:req:redir.word-expansion]
 // [spec:posix:req:redir.word-pathname-expansion]
 // [spec:posix:req:grammar.redirection-filename]
+// [spec:nsh:def:idiom.logical-descriptors]
 fn expredir<'a>(
     sh: &mut Shell,
     redirections: &'a [Redirection],
@@ -932,9 +934,12 @@ fn expredir<'a>(
     Ok(expanded)
 }
 
-fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<c_int>, Error> {
+fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<LogicalDescriptor>, Error> {
     if text.len() == 1 && crate::syntax::is_digit(text[0] as c_int) {
-        Ok(Some(crate::syntax::digit_val(text[0] as c_int)))
+        Ok(Some(
+            LogicalDescriptor::from_digit(text[0])
+                .expect("an ASCII digit names a logical descriptor"),
+        ))
     } else if text == BStr::new(b"-") {
         Ok(None)
     } else {
@@ -1004,13 +1009,17 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, flags: c_int) -> Result<Flow, E
             if let Some(previous) = prevfd.take() {
                 crate::input::reset_input(sh);
                 sh.fds
-                    .install_owned(0, previous)
-                    .map_err(|error| crate::redir::descriptor_error(sh, 0, error))?;
+                    .install_owned(LogicalDescriptor::STDIN, previous)
+                    .map_err(|error| {
+                        crate::redir::descriptor_error(sh, LogicalDescriptor::STDIN, error)
+                    })?;
             }
             if let Some(write) = write {
                 sh.fds
-                    .install_owned(1, write)
-                    .map_err(|error| crate::redir::descriptor_error(sh, 1, error))?;
+                    .install_owned(LogicalDescriptor::STDOUT, write)
+                    .map_err(|error| {
+                        crate::redir::descriptor_error(sh, LogicalDescriptor::STDOUT, error)
+                    })?;
             }
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
@@ -1060,8 +1069,10 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
             FORCEINTON(sh);
             drop(pipe.read);
             sh.fds
-                .install_owned(1, pipe.write)
-                .map_err(|error| crate::redir::descriptor_error(sh, 1, error))?;
+                .install_owned(LogicalDescriptor::STDOUT, pipe.write)
+                .map_err(|error| {
+                    crate::redir::descriptor_error(sh, LogicalDescriptor::STDOUT, error)
+                })?;
             crate::expand::ifsfree(&mut sh.expand);
             /* The one forked child that cannot hand its `Flow` back: it
              * sits under the whole expansion chain, which has no business
@@ -1362,7 +1373,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
         None
     };
 
-    let stderr = sh.fds.slot(2).expect("standard logical descriptor");
+    let stderr = sh.fds.slot(LogicalDescriptor::STDERR);
     sh.io.previous_stderr().set_destination(stderr);
     let expanded_redirections = expredir(sh, &command.redirections)?;
     redir_stop = crate::redir::pushredir(sh, &expanded_redirections);

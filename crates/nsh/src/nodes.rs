@@ -36,6 +36,7 @@
 use bstr::{BStr, BString};
 use core::ffi::c_int;
 
+use crate::fd::LogicalDescriptor;
 use crate::word::ParsedWord;
 
 mod bash;
@@ -188,10 +189,11 @@ pub enum Redirection {
 }
 
 /// A redirection whose operand names a file.
+// [spec:nsh:def:idiom.logical-descriptors]
 #[derive(Clone)]
 pub struct FileRedirection {
     pub operator: FileRedirectionOperator,
-    pub descriptor: c_int,
+    pub descriptor: LogicalDescriptor,
     pub target: WordNode,
 }
 
@@ -205,7 +207,7 @@ pub enum DescriptorRedirectionOperator {
 /// The parsed operand of `<&` or `>&`.
 #[derive(Clone)]
 pub enum DescriptorTarget {
-    Number(c_int),
+    Number(LogicalDescriptor),
     Close,
     Word(WordNode),
 }
@@ -214,14 +216,14 @@ pub enum DescriptorTarget {
 #[derive(Clone)]
 pub struct DescriptorRedirection {
     pub operator: DescriptorRedirectionOperator,
-    pub descriptor: c_int,
+    pub descriptor: LogicalDescriptor,
     pub target: DescriptorTarget,
 }
 
 /// A here-document redirection.
 #[derive(Clone)]
 pub struct HereDocument {
-    pub descriptor: c_int,
+    pub descriptor: LogicalDescriptor,
     pub expand: bool,
     pub body: WordNode,
 }

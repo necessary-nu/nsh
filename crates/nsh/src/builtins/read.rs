@@ -16,6 +16,7 @@ use bstr::{BStr, BString};
 
 use crate::eval::Flow;
 use crate::expand::arglist;
+use crate::fd::LogicalDescriptor;
 use crate::status::ExitStatus;
 
 /* glibc <limits.h> */
@@ -121,6 +122,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:posix:req:builtin.read.terminating-delimiter-removed]
 // [spec:posix:req:builtin.read.utility-syntax-guidelines]
 // [spec:nsh:req:idiom.lexer-tokens]
+// [spec:nsh:def:idiom.logical-descriptors]
 pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
@@ -142,9 +144,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if let Some(prompt) = &prompt {
         if sh
             .fds
-            .get(0)
-            .ok()
-            .flatten()
+            .get(LogicalDescriptor::STDIN)
             .as_ref()
             .is_some_and(|fd| nsh_platform::is_terminal(fd))
         {
@@ -154,9 +154,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let prompt_for_continuation = sh.options.flag(crate::options::iflag) != 0
         && sh
             .fds
-            .get(0)
-            .ok()
-            .flatten()
+            .get(LogicalDescriptor::STDIN)
             .as_ref()
             .is_some_and(|fd| nsh_platform::is_terminal(fd));
     let names = opts.operands();

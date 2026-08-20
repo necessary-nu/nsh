@@ -13,6 +13,7 @@ use std::cmp::Ordering;
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
+use crate::fd::LogicalDescriptor;
 
 // [spec:dash:def:test.token]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -344,16 +345,15 @@ impl<'a> TestParser<'a> {
         Ok(self.word(self.pos).is_some_and(|word| !word.is_empty()))
     }
 
+    // [spec:nsh:def:idiom.logical-descriptors]
     fn unary(&self, sh: &mut Shell, token: Token, operand: &BStr) -> Result<bool, Error> {
         Ok(match token {
             Token::StringEmpty => operand.is_empty(),
             Token::StringNonempty => !operand.is_empty(),
             Token::FileTerminal => {
                 let fd = getn(sh, operand)? as i32;
-                sh.fds
-                    .get(fd)
-                    .ok()
-                    .flatten()
+                LogicalDescriptor::new(fd)
+                    .and_then(|descriptor| sh.fds.get(descriptor))
                     .as_ref()
                     .is_some_and(|fd| nsh_platform::is_terminal(fd))
             }

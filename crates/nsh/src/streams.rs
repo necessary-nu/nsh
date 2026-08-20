@@ -7,7 +7,7 @@
 
 use nsh_platform::{AsDescriptor, Descriptor};
 
-use crate::fd::SharedFd;
+use crate::fd::{LogicalDescriptor, SharedFd};
 
 /// The three descriptors that seed a shell's logical stdin, stdout and
 /// stderr slots.
@@ -43,9 +43,18 @@ impl Streams {
     ) -> std::io::Result<Streams> {
         Ok(Streams {
             owned: Some([
-                SharedFd::from(nsh_platform::duplicate_cloexec(&stdin, 10)?),
-                SharedFd::from(nsh_platform::duplicate_cloexec(&stdout, 10)?),
-                SharedFd::from(nsh_platform::duplicate_cloexec(&stderr, 10)?),
+                SharedFd::from(nsh_platform::duplicate_cloexec(
+                    &stdin,
+                    LogicalDescriptor::COUNT as i32,
+                )?),
+                SharedFd::from(nsh_platform::duplicate_cloexec(
+                    &stdout,
+                    LogicalDescriptor::COUNT as i32,
+                )?),
+                SharedFd::from(nsh_platform::duplicate_cloexec(
+                    &stderr,
+                    LogicalDescriptor::COUNT as i32,
+                )?),
             ]),
         })
     }
@@ -78,21 +87,29 @@ impl Streams {
         })
     }
 
+    // [spec:nsh:def:idiom.logical-descriptors]
     pub(crate) fn initial_descriptors(
         &self,
-    ) -> std::io::Result<[Option<SharedFd>; crate::fd::SLOT_COUNT]> {
+    ) -> std::io::Result<[Option<SharedFd>; LogicalDescriptor::COUNT]> {
         if let Some(owned) = &self.owned {
-            let mut result: [Option<SharedFd>; crate::fd::SLOT_COUNT] =
+            let mut result: [Option<SharedFd>; LogicalDescriptor::COUNT] =
                 std::array::from_fn(|_| None);
-            result[0] = Some(owned[0].clone());
-            result[1] = Some(owned[1].clone());
-            result[2] = Some(owned[2].clone());
+            result[LogicalDescriptor::STDIN.index()] = Some(owned[0].clone());
+            result[LogicalDescriptor::STDOUT.index()] = Some(owned[1].clone());
+            result[LogicalDescriptor::STDERR.index()] = Some(owned[2].clone());
             return Ok(result);
         }
 
-        let mut result: [Option<SharedFd>; crate::fd::SLOT_COUNT] = std::array::from_fn(|_| None);
+        let mut result: [Option<SharedFd>; LogicalDescriptor::COUNT] =
+            std::array::from_fn(|_| None);
         for (number, slot) in result.iter_mut().enumerate() {
-            *slot = nsh_platform::snapshot_process_fd(number as i32, 10)?.map(SharedFd::from);
+            let descriptor = LogicalDescriptor::from_index(number)
+                .expect("the stream table contains only logical descriptors");
+            *slot = nsh_platform::snapshot_process_fd(
+                descriptor.as_i32(),
+                LogicalDescriptor::COUNT as i32,
+            )?
+            .map(SharedFd::from);
         }
         Ok(result)
     }
@@ -125,7 +142,9 @@ impl crate::context::Shell {
         let fd = self
             .streams
             .original(index)
-            .or_else(|| self.fds.get(index as i32).ok().flatten())
+            .or_else(|| {
+                LogicalDescriptor::from_index(index).and_then(|descriptor| self.fds.get(descriptor))
+            })
             .ok_or_else(|| {
                 nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
             })?;
@@ -160,10 +179,13 @@ mod tests {
     #[test]
     fn closed_inherited_streams_remain_closed() {
         let status = nsh_platform::run_in_child(|| {
-            nsh_platform::ProcessDescriptorTransaction::new([(0, None)])
-                .unwrap()
-                .apply()
-                .unwrap();
+            nsh_platform::ProcessDescriptorTransaction::new([(
+                LogicalDescriptor::STDIN.as_i32(),
+                None,
+            )])
+            .unwrap()
+            .apply()
+            .unwrap();
             let descriptors = Streams::INHERIT.initial_descriptors().unwrap();
             nsh_platform::exit_immediately(if descriptors[0].is_none() { 0 } else { 1 });
         })

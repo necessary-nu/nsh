@@ -13,6 +13,8 @@ use core::ffi::{c_char, c_int};
 use std::ffi::CStr;
 use std::io::Write;
 
+use crate::fd::LogicalDescriptor;
+
 mod dialect;
 pub(crate) use dialect::Dialect;
 
@@ -301,12 +303,11 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
         crate::input::input_init(sh);
     }
     if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
+        // [spec:nsh:def:idiom.logical-descriptors]
         if sh.input.stdin_istty != 0
             && sh
                 .fds
-                .get(2)
-                .ok()
-                .flatten()
+                .get(LogicalDescriptor::STDERR)
                 .as_ref()
                 .is_some_and(|fd| nsh_platform::is_terminal(fd))
         {

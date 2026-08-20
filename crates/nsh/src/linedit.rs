@@ -189,14 +189,19 @@ impl LineEditor {
         output_fd: &impl nsh_platform::AsDescriptor,
         mode: EditingMode,
     ) -> Result<Self, LineEditorError> {
+        // [spec:nsh:def:idiom.logical-descriptors]
         let input =
-            nsh_platform::duplicate_cloexec(input_fd, crate::fd::SLOT_COUNT as i32)?.into_file();
+            nsh_platform::duplicate_cloexec(input_fd, crate::fd::LogicalDescriptor::COUNT as i32)?
+                .into_file();
         let output =
-            nsh_platform::duplicate_cloexec(output_fd, crate::fd::SLOT_COUNT as i32)?.into_file();
+            nsh_platform::duplicate_cloexec(output_fd, crate::fd::LogicalDescriptor::COUNT as i32)?
+                .into_file();
         let terminal_snapshots = Arc::new(Mutex::new(TerminalSnapshots::default()));
         let terminal = OwnedTerminal::new(
-            nsh_platform::duplicate_cloexec(&input, crate::fd::SLOT_COUNT as i32)?.into_file(),
-            nsh_platform::duplicate_cloexec(&output, crate::fd::SLOT_COUNT as i32)?.into_file(),
+            nsh_platform::duplicate_cloexec(&input, crate::fd::LogicalDescriptor::COUNT as i32)?
+                .into_file(),
+            nsh_platform::duplicate_cloexec(&output, crate::fd::LogicalDescriptor::COUNT as i32)?
+                .into_file(),
             locale.clone(),
             terminal_snapshots.clone(),
         );

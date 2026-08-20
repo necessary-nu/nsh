@@ -5115,4 +5115,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.no-raw-fd-core}
     )}
+    {id seal-logical-descriptor-types, covered_rules (
+        idiom.logical-descriptors
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.logical-descriptors}
+    )}
 )

@@ -14,6 +14,7 @@ use core::ffi::{c_char, c_int, c_uint};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg};
+use crate::fd::LogicalDescriptor;
 use crate::input::{
     pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
 };
@@ -23,9 +24,7 @@ use crate::nodes::{
     ForCommand, FunctionDefinition, HereDocument, IfCommand, NegatedCommand, Node, NodeText,
     Pipeline, Redirection, SimpleCommand, WordNode,
 };
-use crate::syntax::{
-    InputUnit, SyntaxClass, SyntaxContext, digit_val, is_digit, is_in_name, is_name,
-};
+use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_digit, is_in_name, is_name};
 use crate::word::ParsedWord;
 
 // ---------------------------------------------------------------------
@@ -363,17 +362,18 @@ pub struct heredoc {
 }
 
 /// A redirection operator whose required word operand has not been read yet.
+// [spec:nsh:def:idiom.logical-descriptors]
 pub(crate) enum PendingRedirection {
     File {
         operator: FileRedirectionOperator,
-        descriptor: c_int,
+        descriptor: LogicalDescriptor,
     },
     Descriptor {
         operator: DescriptorRedirectionOperator,
-        descriptor: c_int,
+        descriptor: LogicalDescriptor,
     },
     HereDocument {
-        descriptor: c_int,
+        descriptor: LogicalDescriptor,
     },
 }
 
@@ -1094,7 +1094,10 @@ fn parsefname(sh: &mut Shell, pending: PendingRedirection) -> Result<Redirection
         } => {
             let text = crate::mystring::cstr_prefix(wordtext(sh));
             let target = if text.len() == 1 && is_digit(text[0] as c_int) {
-                DescriptorTarget::Number(digit_val(text[0] as c_int))
+                DescriptorTarget::Number(
+                    LogicalDescriptor::from_digit(text[0])
+                        .expect("an ASCII digit names a logical descriptor"),
+                )
             } else if text == BStr::new(b"-") {
                 DescriptorTarget::Close
             } else {
@@ -1693,7 +1696,6 @@ impl Rt1<'_> {
             self.out.push(CTLQUOTEMARK as u8);
         }
     }
-
 }
 
 // [spec:dash:def:parser.readtoken1-fn]
@@ -2069,11 +2071,11 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
      * assigning `np->type`, re-allocating only because `nhere` is smaller.
      * The arm has to be chosen up front here, so the type and the fd are
      * worked out first and the node built at the end. */
-    let mut fd: c_int;
+    let mut descriptor: LogicalDescriptor;
     let redirection: ParsedRedirection;
 
     if st.input.is(b'>') {
-        fd = 1;
+        descriptor = LogicalDescriptor::STDOUT;
         st.input = pgetc_eatbnl(sh)?;
         if st.input.is(b'>') {
             redirection = ParsedRedirection::File(FileRedirectionOperator::Append);
@@ -2087,7 +2089,7 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
         }
     } else {
         /* c == '<' */
-        fd = 0;
+        descriptor = LogicalDescriptor::STDIN;
         st.input = pgetc_eatbnl(sh)?;
         if st.input.is(b'<') {
             let mut here = heredoc {
@@ -2113,17 +2115,18 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
         }
     }
     if fdc != '\0' as c_char {
-        fd = digit_val(fdc as c_int);
+        descriptor = LogicalDescriptor::from_digit(fdc as u8)
+            .expect("the lexer accepts only a descriptor digit before redirection");
     }
     sh.input.redirnode = Some(match redirection {
         ParsedRedirection::Descriptor(operator) => PendingRedirection::Descriptor {
             operator,
-            descriptor: fd,
+            descriptor,
         },
-        ParsedRedirection::HereDocument => PendingRedirection::HereDocument { descriptor: fd },
+        ParsedRedirection::HereDocument => PendingRedirection::HereDocument { descriptor },
         ParsedRedirection::File(operator) => PendingRedirection::File {
             operator,
-            descriptor: fd,
+            descriptor,
         },
     });
     Ok(())

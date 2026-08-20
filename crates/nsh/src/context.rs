@@ -204,7 +204,11 @@ impl Shell {
 
     pub(crate) fn try_new(streams: crate::streams::Streams) -> std::io::Result<Self> {
         let fds = crate::fd::FdTable::from_streams(&streams)?;
-        let io = crate::output::ShellIo::new(fds.slot(1)?, fds.slot(2)?);
+        // [spec:nsh:def:idiom.logical-descriptors]
+        let io = crate::output::ShellIo::new(
+            fds.slot(crate::fd::LogicalDescriptor::STDOUT),
+            fds.slot(crate::fd::LogicalDescriptor::STDERR),
+        );
         let locale = nsh_platform::Locale::c()?;
         let root_pid = nsh_platform::current_process_id();
         Ok(Shell {

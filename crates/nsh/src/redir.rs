@@ -9,6 +9,7 @@ use std::io::Write;
 
 use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
+use crate::fd::LogicalDescriptor;
 use crate::nodes::{FileRedirectionOperator, HereDocument, Node};
 
 /* flags passed to redirect (redir.h) */
@@ -45,21 +46,22 @@ enum RedirectSource {
 /// Evaluation-local redirection state. Parsed syntax stays immutable; file
 /// names and descriptor words are expanded into this value for one command.
 // [spec:nsh:req:idiom.immutable-ast]
+// [spec:nsh:def:idiom.logical-descriptors]
 pub(crate) enum ExpandedRedirection<'a> {
     File {
         operator: FileRedirectionOperator,
-        descriptor: c_int,
+        descriptor: LogicalDescriptor,
         target: BString,
     },
     Descriptor {
-        descriptor: c_int,
-        source: Option<c_int>,
+        descriptor: LogicalDescriptor,
+        source: Option<LogicalDescriptor>,
     },
     HereDocument(&'a HereDocument),
 }
 
 impl ExpandedRedirection<'_> {
-    fn descriptor(&self) -> c_int {
+    fn descriptor(&self) -> LogicalDescriptor {
         match self {
             Self::File { descriptor, .. } | Self::Descriptor { descriptor, .. } => *descriptor,
             Self::HereDocument(document) => document.descriptor,
@@ -75,7 +77,7 @@ impl ExpandedRedirection<'_> {
 /// shared owners: ordinary unwind restores them, while fork reset drops
 /// obsolete backups without changing the active table.
 pub struct redirtab {
-    renamed: [SavedDescriptor; 10],
+    renamed: [SavedDescriptor; LogicalDescriptor::COUNT],
 }
 
 enum SavedDescriptor {
@@ -149,17 +151,14 @@ pub(crate) fn redirect(
             /* The C's `fd == 0` is "this redirection replaced the shell's
              * own input", which is what makes the buffered parse state
              * stale -- not descriptor 0 for its own sake. */
-            if fd == 0 {
+            if fd == LogicalDescriptor::STDIN {
                 crate::input::reset_input(sh);
             }
 
             if let Some(svi) = sv {
-                let p_slot = fd as usize;
+                let p_slot = fd.index();
                 if matches!(sh.redirs.list[svi].renamed[p_slot], SavedDescriptor::Empty) {
-                    let saved = sh
-                        .fds
-                        .get(fd)
-                        .map_err(|error| descriptor_error(sh, fd, error))?;
+                    let saved = sh.fds.get(fd);
                     sh.redirs.list[svi].renamed[p_slot] = SavedDescriptor::Saved(saved);
                 }
             }
@@ -185,7 +184,9 @@ pub(crate) fn redirect(
          * this line passed REDIR_PUSH and so has a frame. */
         if let Some(svi) = sv {
             let renamed = &sh.redirs.list[svi].renamed;
-            if let Some(SavedDescriptor::Saved(Some(saved))) = renamed.get(2) {
+            if let Some(SavedDescriptor::Saved(Some(saved))) =
+                renamed.get(LogicalDescriptor::STDERR.index())
+            {
                 let destination = crate::fd::FdRef::default();
                 destination.replace(Some(saved.clone()));
                 sh.io.previous_stderr().set_destination(destination);
@@ -454,8 +455,8 @@ fn open_file_redirection(
 
 fn open_descriptor_redirection(
     sh: &mut Shell,
-    descriptor: c_int,
-    source: Option<c_int>,
+    descriptor: LogicalDescriptor,
+    source: Option<LogicalDescriptor>,
 ) -> Result<RedirectSource, Error> {
     let Some(source) = source else {
         return Ok(RedirectSource::Close);
@@ -463,22 +464,22 @@ fn open_descriptor_redirection(
     if source == descriptor {
         Ok(RedirectSource::Noop)
     } else {
-        let source_fd = sh
-            .fds
-            .get(source)
-            .map_err(|error| descriptor_error(sh, source, error))?
-            .ok_or_else(|| {
-                descriptor_error(
-                    sh,
-                    source,
-                    nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor),
-                )
-            })?;
+        let source_fd = sh.fds.get(source).ok_or_else(|| {
+            descriptor_error(
+                sh,
+                source,
+                nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor),
+            )
+        })?;
         Ok(RedirectSource::Shared(source_fd))
     }
 }
 
-pub(crate) fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Error) -> Error {
+pub(crate) fn descriptor_error(
+    sh: &mut Shell,
+    source: LogicalDescriptor,
+    error: std::io::Error,
+) -> Error {
     let mut message = Vec::new();
     write!(&mut message, "{}", source).expect("writing to a Vec cannot fail");
     message.extend_from_slice(b": ");
@@ -491,19 +492,21 @@ pub(crate) fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Er
 // [spec:dash:def:redir.sh-dup2-fn]
 // [spec:dash:sem:redir.sh-dup2-fn]
 // [spec:nsh:req:idiom.no-raw-fd-core]
-fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Result<(), Error> {
+fn install_redirect(
+    sh: &mut Shell,
+    target: LogicalDescriptor,
+    source: RedirectSource,
+) -> Result<(), Error> {
     match source {
         RedirectSource::Noop => Ok(()),
-        RedirectSource::Close => sh
-            .fds
-            .replace(target, None)
-            .map(|_| ())
-            .map_err(|error| descriptor_error(sh, target, error)),
-        RedirectSource::Shared(source) => sh
-            .fds
-            .replace(target, Some(source))
-            .map(|_| ())
-            .map_err(|error| descriptor_error(sh, target, error)),
+        RedirectSource::Close => {
+            sh.fds.replace(target, None);
+            Ok(())
+        }
+        RedirectSource::Shared(source) => {
+            sh.fds.replace(target, Some(source));
+            Ok(())
+        }
         RedirectSource::Owned(source) => sh
             .fds
             .install_owned(target, source)
@@ -520,18 +523,18 @@ pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, boo
         if let Ok(read_fd) = nsh_platform::anonymous_file("dash") {
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
                 .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
-            let read = nsh_platform::move_fd_cloexec(read_fd, crate::fd::SLOT_COUNT as i32)
+            let read = nsh_platform::move_fd_cloexec(read_fd, LogicalDescriptor::COUNT as i32)
                 .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
-            let write = nsh_platform::move_fd_cloexec(write_fd, crate::fd::SLOT_COUNT as i32)
+            let write = nsh_platform::move_fd_cloexec(write_fd, LogicalDescriptor::COUNT as i32)
                 .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
             return Ok((Pipe { read, write }, true));
         }
     }
 
     let (read, write) = nsh_platform::pipe().map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
-    let read = nsh_platform::move_fd_cloexec(read, crate::fd::SLOT_COUNT as i32)
+    let read = nsh_platform::move_fd_cloexec(read, LogicalDescriptor::COUNT as i32)
         .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
-    let write = nsh_platform::move_fd_cloexec(write, crate::fd::SLOT_COUNT as i32)
+    let write = nsh_platform::move_fd_cloexec(write, LogicalDescriptor::COUNT as i32)
         .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
     Ok((Pipe { read, write }, false))
 }
@@ -618,16 +621,13 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
 // [spec:dash:sem:redir.popredir-fn]
 pub fn popredir(sh: &mut Shell, drop: c_int) {
     let rp: usize;
-    let mut i: c_int;
+    let mut i: usize;
 
     INTOFF(sh);
     rp = sh.redirs.list.len() - 1;
     i = 0;
-    while i < 10 {
-        let renamed = std::mem::replace(
-            &mut sh.redirs.list[rp].renamed[i as usize],
-            SavedDescriptor::Empty,
-        );
+    while i < LogicalDescriptor::COUNT {
+        let renamed = std::mem::replace(&mut sh.redirs.list[rp].renamed[i], SavedDescriptor::Empty);
 
         if matches!(renamed, SavedDescriptor::Empty) {
             i += 1;
@@ -637,10 +637,12 @@ pub fn popredir(sh: &mut Shell, drop: c_int) {
         match renamed {
             SavedDescriptor::Saved(saved) => {
                 if drop == 0 {
-                    if i == 0 {
+                    let descriptor = LogicalDescriptor::from_index(i)
+                        .expect("a redirection frame has only logical descriptors");
+                    if descriptor == LogicalDescriptor::STDIN {
                         crate::input::reset_input(sh);
                     }
-                    let _ = sh.fds.replace(i, saved);
+                    sh.fds.replace(descriptor, saved);
                 }
             }
             SavedDescriptor::Empty => unreachable!(),
@@ -688,11 +690,11 @@ pub fn move_fd_above(sh: &mut Shell, fd: Descriptor) -> Result<Descriptor, Error
 }
 
 /// Duplicate a process-table slot above the shell redirection range.
-pub fn copy_slot_above(sh: &mut Shell, from: c_int) -> Result<Option<Descriptor>, Error> {
-    let source = sh
-        .fds
-        .get(from)
-        .map_err(|error| descriptor_error(sh, from, error))?;
+pub fn copy_slot_above(
+    sh: &mut Shell,
+    from: LogicalDescriptor,
+) -> Result<Option<Descriptor>, Error> {
+    let source = sh.fds.get(from);
     source
         .map(|source| nsh_platform::duplicate_cloexec(&source, 10))
         .transpose()
@@ -781,7 +783,7 @@ mod tests {
     //! pinned where it is observable -- as the field count of the word
     //! after a failure, in `tests/errors_are_values.rs`.
 
-    use super::OpenFailureContext;
+    use super::{LogicalDescriptor, OpenFailureContext};
     use crate::Shell;
     use crate::error::Error;
     use crate::expand::restore_handler_expandarg;
@@ -865,11 +867,12 @@ mod tests {
     fn open_into_target_restores_closed_slot() {
         let status = nsh_platform::run_in_child(|| {
             let mut sh = Shell::builder().build().unwrap();
-            sh.fds.replace(3, None).unwrap();
+            let descriptor = LogicalDescriptor::new(3).unwrap();
+            sh.fds.replace(descriptor, None);
             if sh.run(b"{ :; } 3>/dev/null").is_err() {
                 nsh_platform::exit_immediately(2);
             }
-            if sh.fds.is_open(3) {
+            if sh.fds.is_open(descriptor) {
                 nsh_platform::exit_immediately(3);
             }
             nsh_platform::exit_immediately(0);

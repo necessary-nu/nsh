@@ -21,6 +21,7 @@ use nsh_platform::Descriptor;
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
+use crate::fd::LogicalDescriptor;
 use crate::syntax::InputUnit;
 
 /// `MB_LEN_MAX > 16 ? MB_LEN_MAX : 16` — 16 on glibc.
@@ -448,8 +449,9 @@ pub fn mkinit_postexitreset(sh: &mut Shell) {
 
 // [spec:dash:def:input.input-init-fn]
 // [spec:dash:sem:input.input-init-fn]
+// [spec:nsh:def:idiom.logical-descriptors]
 pub fn input_init(sh: &mut Shell) {
-    let stdin = sh.fds.get(0).ok().flatten();
+    let stdin = sh.fds.get(LogicalDescriptor::STDIN);
     if let Some(canonical) = stdin
         .as_ref()
         .and_then(|fd| nsh_platform::terminal_canonical_mode(fd))
@@ -480,7 +482,7 @@ fn stdin_bufferable(sh: &mut Shell) -> bool {
 // [spec:dash:sem:input.flush-tee-fn]
 fn flush_tee(sh: &mut crate::context::Shell, nr: c_int, mut pending: c_int) {
     let mut scratch = [0_u8; BUFSIZ as usize];
-    let stdin = sh.fds.get(0).ok().flatten();
+    let stdin = sh.fds.get(LogicalDescriptor::STDIN);
     while pending > 0 {
         let length = nr.min(pending).max(0) as usize;
         let Some(stdin) = &stdin else {
@@ -513,7 +515,7 @@ fn stdin_tee(sh: &mut Shell, nr: c_int) -> Result<std::io::Result<usize>, Error>
         .as_ref()
         .expect("stdin tee pipe exists");
     let result = if nsh_platform::supports_tee() {
-        match sh.fds.get(0).ok().flatten() {
+        match sh.fds.get(LogicalDescriptor::STDIN) {
             Some(stdin) => nsh_platform::tee(&stdin, &pipe.write, nr as usize),
             None => Err(nsh_platform::platform_error(
                 nsh_platform::PlatformErrorKind::BadDescriptor,
@@ -641,9 +643,7 @@ pub fn pgetc_eoa(sh: &mut crate::context::Shell) -> Result<InputUnit, Error> {
 // [spec:dash:sem:input.stdin-clear-nonblock-fn]
 fn stdin_clear_nonblock(sh: &mut crate::context::Shell) -> bool {
     sh.fds
-        .get(0)
-        .ok()
-        .flatten()
+        .get(LogicalDescriptor::STDIN)
         .is_some_and(|fd| nsh_platform::set_nonblocking(&fd, false).is_ok())
 }
 
@@ -748,7 +748,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             let source = if reading_tee {
                 None
             } else if uses_stdin {
-                sh.fds.get(0).ok().flatten()
+                sh.fds.get(LogicalDescriptor::STDIN)
             } else {
                 cur_pf(sh).owned_fd.clone()
             };
@@ -1287,7 +1287,7 @@ pub fn flush_input(sh: &mut Shell) {
     let left: c_int = base.nleft + input_get_lleft(base);
     INTOFF(sh);
     if sh.input.stdin_state.seekable != 0 && left != 0 {
-        if let Some(stdin) = sh.fds.get(0).ok().flatten() {
+        if let Some(stdin) = sh.fds.get(LogicalDescriptor::STDIN) {
             let _ = nsh_platform::seek_relative(&stdin, -(left as i64));
         }
     } else if sh.input.stdin_state.pending > left {

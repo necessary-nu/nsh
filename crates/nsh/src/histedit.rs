@@ -25,6 +25,7 @@ use nshedit::domain::EditingMode;
 use std::fs::File;
 use std::io::{Read as _, Seek as _, Write};
 
+use crate::fd::LogicalDescriptor;
 use crate::linedit::{History, LineEditor};
 
 const DEFAULT_HISTORY_SIZE: usize = 128;
@@ -182,7 +183,7 @@ pub fn histedit(sh: &mut crate::context::Shell) {
                 .and_then(|name| {
                     let path = name.try_to_path_buf().ok()?;
                     let file = nsh_platform::open_history_file(&path).ok()?;
-                    nsh_platform::duplicate_cloexec(&file, crate::fd::SLOT_COUNT as i32)
+                    nsh_platform::duplicate_cloexec(&file, LogicalDescriptor::COUNT as i32)
                         .ok()
                         .map(nsh_platform::Descriptor::into_file)
                 });
@@ -213,8 +214,9 @@ pub fn histedit(sh: &mut crate::context::Shell) {
             }
         }
 
-        let stdin = sh.fds.get(0).ok().flatten();
-        let stderr = sh.fds.get(2).ok().flatten();
+        // [spec:nsh:def:idiom.logical-descriptors]
+        let stdin = sh.fds.get(LogicalDescriptor::STDIN);
+        let stderr = sh.fds.get(LogicalDescriptor::STDERR);
         let mode = if Vflag(sh) != 0 {
             Some(EditingMode::Vi)
         } else if Eflag(sh) != 0 || crate::linedit::declared_terminal_supports_line_editing() {
