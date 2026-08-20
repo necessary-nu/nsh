@@ -5,6 +5,7 @@
 //! by `signo`, slot 0 being the `EXIT` trap.
 
 // [spec:nsh:req:idiom.operation-modes]
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_char, c_int};
 
@@ -12,7 +13,7 @@ use core::ffi::{c_char, c_int};
 pub type sig_atomic_t = c_int;
 
 use crate::error::{Error, INTOFF, INTON};
-use crate::eval::{Flow, SKIPFUNC};
+use crate::eval::Flow;
 use crate::nodes::Node;
 use crate::status::Signal;
 
@@ -550,11 +551,6 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
             continue;
         }
 
-        if sh.eval.evalskip != 0 {
-            signals.set_pending_signal(Some(signal));
-            break;
-        }
-
         signals.set_signal_pending(signal, false);
 
         /* The action is copied out because `evalstring` parses from the
@@ -579,11 +575,17 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
         sh.eval.signal_trap_depth -= 1;
         sh.eval.trap_default_exit_status = outer_trap_status;
         match outcome? {
-            Flow::Done(_) => {}
+            Flow::Done(_) => sh.status = status,
+            control @ Flow::Return { explicit: true, .. } => return Ok(control),
+            control @ Flow::Return {
+                explicit: false, ..
+            }
+            | control @ Flow::Break { .. }
+            | control @ Flow::Continue { .. } => {
+                sh.status = status;
+                return Ok(control.with_status(status));
+            }
             exit @ Flow::Exit { .. } => return Ok(exit),
-        }
-        if sh.eval.evalskip != SKIPFUNC {
-            sh.status = status;
         }
         i += 1;
     }
@@ -649,7 +651,6 @@ pub fn exitshell(
             if sh.traps.ptrap != 0 {
                 break 'out;
             }
-            sh.eval.evalskip = 0;
             let p = p;
             /* An error in the EXIT trap is reported and dropped -- the
              * shell is already exiting, and the C's `longjmp` landed at
@@ -676,6 +677,11 @@ pub fn exitshell(
                 }
                 Ok(crate::eval::Flow::Done(status)) => {
                     sh.status = explicit_status.unwrap_or(status);
+                }
+                Ok(control) => {
+                    sh.status = explicit_status
+                        .or_else(|| control.status())
+                        .unwrap_or(sh.status);
                 }
                 Err(e) => {
                     /* The EXIT trap failed. An explicit outer `exit n`

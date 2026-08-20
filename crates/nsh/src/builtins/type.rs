@@ -8,6 +8,7 @@
 //! this one rather than either keeping a copy or pushing it back down
 //! into the search machinery.
 
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
@@ -40,7 +41,7 @@ pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     for name in opts.operands() {
         match describe_command(sh, Dest::Stdout, name, None, 1)? {
             Flow::Done(status) => err |= i32::from(status.code()),
-            exit @ Flow::Exit { .. } => return Ok(exit),
+            control => return Ok(control),
         }
     }
     Ok(Flow::Done((err).into()))
@@ -106,7 +107,7 @@ pub(crate) fn describe_command(
             /* Finally use brute force */
             match find_command(sh, command, &mut entry, DO_ABS, path)? {
                 Flow::Done(_) => {}
-                exit @ Flow::Exit { .. } => return Ok(exit),
+                control => return Ok(control),
             }
         }
 

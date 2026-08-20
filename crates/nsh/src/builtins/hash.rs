@@ -4,6 +4,7 @@
 //! table it prints and clears stays in `crate::exec`, which is what fills
 //! it during a PATH search.
 
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, ByteSlice};
@@ -94,7 +95,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         let path = crate::var::pathval(sh);
         match find_command(sh, name, &mut entry, DO_ERR, path.as_bstr())? {
             crate::eval::Flow::Done(_) => {}
-            exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+            control => return Ok(control),
         }
         if matches!(&entry, Command::Unknown) {
             c = 1;

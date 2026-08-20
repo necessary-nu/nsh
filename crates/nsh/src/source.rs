@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use bstr::{BStr, BString};
 use nsh_platform::NativeStrExt as _;
 
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
@@ -223,7 +224,10 @@ impl Shell {
             "run left the input stack at a different depth than it found it"
         );
         match outcome {
-            Ok(Flow::Done(status)) => {
+            Ok(Flow::Done(status))
+            | Ok(Flow::Return { status, .. })
+            | Ok(Flow::Break { status, .. })
+            | Ok(Flow::Continue { status, .. }) => {
                 self.status = status;
                 Ok(status)
             }
@@ -248,10 +252,8 @@ impl Shell {
                 /* What dash's top-level handler does with an exception,
                  * minus the parts that only make sense for a process:
                  * `$?` takes the status the raise carried, and the
-                 * evaluator's skip state, loop nesting and `PS4` guard are
-                 * reset so the next `run` starts clean. Without this a
-                 * `break` that escaped its loop would still be pending on
-                 * the next call. */
+                 * evaluator's loop nesting and `PS4` guard are reset so the
+                 * next `run` starts clean. */
                 self.status = e.status();
                 crate::init::exitreset(self);
                 Err(e)

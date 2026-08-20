@@ -7,6 +7,10 @@ const EXPANSION_MODES: &str = include_str!("../src/expand/mode.rs");
 const EVALUATOR: &str = include_str!("../src/eval.rs");
 const REDIRECTIONS: &str = include_str!("../src/redir.rs");
 const JOBS: &str = include_str!("../src/jobs.rs");
+const BUILTIN_READ: &str = include_str!("../src/builtins/read.rs");
+const BUILTIN_BREAK: &str = include_str!("../src/builtins/break.rs");
+const BUILTIN_RETURN: &str = include_str!("../src/builtins/return.rs");
+const SHELL_MAIN: &str = include_str!("../src/shellmain.rs");
 
 // [spec:nsh:req:idiom.parser-control-flow/test]
 #[test]
@@ -55,4 +59,40 @@ fn operation_modes_are_typed() {
     ] {
         assert!(source.contains(typed_mode), "missing {typed_mode}");
     }
+}
+
+// [spec:nsh:req:idiom.evaluator-control-flow/test]
+#[test]
+fn evaluator_control_is_carried_by_flow() {
+    for forbidden in [
+        "evalskip",
+        "skipcount",
+        "SKIPBREAK",
+        "SKIPCONT",
+        "SKIPFUNC",
+        "SKIPFUNCDEF",
+    ] {
+        for (name, source) in [
+            ("evaluator", EVALUATOR),
+            ("break builtin", BUILTIN_BREAK),
+            ("return builtin", BUILTIN_RETURN),
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{name} contains ambient control marker {forbidden:?}"
+            );
+        }
+    }
+
+    for variant in ["Break {", "Continue {", "Return {"] {
+        assert!(EVALUATOR.contains(variant), "Flow is missing {variant}");
+    }
+    for (name, source) in [("read", BUILTIN_READ), ("startup", SHELL_MAIN)] {
+        assert!(
+            !source.contains("let mut pc"),
+            "{name} has a program counter"
+        );
+        assert!(!source.contains("const L_"), "{name} has translated labels");
+    }
+    assert!(SHELL_MAIN.contains("enum StartupPhase"));
 }

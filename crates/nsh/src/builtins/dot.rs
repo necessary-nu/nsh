@@ -6,6 +6,7 @@
 //! stack and running the command loop over it, so like `eval` it depends
 //! on its words not borrowing from the shell.
 
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
@@ -117,7 +118,7 @@ fn dotcmd_with_missing_status(
         sh.eval.loopnest = caller_loopnest;
         match outcome? {
             Flow::Done(s) => status = s,
-            exit @ Flow::Exit { .. } => return Ok(exit),
+            control => return Ok(control),
         }
         crate::input::popfile(sh);
     }

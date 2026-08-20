@@ -6,11 +6,8 @@
 //! Translation notes (literal, bug-for-bug):
 //!   * `main()`'s `setjmp` on `main_handler` becomes
 //!     `crate::eval::setjmp_catch` over the startup sequence, and the
-//!     `state1`..`state4` labels become an explicit label program
-//!     counter that the jump handler re-enters at. `state` is written
-//!     through a raw pointer, which is what makes it survive the
-//!     unwind exactly as C's `volatile int state` survives the
-//!     `longjmp`.
+//!     `state1`..`state4` labels become typed startup phases. The error
+//!     handler resumes at the phase recorded before each fallible step.
 //!   * `PROFILE` is 0 and `GPROF` undefined, so `monitor()`/`_mcleanup`
 //!     are not compiled; `DEBUG` is off, so `opentrace`/`trargs` and
 //!     every `TRACE` are compiled out.
@@ -26,7 +23,7 @@ use core::ffi::c_int;
 use std::io::Write;
 
 use crate::error::FORCEINTON;
-use crate::eval::{EvalContext, SKIPFUNC, SKIPFUNCDEF};
+use crate::eval::EvalContext;
 use crate::jobs::JobDisplay;
 
 /* `MKINIT struct jmploc main_handler;` was here — the outermost handler,
@@ -76,6 +73,16 @@ fn etext() -> c_int {
  * is used to figure out how far we had gotten.
  */
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupPhase {
+    Initialize,
+    UserProfile,
+    Environment,
+    Command,
+    CommandLoop,
+    Exit,
+}
+
 /// The literal port of `main()` in `src/main.c`, taking the shell it is
 /// to run as. [`main_fn`] is what a caller outside the crate reaches.
 // [spec:dash:def:main.main-fn]
@@ -106,15 +113,11 @@ fn etext() -> c_int {
 // [spec:posix:def:shell.command-language-interpreter]
 // [spec:posix:sem:shell.input-sources]
 // [spec:posix:req:exit.interactive-abandons-command]
+// [spec:nsh:req:idiom.evaluator-control-flow]
 pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
-    let mut state: c_int; /* volatile */
-
     /* #if PROFILE: monitor(4, etext, profile_buf, sizeof profile_buf, 50); */
 
-    state = 0;
-
-    /* Where the startup sequence resumes: 0 is the top, 1..4 are the
-     * `state1`..`state4` labels, and 5 is `exit:`.
+    /* Where the startup sequence resumes after an interactive error.
      *
      * `exit:` is inside the loop, and that is load bearing. In the C,
      * `setjmp(main_handler.loc)` is armed in `main`'s own frame, so it
@@ -129,7 +132,8 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
      * loop, that subshell's unwind had no handler on the stack, escaped
      * `main`, and the child died with Rust's panic status 101, which the
      * trap then reported as `$?`. */
-    let mut entry: c_int = 0;
+    let mut entry = StartupPhase::Initialize;
+    let mut resume = StartupPhase::Initialize;
 
     /* Set by the `exit:` arm, which is what `exitshell` now hands back
      * instead of ending the process. It has to be a captured local rather
@@ -145,103 +149,78 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
          * EXERROR, and a `jumped` of true is what is left travelling by
          * longjmp -- EXINT, until step F. */
         let outcome = (|| -> Result<crate::eval::Flow, crate::error::Error> {
-            let mut pc: c_int = entry;
-            loop {
-                match pc {
-                    0 => {
-                        /* #ifdef DEBUG:
-                         *   opentrace();
-                         *   trputs("Shell args:  ");  trargs(argv); */
-                        crate::init::init(sh)?;
-                        /* `setstackmark(smark)`, popped at `state3` and
-                         * on the exception path, bounded what `procargs`
-                         * and the profile reads left in the region. */
-                        let login: c_int = crate::options::procargs(sh, argv)?;
-                        if login != 0 {
-                            state = 1;
-                            match read_profile(sh, BStr::new(b"/etc/profile"))? {
-                                crate::eval::Flow::Done(_) => {}
-                                exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
-                            }
-                            pc = 1; /* fall into state1: */
-                        } else {
-                            pc = 2; /* the `if (login)` body is skipped */
-                        }
-                    }
-                    1 => {
-                        // state1:
-                        state = 2;
-                        match read_profile(sh, BStr::new(b"$HOME/.profile"))? {
-                            crate::eval::Flow::Done(_) => {}
-                            exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
-                        }
-                        pc = 2;
-                    }
-                    2 => {
-                        // state2:
-                        state = 3;
-                        if
-                        /* #ifndef linux: getuid() == geteuid() &&
-                         *                getgid() == getegid() && */
-                        iflag(sh) != 0 {
-                            if let Some(shinit) = crate::var::lookup_bytes(sh, BStr::new(b"ENV"))
-                                .filter(|value| !value.is_empty())
-                            {
-                                match read_profile(sh, BStr::new(shinit.as_slice()))? {
-                                    crate::eval::Flow::Done(_) => {}
-                                    exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
-                                }
-                            }
-                        }
-                        pc = 3;
-                    }
-                    3 => {
-                        // state3:
-                        state = 4;
-                        if let Some(command) = sh.options.minusc.clone() {
-                            /* With EV_EXIT this always ends in
-                             * `Flow::Exit`, which is the C's EXEND
-                             * reaching the handler and taking
-                             * `goto exit`. Returning it here reaches
-                             * the same place by the same decision. */
-                            match crate::eval::evalstring(
-                                sh,
-                                BStr::new(command.as_slice()),
-                                if sflag(sh) != 0 {
-                                    EvalContext::DEFAULT
-                                } else {
-                                    EvalContext::EXITING
-                                },
-                            )? {
-                                crate::eval::Flow::Done(_) => {}
-                                exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
-                            }
-                        }
+            let mut phase = entry;
 
-                        if sflag(sh) != 0 || sh.options.minusc.is_none() {
-                            pc = 4;
-                        } else {
-                            pc = 5; /* goto exit */
-                        }
-                    }
-                    4 => {
-                        /* state4: XXX ??? - why isn't this before the "if"
-                         * statement */
-                        match cmdloop(sh, 1)? {
-                            crate::eval::Flow::Done(_) => {}
-                            exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
-                        }
-                        pc = 5; /* falls into exit: */
-                    }
-                    _ => {
-                        // exit:
-                        /* #if PROFILE: monitor(0); */
-                        /* #if GPROF: _mcleanup(); */
-                        leaving = Some(crate::trap::exitshell(sh, explicit_exit_status.take()));
-                        return Ok(crate::eval::Flow::END);
-                    }
+            if phase == StartupPhase::Initialize {
+                /* #ifdef DEBUG:
+                 *   opentrace();
+                 *   trputs("Shell args:  ");  trargs(argv); */
+                crate::init::init(sh)?;
+                let login = crate::options::procargs(sh, argv)?;
+                if login != 0 {
+                    resume = StartupPhase::UserProfile;
+                    crate::eval::flow!(read_profile(sh, BStr::new(b"/etc/profile")));
+                    phase = StartupPhase::UserProfile;
+                } else {
+                    phase = StartupPhase::Environment;
                 }
             }
+
+            if phase == StartupPhase::UserProfile {
+                resume = StartupPhase::Environment;
+                crate::eval::flow!(read_profile(sh, BStr::new(b"$HOME/.profile")));
+                phase = StartupPhase::Environment;
+            }
+
+            if phase == StartupPhase::Environment {
+                resume = StartupPhase::Command;
+                if
+                /* #ifndef linux: getuid() == geteuid() &&
+                 *                getgid() == getegid() && */
+                iflag(sh) != 0
+                    && let Some(shinit) = crate::var::lookup_bytes(sh, BStr::new(b"ENV"))
+                        .filter(|value| !value.is_empty())
+                {
+                    crate::eval::flow!(read_profile(sh, BStr::new(shinit.as_slice())));
+                }
+                phase = StartupPhase::Command;
+            }
+
+            if phase == StartupPhase::Command {
+                resume = StartupPhase::CommandLoop;
+                if let Some(command) = sh.options.minusc.clone() {
+                    match crate::eval::evalstring(
+                        sh,
+                        BStr::new(command.as_slice()),
+                        if sflag(sh) != 0 {
+                            EvalContext::DEFAULT
+                        } else {
+                            EvalContext::EXITING
+                        },
+                    )? {
+                        crate::eval::Flow::Done(status)
+                        | crate::eval::Flow::Return { status, .. } => sh.status = status,
+                        control => return Ok(control),
+                    }
+                }
+
+                phase = if sflag(sh) != 0 || sh.options.minusc.is_none() {
+                    StartupPhase::CommandLoop
+                } else {
+                    StartupPhase::Exit
+                };
+            }
+
+            if phase == StartupPhase::CommandLoop {
+                crate::eval::flow!(cmdloop(sh, 1));
+                phase = StartupPhase::Exit;
+            }
+
+            debug_assert_eq!(phase, StartupPhase::Exit);
+            /* #if PROFILE: monitor(0); */
+            /* #if GPROF: _mcleanup(); */
+            leaving = Some(crate::trap::exitshell(sh, explicit_exit_status.take()));
+            Ok(crate::eval::Flow::END)
         })();
 
         /* `exit:` ran. It used to end the process from inside the closure;
@@ -262,10 +241,8 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
         let unrecoverable_read: bool;
 
         match &outcome {
-            /* `exit:` is the only way out of the body that does not
-             * reach here, because the `leaving` check above returns
-             * first. A `Flow::Done` would mean the loop fell out of `pc`
-             * without reaching either, which it cannot. */
+            /* `exit:` is the only way out of the body that does not reach
+             * here, because the `leaving` check above returns first. */
             Ok(crate::eval::Flow::Done(_)) => {
                 unreachable!("main's body leaves only by exiting or by failing")
             }
@@ -274,6 +251,9 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                 selected_status = *status;
                 interrupted = false;
                 unrecoverable_read = false;
+            }
+            Ok(control) => {
+                unreachable!("top-level startup left an uncaught local control: {control:?}")
             }
             Err(e) => {
                 e_is_exit = false;
@@ -293,19 +273,21 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
 
         /* the handler */
         {
-            let s: c_int;
-
             if let Some(status) = selected_status {
                 sh.status = status;
             }
             crate::init::exitreset(sh);
 
-            s = state;
             // [spec:posix:req:exit.shell-error-consequences]
             // [spec:posix:req:exit.unrecoverable-read-error]
-            if e_is_exit || unrecoverable_read || s == 0 || iflag(sh) == 0 || sh.shell_level != 0 {
+            if e_is_exit
+                || unrecoverable_read
+                || resume == StartupPhase::Initialize
+                || iflag(sh) == 0
+                || sh.shell_level != 0
+            {
                 explicit_exit_status = if e_is_exit { selected_status } else { None };
-                entry = 5; // goto exit
+                entry = StartupPhase::Exit;
                 continue;
             }
 
@@ -317,15 +299,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                 let _ = sh.io.stderr().write_all(b"\n");
             }
             FORCEINTON(sh); /* enable interrupts */
-            entry = if s == 1 {
-                1 /* goto state1 */
-            } else if s == 2 {
-                2 /* goto state2 */
-            } else if s == 3 {
-                3 /* goto state3 */
-            } else {
-                4 /* goto state4 */
-            };
+            entry = resume;
         }
     }
 }
@@ -402,8 +376,6 @@ pub(crate) fn cmdloop(
 
     /* TRACE(("cmdloop(%d) called\n", top)); */
     loop {
-        let skip: c_int;
-
         /* `setstackmark`/`popstackmark` per iteration: the parse tree and
          * everything the command allocated used to live in the region
          * between them. */
@@ -420,17 +392,28 @@ pub(crate) fn cmdloop(
         let parsed = crate::parser::parsecmd(sh, inter)?;
         /* showtree(n); DEBUG */
         if let crate::parser::ParseResult::Tree(n) = parsed {
-            let i: crate::status::ExitStatus;
-
             sh.jobs.job_warning = if sh.jobs.job_warning == 2 { 1 } else { 0 };
             numeof = 0;
-            i = crate::eval::flow!(if top != 0 {
+            let flow = if top != 0 {
                 crate::eval::eval_top_level(sh, n.as_ref(), EvalContext::DEFAULT)
             } else {
                 crate::eval::evaltree(sh, n.as_ref(), EvalContext::DEFAULT)
-            });
-            if n.is_some() {
-                status = i;
+            }?;
+            match flow {
+                crate::eval::Flow::Done(i) => {
+                    if n.is_some() {
+                        status = i;
+                    }
+                }
+                crate::eval::Flow::Return {
+                    status: return_status,
+                    ..
+                } => {
+                    sh.status = return_status;
+                    status = return_status;
+                    break;
+                }
+                control => return Ok(control),
             }
         } else {
             // Only the interactive top-level loop may treat EOF as a request
@@ -467,11 +450,6 @@ pub(crate) fn cmdloop(
             }
             crate::input::rearm_stdin_after_eof(sh);
             numeof = numeof.saturating_add(1);
-        }
-        skip = sh.eval.evalskip;
-        if skip != 0 {
-            sh.eval.evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
-            break;
         }
     }
 

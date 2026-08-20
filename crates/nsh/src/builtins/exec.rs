@@ -9,6 +9,7 @@
 //! embedded shell cannot survive it, so the API gates it behind a `Host`
 //! method a frontend grants and an ordinary embedder refuses.
 
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
 
@@ -66,6 +67,7 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return match outcome? {
                 Flow::Exit { .. } => Ok(Flow::Done((sh.status).into())),
                 done @ Flow::Done(_) => Ok(done),
+                control => Ok(control),
             };
         }
 

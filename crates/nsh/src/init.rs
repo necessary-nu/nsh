@@ -25,6 +25,7 @@
 //! `docs/spec/port/src/init.md` states and what this file implements — an
 //! earlier note here claimed the two disagreed, which was wrong.
 
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::nodes::Node;
 
@@ -71,7 +72,6 @@ pub(crate) fn init_from(
 pub fn exitreset(sh: &mut crate::context::Shell) {
     /* from eval.c: */
     {
-        sh.eval.evalskip = 0;
         sh.eval.loopnest = 0;
         sh.eval.inps4 = 0;
     }

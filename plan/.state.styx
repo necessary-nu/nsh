@@ -5130,4 +5130,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.operation-modes}
     )}
+    {id structure-evaluator-builtin-control-flow, covered_rules (
+        idiom.evaluator-control-flow
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.evaluator-control-flow}
+    )}
 )

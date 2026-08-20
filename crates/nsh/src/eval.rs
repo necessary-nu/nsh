@@ -115,12 +115,6 @@ impl EvalContext {
     }
 }
 
-/* reasons for skipping commands (see comment on breakcmd routine) */
-pub const SKIPBREAK: c_int = 1 << 0;
-pub const SKIPCONT: c_int = 1 << 1;
-pub const SKIPFUNC: c_int = 1 << 2;
-pub const SKIPFUNCDEF: c_int = 1 << 3;
-
 // [spec:dash:def:eval.backcmd]
 pub struct backcmd {
     /* result of evalbackcmd */
@@ -132,25 +126,15 @@ pub struct backcmd {
 // module globals
 // ---------------------------------------------------------------------
 
-/// Where the evaluator is: what it is skipping, how deep it is, and the
-/// two buffers it must not re-enter.
+/// Where the evaluator is: how deep it is and the two buffers it must not
+/// re-enter.
 ///
 /// These are independent scalars rather than one structure, which is why
 /// the fields are `pub(crate)` where `AliasTable` and `ShellOptions`
 /// keep theirs private: there is no container invariant for a method to
 /// protect, and twelve one-line accessors would be noise.
 ///
-/// **One pairing is real and is not enforced here.** `skipcount` only
-/// means anything while `evalskip` is `SKIPBREAK` or `SKIPCONT` — it is
-/// the number of loop levels still to unwind. Anything that sets one
-/// must set the other, as `break`/`continue` do. Making that a single
-/// `skip(kind, count)` setter would be an improvement and is *not* this
-/// commit, which moves state and changes no behaviour.
 pub struct EvalState {
-    /// set if we are skipping commands
-    pub(crate) evalskip: c_int,
-    /// number of levels to skip — see the note above
-    pub(crate) skipcount: c_int,
     /// current loop nesting level (MKINIT)
     pub(crate) loopnest: c_int,
     /// starting line number of current function, or 0
@@ -203,8 +187,6 @@ impl EvalState {
     /// What the eight statics were declared with.
     pub(crate) const fn new() -> Self {
         EvalState {
-            evalskip: 0,
-            skipcount: 0,
             loopnest: 0,
             funcline: 0,
             inps4: 0,
@@ -241,14 +223,12 @@ impl EvalState {
 /// avoids pairing control flow with a second ambient field and lets nested
 /// traps carry independent exit decisions.
 ///
-/// `evalskip`'s `break` / `continue` / `return` are **not** here. §3.5
-/// proposes collapsing them into this type as well, and they should be;
-/// but they never travelled by longjmp — they are a global the evaluation
-/// loops already poll — so converting them is idiomatisation riding on
-/// this node rather than part of replacing the exception mechanism.
-/// `docs/idiomatization.md` §2.2 is the rule that says not to.
+/// Loop and function control travel in the same value. This makes every
+/// propagation and catch boundary explicit and leaves no ambient skip code
+/// for unrelated evaluator frames to poll.
+// [spec:nsh:req:idiom.evaluator-control-flow]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[must_use = "an ignored Flow is an `exit` the shell does not perform"]
+#[must_use = "an ignored Flow drops a shell control transfer"]
 pub enum Flow {
     /// Evaluation finished. The value is the status, exactly what these
     /// functions returned before there was anything else to say.
@@ -260,6 +240,12 @@ pub enum Flow {
     /// that could not happen. The latter already left its status on the
     /// shell.
     Exit { status: Option<ExitStatus> },
+    /// Leave `levels` lexically enclosing loops.
+    Break { levels: usize, status: ExitStatus },
+    /// Resume at the top of the `levels`th lexically enclosing loop.
+    Continue { levels: usize, status: ExitStatus },
+    /// Leave the nearest function or sourced-command boundary.
+    Return { status: ExitStatus, explicit: bool },
 }
 
 impl Flow {
@@ -272,6 +258,56 @@ impl Flow {
         Flow::Exit {
             status: Some(status.into()),
         }
+    }
+
+    pub(crate) const fn status(self) -> Option<ExitStatus> {
+        match self {
+            Flow::Done(status)
+            | Flow::Break { status, .. }
+            | Flow::Continue { status, .. }
+            | Flow::Return { status, .. } => Some(status),
+            Flow::Exit { status } => status,
+        }
+    }
+
+    pub(crate) const fn with_status(self, status: ExitStatus) -> Self {
+        match self {
+            Flow::Done(_) => Flow::Done(status),
+            Flow::Break { levels, .. } => Flow::Break { levels, status },
+            Flow::Continue { levels, .. } => Flow::Continue { levels, status },
+            Flow::Return { explicit, .. } => Flow::Return { status, explicit },
+            Flow::Exit { .. } => self,
+        }
+    }
+}
+
+enum LoopStep {
+    Value(ExitStatus),
+    Break(ExitStatus),
+    Continue(ExitStatus),
+    Propagate(Flow),
+}
+
+fn catch_one_loop(flow: Flow) -> LoopStep {
+    match flow {
+        Flow::Done(status) => LoopStep::Value(status),
+        Flow::Break { levels: 1, status } => LoopStep::Break(status),
+        Flow::Continue { levels: 1, status } => LoopStep::Continue(status),
+        Flow::Break { levels, status } => {
+            debug_assert!(levels > 1);
+            LoopStep::Propagate(Flow::Break {
+                levels: levels - 1,
+                status,
+            })
+        }
+        Flow::Continue { levels, status } => {
+            debug_assert!(levels > 1);
+            LoopStep::Propagate(Flow::Continue {
+                levels: levels - 1,
+                status,
+            })
+        }
+        control => LoopStep::Propagate(control),
     }
 }
 
@@ -289,7 +325,7 @@ macro_rules! flow {
     ($e:expr) => {
         match $e? {
             $crate::eval::Flow::Done(status) => status,
-            exit @ $crate::eval::Flow::Exit { .. } => return Ok(exit),
+            control => return Ok(control),
         }
     };
 }
@@ -386,10 +422,6 @@ pub(crate) fn parse_execute(sh: &mut Shell, context: EvalContext) -> Result<Flow
             if n.is_some() {
                 status = i;
             }
-
-            if sh.eval.evalskip != 0 {
-                break;
-            }
         }
         /* `popstackmark(&smark)` — one per parsed command, and one on the
          * way out. */
@@ -432,6 +464,17 @@ fn builtin_error_is_fatal(sh: &Shell, spclbltin: c_int, error: &Error) -> bool {
     error.is_interrupt() || (spclbltin > 0 && sh.eval.signal_trap_depth == 0)
 }
 
+fn capture_local_control(flow: Flow, slot: &mut Option<Flow>) -> Result<(), Flow> {
+    match flow {
+        Flow::Done(_) => Ok(()),
+        exit @ Flow::Exit { .. } => Err(exit),
+        control => {
+            *slot = Some(control);
+            Ok(())
+        }
+    }
+}
+
 fn eval_interactive_sequence(
     sh: &mut Shell,
     n: Option<&Node>,
@@ -440,10 +483,7 @@ fn eval_interactive_sequence(
     if let Some(Node::Sequence(sequence)) = n {
         match eval_interactive_sequence(sh, Some(sequence.left.as_ref()), context.tested_only())? {
             Flow::Done(_) => {}
-            exit @ Flow::Exit { .. } => return Ok(exit),
-        }
-        if sh.eval.evalskip != 0 {
-            return Ok(Flow::Done((sh.status).into()));
+            control => return Ok(control),
         }
         return eval_interactive_sequence(sh, Some(sequence.right.as_ref()), context);
     }
@@ -504,7 +544,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                 }
                 let expanded_redirections = expredir(sh, &redirection.redirections)?;
                 crate::redir::pushredir(sh, &expanded_redirections);
-                let status = match crate::redir::redirectsafe(
+                let outcome = match crate::redir::redirectsafe(
                     sh,
                     &expanded_redirections,
                     RedirectionMode::Push,
@@ -515,18 +555,21 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                     Err(error) => {
                         drop(error);
                         check_exit = true;
-                        ExitStatus::FAILURE
+                        Ok(Flow::Done(ExitStatus::FAILURE))
                     }
-                    Ok(()) => flow!(evaltree(
+                    Ok(()) => evaltree(
                         sh,
                         Some(redirection.command.as_ref()),
                         context.tested_only(),
-                    )),
+                    ),
                 };
                 if !redirection.redirections.is_empty() {
                     crate::redir::popredir(sh, 0);
                 }
-                status
+                match outcome? {
+                    Flow::Done(status) => status,
+                    control => return Ok(control),
+                }
             }
             Node::Command(command) => {
                 check_exit = true;
@@ -554,7 +597,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                     Some(command.left.as_ref()),
                     EvalContext::TESTED
                 ));
-                if !left.success() || sh.eval.evalskip != 0 {
+                if !left.success() {
                     left
                 } else {
                     flow!(evaltree(sh, Some(command.right.as_ref()), context))
@@ -566,7 +609,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                     Some(command.left.as_ref()),
                     EvalContext::TESTED
                 ));
-                if left.success() || sh.eval.evalskip != 0 {
+                if left.success() {
                     left
                 } else {
                     flow!(evaltree(sh, Some(command.right.as_ref()), context))
@@ -578,11 +621,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                     Some(command.left.as_ref()),
                     context.tested_only(),
                 ));
-                if sh.eval.evalskip != 0 {
-                    sh.status
-                } else {
-                    flow!(evaltree(sh, Some(command.right.as_ref()), context))
-                }
+                flow!(evaltree(sh, Some(command.right.as_ref()), context))
             }
             Node::If(command) => {
                 let condition = flow!(evaltree(
@@ -590,9 +629,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                     Some(command.condition.as_ref()),
                     EvalContext::TESTED,
                 ));
-                if sh.eval.evalskip != 0 {
-                    condition
-                } else if condition.success() {
+                if condition.success() {
                     flow!(evaltree(sh, Some(command.then_branch.as_ref()), context))
                 } else if command.else_branch.is_some() {
                     flow!(evaltree(sh, command.else_branch.as_deref(), context))
@@ -616,14 +653,10 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                     Some(command.command.as_ref()),
                     EvalContext::TESTED,
                 ));
-                if sh.eval.evalskip == 0 {
-                    if status.success() {
-                        ExitStatus::FAILURE
-                    } else {
-                        ExitStatus::SUCCESS
-                    }
+                if status.success() {
+                    ExitStatus::FAILURE
                 } else {
-                    status
+                    ExitStatus::SUCCESS
                 }
             }
             Node::Word(_) => {
@@ -658,35 +691,21 @@ pub fn evaltreenr(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Res
      * of the three call sites is in a freshly forked child, whose copy of
      * every frame between here and `main` is its own, so returning
      * through them reaches the same `exit:` the longjmp reached. */
-    let flow = evaltree(sh, n, context)?;
+    let flow = match evaltree(sh, n, context)? {
+        exit @ Flow::Exit { .. } => exit,
+        control @ (Flow::Break { .. } | Flow::Continue { .. } | Flow::Return { .. }) => {
+            sh.status = control
+                .status()
+                .expect("local control at a process terminus carries a status");
+            Flow::END
+        }
+        done @ Flow::Done(_) => done,
+    };
     debug_assert!(
         matches!(flow, Flow::Exit { .. }),
         "evaltreenr's caller passed EV_EXIT, so evaltree cannot finish normally"
     );
     Ok(flow)
-}
-
-// [spec:dash:def:eval.skiploop-fn]
-// [spec:dash:sem:eval.skiploop-fn]
-fn skiploop(sh: &mut crate::context::Shell) -> c_int {
-    let mut skip: c_int = sh.eval.evalskip;
-
-    match skip {
-        0 => {}
-
-        SKIPBREAK | SKIPCONT => {
-            sh.eval.skipcount -= 1;
-            if sh.eval.skipcount <= 0 {
-                sh.eval.evalskip = 0;
-            } else {
-                skip = SKIPBREAK;
-            }
-        }
-
-        _ => {}
-    }
-
-    skip
 }
 
 // [spec:dash:def:eval.evalloop-fn]
@@ -701,49 +720,45 @@ fn evalloop(
     until: bool,
     context: EvalContext,
 ) -> Result<Flow, Error> {
-    let mut skip: c_int;
-    let mut status: ExitStatus;
     let context = context.tested_only();
 
     sh.eval.loopnest += 1;
-    status = ExitStatus::SUCCESS;
-    loop {
-        {
-            let mut i: ExitStatus;
-
-            i = flow!(evaltree(
+    let outcome = (|| {
+        let mut status = ExitStatus::SUCCESS;
+        loop {
+            let mut condition = match catch_one_loop(evaltree(
                 sh,
                 Some(command.left.as_ref()),
                 EvalContext::TESTED,
-            ));
-            skip = skiploop(sh);
-            if skip == SKIPFUNC {
-                status = i;
+            )?) {
+                LoopStep::Value(status) => status,
+                LoopStep::Break(status) => return Ok(Flow::Done(status)),
+                LoopStep::Continue(next_status) => {
+                    status = next_status;
+                    continue;
+                }
+                LoopStep::Propagate(control) => return Ok(control),
+            };
+            if until {
+                condition = if condition.success() {
+                    ExitStatus::FAILURE
+                } else {
+                    ExitStatus::SUCCESS
+                };
             }
-            if skip != 0 {
-                /* `continue` in the C do/while: re-test the condition */
-            } else {
-                if until {
-                    i = if i.success() {
-                        ExitStatus::FAILURE
-                    } else {
-                        ExitStatus::SUCCESS
-                    };
-                }
-                if !i.success() {
-                    break;
-                }
-                status = flow!(evaltree(sh, Some(command.right.as_ref()), context));
-                skip = skiploop(sh);
+            if !condition.success() {
+                return Ok(Flow::Done(status));
+            }
+            match catch_one_loop(evaltree(sh, Some(command.right.as_ref()), context)?) {
+                LoopStep::Value(body_status) => status = body_status,
+                LoopStep::Break(break_status) => return Ok(Flow::Done(break_status)),
+                LoopStep::Continue(next_status) => status = next_status,
+                LoopStep::Propagate(control) => return Ok(control),
             }
         }
-        if (skip & !SKIPCONT) != 0 {
-            break;
-        }
-    }
+    })();
     sh.eval.loopnest -= 1;
-
-    Ok(Flow::Done((status).into()))
+    outcome
 }
 
 // [spec:dash:def:eval.evalfor-fn]
@@ -780,9 +795,17 @@ fn evalfor(sh: &mut Shell, command: &ForCommand, context: EvalContext) -> Result
             Some(crate::mystring::cstr_prefix(&sp.text)),
             0,
         )?;
-        status = flow!(evaltree(sh, Some(command.body.as_ref()), context));
-        if (skiploop(sh) & !SKIPCONT) != 0 {
-            break;
+        match catch_one_loop(evaltree(sh, Some(command.body.as_ref()), context)?) {
+            LoopStep::Value(body_status) => status = body_status,
+            LoopStep::Break(break_status) => {
+                status = break_status;
+                break;
+            }
+            LoopStep::Continue(next_status) => status = next_status,
+            LoopStep::Propagate(control) => {
+                sh.eval.loopnest -= 1;
+                return Ok(control);
+            }
         }
     }
     sh.eval.loopnest -= 1;
@@ -824,9 +847,6 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, context: EvalContext) -> Resu
     debug_assert_eq!(arglist.list.len(), 1, "an unsplit expansion is one field");
     'out_lbl: {
         for clause in &command.clauses {
-            if sh.eval.evalskip != 0 {
-                break;
-            }
             let mut selected = fallthrough;
             if !selected {
                 for patp in &clause.patterns {
@@ -846,7 +866,7 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, context: EvalContext) -> Resu
             }
             /* Ensure body is non-empty as otherwise EV_EXIT may prevent us
              * from setting the exit status. */
-            if sh.eval.evalskip == 0 && clause.body.is_some() {
+            if clause.body.is_some() {
                 status = flow!(evaltree(sh, clause.body.as_deref(), context));
             }
             if clause.fallthrough {
@@ -1071,7 +1091,7 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, context: EvalContext) -> Result
         let has_next = i + 1 < pipeline.commands.len();
         match prehash(sh, cmd)? {
             Flow::Done(_) => {}
-            exit @ Flow::Exit { .. } => return Ok(exit),
+            control => return Ok(control),
         }
         let mut pipe = if has_next {
             match crate::redir::sh_pipe(sh, false) {
@@ -1355,6 +1375,7 @@ fn evalcommand(
     let mut status: ExitStatus;
     let mut vflags: c_int;
     let mut vlocal: c_int;
+    let mut command_control: Option<Flow> = None;
 
     sh.eval.errlinno = command.line;
     sh.vars.lineno = command.line;
@@ -1404,7 +1425,7 @@ fn evalcommand(
                 BStr::new(regpath.as_slice()),
             )? {
                 Flow::Done(_) => {}
-                exit @ Flow::Exit { .. } => return Ok(exit),
+                control => return Ok(control),
             }
 
             vlocal += 1;
@@ -1592,6 +1613,10 @@ fn evalcommand(
                 )? {
                     Flow::Done(_) => {}
                     exit @ Flow::Exit { .. } => return Ok(exit),
+                    control => {
+                        command_control = Some(control);
+                        break 'out_lbl;
+                    }
                 }
             }
 
@@ -1619,8 +1644,11 @@ fn evalcommand(
                      * the mechanism that decides which errors an embedder
                      * ever sees. Anything else leaves as it arrived. */
                     match evalbltin(sh, builtin, &mut arglist.list[head..], context) {
-                        Ok(Flow::Done(_)) => {}
-                        Ok(exit @ Flow::Exit { .. }) => return Ok(exit),
+                        Ok(flow) => {
+                            if let Err(exit) = capture_local_control(flow, &mut command_control) {
+                                return Ok(exit);
+                            }
+                        }
                         Err(e) => {
                             /* The C's `!(exception == EXERROR && spclbltin
                              * <= 0)`. An interrupt is not an EXERROR and
@@ -1656,9 +1684,11 @@ fn evalcommand(
                      * not a builtin, so there is nothing to swallow: both an
                      * exit and a diagnostic leave through this frame. */
                     let args = crate::builtins::args(&arglist.list[head..]);
-                    match evalfun(sh, &function, &args, context)? {
-                        Flow::Done(_) => {}
-                        exit @ Flow::Exit { .. } => return Ok(exit),
+                    if let Err(exit) = capture_local_control(
+                        evalfun(sh, &function, &args, context)?,
+                        &mut command_control,
+                    ) {
+                        return Ok(exit);
                     }
                 }
 
@@ -1766,7 +1796,9 @@ fn evalcommand(
         )?;
     }
 
-    Ok(Flow::Done((status).into()))
+    Ok(command_control
+        .unwrap_or(Flow::Done(status))
+        .with_status(status))
 }
 
 // [spec:dash:def:eval.evalbltin-fn]
@@ -1798,10 +1830,12 @@ fn evalbltin(
                 entry(sh, &args)?
             }
         };
-        let mut status = match command_flow {
-            Flow::Done(status) => status,
-            exit @ Flow::Exit { .. } => return Ok(exit),
-        };
+        if matches!(command_flow, Flow::Exit { .. }) {
+            return Ok(command_flow);
+        }
+        let mut status = command_flow
+            .status()
+            .expect("non-exit builtin control carries a command status");
         /* Every `?` and every `Flow::Exit` above skips the rest of this,
          * exactly as the C's `goto cmddone` skipped it. */
         sh.io.flushall();
@@ -1811,7 +1845,7 @@ fn evalbltin(
             status = ExitStatus::ERROR;
         }
         sh.status = status;
-        Ok(Flow::Done((status).into()))
+        Ok(command_flow.with_status(status))
     })();
 
     // cmddone:
@@ -1876,9 +1910,10 @@ fn evalfun(
     sh.eval.funcline = savefuncline;
     crate::options::restoreparam(sh, saveparam);
     INTON(sh);
-    sh.eval.evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
-
-    outcome
+    match outcome? {
+        Flow::Return { status, .. } => Ok(Flow::Done(status)),
+        control => Ok(control),
+    }
 }
 
 /*
@@ -1972,16 +2007,8 @@ fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
  * No command given.
  */
 
-/*
- * Handle break and continue commands.  Break, continue, and return are
- * all handled by setting the evalskip flag.  The evaluation routines
- * above all check this flag, and if it is set they start skipping
- * commands rather than executing them.  The variable skipcount is
- * the number of loops to break/continue, or the number of function
- * levels to return.  (The latter is always 1.)  It should probably
- * be an error to break out of more loops than exist, but it isn't
- * in the standard shell so we don't make it one here.
- */
+/* Break, continue, and return are typed `Flow` values. Each loop or
+ * function consumes its own level and propagates the rest. */
 
 /*
  * The return command.
@@ -2131,9 +2158,11 @@ mod tests {
         let sh = &mut owned;
 
         sh.status = ExitStatus::from_code(9);
-        sh.eval.evalskip = SKIPFUNCDEF;
+        sh.eval.loopnest = 3;
+        sh.eval.inps4 = 1;
         crate::init::exitreset(sh);
         assert_eq!(sh.status, ExitStatus::from_code(9));
-        assert_eq!(sh.eval.evalskip, 0);
+        assert_eq!(sh.eval.loopnest, 0);
+        assert_eq!(sh.eval.inps4, 0);
     }
 }

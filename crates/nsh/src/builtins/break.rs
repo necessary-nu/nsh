@@ -4,16 +4,16 @@
 //! reads the word it was called as to tell them apart, which is why the
 //! table can point both rows here.
 //!
-//! Breaking a loop is a flag the evaluation routines check rather than a
-//! control transfer -- `evalskip` and `skipcount` live in `crate::eval`
-//! because that is what reads them.
+//! Loop control is returned to the evaluator as a typed [`Flow`].
+
+// [spec:nsh:req:idiom.evaluator-control-flow]
 
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use core::ffi::c_int;
 
-use crate::eval::{Flow, SKIPBREAK, SKIPCONT};
+use crate::eval::Flow;
 
 // [spec:dash:def:eval.breakcmd-fn]
 // [spec:dash:sem:eval.breakcmd-fn]
@@ -43,14 +43,21 @@ pub fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         n = sh.eval.loopnest;
     }
     if n > 0 {
-        sh.eval.evalskip = if args[0].first() == Some(&b'c') {
-            SKIPCONT
+        let levels = n as usize;
+        Ok(if args[0].first() == Some(&b'c') {
+            Flow::Continue {
+                levels,
+                status: crate::status::ExitStatus::SUCCESS,
+            }
         } else {
-            SKIPBREAK
-        };
-        sh.eval.skipcount = n;
+            Flow::Break {
+                levels,
+                status: crate::status::ExitStatus::SUCCESS,
+            }
+        })
+    } else {
+        Ok(Flow::Done(crate::status::ExitStatus::SUCCESS))
     }
-    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]
@@ -59,7 +66,7 @@ mod tests {
 
     /// The two names are told apart by the word the builtin was called
     /// as, so the flag each sets is the thing to check.
-    fn run(name: &[u8], count: Option<&[u8]>, nest: c_int) -> (c_int, c_int) {
+    fn run(name: &[u8], count: Option<&[u8]>, nest: c_int) -> Flow {
         let _guard = crate::testutil::lock();
         let mut args = vec![BStr::new(name)];
         if let Some(count) = count {
@@ -71,14 +78,25 @@ mod tests {
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         sh.eval.loopnest = nest;
-        assert_eq!(breakcmd(sh, &args).unwrap(), Flow::Done((0).into()));
-        (sh.eval.evalskip, sh.eval.skipcount)
+        breakcmd(sh, &args).unwrap()
     }
 
     #[test]
     fn break_and_continue_differ() {
-        assert_eq!(run(b"break", None, 1), (SKIPBREAK, 1));
-        assert_eq!(run(b"continue", None, 1), (SKIPCONT, 1));
+        assert_eq!(
+            run(b"break", None, 1),
+            Flow::Break {
+                levels: 1,
+                status: 0.into()
+            }
+        );
+        assert_eq!(
+            run(b"continue", None, 1),
+            Flow::Continue {
+                levels: 1,
+                status: 0.into()
+            }
+        );
     }
 
     /// "It should probably be an error to break out of more loops than
@@ -86,12 +104,18 @@ mod tests {
     /// here" -- the count is clamped instead.
     #[test]
     fn the_count_clamps_to_the_nesting() {
-        assert_eq!(run(b"break", Some(b"5"), 2), (SKIPBREAK, 2));
+        assert_eq!(
+            run(b"break", Some(b"5"), 2),
+            Flow::Break {
+                levels: 2,
+                status: 0.into()
+            }
+        );
     }
 
     /// Outside any loop there is nothing to skip, so no flag is set.
     #[test]
     fn outside_a_loop_nothing_is_set() {
-        assert_eq!(run(b"break", None, 0), (0, 0));
+        assert_eq!(run(b"break", None, 0), Flow::Done((0).into()));
     }
 }

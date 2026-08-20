@@ -7,6 +7,7 @@
 //! which is why `read` honours `IFS` without knowing what `IFS` is.
 
 // [spec:nsh:req:idiom.operation-modes]
+// [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
 use core::ffi::{c_int, c_uint};
@@ -126,8 +127,8 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:nsh:def:idiom.logical-descriptors]
 pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
-    let mut startloc: c_int = 0;
-    let mut newloc: c_int = 0;
+    let mut startloc: c_int;
+    let mut newloc: c_int;
     let mut status: ExitStatus;
     let mut rflag: c_int;
     let mut delimiter = b'\n';
@@ -171,75 +172,60 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     crate::input::pushstdin(sh);
 
-    /* The C body is a `for (;;)` entered by `goto start`, with the
-     * labels `put`, `record` and `start` inside it. The label graph is
-     * reproduced with an explicit program counter. */
-    const L_BODY: c_int = 0;
-    const L_PUT: c_int = 1;
-    const L_RECORD: c_int = 2;
-    const L_START: c_int = 3;
-
-    let mut pc: c_int = L_START; /* goto start */
-    let mut input = crate::syntax::InputUnit::EndOfInput;
+    startloc = line.len() as c_int;
+    newloc = startloc - 1;
 
     loop {
-        if pc == L_BODY {
-            let ml: c_uint;
-
-            /* `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`
-             * bought the C the room `getmbc` writes into. `getmbc` has its
-             * own scratch now, so there is nothing to reserve on its
-             * behalf -- the reservation left here would be a guess about
-             * another function's internals. */
-            input = if delimiter == b'\0' {
-                crate::input::pgetc_preserve_nul(sh)?
-            } else {
-                crate::input::pgetc(sh)?
-            };
-            if input == crate::syntax::InputUnit::EndOfInput {
-                status = ExitStatus::FAILURE;
-                break;
-            }
-            if input.is(b'\0') && delimiter != b'\0' {
-                pc = L_BODY;
-                continue;
-            }
-            let mut scratch: [u8; crate::parser::MBSLOP] = [0; crate::parser::MBSLOP];
-            ml = crate::parser::getmbc(
-                sh,
-                input,
-                &mut scratch,
-                crate::parser::MultibyteMode::Framed,
-            )?;
-            if ml != 0 {
-                /* `p += ml` is the commit of what `getmbc` wrote; a zero
-                 * return commits nothing, and the scribble it left behind
-                 * stays in the scratch rather than in `line`. */
-                debug_assert!(ml as usize <= READ_MBSLOP);
-                line.extend_from_slice(&scratch[..ml as usize]);
-                pc = L_RECORD; /* goto record */
-            } else if newloc >= startloc {
-                if input.is(b'\n') {
-                    if prompt_for_continuation {
-                        let ps2 = crate::var::ps2val(sh);
-                        let _ = sh.io.stderr().write_all(&ps2);
-                    }
-                    pc = L_RECORD; /* goto record */
-                } else {
-                    pc = L_PUT; /* goto put */
-                }
-            } else if rflag == 0 && input.is(b'\\') {
-                newloc = line.len() as c_int;
-                pc = L_BODY;
-                continue;
-            } else if input.is(delimiter) {
-                break;
-            } else {
-                pc = L_PUT; /* fall through to put: */
-            }
+        let input = if delimiter == b'\0' {
+            crate::input::pgetc_preserve_nul(sh)?
+        } else {
+            crate::input::pgetc(sh)?
+        };
+        if input == crate::syntax::InputUnit::EndOfInput {
+            status = ExitStatus::FAILURE;
+            break;
         }
-        if pc == L_PUT {
-            // put:
+        if input.is(b'\0') && delimiter != b'\0' {
+            continue;
+        }
+
+        /* `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`
+         * bought the C the room `getmbc` writes into. `getmbc` has its own
+         * scratch now, so there is nothing to reserve on its behalf. */
+        let mut scratch: [u8; crate::parser::MBSLOP] = [0; crate::parser::MBSLOP];
+        let ml: c_uint = crate::parser::getmbc(
+            sh,
+            input,
+            &mut scratch,
+            crate::parser::MultibyteMode::Framed,
+        )?;
+        let put_input = if ml != 0 {
+            /* `p += ml` is the commit of what `getmbc` wrote; a zero
+             * return commits nothing, and the scribble it left behind
+             * stays in the scratch rather than in `line`. */
+            debug_assert!(ml as usize <= READ_MBSLOP);
+            line.extend_from_slice(&scratch[..ml as usize]);
+            false
+        } else if newloc >= startloc {
+            if input.is(b'\n') {
+                if prompt_for_continuation {
+                    let ps2 = crate::var::ps2val(sh);
+                    let _ = sh.io.stderr().write_all(&ps2);
+                }
+                false
+            } else {
+                true
+            }
+        } else if rflag == 0 && input.is(b'\\') {
+            newloc = line.len() as c_int;
+            continue;
+        } else if input.is(delimiter) {
+            break;
+        } else {
+            true
+        };
+
+        if put_input {
             /* `strchr` matches the terminator too, so the set the C
              * scans is `cqchars[1..]` *including* its NUL -- which is
              * how a NUL read from the input gets escaped. */
@@ -252,23 +238,12 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
             /* USTPUTC(c, p) */
             line.push(input.expect_byte());
-            pc = L_RECORD;
         }
-        if pc == L_RECORD {
-            // record:
-            if newloc >= startloc {
-                crate::expand::recordregion(&mut sh.expand, startloc, newloc, 0);
-                pc = L_START;
-            } else {
-                pc = L_BODY; /* end of the for body */
-                continue;
-            }
-        }
-        if pc == L_START {
-            // start:
+
+        if newloc >= startloc {
+            crate::expand::recordregion(&mut sh.expand, startloc, newloc, 0);
             startloc = line.len() as c_int;
             newloc = startloc - 1;
-            pc = L_BODY; /* end of the for body */
         }
     }
     crate::input::popfile(sh);
