@@ -1,11 +1,13 @@
 //! nsh — a POSIX shell as a library.
 //!
-//! It began as a port of dash 0.5.13.5, whose observable behavior remains
-//! the reference. The implementation now uses owned Rust data, explicit
-//! state and typed control flow rather than preserving C representations.
+//! It began as a port of dash 0.5.13.5, which remains a differential
+//! regression oracle behind POSIX and explicit nsh behavior. The implementation
+//! uses owned Rust data, explicit state and typed control flow rather than
+//! preserving C representations or defects.
 //! Items carry `[spec:dash:def:…]` / `[spec:dash:sem:…]` annotations for
 //! the rules they implement; corresponding C-source claims live in
 //! `plan/annotations.styx`.
+//! [spec:nsh:sem:idiom.specified-defects+1]
 //!
 //! **The surface is closed.** It was thirty-eight public modules, which is
 //! not an API but the transliteration left open — see

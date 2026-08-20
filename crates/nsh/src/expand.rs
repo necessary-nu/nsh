@@ -1681,6 +1681,7 @@ fn push_multibyte_character(
 // question at once: `p` cannot run past `len`, the eight-byte fast path
 // reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
 // something with a start.
+// [spec:nsh:sem:idiom.specified-defects+1]
 fn push_bytes(
     locale: &nsh_platform::Locale,
     source: &[u8],
@@ -1727,13 +1728,10 @@ fn push_bytes(
             source_index += 8;
         }
 
-        /* NOTE (bug-for-bug): `is_type` is used here *unbiased*, i.e.
-         * without the `+ SYNBASE` every other syntax-table user applies.
-         * `chtodest` only ever indexes it with 0..127, which is in range
-         * and always reads 0 (never CCTL) — that is the point of the
-         * choice.  `mbtodest` however indexes it with CTLMBCHAR (-123),
-         * a read *before* the array; the C relies on that happening to
-         * yield a non-CCTL byte.  Reproduced verbatim, not fixed. */
+        /* The reference reaches this mode through an unbased syntax table
+         * and can index before its array. Its only stable shell-level meaning
+         * is "escape nothing". `Unframed` represents that meaning directly;
+         * no result depends on adjacent memory or a signed array index. */
         syntax = if framed {
             DestinationSyntax::Base
         } else {
@@ -1994,9 +1992,10 @@ fn classify_ifs(
     let mut is_default_whitespace = false;
     let mut is_separator = false;
     let mut wide_character = byte_at(bytes, 0) as i32;
-    /* C leaves `ifs0` uninitialised; it is only read when `isifs`, which
-     * implies one of the branches below assigned it. */
-    let mut first_separator = 0;
+    // [spec:nsh:sem:idiom.specified-defects+1]
+    // NUL-only splitting has no first IFS character. Represent that absence
+    // instead of reading the reference's uninitialized `ifs0` slot.
+    let mut first_separator = None;
 
     if nul_only {
         is_separator = wide_character == 0;
@@ -2018,17 +2017,17 @@ fn classify_ifs(
         }
 
         is_separator = shell.ifs.wide_characters.contains(&wide_character);
-        first_separator = shell.ifs.wide_characters[0];
+        first_separator = shell.ifs.wide_characters.first().copied();
     } else if multibyte_length == 0 {
         is_separator = shell.ifs.bytes.contains(&(wide_character as u8));
-        first_separator = shell.ifs.bytes.first().copied().unwrap_or(0) as i32;
+        first_separator = shell.ifs.bytes.first().copied().map(i32::from);
     }
 
     if is_separator {
         is_default_whitespace = shell.locale.wide_is_space(if wide_character != 0 {
             wide_character
         } else {
-            first_separator
+            first_separator.unwrap_or(wide_character)
         });
     }
     IfsMembership {
@@ -2520,6 +2519,7 @@ fn remove_pathname_escapes(path: &mut BString, name: &[u8]) {
 
 // [spec:dash:def:expand.expmeta-fn]
 // [spec:dash:sem:expand.expmeta-fn]
+// [spec:nsh:sem:idiom.specified-defects+1]
 // [spec:posix:def:pattern.filename-expansion-qualification]
 // [spec:posix:req:pattern.slash-explicit-match]
 // [spec:posix:syn:pattern.slash-terminates-bracket]

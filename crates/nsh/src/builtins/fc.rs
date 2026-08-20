@@ -8,9 +8,10 @@
 //! editor it spawns, and the file it reads back -- so like `eval` it
 //! depends on its words not borrowing from the shell.
 //!
-//! `fc -s old=new` still splits that word in place because dash exposes the
-//! truncated value through `$_`; the write is made through the owned field,
-//! not through a fabricated `char **`.
+//! `fc -s old=new` parses the substitution operand without mutating the
+//! expanded argument. The reference splits its `argv` storage in place, but
+//! that incidental write is neither POSIX behavior nor part of nsh's command
+//! model.
 
 // [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
@@ -142,11 +143,16 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     run_fields(shell, &mut fields)
 }
 
-/// The evaluator's entry point. It receives the owned expanded fields so the
-/// one observable mutation made by `fc -s old=new` remains a normal indexed
-/// write and `$_` sees the same truncated word dash exposes.
+fn split_substitution_operand(word: &BStr) -> Option<(BString, BString)> {
+    let at = word.find_byte(b'=')?;
+    Some((BString::from(&word[..at]), BString::from(&word[at + 1..])))
+}
+
+/// The evaluator's entry point. It receives the owned expanded fields used by
+/// the command evaluator and leaves them intact while parsing `old=new`.
 // [spec:posix:req:builtin.fc.edit-and-reexecute]
 // [spec:posix:req:builtin.fc.exit-status]
+// [spec:nsh:sem:idiom.specified-defects+1]
 pub(crate) fn run_fields(shell: &mut Shell, fields: &mut [ExpandedField]) -> Result<Flow, Error> {
     let args = crate::builtins::args(fields);
     let flags = scan_options(shell, &args)?;
@@ -175,8 +181,8 @@ pub(crate) fn run_fields(shell: &mut Shell, fields: &mut [ExpandedField]) -> Res
      * leaves it installed for *the whole rest of the function* — there is
      * no `out:` label, and `handler` is deliberately not restored on the
      * normal path, which leaves it dangling into a returned frame. That
-     * was reproduced bug-for-bug while handlers existed; there are none
-     * now, so the hazard is gone rather than preserved. What survives is
+     * existed only while handlers were translated literally; there are none
+     * now, so the hazard is gone. What survives is
      * the shape: the guarded body is a closure, and what the C's non-zero
      * arm did is the code after the call.
      */
@@ -225,12 +231,10 @@ pub(crate) fn run_fields(shell: &mut Shell, fields: &mut [ExpandedField]) -> Res
         let mut pattern: Option<BString> = None;
         let mut replacement = BString::default();
         if substitute {
-            if let Some(field) = fields.get_mut(operand_start) {
-                let word = field.as_bstr();
-                if let Some(at) = word.find_byte(b'=') {
-                    pattern = Some(BString::from(&word[..at]));
-                    replacement = BString::from(&word[at + 1..]);
-                    field.text[at] = 0;
+            if let Some(field) = fields.get(operand_start) {
+                if let Some((old, new)) = split_substitution_operand(field.as_bstr()) {
+                    pattern = Some(old);
+                    replacement = new;
                     operand_start += 1;
                 }
             }
@@ -644,6 +648,17 @@ mod tests {
             BString::from("abc"),
         );
         assert_eq!(pattern, Some(BString::from("")));
+    }
+
+    // [spec:nsh:sem:idiom.specified-defects+1/test]
+    #[test]
+    fn substitution_operand_stays_intact() {
+        let fields = [ExpandedField::from_bytes(b"old=new")];
+        let (pattern, replacement) = split_substitution_operand(fields[0].as_bstr()).unwrap();
+
+        assert_eq!(pattern, BString::from("old"));
+        assert_eq!(replacement, BString::from("new"));
+        assert_eq!(fields[0].as_bstr(), BStr::new(b"old=new"));
     }
 
     // [spec:posix:req:builtin.fc.stdout-list-format/test]

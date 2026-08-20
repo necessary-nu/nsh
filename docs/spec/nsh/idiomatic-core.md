@@ -247,11 +247,19 @@ undefined behavior.
 > dispatch suffixes, and unexplained C abbreviations MUST NOT remain merely for
 > source correspondence.
 
-> [spec:nsh:sem:idiom.specified-defects]
+> [spec:nsh:sem:idiom.specified-defects+1]
 > Observable behavior follows POSIX, an explicit nsh compatibility rule, or a
 > documented sanctioned divergence in that precedence order. Dash behavior is
 > regression evidence, not authority to preserve a defect, undefined behavior,
 > impossible fallthrough, null dereference, or uninitialized value.
+>
+> Invalid internal states MUST be unrepresentable or produce an explicit error;
+> they MUST NOT be interpreted through a C union arm or release-build
+> fallthrough. Where POSIX leaves signed shell-arithmetic overflow unspecified,
+> nsh defines two's-complement `i64` wrapping and masks shift counts modulo 64,
+> so the result is deterministic and independent of host-language undefined
+> behavior. Numeric operands whose valid range is specified by the
+> implementation MUST be range-checked rather than wrapped.
 
 > [spec:nsh:req:idiom.port-provenance]
 > Source-port provenance MUST remain discoverable without constraining the Rust

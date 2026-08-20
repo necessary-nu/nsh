@@ -5356,4 +5356,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.rust-naming}
     )}
+    {id audit-bug-for-bug-behavior, covered_rules (
+        idiom.specified-defects
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.specified-defects}
+    )}
 )

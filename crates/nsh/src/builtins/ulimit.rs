@@ -145,6 +145,7 @@ fn print_limit(
 
 // [spec:posix:req:builtin.ulimit.unlimited-value]
 // [spec:posix:def:builtin.ulimit.operand-newlimit]
+// [spec:nsh:sem:idiom.specified-defects+1]
 fn parse_value(shell: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, Error> {
     if text == b"unlimited" {
         return Ok(None);
@@ -152,10 +153,14 @@ fn parse_value(shell: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64
     if text.is_empty() || !text.iter().all(u8::is_ascii_digit) {
         return Err(shell.diagnostics().shell_error(b"bad number"));
     }
-    let value = text.iter().fold(0_u64, |value, digit| {
-        value.wrapping_mul(10).wrapping_add((digit - b'0') as u64)
-    });
-    Ok(Some(value.wrapping_mul(factor)))
+    let value = text
+        .iter()
+        .try_fold(0_u64, |value, digit| {
+            value.checked_mul(10)?.checked_add((digit - b'0') as u64)
+        })
+        .and_then(|value| value.checked_mul(factor))
+        .ok_or_else(|| shell.diagnostics().shell_error(b"bad number"))?;
+    Ok(Some(value))
 }
 
 // [spec:dash:def:miscbltin.ulimitcmd-fn]
@@ -240,6 +245,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::lock;
 
     #[test]
     fn every_option_letter_has_a_row() {
@@ -255,5 +261,24 @@ mod tests {
                 .iter()
                 .all(|limit| !matches!(limit.option, b'H' | b'S'))
         );
+    }
+
+    // [spec:posix:def:builtin.ulimit.operand-newlimit/test]
+    // [spec:nsh:sem:idiom.specified-defects+1/test]
+    #[test]
+    fn numeric_limits_reject_overflow() {
+        let _guard = lock();
+        let mut shell = Shell::new(crate::streams::Streams::INHERIT);
+
+        assert_eq!(
+            parse_value(&mut shell, BStr::new(b"18446744073709551615"), 1).unwrap(),
+            Some(u64::MAX)
+        );
+        let decimal_overflow =
+            parse_value(&mut shell, BStr::new(b"18446744073709551616"), 1).unwrap_err();
+        assert_eq!(decimal_overflow.message(), BStr::new(b"bad number"));
+        let unit_overflow =
+            parse_value(&mut shell, BStr::new(b"18446744073709551615"), 2).unwrap_err();
+        assert_eq!(unit_overflow.message(), BStr::new(b"bad number"));
     }
 }

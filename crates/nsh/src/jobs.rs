@@ -1447,13 +1447,11 @@ pub fn has_stopped_jobs(shell: &mut crate::context::Shell) -> Result<bool, Error
 
 // [spec:dash:def:jobs.commandtext-fn]
 // [spec:dash:sem:jobs.commandtext-fn]
+// [spec:posix:req:builtin.jobs.stdout-default-format]
+// [spec:nsh:sem:idiom.specified-defects+1]
 fn render_command(node: &Node) -> BString {
     let mut text = BString::new(Vec::new());
     render_node(Some(node), &mut text);
-    /* `cmdtxt` writes nothing at all for a command with no words — `x=1 &`
-     * is one — and the C then hands `savestr` an uninitialised stack block,
-     * out of which the reference reads a NUL and prints an empty command
-     * text. The empty buffer is that, said on purpose. */
     text
 }
 
@@ -1466,7 +1464,11 @@ fn render_node(node: Option<&Node>, text: &mut BString) {
         Node::Sequence(binary) => render_binary_command(binary, b"; ", text),
         Node::And(binary) => render_binary_command(binary, b" && ", text),
         Node::Or(binary) => render_binary_command(binary, b" || ", text),
-        Node::Redirect(command) | Node::Background(command) => {
+        Node::Redirect(command) => {
+            render_node(Some(command.command.as_ref()), text);
+            render_redirections(&command.redirections, text);
+        }
+        Node::Background(command) => {
             render_node(Some(command.command.as_ref()), text);
         }
         Node::Not(command) => {
@@ -1488,6 +1490,7 @@ fn render_node(node: Option<&Node>, text: &mut BString) {
             push_command_text(b"(", text);
             render_node(Some(command.command.as_ref()), text);
             push_command_text(b")", text);
+            render_redirections(&command.redirections, text);
         }
         Node::While(command) | Node::Until(command) => {
             push_command_text(
@@ -1517,6 +1520,10 @@ fn render_node(node: Option<&Node>, text: &mut BString) {
             push_command_text(b"() { ... }", text);
         }
         Node::Command(command) => {
+            render_command_list(&command.assignments, true, text);
+            if !command.assignments.is_empty() && !command.arguments.is_empty() {
+                push_command_text(b" ", text);
+            }
             render_command_list(&command.arguments, true, text);
             render_redirections(&command.redirections, text);
         }
@@ -1526,9 +1533,12 @@ fn render_node(node: Option<&Node>, text: &mut BString) {
             render_node(Some(command.word.as_ref()), text);
             push_command_text(b" in ", text);
             for clause in &command.clauses {
-                /* The C passes the head of the pattern list, so only the
-                 * first pattern of a case ever prints. */
-                render_node(clause.patterns.first(), text);
+                for (index, pattern) in clause.patterns.iter().enumerate() {
+                    if index != 0 {
+                        push_command_text(b"|", text);
+                    }
+                    render_node(Some(pattern), text);
+                }
                 push_command_text(b") ", text);
                 render_node(clause.body.as_deref(), text);
                 push_command_text(if clause.fallthrough { b";& " } else { b";; " }, text);
@@ -1705,6 +1715,14 @@ pub(crate) fn job_exit_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nodes::{CaseClause, CaseCommand, SimpleCommand, WordNode};
+    use crate::word::ParsedWord;
+
+    fn word(text: &[u8]) -> Node {
+        Node::Word(WordNode {
+            word: ParsedWord::literal(BString::from(text)),
+        })
+    }
 
     #[test]
     fn child_status_derives_job_state() {
@@ -1800,5 +1818,44 @@ mod tests {
             true,
             true,
         ));
+    }
+
+    // [spec:posix:req:builtin.jobs.stdout-default-format/test]
+    // [spec:nsh:sem:idiom.specified-defects+1/test]
+    #[test]
+    fn job_text_includes_assignment_only_commands() {
+        let command = Node::Command(SimpleCommand {
+            line: 1,
+            assignments: vec![word(b"answer=42")],
+            arguments: Vec::new(),
+            redirections: Vec::new(),
+        });
+
+        assert_eq!(render_command(&command), BString::from(b"answer=42"));
+    }
+
+    // [spec:posix:req:builtin.jobs.stdout-default-format/test]
+    // [spec:nsh:sem:idiom.specified-defects+1/test]
+    #[test]
+    fn job_text_includes_every_case_pattern() {
+        let command = Node::Case(CaseCommand {
+            line: 1,
+            word: Box::new(word(b"value")),
+            clauses: vec![CaseClause {
+                patterns: vec![word(b"first"), word(b"second")],
+                body: Some(Box::new(Node::Command(SimpleCommand {
+                    line: 1,
+                    assignments: Vec::new(),
+                    arguments: vec![word(b"echo")],
+                    redirections: Vec::new(),
+                }))),
+                fallthrough: false,
+            }],
+        });
+
+        assert_eq!(
+            render_command(&command),
+            BString::from(b"case value in first|second) echo;; esac")
+        );
     }
 }

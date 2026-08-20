@@ -1181,6 +1181,7 @@ pub fn push_standard_input(shell: &mut Shell) {
 
 // [spec:dash:def:input.popfile-fn]
 // [spec:dash:sem:input.popfile-fn]
+// [spec:nsh:sem:idiom.specified-defects+1]
 pub fn pop_input_frame(shell: &mut crate::context::Shell) {
     let popped_index = shell.input.current;
 
@@ -1214,18 +1215,14 @@ pub fn pop_input_frame(shell: &mut crate::context::Shell) {
         {
             clear_input_overlays(shell);
         }
-        /* `ckfree(pf)` takes the dying level's `spfree` chain with it, and the
-         * `ALIASINUSE` bits on it are never cleared: an alias expanded inside an
-         * old-style backquote, or any other level that ends with the alias
-         * already popped but not yet freed, stays marked in use for the rest of
-         * the shell's life and never expands again. That is observable, so the
-         * chain is dropped here rather than released.
-         *
-         * The C's `while (pf->strpush) { popstring(); … }` above the free reads
-         * `parsefile->strpush`, and `parsefile` was moved to the outer level two
-         * lines earlier — so the loop pops the wrong stack and then walks into a
-         * NULL `strpush`. It cannot run in any case that survives; these go the
-         * same way as the chain. */
+        /* Release every alias expansion owned by the dying frame before the
+         * frame disappears. The reference switches to the outer frame too
+         * early, walks that frame's string stack, and can both leave aliases
+         * permanently marked in-use and dereference a null link. Ownership
+         * identifies the intended frame without either failure mode. */
+        let mut overlays = core::mem::take(&mut input_frame.deferred_overlays);
+        overlays.extend(core::mem::take(&mut input_frame.overlays));
+        release_input_overlays(shell, overlays);
         drop(input_frame);
     });
 }
@@ -1305,4 +1302,40 @@ pub(crate) fn rearm_stdin_after_eof(shell: &mut Shell) {
     let base = input_frame_at(&mut shell.input, 0);
     base.eof_latched = false;
     base.eof_observed = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::lock;
+
+    // [spec:nsh:sem:idiom.specified-defects+1/test]
+    #[test]
+    fn popped_frame_releases_aliases() {
+        let _guard = lock();
+        let mut shell = Shell::new(crate::streams::Streams::INHERIT);
+        let name = BStr::new(b"again");
+        crate::alias::set_alias(&mut shell, name, BStr::new(b"echo yes")).unwrap();
+        shell.aliases.begin_expansion(name);
+        assert!(shell.aliases.lookup(name, true).is_none());
+
+        push_input_frame(&mut shell);
+        current_input_frame(&mut shell.input)
+            .deferred_overlays
+            .push(InputOverlay {
+                previous_position: 0,
+                previous_line_remaining: 0,
+                alias_name: Some(name.to_owned()),
+                string: b"echo yes".to_vec(),
+                deferred_overlays: Vec::new(),
+                unread_count: 0,
+            });
+
+        pop_input_frame(&mut shell);
+
+        assert_eq!(
+            shell.aliases.lookup(name, true),
+            Some(BString::from("echo yes"))
+        );
+    }
 }

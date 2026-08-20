@@ -455,6 +455,7 @@ impl<'a, 'shell> Parser<'a, 'shell> {
 
     // [spec:dash:def:arith-yacc.do-binop-fn]
     // [spec:dash:sem:arith-yacc.do-binop-fn]
+    // [spec:nsh:sem:idiom.specified-defects+1]
     fn apply(&mut self, op: BinaryOperator, left: i64, right: i64) -> Result<i64, Error> {
         Ok(match op {
             BinaryOperator::Multiply => left.wrapping_mul(right),
@@ -554,6 +555,21 @@ mod tests {
         assert_eq!(
             evaluate(&mut shell, BStr::new(b"9223372036854775808")).unwrap(),
             i64::MAX
+        );
+    }
+
+    // [spec:nsh:sem:idiom.specified-defects+1/test]
+    #[test]
+    fn overflow_and_shift_semantics_are_defined() {
+        let mut shell = shell();
+        assert_eq!(
+            evaluate(&mut shell, BStr::new(b"9223372036854775807 + 1")).unwrap(),
+            i64::MIN
+        );
+        assert_eq!(evaluate(&mut shell, BStr::new(b"1 << 64")).unwrap(), 1);
+        assert_eq!(
+            evaluate(&mut shell, BStr::new(b"1 << -1")).unwrap(),
+            i64::MIN
         );
     }
 

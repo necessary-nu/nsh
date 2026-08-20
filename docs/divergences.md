@@ -495,9 +495,11 @@ a shell that stops answering `^C`:
 not a crash but a shell that stops responding to `^C`, which no batch
 harness can observe because a batch harness never sends one.
 
-## Candidates not yet decided
+## POSIX survey improvements outside the differential register
 
-### The port is *more* conformant than dash in two line-editing cases
+### `edit.history-goto` / `edit.history-search-pattern`
+
+**Status:** sanctioned improvements. The Rust behavior leads.
 
 `edit-history-goto-number` (`edit.history-goto`, the `[number]G` command)
 and `edit-history-search-pattern-anchored`
@@ -505,33 +507,14 @@ and `edit-history-search-pattern-anchored`
 port's line editor is nshedit; dash's is libedit; nshedit satisfies these
 two and libedit does not.
 
-Nobody chose this. It is what fell out of attaching the history, and it
-is the same shape as the `edit.undo` entry that used to sit here —
-which resolved itself, since nshedit reproduces dash's behaviour there
-and both now fail together.
+The defect is in libedit, not in Dash's shell-language implementation, and
+nshedit already implements the conforming result. Deliberately regressing the
+native editor would have no compatibility benefit, so these outcomes are
+accepted under `[spec:nsh:sem:idiom.specified-defects+1]`.
 
-Under the bug-for-bug contract a port that is *better* than its original
-is still a divergence, so the choice is the usual three:
-
-  1. Reproduce libedit's failure, keeping the port faithful.
-  2. Register these as sanctioned improvements and let the port lead.
-  3. Fix libedit, so both conform and nothing is registered — the route
-     `fc -e` and the background job announcement took.
-
-Option 3 is not available in the same way here: the defect is in
-libedit, not in dash, and nshedit is already the fixed implementation.
-So it reduces to 1 or 2, and 2 costs nothing to hold — no maintenance,
-no divergence in the shell language, only in the editor.
-
-Left undecided deliberately. Recorded so that a future parity run
-showing "2 mismatches, port ahead" is read as this entry and not as a
-regression.
-
-**Since resolved in principle, not yet in writing.**
-[dec:nsh:we-own-the-defects] makes option 2 the default: dash is a
-reference rather than an authority, so a port that is better than its
-original is not thereby wrong. What is left is to move this section into
-the register above and say so, which is bookkeeping rather than a
-decision. It is held back only because these two *are* observed by the
-POSIX suite, so promoting them is exactly the case that wants the
-sanctioned-divergence mechanism first.
+They do not get functions in `tests/harness/divergences.sh`: that register
+classifies byte/status differences in the generated differential corpus, while
+these are named POSIX survey cases driven through a terminal. Their executable
+evidence remains those survey cases. A future result showing the port ahead in
+exactly these two cases is therefore expected; a different editor mismatch is
+not covered by this entry.
