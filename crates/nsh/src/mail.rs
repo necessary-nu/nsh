@@ -6,16 +6,15 @@ use nsh_platform::ShellBytesExt as _;
 
 use crate::var::{mailval, mpathset, mpathval};
 
-const MAXMBOXES: usize = 10;
-
 /// What `$MAILPATH` checking remembers between prompts.
 ///
 /// Another group §5 does not list. The times are per-shell by
 /// construction -- they are compared against the mailboxes of *this*
 /// shell's `$MAILPATH`, which another shell may have set differently.
+// [spec:nsh:req:idiom.no-artificial-limits]
 pub struct MailState {
     /* times of mailboxes */
-    mailtime: [i64; MAXMBOXES],
+    mailtime: Vec<i64>,
     /* Set if MAIL or MAILPATH is changed. */
     changed: bool,
 }
@@ -23,18 +22,19 @@ pub struct MailState {
 impl MailState {
     pub(crate) const fn new() -> Self {
         MailState {
-            mailtime: [0; MAXMBOXES],
+            mailtime: Vec::new(),
             changed: false,
         }
     }
 
     fn check(&mut self, mail_path: &BStr) -> Vec<Vec<u8>> {
         let mut notices = Vec::new();
-        for (index, component) in mail_path
-            .split(|&byte| byte == b':')
-            .take(MAXMBOXES)
-            .enumerate()
-        {
+        let mut component_count = 0;
+        for (index, component) in mail_path.split(|&byte| byte == b':').enumerate() {
+            component_count = index + 1;
+            if self.mailtime.len() <= index {
+                self.mailtime.resize(index + 1, 0);
+            }
             let (path, message) = component
                 .iter()
                 .position(|&byte| byte == b'%')
@@ -42,6 +42,7 @@ impl MailState {
                     (&component[..at], Some(&component[at + 1..]))
                 });
             if path.is_empty() {
+                self.mailtime[index] = 0;
                 continue;
             }
             let modified = path
@@ -61,6 +62,7 @@ impl MailState {
                 self.mailtime[index] = modified;
             }
         }
+        self.mailtime.truncate(component_count);
         self.changed = false;
         notices
     }
@@ -91,4 +93,22 @@ pub fn chkmail(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error
 // [spec:dash:sem:mail.changemail-fn]
 pub fn changemail(mail: &mut MailState, _value: &BStr) {
     mail.changed = true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_mailbox_is_tracked() {
+        let path = (0..12)
+            .map(|index| format!("nsh-missing-mailbox-{index}"))
+            .collect::<Vec<_>>()
+            .join(":");
+        let mut state = MailState::new();
+
+        drop(state.check(BStr::new(path.as_bytes())));
+
+        assert_eq!(state.mailtime.len(), 12);
+    }
 }

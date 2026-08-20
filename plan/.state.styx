@@ -5341,4 +5341,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.no-ignored-results}
     )}
+    {id remove-artificial-buffer-limits, covered_rules (
+        idiom.no-artificial-limits
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-artificial-limits}
+    )}
 )

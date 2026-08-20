@@ -307,6 +307,24 @@ fn fallible_results_are_explicit() {
     );
 }
 
+// [spec:nsh:req:idiom.no-artificial-limits/test]
+#[test]
+fn dynamic_values_are_not_clamped() {
+    for (name, source, forbidden) in [
+        ("jobs", JOBS, "append_ascii"),
+        ("jobs", JOBS, "name.len().min(32)"),
+        ("parser", PARSER, "message.truncate(63)"),
+        ("mail", MAIL, "MAXMBOXES"),
+        ("mail", MAIL, ".take(MAXMBOXES)"),
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "{name} retains artificial limit {forbidden:?}"
+        );
+    }
+    assert!(MAIL.contains("mailtime: Vec<i64>"));
+}
+
 // [spec:nsh:req:idiom.builtin-registry/test]
 #[test]
 fn builtin_registry_is_fully_typed() {

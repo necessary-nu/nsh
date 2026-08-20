@@ -30,15 +30,6 @@ mod model;
 
 pub(crate) use model::{Job, JobId, JobState, JobTable, JobWarning, ProcStat};
 
-/// Append an already-rendered ASCII fragment with `fmtstr`'s historical
-/// clamp-to-capacity convention.
-fn append_ascii(out: &mut Vec<u8>, capacity: usize, text: &str) -> usize {
-    debug_assert!(text.is_ascii());
-    let copied = text.len().min(capacity.saturating_sub(1));
-    out.extend_from_slice(&text.as_bytes()[..copied]);
-    text.len().min(capacity)
-}
-
 // ---------------------------------------------------------------------
 // src/jobs.h
 // ---------------------------------------------------------------------
@@ -397,6 +388,7 @@ pub(crate) const fn jobno(jp: JobId) -> usize {
 // [spec:dash:def:jobs.sprint-status-fn]
 // [spec:dash:sem:jobs.sprint-status-fn]
 // [spec:posix:def:builtin.jobs.stdout-state-strings]
+// [spec:nsh:req:idiom.no-artificial-limits]
 fn sprint_status(
     locale: &nsh_platform::Locale,
     out: &mut Vec<u8>,
@@ -407,9 +399,9 @@ fn sprint_status(
     match status {
         ChildStatus::Exited(code) if !signal_only => {
             if code == 0 {
-                append_ascii(out, 5, "Done");
+                out.extend_from_slice(b"Done");
             } else {
-                append_ascii(out, 16, &format!("Done({code})"));
+                out.extend_from_slice(format!("Done({code})").as_bytes());
             }
         }
         ChildStatus::Stopped(signal) if !signal_only => {
@@ -430,21 +422,14 @@ fn sprint_status(
             || (signal != nsh_platform::interrupt_signal()
                 && signal != nsh_platform::pipe_signal()) =>
         {
-            /* `stpncpy(s, …, 32)` copies at most 32 bytes and NUL-pads
-             * the rest of them, which is why the callers' buffers are
-             * sized for 32 whatever the signal is called. `strsignal` is
-             * locale text, not ASCII, so the bytes are copied rather than
-             * routed through `copy_ascii_cstr`. */
             let description = locale.signal_description(signal);
-            let name = description.as_slice();
-            let n = name.len().min(32);
-            out.extend_from_slice(&name[..n]);
+            out.extend_from_slice(&description);
             if core_dumped {
-                append_ascii(out, 15, " (core dumped)");
+                out.extend_from_slice(b" (core dumped)");
             }
         }
         ChildStatus::Continued if !signal_only => {
-            append_ascii(out, 8, "Running");
+            out.extend_from_slice(b"Running");
         }
         _ => {}
     }
@@ -469,7 +454,7 @@ pub(crate) fn showjob(
     let psend: usize;
     let mut column: usize;
     let indent: usize;
-    let mut s: Vec<u8> = Vec::with_capacity(80);
+    let mut s = Vec::new();
 
     if matches!(mode, JobDisplay::ProcessGroup) {
         /* just output process (group) id of pipeline */
@@ -483,7 +468,8 @@ pub(crate) fn showjob(
     }
 
     let heading = format!("[{}]   ", jobno(jp));
-    column = append_ascii(&mut s, 16, &heading);
+    s.extend_from_slice(heading.as_bytes());
+    column = s.len();
     indent = column;
 
     if Some(jp) == sh.jobs.current() {
@@ -494,14 +480,16 @@ pub(crate) fn showjob(
 
     if matches!(mode, JobDisplay::Long) {
         let pid = format!("{} ", process_id_text(ps_pid(sh, jp, 0)));
-        column += append_ascii(&mut s, 16, &pid);
+        s.extend_from_slice(pid.as_bytes());
+        column = s.len();
     }
 
     psend = sh.jobs[jp].ps.len();
 
     if sh.jobs[jp].is_running() {
         /* scopy("Running", s + col) */
-        column += append_ascii(&mut s, 8, "Running");
+        s.extend_from_slice(b"Running");
+        column = s.len();
     } else {
         /* `psend[-1]`: a job leaves the running state only through `waitone`,
          * which needs a process to have exited to do it. */
@@ -531,8 +519,8 @@ pub(crate) fn showjob(
                 space = ' ',
                 width = indent,
             );
-            let mut prefix = Vec::with_capacity(48);
-            let column = append_ascii(&mut prefix, 48, &continuation) - 3;
+            let prefix = continuation.into_bytes();
+            let column = prefix.len() - 3;
             (prefix, column)
         };
 
@@ -1214,7 +1202,7 @@ fn waitone(
     })?;
 
     if thisjob.is_some() && thisjob == jobp {
-        let mut message = Vec::with_capacity(49);
+        let mut message = Vec::new();
         sprint_status(
             &sh.locale,
             &mut message,

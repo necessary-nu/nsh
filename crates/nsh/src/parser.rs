@@ -2464,6 +2464,7 @@ pub fn endofname(locale: &nsh_platform::Locale, name: &BStr) -> usize {
 
 // [spec:dash:def:parser.synexpect-fn]
 // [spec:dash:sem:parser.synexpect-fn]
+// [spec:nsh:req:idiom.no-artificial-limits]
 fn synexpect(sh: &mut Shell, expected: Option<TokenKind>) -> Error {
     let mut message = Vec::new();
 
@@ -2474,7 +2475,6 @@ fn synexpect(sh: &mut Shell, expected: Option<TokenKind>) -> Error {
         message.extend_from_slice(expected.description());
         message.push(b')');
     }
-    message.truncate(63);
     synerror(sh, &message)
 }
 
