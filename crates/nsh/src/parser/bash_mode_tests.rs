@@ -1,3 +1,4 @@
+// [spec:nsh:req:idiom.operation-modes]
 use super::{ParseResult, parsecmd};
 use crate::context::Shell;
 use bstr::BStr;
@@ -21,7 +22,7 @@ fn dialect_changes_apply_next_parse_unit() {
     crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), true).unwrap();
     assert_eq!(sh.input.parse_dialect(), crate::options::Dialect::Posix);
     assert!(matches!(
-        crate::eval::evaltree(&mut sh, Some(&first), 0).unwrap(),
+        crate::eval::evaltree(&mut sh, Some(&first), crate::eval::EvalContext::DEFAULT).unwrap(),
         crate::eval::Flow::Done(crate::status::ExitStatus::SUCCESS)
     ));
 
@@ -30,14 +31,14 @@ fn dialect_changes_apply_next_parse_unit() {
     crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), false).unwrap();
     assert_eq!(sh.input.parse_dialect(), crate::options::Dialect::Bash);
     assert!(matches!(
-        crate::eval::evaltree(&mut sh, Some(&second), 0).unwrap(),
+        crate::eval::evaltree(&mut sh, Some(&second), crate::eval::EvalContext::DEFAULT).unwrap(),
         crate::eval::Flow::Done(crate::status::ExitStatus::SUCCESS)
     ));
 
     let third = parse_tree(&mut sh);
     assert_eq!(sh.input.parse_dialect(), crate::options::Dialect::Posix);
     assert!(matches!(
-        crate::eval::evaltree(&mut sh, Some(&third), 0).unwrap(),
+        crate::eval::evaltree(&mut sh, Some(&third), crate::eval::EvalContext::DEFAULT).unwrap(),
         crate::eval::Flow::Done(crate::status::ExitStatus::SUCCESS)
     ));
     assert_eq!(

@@ -13,7 +13,7 @@ use core::ffi::{c_char, c_int, c_uint};
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg};
+use crate::expand::{ExpansionMode, expandarg, restore_handler_expandarg};
 use crate::fd::LogicalDescriptor;
 use crate::input::{
     pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
@@ -1426,7 +1426,10 @@ fn pgetc_top(sh: &mut Shell, stack: &synstack) -> Result<InputUnit, Error> {
     }
 }
 
+mod multibyte;
 mod synstack_ops;
+
+pub(crate) use multibyte::MultibyteMode;
 
 // [spec:dash:def:parser.getmbc-fn]
 // [spec:dash:sem:parser.getmbc-fn]
@@ -1443,11 +1446,11 @@ mod synstack_ops;
 /// the caller appends only the prefix this reports, and the scribble is
 /// simply not copied out. Same bytes, same length, and the reservation
 /// stops being a memory-safety contract.
-pub fn getmbc(
+pub(crate) fn getmbc(
     sh: &mut Shell,
     input: InputUnit,
     out: &mut [u8; MBSLOP],
-    mode: c_int,
+    mode: MultibyteMode,
 ) -> Result<c_uint, Error> {
     let Some(mut byte) = input.byte() else {
         return Ok(0);
@@ -1459,16 +1462,17 @@ pub fn getmbc(
     let mut wc: i32 = 0;
     let mut complete = false;
     let mbc: usize;
+    let framed = matches!(
+        mode,
+        MultibyteMode::Framed | MultibyteMode::Escaped | MultibyteMode::FieldBoundary
+    );
+    let escaped = matches!(mode, MultibyteMode::Escaped);
 
     if byte.is_ascii() {
         return Ok(0);
     }
 
-    mbc = if (mode & 3) < 2 {
-        2 + (mode == 1) as usize
-    } else {
-        0
-    };
+    mbc = if framed { 2 + usize::from(escaped) } else { 0 };
     out[mbc + ml as usize] = byte;
     loop {
         /* `mbrtowc` is asked for exactly one byte, and the slice it is
@@ -1497,7 +1501,7 @@ pub fn getmbc(
     }
 
     if complete && ml > 1 {
-        if mode == 4 && sh.locale.wide_is_blank(wc) {
+        if matches!(mode, MultibyteMode::FieldBoundary) && sh.locale.wide_is_blank(wc) {
             return Ok(1);
         }
 
@@ -1505,11 +1509,11 @@ pub fn getmbc(
          * Over an offset they are one statement each, so they are written
          * out with the C's name beside them and the macros are deleted --
          * the bookkeeping [[delete-memalloc]] left recorded. */
-        if (mode & 3) < 2 {
+        if framed {
             /* USTPUTC(CTLMBCHAR, out) */
             out[o] = CTLMBCHAR as u8;
             o += 1;
-            if mode == 1 {
+            if escaped {
                 /* USTPUTC(CTLESC, out) */
                 out[o] = CTLESC as u8;
                 o += 1;
@@ -1521,7 +1525,7 @@ pub fn getmbc(
         /* STADJUST(ml, out) — step over the bytes written ahead of the
          * cursor, which are the character itself. */
         o += ml as usize;
-        if (mode & 3) < 2 {
+        if framed {
             /* USTPUTC(ml, out) */
             out[o] = ml as u8;
             o += 1;
@@ -1559,7 +1563,7 @@ fn getmbc_at(
     sh: &mut Shell,
     out: &mut BString,
     input: InputUnit,
-    mode: c_int,
+    mode: MultibyteMode,
 ) -> Result<c_uint, Error> {
     let mut scratch: [u8; MBSLOP] = [0; MBSLOP];
     let ml = getmbc(sh, input, &mut scratch, mode)?;
@@ -1760,28 +1764,19 @@ fn readtoken1(
         checkend(sh, &mut st)?;
         /* Until end of line or end of word */
         loop {
-            let fieldsplitting: c_int;
+            let field_splitting: bool;
             let mut ml: c_uint;
 
-            fieldsplitting = if st.syn().syntax == SyntaxContext::Base
-                && (st.syn().varnest | st.syn().backq) == 0
-            {
-                4
-            } else {
-                0
-            };
-            bash::process_substitutions(sh, &mut st, fieldsplitting)?;
+            field_splitting =
+                st.syn().syntax == SyntaxContext::Base && (st.syn().varnest | st.syn().backq) == 0;
+            bash::process_substitutions(sh, &mut st, field_splitting)?;
             /* The C's CHECKSTRSPACE, which permits max(MB_LEN_MAX, 23)
              * calls to USTPUTC, has no counterpart here: `getmbc`
              * writes into its own scratch and `getmbc_at` appends
              * what it reports, so there is no room for this frame to
              * make on its behalf. */
-            ml = getmbc_at(
-                sh,
-                &mut st.out,
-                st.input,
-                fieldsplitting | (if st.printesc { 2 } else { 0 }),
-            )?;
+            let multibyte_mode = MultibyteMode::for_word(field_splitting, st.printesc);
+            ml = getmbc_at(sh, &mut st.out, st.input, multibyte_mode)?;
             if ml == 1 {
                 if st.out.is_empty() {
                     return Ok(Token::plain(TokenKind::Blank));
@@ -1798,7 +1793,7 @@ fn readtoken1(
 
             match class {
                 SyntaxClass::Newline => {
-                    if fieldsplitting != 0 {
+                    if field_splitting {
                         break 'word;
                     }
                     st.out.push(st.input.expect_byte());
@@ -1839,7 +1834,7 @@ fn readtoken1(
                         }
                         st.quoted = true;
 
-                        ml = getmbc_at(sh, &mut st.out, st.input, 1)?;
+                        ml = getmbc_at(sh, &mut st.out, st.input, MultibyteMode::Escaped)?;
                         if ml == 0 {
                             st.out.push(CTLESC as u8);
                             st.out.push(st.input.expect_byte());
@@ -1928,7 +1923,7 @@ fn readtoken1(
                         synstack_ops::pop(&mut st.synstack);
                         st.printesc = false;
                         st.out.push(st.input.expect_byte());
-                    } else if fieldsplitting != 0 {
+                    } else if field_splitting {
                         break 'word;
                     } else {
                         st.out.push(st.input.expect_byte());
@@ -2399,7 +2394,7 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
                 {
                     pstr.push(b'\\');
                 }
-                ml = getmbc_at(sh, &mut pstr, input, 2)?;
+                ml = getmbc_at(sh, &mut pstr, input, MultibyteMode::Raw)?;
                 if ml != 0 {
                     continue;
                 }
@@ -2600,7 +2595,7 @@ pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
             word: mem::take(&mut sh.input.word),
         });
 
-        expandarg(sh, &n, None, EXP_QUOTED)?;
+        expandarg(sh, &n, None, ExpansionMode::QUOTED)?;
         /* The C reads the expansion back as `stackblock()`; the expansion
          * buffer is owned now, so the read is named.  The C's pointer was
          * live only until the next `stalloc`; this one is live until the

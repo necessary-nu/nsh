@@ -6,6 +6,7 @@
 //! `ifsbreakup` -- the same field splitting an unquoted expansion gets,
 //! which is why `read` honours `IFS` without knowing what `IFS` is.
 
+// [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
 use crate::error::Error;
 use core::ffi::{c_int, c_uint};
@@ -204,7 +205,12 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 continue;
             }
             let mut scratch: [u8; crate::parser::MBSLOP] = [0; crate::parser::MBSLOP];
-            ml = crate::parser::getmbc(sh, input, &mut scratch, 0)?;
+            ml = crate::parser::getmbc(
+                sh,
+                input,
+                &mut scratch,
+                crate::parser::MultibyteMode::Framed,
+            )?;
             if ml != 0 {
                 /* `p += ml` is the commit of what `getmbc` wrote; a zero
                  * return commits nothing, and the scribble it left behind

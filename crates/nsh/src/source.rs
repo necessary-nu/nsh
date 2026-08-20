@@ -14,6 +14,7 @@
 //! is. A `run` that could be continued by the next one would have to block
 //! for more input, which is what [`Source::stream`] is for.
 
+// [spec:nsh:req:idiom.operation-modes]
 use std::path::{Path, PathBuf};
 
 use bstr::{BStr, BString};
@@ -209,7 +210,7 @@ impl Shell {
              * The difference is not cosmetic — `cmdloop` prompts, reports
              * changed jobs, and counts consecutive `EOF`s for
              * `ignoreeof`. */
-            Kind::Bytes(_) => crate::eval::parse_execute(self, 0),
+            Kind::Bytes(_) => crate::eval::parse_execute(self, crate::eval::EvalContext::DEFAULT),
             Kind::File(_) => crate::shellmain::cmdloop(self, 0),
             Kind::Stream => crate::shellmain::cmdloop(self, 1),
         };
@@ -295,7 +296,10 @@ impl Shell {
     /// have one, and offering one that quietly skipped `$(…)` would be a
     /// different language wearing this one's syntax.
     pub fn expand_word(&mut self, word: &BStr) -> Result<Vec<BString>, Error> {
-        self.expand(word, crate::expand::EXP_FULL | crate::expand::EXP_TILDE)
+        self.expand(
+            word,
+            crate::expand::ExpansionMode::SPLIT | crate::expand::ExpansionMode::TILDE,
+        )
     }
 
     /// Expand one word as if it appeared inside double quotes: no field
@@ -305,7 +309,7 @@ impl Shell {
     /// flag a here-document is expanded under, which is what makes it the
     /// shell's own idea of "quoted" rather than a second one.
     pub fn expand_word_quoted(&mut self, word: &BStr) -> Result<BString, Error> {
-        let mut fields = self.expand(word, crate::expand::EXP_QUOTED)?;
+        let mut fields = self.expand(word, crate::expand::ExpansionMode::QUOTED)?;
         /* `expandarg` without `EXP_FULL` pushes exactly one field, so
          * the empty case is unreachable rather than defaulted. */
         Ok(fields.pop().unwrap_or_default())
@@ -322,7 +326,11 @@ impl Shell {
     /// keyword and alias checks off, because a single word in isolation is
     /// neither.
     // [spec:nsh:req:idiom.lexer-tokens]
-    fn expand(&mut self, word: &BStr, flag: core::ffi::c_int) -> Result<Vec<BString>, Error> {
+    fn expand(
+        &mut self,
+        word: &BStr,
+        mode: crate::expand::ExpansionMode,
+    ) -> Result<Vec<BString>, Error> {
         let mark = self.input.mark();
         let old_floor = self.input.floor();
 
@@ -344,7 +352,7 @@ impl Shell {
             }
             let n = crate::parser::makename(sh);
             let mut list = crate::expand::arglist::new();
-            crate::expand::expandarg(sh, &n, Some(&mut list), flag)?;
+            crate::expand::expandarg(sh, &n, Some(&mut list), mode)?;
             Ok(list
                 .list
                 .into_iter()

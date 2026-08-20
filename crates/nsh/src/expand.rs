@@ -19,7 +19,11 @@ use crate::mystring::{byte_at, byte_at_i, slice_from};
 use crate::nodes::Node;
 use crate::pmatch::pmatch_slices;
 
+mod mode;
 mod typed;
+
+use mode::EscapeMode;
+pub(crate) use mode::ExpansionMode;
 
 // ---------------------------------------------------------------------
 // Constants mirrored from the headers this file includes.
@@ -60,9 +64,6 @@ const VSLENGTH: c_int = crate::parser::VSLENGTH as c_int;
 /// are false in the shipped build.
 pub(crate) const FNMATCH_IS_ENABLED: bool = crate::mystring::FNMATCH_IS_ENABLED != 0;
 const GLOB_IS_ENABLED: bool = crate::mystring::GLOB_IS_ENABLED != 0;
-
-/// `<limits.h>`
-const CHAR_BIT: c_int = 8;
 
 // C character literals used as `switch` labels; Rust `match` patterns
 // require named constants, so the ones this file switches on get names.
@@ -166,21 +167,6 @@ impl arglist {
     }
 }
 
-/*
- * expandarg() flags
- */
-pub const EXP_FULL: c_int = 0x1; /* perform word splitting & file globbing */
-pub const EXP_TILDE: c_int = 0x2; /* do normal tilde expansion */
-pub const EXP_VARTILDE: c_int = 0x4; /* expand tildes in an assignment */
-pub const EXP_REDIR: c_int = 0x8; /* file glob for a redirection (1 match only) */
-pub const EXP_CASE: c_int = 0x10; /* keeps quotes around for CASE pattern */
-pub const EXP_MBCHAR: c_int = 0x20; /* mark multi-byte characters */
-pub const EXP_VARTILDE2: c_int = 0x40; /* expand tildes after colons only */
-pub const EXP_WORD: c_int = 0x80; /* expand word in parameter expansion */
-pub const EXP_QUOTED: c_int = 0x100; /* expand word in double quotes */
-pub const EXP_KEEPNUL: c_int = 0x200; /* do not skip NUL characters */
-pub const EXP_DISCARD: c_int = 0x400; /* discard result of expansion */
-
 /// [`rmescapes`] over a buffer that owns its bytes.
 ///
 /// `_rmescapes` shortens the C string in place and says nothing about by
@@ -193,23 +179,12 @@ pub const EXP_DISCARD: c_int = 0x400; /* discard result of expansion */
 // [spec:posix:req:expand.quote-removal]
 // [spec:posix:sem:expand.quote-removal-quoting-remembered]
 pub fn rmescapes_owned(s: &mut BString) -> usize {
-    rmescapes_buffer(s, 0)
+    rmescapes_buffer(s, EscapeMode::Plain)
 }
 
 // ---------------------------------------------------------------------
 // src/expand.c
 // ---------------------------------------------------------------------
-
-/*
- * _rmescape() flags
- */
-pub const RMESCAPE_ALLOC: c_int = 0x1; /* Allocate a new string */
-pub const RMESCAPE_GLOB: c_int = 0x2; /* Add backslashes for glob */
-pub const RMESCAPE_GROW: c_int = 0x8; /* Grow strings instead of stalloc */
-pub const RMESCAPE_HEAP: c_int = 0x10; /* Malloc strings instead of stalloc */
-
-/* Add CTLESC when necessary. */
-pub const QUOTES_ESC: c_int = EXP_FULL | EXP_CASE;
 
 /*
  * Structure specifying which parts of the string should be searched
@@ -550,22 +525,6 @@ fn int_pending() -> c_int {
     crate::error::int_pending()
 }
 
-// ---------------------------------------------------------------------
-// Flag-value guards.  The C has `#error` directives for both of these;
-// the branchless expressions in `memtodest` and `varvalue` are only
-// correct for these exact numeric values.
-// ---------------------------------------------------------------------
-
-/* #if QUOTES_ESC != 0x11 || EXP_MBCHAR != 0x20 || EXP_QUOTED != 0x100
- * #error QUOTES_ESC != 0x11 || EXP_MBCHAR != 0x20 || EXP_QUOTED != 0x100
- * #endif */
-const _: () = assert!(QUOTES_ESC == 0x11 && EXP_MBCHAR == 0x20 && EXP_QUOTED == 0x100);
-
-/* #if EXP_QUOTED >> CHAR_BIT != EXP_FULL
- * #error The following two lines expect EXP_QUOTED == EXP_FULL << CHAR_BIT
- * #endif */
-const _: () = assert!(EXP_QUOTED >> CHAR_BIT == EXP_FULL);
-
 /*
  * Prepare a pattern for a glob(3) call.
  *
@@ -666,14 +625,14 @@ pub fn expandarg(
     sh: &mut crate::context::Shell,
     arg: &crate::nodes::Node,
     arglist: Option<&mut arglist>,
-    flag: c_int,
+    mode: ExpansionMode,
 ) -> Result<(), Error> {
     let Node::Word(word) = arg else {
         return Err(sh.sh_error_value(b"word expansion requires a word node"));
     };
     // [spec:nsh:def:idiom.word-ir]
     // [spec:nsh:sem:idiom.typed-expansion]
-    typed::expand_argument(sh, &word.word, arglist, flag)
+    typed::expand_argument(sh, &word.word, arglist, mode)
 }
 
 // [spec:nsh:req:idiom.parser-control-flow]
@@ -682,7 +641,7 @@ fn expandarg_inner(
     state: &mut ExpandState,
     text: &[u8],
     arglist: Option<&mut arglist>,
-    flag: c_int,
+    mode: ExpansionMode,
 ) -> Result<(), Error> {
     let mut p: BString;
 
@@ -694,7 +653,7 @@ fn expandarg_inner(
      * swallowing arm and `init::exitreset` both call `ifsfree`, which is
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
-    argstr(sh, state, text, 0, flag)?;
+    argstr(sh, state, text, 0, mode)?;
     if let Some(arglist) = arglist {
         p = grabexpdest(state);
         /* `exparg.lastp = &exparg.list`.  It re-points the tail at the
@@ -705,7 +664,7 @@ fn expandarg_inner(
         /*
          * TODO - EXP_REDIR
          */
-        if (flag & EXP_FULL) != 0 {
+        if mode.contains(ExpansionMode::SPLIT) {
             /* The fields copy out of the word rather than pointing into
              * it, so the word itself is a local that dies at the end of
              * this block.  The C could not do that: its fields *are*
@@ -749,7 +708,7 @@ fn argstr(
     state: &mut ExpandState,
     text: &[u8],
     mut p: usize,
-    mut flag: c_int,
+    mut mode: ExpansionMode,
 ) -> Result<usize, Error> {
     static spclchars: [u8; 11] = [
         C_EQUALS as u8,
@@ -769,20 +728,25 @@ fn argstr(
      * its terminator, which is index 10. */
     let mut reject: usize = 0;
     let mut c: c_int;
-    let breakall: c_int = ((flag & (EXP_WORD | EXP_QUOTED)) == EXP_WORD) as c_int;
-    let mut inquotes: c_int;
+    let break_all =
+        mode.contains(ExpansionMode::PARAMETER_WORD) && !mode.contains(ExpansionMode::QUOTED);
+    let mut in_quotes: bool;
     let mut length: usize;
     let mut startloc: c_int;
 
-    reject += if (flag & EXP_VARTILDE2) != 0 { 1 } else { 0 };
-    reject += if (flag & EXP_VARTILDE) != 0 { 0 } else { 2 };
-    inquotes = 0;
+    reject += usize::from(mode.contains(ExpansionMode::COLON_TILDE));
+    reject += if mode.contains(ExpansionMode::ASSIGNMENT_TILDE) {
+        0
+    } else {
+        2
+    };
+    in_quotes = false;
     length = 0;
 
-    if (flag & EXP_TILDE) != 0 {
-        flag &= !EXP_TILDE;
+    if mode.contains(ExpansionMode::TILDE) {
+        mode = mode.without(ExpansionMode::TILDE);
         if byte_at(text, p) == C_TILDE {
-            p = exptilde(sh, state, text, p, flag);
+            p = exptilde(sh, state, text, p, mode);
         }
     }
 
@@ -819,7 +783,7 @@ fn argstr(
             } else {
                 end = 0;
             }
-            if length > 0 && (flag & EXP_DISCARD) == 0 {
+            if length > 0 && !mode.contains(ExpansionMode::DISCARD) {
                 let newloc: c_int;
                 let q: usize;
 
@@ -837,9 +801,15 @@ fn argstr(
                  * has already turned it into a NUL.  Under EXP_WORD the
                  * cursor steps back over it, so it lands past the length —
                  * the outer `argstr` overwrites it on its next append. */
-                b.truncate(q - (if (flag & EXP_WORD) != 0 { end } else { 0 }) as usize);
+                b.truncate(
+                    q - (if mode.contains(ExpansionMode::PARAMETER_WORD) {
+                        end
+                    } else {
+                        0
+                    }) as usize,
+                );
                 newloc = q as c_int - end;
-                if breakall != 0 && inquotes == 0 && newloc > startloc {
+                if break_all && !in_quotes && newloc > startloc {
                     recordregion(state, startloc, newloc, 0);
                 }
                 startloc = newloc;
@@ -854,7 +824,7 @@ fn argstr(
             match c as c_char {
                 C_EQUALS | C_COLON => {
                     if (c as c_char) == C_EQUALS {
-                        flag |= EXP_VARTILDE2;
+                        mode = mode | ExpansionMode::COLON_TILDE;
                         reject += 1;
                         /* fall through */
                     }
@@ -864,7 +834,7 @@ fn argstr(
                      */
                     p -= 1;
                     if byte_at(text, p) == C_TILDE {
-                        p = exptilde(sh, state, text, p, flag);
+                        p = exptilde(sh, state, text, p, mode);
                         continue 'expansion;
                     }
                     continue;
@@ -874,15 +844,15 @@ fn argstr(
                     /* `dolatstr + 1` is the five bytes the parser emits for
                      * a bare `"$@"`, terminator excluded. */
                     let dolat = crate::mystring::dolatstr.map(|c| c as u8);
-                    if inquotes == 0
+                    if !in_quotes
                         && crate::mystring::cstr_prefix(slice_from(text, p)) == &dolat[1..6]
                     {
-                        p = evalvar(sh, state, text, p + 1, flag | EXP_QUOTED)? + 1;
+                        p = evalvar(sh, state, text, p + 1, mode | ExpansionMode::QUOTED)? + 1;
                         continue 'expansion;
                     }
-                    inquotes ^= EXP_QUOTED;
+                    in_quotes = !in_quotes;
                     /* addquote: */
-                    if (flag & QUOTES_ESC) != 0 {
+                    if mode.escapes_quotes() {
                         p -= 1;
                         length += 1;
                         startloc += 1;
@@ -893,7 +863,7 @@ fn argstr(
                     p -= 1;
                     mb = mbnext_bytes(slice_from(text, p));
                     ml = (mb >> 8) - 2;
-                    if (flag & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
+                    if mode.escapes_quotes() || mode.contains(ExpansionMode::PRESERVE_MULTIBYTE) {
                         length = ((mb >> 8) + (mb & 0xff)) as usize;
                         if (c as c_char) == CTLESC {
                             startloc += length as c_int;
@@ -903,7 +873,7 @@ fn argstr(
                             startloc += ml as c_int;
                         }
                         p += (mb & 0xff) as usize;
-                        if (flag & EXP_DISCARD) == 0 {
+                        if !mode.contains(ExpansionMode::DISCARD) {
                             expb(state).extend_from_slice(&text[p..p + ml as usize]);
                         }
                         p += (mb >> 8) as usize;
@@ -912,25 +882,42 @@ fn argstr(
                 CTLESC => {
                     startloc += 1;
                     length += 1;
-                    if (flag & QUOTES_ESC) != 0 {
+                    if mode.escapes_quotes() {
                         p -= 1;
                         length += 1;
                         startloc += 1;
                     }
                 }
                 CTLVAR => {
-                    p = evalvar(sh, state, text, p, flag | inquotes)?;
+                    p = evalvar(
+                        sh,
+                        state,
+                        text,
+                        p,
+                        mode.with_if(ExpansionMode::QUOTED, in_quotes),
+                    )?;
                     continue 'expansion;
                 }
                 CTLBACKQ => {
                     let at = state.next_backquote;
                     state.next_backquote += 1;
                     let cmd = state.backquotes.get_mut(at).and_then(Option::take);
-                    expbackq(sh, state, cmd.as_ref(), flag | inquotes)?;
+                    expbackq(
+                        sh,
+                        state,
+                        cmd.as_ref(),
+                        mode.with_if(ExpansionMode::QUOTED, in_quotes),
+                    )?;
                     continue 'expansion;
                 }
                 CTLARI => {
-                    p = expari(sh, state, text, p, flag | inquotes)?;
+                    p = expari(
+                        sh,
+                        state,
+                        text,
+                        p,
+                        mode.with_if(ExpansionMode::QUOTED, in_quotes),
+                    )?;
                     continue 'expansion;
                 }
                 _ => {}
@@ -953,7 +940,7 @@ fn exptilde(
     state: &mut ExpandState,
     text: &[u8],
     startp: usize,
-    flag: c_int,
+    mode: ExpansionMode,
 ) -> usize {
     let mut c: c_char;
     let name: usize;
@@ -972,7 +959,7 @@ fn exptilde(
             CTLESC => return startp,
             CTLQUOTEMARK => return startp,
             C_COLON => {
-                if (flag & EXP_VARTILDE) != 0 {
+                if mode.contains(ExpansionMode::ASSIGNMENT_TILDE) {
                     break;
                 }
             }
@@ -980,7 +967,7 @@ fn exptilde(
             _ => {}
         }
     }
-    if (flag & EXP_DISCARD) == 0 {
+    if !mode.contains(ExpansionMode::DISCARD) {
         /* `c = *p; *p = '\0'; ...; *p = c;` — the C terminates the user
          * name in place because `getpwnam` and `lookupvar` want a C string
          * and the only one to hand is the word itself.  The word is shared,
@@ -993,7 +980,7 @@ fn exptilde(
             let Some(home) = crate::var::lookup_bytes(sh, BStr::new(b"HOME")) else {
                 return startp;
             };
-            memtodest(&sh.locale, &home, flag | EXP_QUOTED, expb(state));
+            memtodest(&sh.locale, &home, mode | ExpansionMode::QUOTED, expb(state));
         } else {
             let Ok(name) = namebuf.try_to_os_string() else {
                 return startp;
@@ -1003,7 +990,7 @@ fn exptilde(
                 return startp;
             };
             let home = home.to_shell_bytes();
-            memtodest(&sh.locale, &home, flag | EXP_QUOTED, expb(state));
+            memtodest(&sh.locale, &home, mode | ExpansionMode::QUOTED, expb(state));
         }
     }
     p
@@ -1056,7 +1043,7 @@ fn expari(
     state: &mut ExpandState,
     text: &[u8],
     start: usize,
-    flag: c_int,
+    mode: ExpansionMode,
 ) -> Result<usize, Error> {
     let begoff: c_int;
     let len: c_int;
@@ -1066,9 +1053,15 @@ fn expari(
     let p: usize;
 
     begoff = expdest_off(state);
-    p = argstr(sh, state, text, start, flag & EXP_DISCARD)?;
+    p = argstr(
+        sh,
+        state,
+        text,
+        start,
+        mode.intersection(ExpansionMode::DISCARD),
+    )?;
 
-    if (flag & EXP_DISCARD) == 0 {
+    if !mode.contains(ExpansionMode::DISCARD) {
         /* `start = stackblock() + begoff; STADJUST(start - expdest, expdest)`
          * made the C parser read the expression through a pointer beyond
          * the stack allocator's restored cursor.  The expression has value
@@ -1084,9 +1077,9 @@ fn expari(
          * gone and the value travels. */
         result = crate::arith_yacc::arith(sh, arithmetic.as_bstr())?;
 
-        len = cvtnum(&sh.locale, result, flag, expb(state)) as c_int;
+        len = cvtnum(&sh.locale, result, mode, expb(state)) as c_int;
 
-        if (flag & EXP_QUOTED) == 0 {
+        if !mode.contains(ExpansionMode::QUOTED) {
             recordregion(state, begoff, begoff + len, 0);
         }
     }
@@ -1106,7 +1099,7 @@ fn expbackq(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
     cmd: Option<&crate::nodes::Node>,
-    flag: c_int,
+    mode: ExpansionMode,
 ) -> Result<(), Error> {
     let mut in_ = crate::eval::backcmd { fd: None, jp: None };
     let mut i: c_int;
@@ -1115,7 +1108,7 @@ fn expbackq(
     let mut buf: [u8; 128] = [0; 128];
     let startloc: c_int;
 
-    if (flag & EXP_DISCARD) == 0 {
+    if !mode.contains(ExpansionMode::DISCARD) {
         crate::error::INTOFF(sh);
         startloc = expdest_off(state);
         /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
@@ -1159,7 +1152,7 @@ fn expbackq(
             if i <= 0 {
                 break;
             }
-            memtodest(&sh.locale, &buf[..i as usize], flag, expb(state));
+            memtodest(&sh.locale, &buf[..i as usize], mode, expb(state));
         }
 
         if in_.fd.take().is_some() {
@@ -1172,7 +1165,7 @@ fn expbackq(
          * `truncate`. */
         nsh_platform::trim_command_substitution_output(expb(state), startloc as usize);
 
-        if (flag & EXP_QUOTED) == 0 {
+        if !mode.contains(ExpansionMode::QUOTED) {
             let endloc = expdest_off(state);
             recordregion(state, startloc, endloc, 0);
         }
@@ -1221,8 +1214,8 @@ struct Scan {
     rmescend: usize,
     /// The pattern, `preglob`'d in place.
     pat: usize,
-    quotes: c_int,
-    zero: c_int,
+    quotes: bool,
+    zero: bool,
 }
 
 type ScanFn = fn(&nsh_platform::Locale, &[u8], &Scan) -> Option<usize>;
@@ -1239,7 +1232,7 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
         /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
          * *loc = c;` — the temporary terminator, as a subslice that ends
          * where it went. */
-        let subject: &[u8] = if a.zero != 0 {
+        let subject: &[u8] = if a.zero {
             let from = if FNMATCH_IS_ENABLED {
                 a.rmesc
             } else {
@@ -1250,7 +1243,7 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
             slice_from(b, s)
         };
         if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
-            return Some(if a.quotes != 0 { loc } else { loc2 });
+            return Some(if a.quotes { loc } else { loc2 });
         }
 
         if c == C_NUL {
@@ -1283,7 +1276,7 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
         /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
          * *loc = c;` — see [`Scan`]: the subslice ends where the C's
          * temporary NUL went, so nothing is written. */
-        let subject: &[u8] = if a.zero != 0 {
+        let subject: &[u8] = if a.zero {
             let from = if FNMATCH_IS_ENABLED {
                 a.rmesc
             } else {
@@ -1294,7 +1287,7 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
             slice_from(b, s.max(0) as usize)
         };
         if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
-            return Some(if a.quotes != 0 { loc } else { loc2 } as usize);
+            return Some(if a.quotes { loc } else { loc2 } as usize);
         }
         loc -= 1;
         if loc < a.startp as isize {
@@ -1343,10 +1336,10 @@ fn subevalvar(
     strloc: c_int,
     startloc: c_int,
     varflags: c_int,
-    flag: c_int,
+    mode: ExpansionMode,
 ) -> Result<usize, Error> {
     let mut subtype: c_int = varflags & VSTYPE;
-    let quotes: c_int = flag & QUOTES_ESC;
+    let quotes = mode.escapes_quotes();
     /* Every one of the C's `char *` locals here is a position in the
      * expansion buffer and only ever used as one.  As offsets they stop
      * having to be re-derived: the three `stackblock()` re-reads below the
@@ -1359,7 +1352,7 @@ fn subevalvar(
     let loc: usize;
     let mut rmesc: usize;
     let mut rmescend: usize;
-    let zero: c_int;
+    let zero: bool;
     let scan: ScanFn;
     let endp: usize;
     let pat: usize;
@@ -1370,9 +1363,15 @@ fn subevalvar(
         state,
         text,
         start,
-        (flag & EXP_DISCARD) | EXP_TILDE | (if str.is_some() { 0 } else { EXP_CASE }),
+        mode.intersection(ExpansionMode::DISCARD)
+            | ExpansionMode::TILDE
+            | if str.is_some() {
+                ExpansionMode::PLAIN
+            } else {
+                ExpansionMode::CASE_PATTERN
+            },
     )?;
-    if (flag & EXP_DISCARD) != 0 {
+    if mode.contains(ExpansionMode::DISCARD) {
         return Ok(p);
     }
 
@@ -1410,18 +1409,18 @@ fn subevalvar(
          * `FNMATCH_IS_ENABLED` is 0, and into the buffer above the cursor
          * when it is not, so its result is a position in this buffer
          * either way. */
-        rmescapes_buffer(&mut expb(state)[rmescend..], RMESCAPE_GLOB);
+        rmescapes_buffer(&mut expb(state)[rmescend..], EscapeMode::Glob);
         pat = rmescend;
 
         rmesc = startp;
-        if FNMATCH_IS_ENABLED || quotes == 0 {
+        if FNMATCH_IS_ENABLED || !quotes {
             /* `_rmescapes` with RMESCAPE_GROW appends an unescaped copy of
              * `startp` past the cursor and moves the cursor over it, so the
              * buffer can have reallocated underneath.  That is what the C's
              * three `stackblock()` re-reads on the lines after this call
              * were for, and they are gone: an offset survives a growth,
              * which is why this hands over one and gets one back. */
-            rmesc = rmescapes_grow(expb(state), startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
+            rmesc = rmescapes_grow(expb(state), startp);
             if rmesc != startp {
                 rmescend = expb(state).len();
             }
@@ -1429,9 +1428,9 @@ fn subevalvar(
         rmescend -= 1;
 
         /* zero = subtype == VSTRIMLEFT || subtype == VSTRIMLEFTMAX */
-        zero = subtype >> 1;
+        zero = subtype >= 2;
         /* VSTRIMLEFT/VSTRIMRIGHTMAX -> scanleft */
-        scan = if ((subtype & 1) ^ zero) != 0 {
+        scan = if ((subtype & 1) != 0) ^ zero {
             scanleft
         } else {
             scanright
@@ -1453,19 +1452,19 @@ fn subevalvar(
         );
         match found {
             None => {
-                if quotes != 0 {
+                if quotes {
                     rmesc = startp;
                     rmescend = endp;
                 }
             }
-            Some(at) if quotes == 0 => {
-                if zero != 0 {
+            Some(at) if !quotes => {
+                if zero {
                     rmesc = at;
                 } else {
                     rmescend = at;
                 }
             }
-            Some(at) if zero != 0 => {
+            Some(at) if zero => {
                 rmesc = at;
                 rmescend = endp;
             }
@@ -1532,7 +1531,7 @@ fn evalvar(
     state: &mut ExpandState,
     text: &[u8],
     mut p: usize,
-    mut flag: c_int,
+    mut mode: ExpansionMode,
 ) -> Result<usize, Error> {
     let mut subtype: c_int;
     let mut varflags: c_int;
@@ -1540,15 +1539,14 @@ fn evalvar(
     let patloc: c_int;
     let startloc: c_int;
     let mut varlen: isize;
-    let mut discard: c_int;
-    let mut quoted: c_int;
-    let mbchar: c_int;
+    let mut discard: bool;
+    let quoted = mode.contains(ExpansionMode::QUOTED);
+    let multibyte_mode: ExpansionMode;
 
     varflags = (byte_at(text, p) as c_int) & !VSBIT;
     p += 1;
     subtype = varflags & VSTYPE;
 
-    quoted = flag & EXP_QUOTED;
     var = p;
     startloc = expdest_off(state);
     /* The parser always writes the `=` that ends the variable name, and
@@ -1558,9 +1556,11 @@ fn evalvar(
         .expect("the parser ends a variable name with `=`")
         + 1;
 
-    mbchar = match subtype {
-        VSTRIMLEFT | VSTRIMLEFTMAX | VSTRIMRIGHT | VSTRIMRIGHTMAX => EXP_MBCHAR,
-        _ => 0,
+    multibyte_mode = match subtype {
+        VSTRIMLEFT | VSTRIMLEFTMAX | VSTRIMRIGHT | VSTRIMRIGHTMAX => {
+            ExpansionMode::PRESERVE_MULTIBYTE
+        }
+        _ => ExpansionMode::PLAIN,
     };
 
     enum RecordPolicy {
@@ -1574,18 +1574,18 @@ fn evalvar(
             state,
             BStr::new(&text[var..p]),
             varflags,
-            (flag | mbchar) as c_uint,
+            mode | multibyte_mode,
         )?;
         if (varflags & VSNUL) != 0 {
             varlen -= 1;
         }
 
-        discard = if varlen < 0 { EXP_DISCARD } else { 0 };
+        discard = varlen < 0;
 
         match subtype {
             VSPLUS | 0 | VSMINUS => {
                 if subtype == VSPLUS {
-                    discard ^= EXP_DISCARD;
+                    discard = !discard;
                     /* fall through */
                 }
 
@@ -1594,7 +1594,8 @@ fn evalvar(
                     state,
                     text,
                     p,
-                    flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD),
+                    (mode | ExpansionMode::TILDE | ExpansionMode::PARAMETER_WORD)
+                        .with_if(ExpansionMode::DISCARD, !discard),
                 )?;
                 break RecordPolicy::IfPresent;
             }
@@ -1609,10 +1610,11 @@ fn evalvar(
                     0,
                     startloc,
                     varflags,
-                    (flag & !QUOTES_ESC) | (discard ^ EXP_DISCARD),
+                    mode.without(ExpansionMode::SPLIT | ExpansionMode::CASE_PATTERN)
+                        .with_if(ExpansionMode::DISCARD, !discard),
                 )?;
 
-                if ((flag | !discard) & EXP_DISCARD) != 0 {
+                if mode.contains(ExpansionMode::DISCARD) || !discard {
                     break RecordPolicy::IfPresent;
                 }
 
@@ -1623,20 +1625,20 @@ fn evalvar(
             _ => {}
         }
 
-        if (discard & !flag) != 0 && uflag(sh) != 0 {
+        if discard && !mode.contains(ExpansionMode::DISCARD) && uflag(sh) != 0 {
             /* A stop before `varunset` stopped diverging, and still one. */
             return Err(varunset(sh, text, p, var, None, 0));
         }
 
         if subtype == VSLENGTH {
             p += 1;
-            if (flag & EXP_DISCARD) != 0 {
+            if mode.contains(ExpansionMode::DISCARD) {
                 return Ok(p);
             }
             cvtnum(
                 &sh.locale,
                 (if varlen > 0 { varlen } else { 0 }) as i64,
-                flag,
+                mode,
                 expb(state),
             );
             break RecordPolicy::Always;
@@ -1656,8 +1658,8 @@ fn evalvar(
          *	}
          * #endif */
 
-        flag |= discard;
-        if (flag & EXP_DISCARD) == 0 {
+        mode = mode.with_if(ExpansionMode::DISCARD, discard);
+        if !mode.contains(ExpansionMode::DISCARD) {
             /*
              * Terminate the string and start recording the pattern
              * right after it
@@ -1667,22 +1669,26 @@ fn evalvar(
         }
 
         patloc = expdest_off(state);
-        p = subevalvar(sh, state, text, p, None, patloc, startloc, varflags, flag)?;
+        p = subevalvar(sh, state, text, p, None, patloc, startloc, varflags, mode)?;
         break RecordPolicy::IfPresent;
     };
 
-    if matches!(record_policy, RecordPolicy::IfPresent) && ((flag | discard) & EXP_DISCARD) != 0 {
+    if matches!(record_policy, RecordPolicy::IfPresent)
+        && (mode.contains(ExpansionMode::DISCARD) || discard)
+    {
         return Ok(p);
     }
 
-    if quoted != 0 {
-        quoted = (byte_at(text, var) == C_AT && sh.options.shellparam.nparam != 0) as c_int;
-        if quoted == 0 {
-            return Ok(p);
-        }
+    let quoted_at = if quoted {
+        byte_at(text, var) == C_AT && sh.options.shellparam.nparam != 0
+    } else {
+        false
+    };
+    if quoted && !quoted_at {
+        return Ok(p);
     }
     let endloc = expdest_off(state);
-    recordregion(state, startloc, endloc, quoted);
+    recordregion(state, startloc, endloc, c_int::from(quoted_at));
     Ok(p)
 }
 
@@ -1809,10 +1815,14 @@ fn mbtodest(
 // question at once: `p` cannot run past `len`, the eight-byte fast path
 // reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
 // something with a start.
-fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut BString) -> usize {
+fn memtodest(
+    locale: &nsh_platform::Locale,
+    src: &[u8],
+    mode: ExpansionMode,
+    dst: &mut BString,
+) -> usize {
     let syntax: DestinationSyntax;
     let mut count: usize = 0;
-    let expq: c_int;
     /* The C's `p` and `len` are one cursor over `src` and the number of
      * bytes left; `i` is the first and `src.len() - i` the second. */
     let mut i: usize = 0;
@@ -1826,10 +1836,8 @@ fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut 
      * costs a growth instead of running off the end. */
     dst.reserve(src.len() * 3);
 
-    /* Guarded by the `assert!(QUOTES_ESC == 0x11 && …)` above, which is
-     * this file's port of the matching `#error`. */
-    expq = flags & EXP_QUOTED;
-    if (flags & (expq >> 3 | expq >> 4 | expq >> 8) & (QUOTES_ESC | EXP_MBCHAR)) == 0 {
+    let framed = mode.escapes_quotes() || mode.contains(ExpansionMode::PRESERVE_MULTIBYTE);
+    if !mode.contains(ExpansionMode::QUOTED) || !framed {
         while src.len() - i >= 8 {
             let x: u64;
 
@@ -1861,7 +1869,7 @@ fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut 
          * choice.  `mbtodest` however indexes it with CTLMBCHAR (-123),
          * a read *before* the array; the C relies on that happening to
          * yield a non-CCTL byte.  Reproduced verbatim, not fixed. */
-        syntax = if (flags & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
+        syntax = if framed {
             DestinationSyntax::Base
         } else {
             DestinationSyntax::Unframed
@@ -1875,7 +1883,7 @@ fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut 
         let c: c_int = src[i] as c_char as c_int;
         i += 1;
 
-        if c == 0 && (flags & EXP_KEEPNUL) == 0 {
+        if c == 0 && !mode.contains(ExpansionMode::KEEP_NUL) {
             continue;
         }
 
@@ -1913,10 +1921,10 @@ fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut 
 fn strtodest(
     locale: &nsh_platform::Locale,
     value: &[u8],
-    flags: c_int,
+    mode: ExpansionMode,
     dst: &mut BString,
 ) -> usize {
-    memtodest(locale, value, flags, dst)
+    memtodest(locale, value, mode, dst)
 }
 
 /*
@@ -1947,7 +1955,7 @@ fn varvalue(
     state: &mut ExpandState,
     name: &BStr,
     varflags: c_int,
-    mut flags: c_uint,
+    mut mode: ExpansionMode,
 ) -> Result<isize, Error> {
     let subtype: c_int = varflags & VSTYPE;
     let mut seplen: usize;
@@ -1959,31 +1967,28 @@ fn varvalue(
     let mut seps: &[u8];
     let mut len: isize = 0;
     let start: usize;
-    let discard: c_int;
+    let discard: bool;
     let name = crate::var::varname(name);
     let name_byte = name.first().copied().unwrap_or_default() as c_char;
 
-    discard =
-        ((subtype == VSPLUS || subtype == VSLENGTH) as c_int) | ((flags as c_int) & EXP_DISCARD);
+    discard = subtype == VSPLUS || subtype == VSLENGTH || mode.contains(ExpansionMode::DISCARD);
 
     if subtype == 0 {
-        if discard != 0 {
+        if discard {
             return Ok(-1);
         }
 
         return Err(sh.sh_error_value(b"Bad substitution"));
     }
 
-    flags &= if discard != 0 {
-        (!QUOTES_ESC) as c_uint
-    } else {
-        !(0 as c_uint)
-    };
+    if discard {
+        mode = mode.without(ExpansionMode::SPLIT | ExpansionMode::CASE_PATTERN);
+    }
     /* `seps = nullstr` — the empty C string, whose one byte is the
      * terminator, and the terminator is what gets written when the
      * separator is a NUL. */
     seps = &[0u8];
-    seplen = ((flags as c_int) & EXP_FULL) as usize;
+    seplen = usize::from(mode.contains(ExpansionMode::SPLIT));
     start = expdest_off(state) as usize;
 
     match name_byte {
@@ -2000,7 +2005,7 @@ fn varvalue(
                 }
                 _ => unreachable!(),
             };
-            len = cvtnum(&sh.locale, num, flags as c_int, expb(state)) as isize;
+            len = cvtnum(&sh.locale, num, mode, expb(state)) as isize;
         }
         C_MINUS => {
             let mut i = crate::options::NOPTS;
@@ -2015,9 +2020,11 @@ fn varvalue(
         }
         C_AT | C_STAR => {
             if name_byte != C_AT
-                || ((flags as c_int) & (EXP_QUOTED | EXP_FULL)) != (EXP_QUOTED | EXP_FULL)
+                || !(mode.contains(ExpansionMode::QUOTED) && mode.contains(ExpansionMode::SPLIT))
             {
-                seplen &= (!(flags >> CHAR_BIT)) as usize;
+                if mode.contains(ExpansionMode::QUOTED) {
+                    seplen = 0;
+                }
                 if seplen == 0 {
                     seps = sh.ifs.ncifs.as_slice();
                 }
@@ -2035,7 +2042,7 @@ fn varvalue(
                     len += memtodest(
                         &sh.locale,
                         &seps[..seplen],
-                        (flags as c_int) | EXP_KEEPNUL,
+                        mode | ExpansionMode::KEEP_NUL,
                         expb(state),
                     ) as isize;
                 }
@@ -2043,7 +2050,7 @@ fn varvalue(
                 len += strtodest(
                     &sh.locale,
                     crate::mystring::cstr_prefix(param).as_bytes(),
-                    flags as c_int,
+                    mode,
                     expb(state),
                 ) as isize;
             }
@@ -2070,7 +2077,7 @@ fn varvalue(
             len = strtodest(
                 &sh.locale,
                 crate::mystring::cstr_prefix(&value).as_bytes(),
-                flags as c_int,
+                mode,
                 expb(state),
             ) as isize;
         }
@@ -2081,13 +2088,13 @@ fn varvalue(
             len = strtodest(
                 &sh.locale,
                 crate::mystring::cstr_prefix(&value).as_bytes(),
-                flags as c_int,
+                mode,
                 expb(state),
             ) as isize;
         }
     }
 
-    if discard != 0 {
+    if discard {
         expb(state).truncate(start);
     }
 
@@ -2522,7 +2529,7 @@ fn expandmeta(
             pattern.clear();
             pattern.extend_from_slice(text);
             pattern.push(0);
-            let pattern_len = rmescapes_buffer(&mut pattern, RMESCAPE_GLOB);
+            let pattern_len = rmescapes_buffer(&mut pattern, EscapeMode::Glob);
             pattern.truncate(pattern_len + 1);
 
             /* The C's top-level `expmeta` starts on whatever block the
@@ -2646,7 +2653,7 @@ fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
          * was appended. */
         b.extend_from_slice(name);
         b.push(0);
-        let n = rmescapes_buffer(&mut b[at..], 0);
+        let n = rmescapes_buffer(&mut b[at..], EscapeMode::Plain);
         debug_assert!(n <= name.len());
         b.truncate(at + n);
         return;
@@ -2881,7 +2888,12 @@ fn expmeta(
                  * after a possible growth, and an index does not
                  * move. */
                 globenc.clear();
-                memtodest(locale, dname, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
+                memtodest(
+                    locale,
+                    dname,
+                    ExpansionMode::PRESERVE_MULTIBYTE | ExpansionMode::KEEP_NUL,
+                    &mut globenc,
+                );
                 debug_assert_eq!(
                     globenc.last(),
                     Some(&0),
@@ -2994,7 +3006,7 @@ fn msort(locale: &nsh_platform::Locale, list: &mut [strlist], len: c_int) {
 // [spec:posix:req:pattern.escaping-follows-quoting-rules]
 // [spec:posix:syn:pattern.trailing-backslash-unspecified]
 // [spec:posix:req:pattern.quote-to-match-literally]
-fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
+fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
     /* The growing configuration is `FNMATCH_IS_ENABLED` together with
      * globbing, where the `CTLESC` arm can write three bytes for two.
      * Compaction cannot express that -- `q` would overtake `p` and clobber
@@ -3009,34 +3021,34 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
          which in-place compaction cannot express; see plan/decisions/owned-data.md"
     );
 
-    let globbing: c_int = flag & RMESCAPE_GLOB;
-    let mut inquotes: c_int = 0;
-    let mut notescaped: c_int = globbing;
+    let globbing = mode == EscapeMode::Glob;
+    let mut in_quotes = false;
+    let mut not_escaped = globbing;
     /* The C's `p` and `q`, which are indices into one buffer here. */
     let mut p: usize = at;
     let mut q: usize = at;
 
     while byte_at(buf, p) != C_NUL {
         let mut c: c_int = byte_at(buf, p) as c_int;
-        let mut newnesc: c_int = globbing;
+        let mut newly_not_escaped = globbing;
         let mb: c_uint;
         let mut ml: c_uint;
 
         let copy_byte = if c == CTLQUOTEMARK as c_int {
             p += 1;
-            inquotes ^= globbing;
+            in_quotes ^= globbing;
             continue;
         } else if c == C_BACKSLASH as c_int {
             /* naked back slash */
-            newnesc ^= notescaped;
+            newly_not_escaped ^= not_escaped;
             /* naked backslashes can only occur outside quotes */
-            inquotes = 0;
-            if !FNMATCH_IS_ENABLED && notescaped != 0 {
+            in_quotes = false;
+            if !FNMATCH_IS_ENABLED && not_escaped {
                 c = CTLESC as c_int;
             }
             true
         } else if c == CTLESC as c_int {
-            if ((notescaped ^ inquotes) & inquotes) != 0 {
+            if !not_escaped && in_quotes {
                 if FNMATCH_IS_ENABLED {
                     buf[q] = C_BACKSLASH as u8;
                     q += 1;
@@ -3049,7 +3061,7 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
                     buf[q - 1] = C_BACKSLASH as u8;
                 }
             }
-            if globbing != 0 {
+            if globbing {
                 buf[q] = if FNMATCH_IS_ENABLED {
                     C_BACKSLASH
                 } else {
@@ -3064,14 +3076,14 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
         } else if c == CTLMBCHAR as c_int {
             let mut tail: c_uint = 2;
 
-            if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
+            if !FNMATCH_IS_ENABLED && (globbing ^ not_escaped) {
                 q -= 1;
             }
 
             mb = mbnext_bytes(slice_from(buf, p));
             ml = mb >> 8;
 
-            if globbing == 0 || FNMATCH_IS_ENABLED {
+            if !globbing || FNMATCH_IS_ENABLED {
                 p += (mb & 0xff) as usize;
                 ml -= 2;
             } else {
@@ -3095,9 +3107,9 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
             q += 1;
             p += 1;
         }
-        notescaped = newnesc;
+        not_escaped = newly_not_escaped;
     }
-    if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
+    if !FNMATCH_IS_ENABLED && (globbing ^ not_escaped) {
         /* The same reach-back, and the same argument. */
         buf[q - 1] = C_BACKSLASH as u8;
     }
@@ -3120,7 +3132,7 @@ fn rmescapes_scan(s: &[u8]) -> Option<usize> {
 
 /// Apply `_rmescapes` to one owned, NUL-terminated byte buffer and return
 /// the resulting length without the terminator.
-fn rmescapes_buffer(bytes: &mut [u8], flag: c_int) -> usize {
+fn rmescapes_buffer(bytes: &mut [u8], mode: EscapeMode) -> usize {
     let len = bytes
         .iter()
         .position(|&byte| byte == 0)
@@ -3131,7 +3143,7 @@ fn rmescapes_buffer(bytes: &mut [u8], flag: c_int) -> usize {
     if len == bytes.len() {
         return len;
     }
-    rmescapes_compact(&mut bytes[..=len], at, flag)
+    rmescapes_compact(&mut bytes[..=len], at, mode)
 }
 
 // [spec:dash:def:expand.rmescapes-fn]
@@ -3166,12 +3178,7 @@ fn rmescapes_buffer(bytes: &mut [u8], flag: c_int) -> usize {
 /// `STARTSTACKSTR`. An owned buffer cannot hold that pointer and has no
 /// reason to, so that store is not transcribed on the heap path: a
 /// deliberate divergence from a write with no observable value.
-pub fn rmescapes_grow(b: &mut BString, at: usize, flag: c_int) -> usize {
-    debug_assert!(
-        (flag & (RMESCAPE_ALLOC | RMESCAPE_GROW)) == (RMESCAPE_ALLOC | RMESCAPE_GROW),
-        "rmescapes_grow is the RMESCAPE_ALLOC | RMESCAPE_GROW path"
-    );
-
+pub fn rmescapes_grow(b: &mut BString, at: usize) -> usize {
     let n: usize = crate::mystring::cstr_prefix(&b[at..]).len();
     if rmescapes_scan(&b[at..at + n]).is_none() {
         /* `return str` — before the block is grown, so the cursor is
@@ -3185,7 +3192,7 @@ pub fn rmescapes_grow(b: &mut BString, at: usize, flag: c_int) -> usize {
      * buffer, which is exactly what `extend_from_within` is for. */
     let r: usize = b.len();
     b.extend_from_within(at..at + n + 1);
-    let m = rmescapes_compact(&mut b[r..], at_rel, flag);
+    let m = rmescapes_compact(&mut b[r..], at_rel, EscapeMode::Plain);
     b.truncate(r + m + 1);
     r
 }
@@ -3222,10 +3229,16 @@ fn casematch_inner(
     /* As in `expandarg`: this `?` returns past the `ifsfree()`, which is
      * where the longjmp went too, and the catch frame reclaims the
      * regions. */
-    argstr(sh, state, pattern, 0, EXP_TILDE | EXP_CASE)?;
+    argstr(
+        sh,
+        state,
+        pattern,
+        0,
+        ExpansionMode::TILDE | ExpansionMode::CASE_PATTERN,
+    )?;
     ifsfree(state);
     /* The C reads the word back as `stackblock()`. */
-    rmescapes_buffer(expb(state), RMESCAPE_GLOB);
+    rmescapes_buffer(expb(state), EscapeMode::Glob);
     result =
         crate::pmatch::pmatch_slices(&sh.locale, crate::mystring::cstr_prefix(expb(state)), val);
     Ok(result)
@@ -3237,9 +3250,14 @@ fn casematch_inner(
 
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
-fn cvtnum(locale: &nsh_platform::Locale, num: i64, flags: c_int, dst: &mut BString) -> usize {
+fn cvtnum(
+    locale: &nsh_platform::Locale,
+    num: i64,
+    mode: ExpansionMode,
+    dst: &mut BString,
+) -> usize {
     let value = format!("{num}");
-    memtodest(locale, value.as_bytes(), flags, dst)
+    memtodest(locale, value.as_bytes(), mode, dst)
 }
 
 // [spec:dash:def:expand.varunset-fn]

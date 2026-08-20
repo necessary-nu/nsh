@@ -12,6 +12,7 @@
 //! truncated value through `$_`; the write is made through the owned field,
 //! not through a fabricated `char **`.
 
+// [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
@@ -315,7 +316,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                     result_status = crate::eval::flow!(crate::eval::evalstring(
                         sh,
                         BStr::new(line.as_slice()),
-                        0,
+                        crate::eval::EvalContext::DEFAULT,
                     ));
 
                     break;
@@ -342,8 +343,11 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
 
             drop(edit_file.take());
             /* XXX - should use no JC command */
-            let editor_status =
-                crate::eval::flow!(crate::eval::evalstring(sh, BStr::new(&editcmdbuf), 0,));
+            let editor_status = crate::eval::flow!(crate::eval::evalstring(
+                sh,
+                BStr::new(&editcmdbuf),
+                crate::eval::EvalContext::DEFAULT,
+            ));
             INTON(sh);
 
             if editor_status.success() {
@@ -364,8 +368,11 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                 {
                     record_history_line(sh, &edited, true, false);
                 }
-                result_status =
-                    crate::eval::flow!(crate::eval::evalstring(sh, BStr::new(&edited), 0,));
+                result_status = crate::eval::flow!(crate::eval::evalstring(
+                    sh,
+                    BStr::new(&edited),
+                    crate::eval::EvalContext::DEFAULT,
+                ));
             } else {
                 result_status = editor_status;
                 if let Some(path) = editfile.take() {

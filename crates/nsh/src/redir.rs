@@ -12,10 +12,18 @@ use crate::error::{INTOFF, INTON};
 use crate::fd::LogicalDescriptor;
 use crate::nodes::{FileRedirectionOperator, HereDocument, Node};
 
-/* flags passed to redirect (redir.h) */
-pub const REDIR_PUSH: c_int = 0o1; /* save previous values of file descriptors */
-/* #ifdef notyet #define REDIR_BACKQ 02 */
-pub const REDIR_SAVEFD2: c_int = 0o3; /* set preverrout */
+/// Whether applying redirections is permanent or records a restorable frame.
+///
+/// A pushed redirection also redirects the evaluator's saved stderr view to
+/// the descriptor frame it just captured. Those operations were previously
+/// encoded by overlapping `01` and `03` masks, so no third valid combination
+/// existed even though the integer API appeared to permit one.
+// [spec:nsh:req:idiom.operation-modes]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RedirectionMode {
+    Apply,
+    Push,
+}
 
 /*
  * config.h knobs used by this file.  The reference build has
@@ -126,7 +134,7 @@ impl RedirStack {
 pub(crate) fn redirect(
     sh: &mut Shell,
     redir: &[ExpandedRedirection<'_>],
-    flags: c_int,
+    mode: RedirectionMode,
 ) -> Result<(), Error> {
     let sv: Option<usize>;
 
@@ -137,7 +145,7 @@ pub(crate) fn redirect(
     INTOFF(sh);
     /* `sv = redirlist` — the frame `pushredir` just pushed, and NULL when
      * there is none, which is what `checked_sub` says. */
-    sv = if (flags & REDIR_PUSH) != 0 {
+    sv = if mode == RedirectionMode::Push {
         sh.redirs.list.len().checked_sub(1)
     } else {
         None
@@ -170,18 +178,12 @@ pub(crate) fn redirect(
         }
     }
     INTON(sh);
-    /* NB: REDIR_SAVEFD2 is 03, so this test also fires for a plain
-     * REDIR_PUSH (01); reproduced verbatim (src/redir.c:184).
-     *
-     * The C indexes slot 2 because that is where the shell's stderr is.
+    /* The C indexes slot 2 because that is where the shell's stderr is.
      * The slot follows the frontend's stderr instead -- and if that was
      * put past the end of `renamed`, which covers the ten descriptors
      * redirection can name, there is nothing saved to point the trace
      * stream at and it stays where it was. */
-    if (flags & REDIR_SAVEFD2) != 0 {
-        /* The C dereferences `sv` here without testing it, and gets away
-         * with it because REDIR_SAVEFD2 is 03: every caller that reaches
-         * this line passed REDIR_PUSH and so has a frame. */
+    if mode == RedirectionMode::Push {
         if let Some(svi) = sv {
             let renamed = &sh.redirs.list[svi].renamed;
             if let Some(SavedDescriptor::Saved(Some(saved))) =
@@ -555,7 +557,7 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
 
     let p: &[u8] = if document.expand {
         let doc = Node::Word(document.body.clone());
-        crate::expand::expandarg(sh, &doc, None, crate::expand::EXP_QUOTED)?;
+        crate::expand::expandarg(sh, &doc, None, crate::expand::ExpansionMode::QUOTED)?;
         /* The C reads the expansion back out of the region as
          * `stackblock()`.  The expansion buffer is owned now, so the read is
          * named.  Two consequences, both in the port's favour: the bytes
@@ -723,12 +725,12 @@ pub fn copy_slot_above(
 pub(crate) fn redirectsafe(
     sh: &mut Shell,
     redir: &[ExpandedRedirection<'_>],
-    flags: c_int,
+    mode: RedirectionMode,
 ) -> Result<(), Error> {
     let mut saveint: c_int = 0;
 
     crate::SAVEINT!(sh, saveint);
-    let redirect_error = redirect(sh, redir, flags).err();
+    let redirect_error = redirect(sh, redir, mode).err();
     let caught = crate::expand::restore_handler_expandarg(sh, redirect_error);
     if let Some(e) = caught {
         /* The C's `longjmp` from `restore_handler_expandarg` left before

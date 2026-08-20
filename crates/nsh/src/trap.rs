@@ -4,6 +4,7 @@
 //! Note `sigmode`/`gotsig` are indexed by `signo - 1` while `trap` is indexed
 //! by `signo`, slot 0 being the `EXIT` trap.
 
+// [spec:nsh:req:idiom.operation-modes]
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_char, c_int};
 
@@ -574,7 +575,7 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * and interrupt errors still arrive as `Err` and propagate. */
         let outer_trap_status = sh.eval.trap_default_exit_status.replace(status);
         sh.eval.signal_trap_depth += 1;
-        let outcome = crate::eval::evalstring(sh, p.as_bstr(), 0);
+        let outcome = crate::eval::evalstring(sh, p.as_bstr(), crate::eval::EvalContext::DEFAULT);
         sh.eval.signal_trap_depth -= 1;
         sh.eval.trap_default_exit_status = outer_trap_status;
         match outcome? {
@@ -657,7 +658,8 @@ pub fn exitshell(
              * status the shell leaves with. */
             let trap_entry_status = sh.status;
             let outer_trap_status = sh.eval.trap_default_exit_status.replace(trap_entry_status);
-            let outcome = crate::eval::evalstring(sh, p.as_bstr(), 0);
+            let outcome =
+                crate::eval::evalstring(sh, p.as_bstr(), crate::eval::EvalContext::DEFAULT);
             sh.eval.trap_default_exit_status = outer_trap_status;
             match outcome {
                 Ok(crate::eval::Flow::Exit {

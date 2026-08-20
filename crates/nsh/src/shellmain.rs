@@ -19,14 +19,15 @@
 //!   * `FLUSHERR` is never defined in the dash build, so the
 //!     `flushout(out2)` calls guarded by it are absent here too.
 
+// [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
 use bstr::{BStr, BString};
 use core::ffi::c_int;
 use std::io::Write;
 
 use crate::error::FORCEINTON;
-use crate::eval::{EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
-use crate::jobs::SHOW_CHANGED;
+use crate::eval::{EvalContext, SKIPFUNC, SKIPFUNCDEF};
+use crate::jobs::JobDisplay;
 
 /* `MKINIT struct jmploc main_handler;` was here — the outermost handler,
  * which the generated `FORKRESET` block re-pointed `handler` at after a
@@ -206,7 +207,11 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                             match crate::eval::evalstring(
                                 sh,
                                 BStr::new(command.as_slice()),
-                                if sflag(sh) != 0 { 0 } else { EV_EXIT },
+                                if sflag(sh) != 0 {
+                                    EvalContext::DEFAULT
+                                } else {
+                                    EvalContext::EXITING
+                                },
                             )? {
                                 crate::eval::Flow::Done(_) => {}
                                 exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
@@ -405,7 +410,7 @@ pub(crate) fn cmdloop(
         if sh.jobs.jobctl != 0 {
             /* An interrupt taken while announcing changed jobs leaves
              * through the read-eval loop, like any other. */
-            crate::jobs::showjobs(sh, crate::output::Dest::Stderr, SHOW_CHANGED)?;
+            crate::jobs::showjobs(sh, crate::output::Dest::Stderr, JobDisplay::Changed)?;
         }
         inter = 0;
         if iflag(sh) != 0 && top != 0 {
@@ -420,9 +425,9 @@ pub(crate) fn cmdloop(
             sh.jobs.job_warning = if sh.jobs.job_warning == 2 { 1 } else { 0 };
             numeof = 0;
             i = crate::eval::flow!(if top != 0 {
-                crate::eval::eval_top_level(sh, n.as_ref(), 0)
+                crate::eval::eval_top_level(sh, n.as_ref(), EvalContext::DEFAULT)
             } else {
-                crate::eval::evaltree(sh, n.as_ref(), 0)
+                crate::eval::evaltree(sh, n.as_ref(), EvalContext::DEFAULT)
             });
             if n.is_some() {
                 status = i;

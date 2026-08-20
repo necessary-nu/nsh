@@ -6,10 +6,11 @@
 //! boundaries are values too, most notably for `"$@"`; no sentinel bytes are
 //! inserted into the shell data.
 
+// [spec:nsh:req:idiom.operation-modes]
 use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
-use super::{EXP_FULL, EXP_QUOTED, EXP_TILDE, EXP_VARTILDE, EXP_VARTILDE2, arglist, strlist};
+use super::{ExpansionMode, arglist, strlist};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::nodes::Node;
@@ -133,15 +134,16 @@ struct Context {
 }
 
 impl Context {
-    fn top(flags: i32) -> Self {
+    fn top(mode: ExpansionMode) -> Self {
         Self {
-            quoted: flags & EXP_QUOTED != 0,
-            full: flags & EXP_FULL != 0,
+            quoted: mode.contains(ExpansionMode::QUOTED),
+            full: mode.contains(ExpansionMode::SPLIT),
             operand: false,
             pattern: false,
-            tilde_at_start: flags & EXP_TILDE != 0,
-            tilde_after_equal: flags & EXP_VARTILDE != 0,
-            tilde_after_colon: flags & (EXP_VARTILDE | EXP_VARTILDE2) != 0,
+            tilde_at_start: mode.contains(ExpansionMode::TILDE),
+            tilde_after_equal: mode.contains(ExpansionMode::ASSIGNMENT_TILDE),
+            tilde_after_colon: mode
+                .intersects(ExpansionMode::ASSIGNMENT_TILDE | ExpansionMode::COLON_TILDE),
         }
     }
 
@@ -196,9 +198,9 @@ pub(super) fn expand_argument(
     sh: &mut Shell,
     word: &ParsedWord,
     output: Option<&mut arglist>,
-    flags: i32,
+    mode: ExpansionMode,
 ) -> Result<(), Error> {
-    let context = Context::top(flags);
+    let context = Context::top(mode);
     let expanded = expand_parts(sh, word.parts(), context)?;
 
     if let Some(output) = output {

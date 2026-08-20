@@ -5125,4 +5125,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.command-dispatch}
     )}
+    {id type-evaluation-redirection-modes, covered_rules (
+        idiom.operation-modes
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.operation-modes}
+    )}
 )

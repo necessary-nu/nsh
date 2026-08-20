@@ -9,12 +9,11 @@
 //! or handing the shell back would not compile. See
 //! `[dec:nsh:public-surface]`.
 
+// [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
 use crate::error::Error;
+use crate::eval::{EvalContext, Flow, evalstring};
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
-
-use crate::eval::{EV_TESTED, Flow, evalstring};
 
 // [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
@@ -23,7 +22,7 @@ use crate::eval::{EV_TESTED, Flow, evalstring};
 // [spec:posix:req:builtin.eval.stderr]
 // [spec:posix:req:builtin.eval.interfaces]
 // [spec:posix:req:builtin.eval.exit-status]
-pub(crate) fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
+pub(crate) fn evalcmd(sh: &mut Shell, args: &[&BStr], context: EvalContext) -> Result<Flow, Error> {
     /* `grabstackstr` kept the joined string alive until the enclosing mark
      * popped, which is past the `evalstring` that parses it. Owning it here
      * says the same thing, and it has to be a binding of this frame because
@@ -42,7 +41,7 @@ pub(crate) fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Fl
         } else {
             args[1]
         };
-        return evalstring(sh, text, flags & EV_TESTED);
+        return evalstring(sh, text, context.tested_only());
     }
     Ok(Flow::Done((0).into()))
 }

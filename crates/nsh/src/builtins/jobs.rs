@@ -4,13 +4,13 @@
 //! `crate::jobs::showjob`, which the shell also does unprompted when a
 //! background job changes state, so it stays there.
 
+// [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 
 use crate::eval::Flow;
-use crate::jobs::{SHOW_PGID, SHOW_PID, getjob, showjob, showjobs};
+use crate::jobs::{JobDisplay, getjob, showjob, showjobs};
 use crate::output::Dest;
 
 // [spec:dash:def:jobs.jobscmd-fn]
@@ -28,15 +28,13 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.jobs.exit-status]
 // [spec:posix:req:builtin.jobs.interfaces]
 pub fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut mode: c_int;
-
-    mode = 0;
+    let mut mode = JobDisplay::Standard;
     let mut opts = crate::options::Options::new(args);
     while let Some(m) = opts.next(sh, b"lp")? {
         if m == b'l' {
-            mode = SHOW_PID;
+            mode = JobDisplay::Long;
         } else {
-            mode = SHOW_PGID;
+            mode = JobDisplay::ProcessGroup;
         }
     }
 

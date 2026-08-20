@@ -56,10 +56,20 @@ pub const FORK_FG: c_int = 0;
 pub const FORK_BG: c_int = 1;
 pub const FORK_NOJOB: c_int = 2;
 
-/* mode flags for showjob(s) */
-pub const SHOW_PGID: c_int = 0x01; /* only show pgid - for jobs -p */
-pub const SHOW_PID: c_int = 0x04; /* include process pid */
-pub const SHOW_CHANGED: c_int = 0x08; /* only jobs whose state has changed */
+/// The four supported job-list presentations.
+///
+/// These are alternatives, not composable bits: `-p` replaces the ordinary
+/// record with a process-group id, `-l` adds process ids, and asynchronous
+/// notification filters the standard presentation to changed jobs.
+// [spec:nsh:req:idiom.operation-modes]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum JobDisplay {
+    #[default]
+    Standard,
+    Long,
+    ProcessGroup,
+    Changed,
+}
 
 /* job states */
 pub const JOBRUNNING: c_int = 0; /* at least one proc running */
@@ -684,7 +694,7 @@ fn sprint_status(
 // [spec:posix:req:builtin.jobs.stdout-l-format]
 // [spec:posix:req:builtin.jobs.stdout-default-format]
 // [spec:posix:req:jobctl.suspended-job-message]
-pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: c_int) {
+pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: JobDisplay) {
     let mut ps: usize;
     let psend: usize;
     let mut col: c_int;
@@ -693,7 +703,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
 
     ps = 0;
 
-    if (mode & SHOW_PGID) != 0 {
+    if matches!(mode, JobDisplay::ProcessGroup) {
         /* just output process (group) id of pipeline */
         /* The pid is read out before the write starts rather than inside
          * its argument list: `ps_pid` borrows the shell and the write
@@ -718,7 +728,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
         s[(col - 2) as usize] = b'-';
     }
 
-    if (mode & SHOW_PID) != 0 {
+    if matches!(mode, JobDisplay::Long) {
         let pid = format!("{} ", process_id_text(ps_pid(sh, jp, ps)));
         col += append_ascii(&mut s, 16, &pid);
     }
@@ -764,7 +774,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
         record.resize(record.len() + width.max(1), b' ');
         let _ = sh.io.get(dest).write_all(&record);
         outcmd(sh, jp, ps, dest);
-        if (mode & SHOW_PID) == 0 {
+        if !matches!(mode, JobDisplay::Long) {
             showpipe(sh, jp, dest);
             break;
         }
@@ -793,7 +803,11 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
 // [spec:posix:req:jobctl.background-job-suspended-message]
 // [spec:posix:req:jobctl.background-job-completion-message]
 // [spec:posix:req:jobctl.non-interactive-message-timing]
-pub fn showjobs(sh: &mut crate::context::Shell, dest: Dest, mode: c_int) -> Result<(), Error> {
+pub(crate) fn showjobs(
+    sh: &mut crate::context::Shell,
+    dest: Dest,
+    mode: JobDisplay,
+) -> Result<(), Error> {
     let mut jp: Option<usize>;
 
     /* TRACE(("showjobs(%x) called\n", mode)); */
@@ -809,7 +823,7 @@ pub fn showjobs(sh: &mut crate::context::Shell, dest: Dest, mode: c_int) -> Resu
      * `freejob` unlinks the job from the chain but leaves its own
      * `prev_job` alone, which is what keeps the next step valid. */
     while let Some(i) = jp {
-        if (mode & SHOW_CHANGED) == 0 || sh.jobs.tab[i].changed != 0 {
+        if !matches!(mode, JobDisplay::Changed) || sh.jobs.tab[i].changed != 0 {
             showjob(sh, dest, i, mode);
         }
         jp = sh.jobs.tab[i].prev_job;
@@ -1550,7 +1564,7 @@ fn waitone(
             sh.jobs.tab[changed_job].jobctl != 0,
             Some(changed_job) == jobp,
         ) {
-            showjob(sh, Dest::Stderr, changed_job, 0);
+            showjob(sh, Dest::Stderr, changed_job, JobDisplay::Standard);
         }
     }
     Ok(waited)

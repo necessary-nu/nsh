@@ -1,5 +1,6 @@
 //! Bash-only productions in the existing recursive-descent parser.
 
+// [spec:nsh:req:idiom.operation-modes]
 use core::ffi::c_int;
 use core::mem;
 
@@ -221,10 +222,10 @@ pub(super) fn compound_array(
 pub(super) fn process_substitutions(
     sh: &mut Shell,
     st: &mut Rt1<'_>,
-    enabled: c_int,
+    enabled: bool,
 ) -> Result<(), Error> {
     loop {
-        if enabled == 0 || !active(sh) || !st.eofmark.is_none() {
+        if !enabled || !active(sh) || !st.eofmark.is_none() {
             return Ok(());
         }
         let direction = match st.input.byte() {
