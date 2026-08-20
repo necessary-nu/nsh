@@ -89,7 +89,6 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                             return Err(sh.sh_error_value(&message));
                         }
                     }
-                    /* `default:` (DEBUG: abort()) falls through into 'l' */
                     _ /* default, 'l' */ => {
                         list = true;
                     }

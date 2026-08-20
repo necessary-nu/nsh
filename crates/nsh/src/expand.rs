@@ -60,13 +60,6 @@ const VSTRIMLEFT: c_int = crate::parser::VSTRIMLEFT as c_int;
 const VSTRIMLEFTMAX: c_int = crate::parser::VSTRIMLEFTMAX as c_int;
 const VSLENGTH: c_int = crate::parser::VSLENGTH as c_int;
 
-/// `FNMATCH_IS_ENABLED` / `GLOB_IS_ENABLED` from `mystring.h`: the
-/// build-time switch between libc `fnmatch(3)`/`glob(3)` and the shell's
-/// own matcher.  `--enable-fnmatch` / `--enable-glob` are opt-in, so both
-/// are false in the shipped build.
-pub(crate) const FNMATCH_IS_ENABLED: bool = crate::mystring::FNMATCH_IS_ENABLED != 0;
-const GLOB_IS_ENABLED: bool = crate::mystring::GLOB_IS_ENABLED != 0;
-
 // C character literals used as `switch` labels; Rust `match` patterns
 // require named constants, so the ones this file switches on get names.
 pub(crate) const C_NUL: c_char = 0;
@@ -1054,7 +1047,6 @@ fn expbackq(
                         Err(_) => break 0,
                     }
                 };
-                /* TRACE(("expbackq: read returns %d\n", count)); */
                 if count == 0 {
                     break;
                 }
@@ -1085,7 +1077,6 @@ fn expbackq(
                 false,
             );
         }
-        /* TRACE(("evalbackq: size=%d: \"%.*s\"\n", ...)); */
     }
 
     Ok(())
@@ -1124,8 +1115,7 @@ struct Scan {
     /// Its last byte. `scanright` walks down from here.
     endp: usize,
     /// The unescaped copy `_rmescapes` left above the cursor, and its end.
-    /// Read only when `FNMATCH_IS_ENABLED`; `loc2` tracks them either way,
-    /// because it is what an unquoted match returns.
+    /// `loc2` tracks it because it is what an unquoted match returns.
     rmesc: usize,
     rmescend: usize,
     /// The pattern, `preglob`'d in place.
@@ -1142,19 +1132,14 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
     let mut loc: usize = a.startp;
     let mut loc2: usize = a.rmesc;
     loop {
-        let s: usize = if FNMATCH_IS_ENABLED { loc2 } else { loc };
+        let s = loc;
         let c: c_char = byte_at(b, s);
 
         /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
          * *loc = c;` — the temporary terminator, as a subslice that ends
          * where it went. */
         let subject: &[u8] = if a.zero {
-            let from = if FNMATCH_IS_ENABLED {
-                a.rmesc
-            } else {
-                a.startp
-            };
-            between(b, from, s)
+            between(b, a.startp, s)
         } else {
             slice_from(b, s)
         };
@@ -1187,18 +1172,13 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
     let mut loc: isize = a.endp as isize;
     let mut loc2: isize = a.rmescend as isize;
     loop {
-        let s: isize = if FNMATCH_IS_ENABLED { loc2 } else { loc };
+        let s = loc;
 
         /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
          * *loc = c;` — see [`Scan`]: the subslice ends where the C's
          * temporary NUL went, so nothing is written. */
         let subject: &[u8] = if a.zero {
-            let from = if FNMATCH_IS_ENABLED {
-                a.rmesc
-            } else {
-                a.startp
-            };
-            between(b, from, s.max(0) as usize)
+            between(b, a.startp, s.max(0) as usize)
         } else {
             slice_from(b, s.max(0) as usize)
         };
@@ -1315,21 +1295,15 @@ fn subevalvar(
         }
 
         subtype -= VSTRIMRIGHT;
-        /* #ifdef DEBUG
-         *	if (subtype < 0 || subtype > 3)
-         *		abort();
-         * #endif */
 
         rmescend = strloc as usize;
-        /* `str = preglob(rmescend, 0, NULL)` — in place while
-         * `FNMATCH_IS_ENABLED` is 0, and into the buffer above the cursor
-         * when it is not, so its result is a position in this buffer
-         * either way. */
+        /* `str = preglob(rmescend, 0, NULL)` — the pattern is unescaped in
+         * place, so its result remains a position in this buffer. */
         rmescapes_buffer(&mut expb(state)[rmescend..], EscapeMode::Glob);
         pat = rmescend;
 
         rmesc = startp;
-        if FNMATCH_IS_ENABLED || !quotes {
+        if !quotes {
             /* `_rmescapes` with RMESCAPE_GROW appends an unescaped copy of
              * `startp` past the cursor and moves the cursor over it, so the
              * buffer can have reallocated underneath.  That is what the C's
@@ -1569,16 +1543,6 @@ fn evalvar(
         if subtype == VSNORMAL {
             break RecordPolicy::IfPresent;
         }
-
-        /* #ifdef DEBUG
-         *	switch (subtype) {
-         *	case VSTRIMLEFT: case VSTRIMLEFTMAX:
-         *	case VSTRIMRIGHT: case VSTRIMRIGHTMAX:
-         *		break;
-         *	default:
-         *		abort();
-         *	}
-         * #endif */
 
         mode = mode.with_if(ExpansionMode::DISCARD, discard);
         if !mode.contains(ExpansionMode::DISCARD) {
@@ -2407,9 +2371,8 @@ pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
  * should be escapes.  The results are stored in the list exparg.
  */
 
-/* The libc `glob64` arm and its callback table were compile-time dead:
- * `GLOB_IS_ENABLED` is zero in every supported build. The shell's own
- * byte-preserving glob implementation below is the only reachable arm.
+/* The shell's byte-preserving glob implementation is the only supported
+ * pathname-expansion engine.
  * [spec:dash:def:expand.opendir-interruptible-fn]
  * [spec:dash:sem:expand.opendir-interruptible-fn]
  * [spec:dash:def:expand.expandmeta-glob-fn]
@@ -2433,8 +2396,7 @@ fn expandmeta(
      * word, `ckfree`d as soon as `expmeta` has read it.  That is a local
      * buffer's lifetime exactly, and reusing it across the loop is the
      * only difference — `expmeta` never re-enters `preglob`, because the
-     * only `preglob` under it is `patmatch`'s, which does not allocate
-     * while `FNMATCH_IS_ENABLED` is 0. */
+     * only `preglob` under it is `patmatch`'s and does not allocate. */
     let mut pattern: BString = BString::new(Vec::new());
 
     /* The glob buffer, owned here and lent to `expmeta`.  One allocation
@@ -2561,52 +2523,14 @@ fn addfnamealt(state: &mut ExpandState, b: &mut BString, expdir_len: usize) {
 /// what lets `expmeta`'s `name` be a `&[u8]`.
 fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
     let at = b.len();
-
-    if !FNMATCH_IS_ENABLED {
-        /* The C copies `name` to the cursor and unescapes it in place.
-         * `_rmescapes` still speaks C strings — it is the next conversion,
-         * not this one — so the copy lands in the buffer with a terminator,
-         * is unescaped there, and the terminator is dropped again.
-         * `_rmescapes` only ever shortens, so this cannot reach past what
-         * was appended. */
-        b.extend_from_slice(name);
-        b.push(0);
-        let n = rmescapes_buffer(&mut b[at..], EscapeMode::Plain);
-        debug_assert!(n <= name.len());
-        b.truncate(at + n);
-        return;
-    }
-
-    let mut p: usize = 0;
-    loop {
-        /* `q = strchrnul(p, '\\')`, then `mempcpy(enddir, p, q - p + 1)` —
-         * the copy includes the byte *at* `q`, which is either the
-         * backslash or the string's terminator. */
-        let q: usize = name[p..]
-            .find_byte(C_BACKSLASH as u8)
-            .map_or(name.len(), |at| p + at);
-
-        b.extend_from_slice(&name[p..q]);
-        b.push(byte_at(name, q) as u8);
-        p = q;
-        if p == name.len() {
-            break;
-        }
-        p += 1;
-        if p != name.len() {
-            /* `*enddir.offset(-1) = *p` — the escaped byte overwrites the
-             * backslash that was just copied. */
-            let last = b.len() - 1;
-            b[last] = name[p];
-            p += 1;
-        }
-    }
-
-    /* `return enddir - 1` — the C hands back the position of the NUL its
-     * last `mempcpy` copied.  Here that NUL is the last byte appended, and
-     * the caller's terminator is its own business. */
-    b.pop();
-    debug_assert!(b.len() >= at);
+    /* The bytes use nsh's internal escaping, so copy them into the cursor,
+     * unescape in place, and discard the temporary terminator. The transform
+     * only shortens and therefore cannot reach past the appended input. */
+    b.extend_from_slice(name);
+    b.push(0);
+    let n = rmescapes_buffer(&mut b[at..], EscapeMode::Plain);
+    debug_assert!(n <= name.len());
+    b.truncate(at + n);
 }
 
 /*
@@ -2631,11 +2555,7 @@ fn expmeta(
     name: &[u8],
     mut expdir_len: usize,
 ) {
-    let mesc: c_char = if FNMATCH_IS_ENABLED {
-        C_BACKSLASH
-    } else {
-        CTLESC
-    };
+    let mesc = CTLESC;
     let mut endname: usize;
     let mut zeroedp: usize;
     let mut matchdot: bool;
@@ -2788,39 +2708,22 @@ fn expmeta(
              * string and the next component overwrites it. */
             let dname: &[u8] = &dname;
             let len: usize = dname.len();
-            let subject: &[u8] = if !FNMATCH_IS_ENABLED {
-                /* The C encodes the directory entry's name at
-                 * `enddir` — inside the glob buffer, past the
-                 * prefix — by parking `enddir` in the global
-                 * `expdest` for the length of the call.  Those bytes
-                 * are pure scratch: they exist only for `pmatch`
-                 * below, and the branch that keeps the entry
-                 * immediately overwrites them with the raw name via
-                 * `stnputs`.  So the encoding goes to its own buffer
-                 * and the candidate path never holds it.  That is
-                 * what let the expansion buffer and this one be
-                 * converted separately.
-                 *
-                 * `cp = stackblock(); enddir = cp + expdir_len` is
-                 * gone with the pointers: it was the C's re-read
-                 * after a possible growth, and an index does not
-                 * move. */
-                globenc.clear();
-                memtodest(
-                    locale,
-                    dname,
-                    ExpansionMode::PRESERVE_MULTIBYTE | ExpansionMode::KEEP_NUL,
-                    &mut globenc,
-                );
-                debug_assert_eq!(
-                    globenc.last(),
-                    Some(&0),
-                    "EXP_KEEPNUL carries the entry's terminator through"
-                );
-                &globenc
-            } else {
-                dname
-            };
+            /* Encode the directory entry as matcher input in separate
+             * scratch storage. The candidate path itself stays raw and is
+             * only appended after a successful match. */
+            globenc.clear();
+            memtodest(
+                locale,
+                dname,
+                ExpansionMode::PRESERVE_MULTIBYTE | ExpansionMode::KEEP_NUL,
+                &mut globenc,
+            );
+            debug_assert_eq!(
+                globenc.last(),
+                Some(&0),
+                "EXP_KEEPNUL carries the entry's terminator through"
+            );
+            let subject = globenc.as_slice();
             if crate::pmatch::pmatch_slices(locale, pat, subject) != 0 {
                 /* `enddir = stnputs(dname, len, enddir)` — an
                  * append at a cursor below the end, which is
@@ -2916,29 +2819,13 @@ fn msort(locale: &nsh_platform::Locale, list: &mut [strlist], len: c_int) {
 /// materialising their source into their destination first.
 ///
 /// Recorded in plan/decisions/owned-data.md, "What this cost in the port:
-/// `_rmescapes`", together with the two reach-backs' safety argument and
-/// why the one configuration that *could* grow is asserted unreachable
-/// rather than given a second engine.
+/// `_rmescapes`", together with the two reach-backs' safety argument.
 // [spec:posix:syn:pattern.backslash-escape-with-shell-quoting]
 // [spec:posix:syn:pattern.backslash-escape-without-shell-quoting]
 // [spec:posix:req:pattern.escaping-follows-quoting-rules]
 // [spec:posix:syn:pattern.trailing-backslash-unspecified]
 // [spec:posix:req:pattern.quote-to-match-literally]
 fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
-    /* The growing configuration is `FNMATCH_IS_ENABLED` together with
-     * globbing, where the `CTLESC` arm can write three bytes for two.
-     * Compaction cannot express that -- `q` would overtake `p` and clobber
-     * source the walk has not read -- and it is unreachable by
-     * construction, because the only producer of `RMESCAPE_GLOB` is
-     * `preglob`, which under FNMATCH also sets `RMESCAPE_ALLOC` and so
-     * always has the separate, doubled destination the C sized for it.
-     * Checked here rather than believed. */
-    const _: () = assert!(
-        !FNMATCH_IS_ENABLED,
-        "rmescapes_compact: FNMATCH_IS_ENABLED with globbing can grow the string, \
-         which in-place compaction cannot express; see plan/decisions/owned-data.md"
-    );
-
     let globbing = mode == EscapeMode::Glob;
     let mut in_quotes = false;
     let mut not_escaped = globbing;
@@ -2961,30 +2848,19 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
             newly_not_escaped ^= not_escaped;
             /* naked backslashes can only occur outside quotes */
             in_quotes = false;
-            if !FNMATCH_IS_ENABLED && not_escaped {
+            if not_escaped {
                 c = CTLESC as c_int;
             }
             true
         } else if c == CTLESC as c_int {
             if !not_escaped && in_quotes {
-                if FNMATCH_IS_ENABLED {
-                    buf[q] = C_BACKSLASH as u8;
-                    q += 1;
-                } else {
-                    /* Reaches back one byte.  `notescaped` is cleared
-                     * only by the naked-backslash arm, which writes a
-                     * byte first, so `q` has advanced at least once
-                     * before this is reachable -- and the index is
-                     * checked, where the C's was not. */
-                    buf[q - 1] = C_BACKSLASH as u8;
-                }
+                /* Reaches back one byte.  `notescaped` is cleared only by
+                 * the naked-backslash arm, which writes a byte first, so
+                 * `q` has advanced before this is reachable. */
+                buf[q - 1] = C_BACKSLASH as u8;
             }
             if globbing {
-                buf[q] = if FNMATCH_IS_ENABLED {
-                    C_BACKSLASH
-                } else {
-                    CTLESC
-                } as u8;
+                buf[q] = CTLESC as u8;
                 q += 1;
             }
 
@@ -2994,14 +2870,14 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
         } else if c == CTLMBCHAR as c_int {
             let mut tail: c_uint = 2;
 
-            if !FNMATCH_IS_ENABLED && (globbing ^ not_escaped) {
+            if globbing ^ not_escaped {
                 q -= 1;
             }
 
             mb = mbnext_bytes(slice_from(buf, p));
             ml = mb >> 8;
 
-            if !globbing || FNMATCH_IS_ENABLED {
+            if !globbing {
                 p += (mb & 0xff) as usize;
                 ml -= 2;
             } else {
@@ -3027,7 +2903,7 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
         }
         not_escaped = newly_not_escaped;
     }
-    if !FNMATCH_IS_ENABLED && (globbing ^ not_escaped) {
+    if globbing ^ not_escaped {
         /* The same reach-back, and the same argument. */
         buf[q - 1] = C_BACKSLASH as u8;
     }

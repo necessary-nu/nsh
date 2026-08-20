@@ -24,10 +24,6 @@
 //! that unwinding *runs `Drop`* (C's `longjmp` does not), and that a
 //! `longjmp` cannot cross a non-Rust frame.
 //!
-//! Other translation notes: `TRACE(...)` compiles to nothing without
-//! `DEBUG`, so the calls are dropped; C `goto`s are reproduced with
-//! labelled blocks whose nesting mirrors the order of the C labels.
-
 use crate::context::Shell;
 use crate::error::Error;
 use crate::fd::LogicalDescriptor;
@@ -799,11 +795,7 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, context: EvalContext) -> Resu
         sh,
         command.word.as_ref(),
         Some(&mut arglist),
-        if crate::mystring::FNMATCH_IS_ENABLED != 0 {
-            ExpansionMode::TILDE
-        } else {
-            ExpansionMode::TILDE | ExpansionMode::PRESERVE_MULTIBYTE
-        },
+        ExpansionMode::TILDE | ExpansionMode::PRESERVE_MULTIBYTE,
     )?;
     /* The C reads `arglist.list->text` with no null check, and is right to:
      * `expandarg` without EXP_FULL takes its single-field arm, which appends
@@ -1173,7 +1165,6 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
         result.jp = Some(jp);
     }
     // out:
-    /* TRACE(("evalbackcmd done: fd=%d buf=0x%x nleft=%d jp=0x%x\n", ...)); */
     Ok(())
 }
 
@@ -1310,10 +1301,6 @@ fn parse_command_args(
 // [spec:posix:req:cmd.no-name-redirection-failure]
 // [spec:posix:req:cmd.no-name-exit-status]
 // [spec:nsh:req:idiom.command-dispatch]
-//
-// The `def` rule quotes the `#ifdef notyet` three-argument prototype;
-// the compiled signature — ported here — is
-// `STATIC int evalcommand(union node *cmd, int flags)`.
 fn evalcommand(
     sh: &mut Shell,
     command: &SimpleCommand,
@@ -1366,7 +1353,6 @@ fn evalcommand_in_scope(
     }
 
     /* First expand the arguments. */
-    /* TRACE(("evalcommand(0x%lx, %d) called\n", (long)cmd, flags)); */
     sh.eval.back_exitstatus = ExitStatus::SUCCESS;
 
     cmd_flag = 0;

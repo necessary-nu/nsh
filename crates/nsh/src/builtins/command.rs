@@ -43,7 +43,6 @@ pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         } else if c == b'v' {
             verify |= VERIFY_BRIEF;
         } else {
-            /* DEBUG: `else if (c != 'p') abort();` */
             use_default_path = true;
         }
     }

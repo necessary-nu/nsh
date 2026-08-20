@@ -5296,4 +5296,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.owned-lifecycle}
     )}
+    {id delete-port-configuration-fossils, covered_rules (
+        idiom.no-port-fossils
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-port-fossils}
+    )}
 )

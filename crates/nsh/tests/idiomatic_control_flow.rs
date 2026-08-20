@@ -1,5 +1,7 @@
 //! Structural checks for parser and expander control flow.
 
+use std::path::{Path, PathBuf};
+
 const PARSER: &str = include_str!("../src/parser.rs");
 const PARSER_MULTIBYTE: &str = include_str!("../src/parser/multibyte.rs");
 const EXPANDER: &str = include_str!("../src/expand.rs");
@@ -14,6 +16,62 @@ const BUILTIN_READ: &str = include_str!("../src/builtins/read.rs");
 const BUILTIN_BREAK: &str = include_str!("../src/builtins/break.rs");
 const BUILTIN_RETURN: &str = include_str!("../src/builtins/return.rs");
 const SHELL_MAIN: &str = include_str!("../src/shellmain.rs");
+
+fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(directory).expect("source directory is readable") {
+        let path = entry.expect("source entry is readable").path();
+        if path.is_dir() {
+            rust_sources_below(&path, sources);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            sources.push(path);
+        }
+    }
+}
+
+// [spec:nsh:req:idiom.no-port-fossils/test]
+#[test]
+fn port_fossils_are_absent() {
+    let mut sources = Vec::new();
+    rust_sources_below(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut sources,
+    );
+    sources.sort();
+
+    let forbidden = [
+        "#[cfg(any())]",
+        "#if ",
+        "#ifdef",
+        "#ifndef",
+        "TRACE((",
+        "FNMATCH_IS_ENABLED",
+        "GLOB_IS_ENABLED",
+        "IS_DEFINED_SMALL",
+        "USE_MEMFD_CREATE",
+        "HAVE_F_DUPFD_CLOEXEC",
+        "HAVE_TRADITIONAL_FACCESSAT",
+        "pub const JOBS",
+        "pub const BSD",
+        "pub const DEBUG",
+        "pub type pointer",
+        "fn likely(",
+        "fn unlikely(",
+        "fn etext(",
+        "fn getcmdentry(",
+        "fn onsigchild(",
+    ];
+
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        for fossil in forbidden {
+            assert!(
+                !source.contains(fossil),
+                "{} retains port fossil {fossil:?}",
+                path.display()
+            );
+        }
+    }
+}
 
 // [spec:nsh:req:idiom.parser-control-flow/test]
 #[test]

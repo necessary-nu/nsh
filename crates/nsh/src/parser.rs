@@ -619,7 +619,6 @@ fn pipeline(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error
     let mut negate: c_int;
 
     negate = 0;
-    /* TRACE(("pipeline: entered\n")); */
     let command_context = if readtoken(sh, context)? == TokenKind::Bang {
         negate = (negate == 0) as c_int;
         TokenContext::COMMAND_START
@@ -2536,7 +2535,6 @@ fn setprompt(sh: &mut Shell, which: c_int) {
     sh.input.needprompt = 0;
     sh.input.whichprompt = which;
 
-    /* #ifdef SMALL: show = 1 */
     show = (!crate::histedit::editing_active(sh)) as c_int;
     if show != 0 && crate::input::cur_pf(sh).nleft == 0 {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
@@ -2661,10 +2659,8 @@ pub fn getprompt(sh: &mut Shell) -> BString {
                 .expand_prompt_exclamation_marks(BStr::new(prompt.as_slice()))
         }
         2 => crate::var::ps2val(sh),
-        /* default: falls into case 0 outside DEBUG builds.  The C returns
-         * `nullstr`, whose *address* is load-bearing at other sites (see
-         * `mystring::nullstr`) but not at this one: both readers here take
-         * its bytes and there are none, so the empty value is exact. */
+        /* An unknown prompt selector is empty. Both readers consume bytes,
+         * so there is no distinct identity to preserve here. */
         _ => {
             return BString::default();
         }

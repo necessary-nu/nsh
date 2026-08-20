@@ -189,8 +189,6 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:xcurel.change-cwd]
 // [spec:nsh:req:idiom.platform-errors]
 fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
-    /* `TRACE(("docd(sh, \"%s\", %d) called\n", dest, flags));` — `#ifdef DEBUG`
-     * in `shell.h`, and the dash build does not define it. */
     crate::error::with_interrupts_deferred(sh, |sh| {
         let logical = if (flags & CD_PHYSICAL) == 0 {
             updatepwd(sh, dest)

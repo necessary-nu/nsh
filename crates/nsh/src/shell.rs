@@ -1,49 +1,9 @@
-//! Literal port of `src/shell.c` / `src/shell.h`.
+//! Shell-wide helpers that do not belong to a subsystem.
 //! Rules: `docs/spec/port/src/shell.md`.
-//!
-//! There is no `src/shell.c`; `shell.h` is the umbrella header holding
-//! build-wide typedefs and configuration.  The preprocessor knobs
-//! (`JOBS`, `BSD`, `DO_SHAREDVFORK`, `STATIC`, `TRACE`,
-//! `TRACEV`) have no runtime meaning here and are recorded as plain
-//! constants or comments.
 
-use core::ffi::{c_int, c_void};
+// [spec:nsh:req:idiom.no-port-fossils]
 
-/* JOBS -> 1 if you have Berkeley job control, 0 otherwise. */
-pub const JOBS: c_int = 1;
-/* define BSD if you are running 4.2 BSD or later. */
-pub const BSD: c_int = 1;
-
-/*
- * define DEBUG=1 to compile in debugging ('set -o debug' to turn on)
- * define DEBUG=2 to compile in and turn on debugging.
- *
- * Not defined in the shipped build.  Ports of `#ifdef DEBUG` blocks test
- * this constant so the code still type-checks while remaining dead.
- */
-pub const DEBUG: bool = false;
-
-// [spec:dash:def:shell.pointer]
-pub type pointer = *mut c_void;
-
-/*
- * `extern char nullstr[1];` — the null string is defined in
- * `mystring.c`, so it lives in `crate::mystring`.
- */
-
-/*
- * `likely`/`unlikely` are branch hints only; they have no effect on
- * behaviour and Rust has no stable equivalent, so they are the identity.
- */
-#[inline(always)]
-pub fn likely(x: bool) -> bool {
-    x
-}
-
-#[inline(always)]
-pub fn unlikely(x: bool) -> bool {
-    x
-}
+use core::ffi::c_int;
 
 /*
  * Hack to calculate maximum length.

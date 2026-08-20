@@ -12,7 +12,7 @@
 //! Eight of those exported items are gone, because `<[u8]>` spells them and
 //! nothing called the port's copy. `equal` and `scopy` are `mystring.h`
 //! macros that `parser.rs` and `exec.rs` each expanded for themselves;
-//! `scopyn` is inside `#if 0` in the C; `sstrdup` copied onto
+//! The unused bounded-copy helper from the C is omitted; `sstrdup` copied onto
 //! the region allocator that `delete-memalloc` emptied; `findstring` was a
 //! `bsearch` over one sorted table, which `parser::findkwd` now does with
 //! `binary_search_by`; `pstrcmp` existed only to adapt that search to C's
@@ -64,14 +64,6 @@ pub static cqchars: [c_char; 5] = [
 pub static illnum: [c_char; 19] = to_cchar(b"Illegal number: %s\0");
 pub static homestr: [c_char; 5] = to_cchar(b"HOME\0");
 pub static dotdir: [c_char; 2] = to_cchar(b".\0");
-
-/*
- * `#ifdef HAVE_FNMATCH` … — neither `--enable-fnmatch` nor
- * `--enable-glob` is on by default, so both knobs are 0 in the shipped
- * build.
- */
-pub const FNMATCH_IS_ENABLED: c_int = 0;
-pub const GLOB_IS_ENABLED: c_int = 0;
 
 /*
  * prefix -- see if pfx is a prefix of string.
@@ -345,7 +337,7 @@ pub fn single_quote(mut s: &BStr) -> BString {
 // Unit tests for this module's functions.
 //
 // These live inside the module because most of what the port exposes is
-// private to its own file, exactly as the C's `STATIC` functions are.
+// private to its own file.
 // An external test crate would only reach the `pub` surface, and the
 // manifest's obligation is per function, not per public API.
 // ---------------------------------------------------------------------

@@ -15,10 +15,7 @@
 //! script) from `src/builtins.def.in`, so nothing here carries
 //! `[spec:dash:…]` annotations — there is no C source file to annotate.
 //!
-//! The table is the real generator's output for the default Linux build
-//! (`JOBS` = 1, `SMALL` undefined, `HAVE_GETRLIMIT` defined), which is the
-//! configuration `plan/.port-manifest.styx` was extracted from — `fc`
-//! (`histcmd`) and `ulimit` are therefore present.
+//! The table includes the supported `fc` (`histcmd`) and `ulimit` builtins.
 //!
 //! `mkbuiltins` sorts the table by name with `LC_COLLATE=C`, and
 //! `exec.c`'s `find_builtin` binary-searches it, so **the order below is

@@ -225,9 +225,6 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<bool
         };
         sh.options.set(ShellOption::Monitor, monitor);
     }
-    /* #if DEBUG == 2 — not selected in this configuration:
-     *     debug = 1;
-     */
     /* POSIX 1003.2: first arg after -c cmd is $0, remainder $1... */
     let mut setarg0 = false;
     if scan.minus_c {
@@ -257,10 +254,7 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<bool
 /// this function's callers is teardown. See `jobs::setjobctl`.
 pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     crate::exec::dispatch_changed(sh);
-    /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
-     * so `show.c` compiles to nothing and there is no trace file. */
     crate::trap::setinteractive(sh, sh.options.enabled(ShellOption::Interactive) as c_int);
-    /* #ifndef SMALL */
     crate::histedit::histedit(sh);
     crate::jobs::setjobctl(sh, sh.options.enabled(ShellOption::Monitor) as c_int)
 }

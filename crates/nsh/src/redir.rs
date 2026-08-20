@@ -26,15 +26,6 @@ pub(crate) enum RedirectionMode {
     Push,
 }
 
-/*
- * config.h knobs used by this file.  The reference build has
- * `HAVE_MEMFD_CREATE 1` / `USE_MEMFD_CREATE 1`, so `memfd_create` comes from
- * `<sys/mman.h>` (glibc) and system.h's `#ifndef HAVE_MEMFD_CREATE` stub is not
- * compiled; `F_DUPFD_CLOEXEC` is available on the targets `libc` exposes it for.
- */
-pub const USE_MEMFD_CREATE: c_int = 1;
-pub const HAVE_F_DUPFD_CLOEXEC: c_int = 1;
-
 /// `PIPE_BUF` where available, 4096 otherwise.  4096 on Linux.
 const PIPESIZE: usize = 4096;
 
@@ -134,7 +125,6 @@ pub(crate) fn redirect(
     redir: &[ExpandedRedirection<'_>],
     mode: RedirectionMode,
 ) -> Result<(), Error> {
-    /* #if notyet — the `memory[10]` in-memory sink is not compiled. */
     if redir.is_empty() {
         return Ok(());
     }
@@ -515,7 +505,7 @@ fn install_redirect(
 // [spec:dash:sem:redir.sh-pipe-fn]
 // [spec:nsh:req:idiom.filesystem-account-bytes]
 pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, bool), Error> {
-    if memfd && USE_MEMFD_CREATE != 0 {
+    if memfd {
         if let Ok(read_fd) = nsh_platform::anonymous_file("dash") {
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
                 .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;

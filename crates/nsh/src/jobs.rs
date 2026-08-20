@@ -10,7 +10,6 @@
 //!     `growjobtab` relocation pass has nothing left to relocate.
 //!   * Command rendering and job lookup are expressed as ordinary iteration
 //!     and typed results rather than translated label blocks.
-//!   * `TRACE(...)` compiles to nothing without `DEBUG` and is dropped.
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
@@ -135,19 +134,6 @@ pub(crate) fn outcmd(sh: &mut crate::context::Shell, jp: JobId, i: usize, dest: 
         .get(i)
         .map_or(BStr::new(b""), |p| p.cmd.as_bstr());
     let _ = sh.io.get(dest).write_all(cmd);
-}
-
-// [spec:dash:def:jobs.onsigchild-fn]
-// [spec:dash:sem:jobs.onsigchild-fn]
-//
-// `STATIC int onsigchild(void);` is declared under `#ifdef SYSV` in
-// src/jobs.c (line 117) and is never defined anywhere in the tree — a
-// vestige of System V SIGCHLD handling that was removed. There is no
-// body to port; this is the annotated placeholder that records the
-// omission. `#[cfg(any())]` mirrors the never-satisfied `#ifdef SYSV`.
-#[cfg(any())]
-fn onsigchild() -> c_int {
-    unimplemented!("declared under #ifdef SYSV, never defined in dash")
 }
 
 /*
@@ -521,7 +507,6 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
     sh.jobs[jp].changed = false;
 
     if sh.jobs[jp].is_done() {
-        /* TRACE(("showjob: freeing job %d\n", jobno(jp))); */
         freejob(sh, jp);
     }
 }
@@ -541,8 +526,6 @@ pub(crate) fn showjobs(
     dest: Dest,
     mode: JobDisplay,
 ) -> Result<(), Error> {
-    /* TRACE(("showjobs(%x) called\n", mode)); */
-
     /* If not even one job changed, there is nothing to do */
     /* `DOWAIT_NONBLOCK`, so the wait cannot block and the poll inside it
      * has nothing to notice; the `?` is the type saying so rather than a
@@ -727,7 +710,6 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
         job.jobctl = true;
     }
     sh.jobs.occupy_current(jp, job);
-    /* TRACE(("makejob(%d) returns %%%d\n", nprocs, jobno(jp))); */
     jp
 }
 
@@ -787,8 +769,6 @@ fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
 // [spec:nsh:req:idiom.no-raw-fd-core]
 fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>, mode: c_int) {
     let oldlvl: c_int;
-
-    /* TRACE(("Child shell %d\n", getpid())); */
 
     crate::shell::reset_coverage();
 
@@ -880,7 +860,6 @@ fn forkparent(
     mode: c_int,
     pid: ProcessId,
 ) {
-    /* TRACE(("In parent shell:  child = %d\n", pid)); */
     let Some(ji) = jp else {
         return;
     };
@@ -927,8 +906,6 @@ pub fn forkshell(
     n: Option<&Node>,
     mode: c_int,
 ) -> Result<nsh_platform::ForkResult, Error> {
-    /* TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode)); */
-
     sh.flush_input();
 
     if mode == FORK_FG && jp.is_some_and(|i| sh.jobs[i].jobctl) {
@@ -1029,7 +1006,6 @@ pub fn waitforjob(
     let st: crate::status::ExitStatus;
     let mut terminal_error: Option<(&'static [u8], std::io::Error)> = None;
 
-    /* TRACE(("waitforjob(%%%d) called\n", jp ? jobno(jp) : 0)); */
     dowait(
         sh,
         if jp.is_some() {
@@ -1143,9 +1119,7 @@ fn waitone(
     let mut reported_status = None;
 
     let waited = crate::error::with_interrupts_deferred(sh, |sh| {
-        /* TRACE(("dowait(%d) called\n", block)); */
         let waited = waitproc(sh, block)?;
-        /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
         if let WaitOutcome::Reaped { process, status } = waited {
             reported_status = Some(status);
             for id in sh.jobs.order_snapshot() {
@@ -1161,7 +1135,6 @@ fn waitone(
                 if next_state != JobState::Running {
                     sh.jobs[id].changed = true;
                     if sh.jobs[id].transition_to(next_state) {
-                        /* TRACE(("Job %d: changing state from %d to %d\n", ...)); */
                         if next_state == JobState::Stopped {
                             sh.jobs.position_stopped(id);
                         }
@@ -1358,7 +1331,6 @@ fn commandtext(n: &Node) -> BString {
      * is one — and the C then hands `savestr` an uninitialised stack block,
      * out of which the reference reads a NUL and prints an empty command
      * text. The empty buffer is that, said on purpose. */
-    /* TRACE(("commandtext: name %p, end %p\n", name, cmdnextc)); */
     text
 }
 
@@ -1602,7 +1574,6 @@ pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: JobId) -> crate::s
         ChildStatus::Stopped(signal) => crate::status::ExitStatus::from_code(signal.number() + 128),
         ChildStatus::Continued => crate::status::ExitStatus::SUCCESS,
     };
-    /* TRACE(("getstatus: job %d, nproc %d, status %x, retval %x\n", ...)); */
     retval
 }
 

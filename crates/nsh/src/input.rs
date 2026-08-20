@@ -1,10 +1,6 @@
 //! Literal port of `src/input.c` / `src/input.h`.
 //! Rules: `docs/spec/port/src/input.md`.
 //!
-//! Configuration: `SMALL` is *not* defined, so `IS_DEFINED_SMALL` is false and
-//! the `#ifndef SMALL` arms (`lleft`, libedit, history) are the live ones.
-//! Both `IS_DEFINED_SMALL` arms are carried, exactly as the C carries them.
-//!
 //! The C's three allocations here — the `parsefile` node, its `IBUFSIZ`
 //! buffer and the `strpush` node — are owned Rust values. The frame stack is
 //! `FRAMES`, addressed by index rather than by `prev` pointer, because a
@@ -30,9 +26,6 @@ pub const PUNGETC_MAX: usize = 16;
 /// stdio's `BUFSIZ`.
 pub const BUFSIZ: c_int = 8192;
 pub const IBUFSIZ: usize = BUFSIZ as usize + PUNGETC_MAX + 1;
-
-/// `#ifdef SMALL / #define IS_DEFINED_SMALL 1 #else 0` — this port is !SMALL.
-pub const IS_DEFINED_SMALL: bool = false;
 
 pub const INPUT_PUSH_FILE: c_int = 1;
 pub const INPUT_NOFILE_OK: c_int = 2;
@@ -93,7 +86,6 @@ pub struct ParseFile {
     pub strpush: Vec<StrPush>,
     /// Delay freeing so we can stop nested aliases.
     pub spfree: Vec<StrPush>,
-    /* #ifndef SMALL */
     /// number of chars left in this buffer
     pub lleft: c_int,
     /// Number of outstanding calls to pungetc.
@@ -360,14 +352,12 @@ macro_rules! plinno {
 // [spec:dash:def:input.input-get-lleft-fn]
 // [spec:dash:sem:input.input-get-lleft-fn]
 pub fn input_get_lleft(pf: &ParseFile) -> c_int {
-    /* #ifdef SMALL return 0; #else */
     pf.lleft
 }
 
 // [spec:dash:def:input.input-set-lleft-fn]
 // [spec:dash:sem:input.input-set-lleft-fn]
 pub fn input_set_lleft(pf: &mut ParseFile, len: c_int) {
-    /* #ifndef SMALL */
     pf.lleft = len;
 }
 
@@ -552,7 +542,7 @@ pub(crate) fn pgetc_preserve_nul(sh: &mut crate::context::Shell) -> Result<Input
 }
 
 fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<InputUnit, Error> {
-    let mut input: InputUnit;
+    let input: InputUnit;
     /* Re-derived after everything that can push a level, because that is
      * what moves the frames; the C reloads the same global for the same
      * reason. */
@@ -571,33 +561,22 @@ fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
             return Ok(InputUnit::Byte(text(pf)[pf.pos - unget]));
         }
 
-        'nextc: loop {
-            if pf.nleft > 0 {
-                pf.nleft -= 1;
-                input = InputUnit::Byte(text(pf)[pf.pos]);
-                pf.pos += 1;
-            } else if !pf.strpush.is_empty() {
-                popstring(sh);
-                /* The freestrings call must be delayed til the next
-                 * input read so the alias-end boundary remains observable.
-                 */
-                pf = cur_pf(sh);
-                continue 'again;
-            } else {
-                input = preadbuffer(sh, preserve_nul)?;
-                pf = cur_pf(sh);
-            }
-
-            /* delete nul characters */
-            if IS_DEFINED_SMALL && !preserve_nul && input.is(0) {
-                let n = pf.nleft as usize;
-                pf.buf.copy_within(pf.pos..pf.pos + n, pf.pos - 1);
-                pf.pos -= 1;
-                continue 'nextc;
-            }
-
-            return Ok(input);
+        if pf.nleft > 0 {
+            pf.nleft -= 1;
+            input = InputUnit::Byte(text(pf)[pf.pos]);
+            pf.pos += 1;
+        } else if !pf.strpush.is_empty() {
+            popstring(sh);
+            /* The freestrings call must be delayed til the next
+             * input read so the alias-end boundary remains observable.
+             */
+            pf = cur_pf(sh);
+            continue 'again;
+        } else {
+            input = preadbuffer(sh, preserve_nul)?;
         }
+
+        return Ok(input);
     }
 }
 
@@ -662,22 +641,18 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let off: usize = unget as usize + nr as usize;
 
     nr = BUFSIZ - nr;
-    if !IS_DEFINED_SMALL && nr == 0 {
+    if nr == 0 {
         return Ok(nr);
     }
 
     /* The C's `fd == 0` means "this parse file is the shell's standard
      * input", which is the condition for line editing and for teeing --
      * not descriptor 0 for its own sake. */
-    use_tee = uses_stdin
-        /* #ifndef SMALL */
-        && !crate::histedit::editing_active(sh)
-        && !stdin_bufferable(sh);
+    use_tee = uses_stdin && !crate::histedit::editing_active(sh) && !stdin_bufferable(sh);
 
     pnr = nr;
     'retry: loop {
         nr = pnr;
-        /* #ifndef SMALL */
         if uses_stdin && crate::histedit::editing_active(sh) {
             /* `docs/api-design.md` §5.5: nothing the shell hands to a
              * callee may borrow from the shell, and `read_edit_line`
@@ -824,7 +799,6 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
         let mut something = (first == 0) as c_int;
         let mut more = input_get_lleft(cur_pf(sh));
         let mut save = false;
-        let mut savec = 0;
 
         'outer: loop {
             if more <= 0 {
@@ -836,18 +810,12 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
                 if more <= 0 {
                     cur_pf(sh).nleft = 0;
                     input_set_lleft(cur_pf(sh), 0);
-                    if !IS_DEFINED_SMALL && nr > 0 {
+                    if nr > 0 {
                         save = true;
                         break 'outer;
                     }
                     return Ok(None);
                 }
-            }
-
-            if IS_DEFINED_SMALL {
-                q += more as usize;
-                more = 0;
-                break 'outer;
             }
 
             /* delete nul characters */
@@ -894,14 +862,13 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
             input_set_lleft(cur_pf(sh), more);
         }
 
-        {
+        let savec = {
             let pf = cur_pf(sh);
             pf.nleft = (q - pf.pos) as c_int - 1;
-            if !IS_DEFINED_SMALL {
-                savec = pf.buf[q];
-            }
+            let savec = pf.buf[q];
             pf.buf[q] = b'\0';
-        }
+            savec
+        };
 
         let line = {
             let pf = cur_pf(sh);
@@ -942,12 +909,9 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
 
     if sh.options.enabled(ShellOption::Verbose) {
         let _ = sh.io.stderr().write_all(&line);
-        /* #ifdef FLUSHERR flushout(out2); */
     }
 
-    if !IS_DEFINED_SMALL {
-        cur_pf(sh).buf[q] = savec;
-    }
+    cur_pf(sh).buf[q] = savec;
 
     let pf = cur_pf(sh);
     let byte = pf.buf[pf.pos];

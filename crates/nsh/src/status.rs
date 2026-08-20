@@ -127,11 +127,10 @@ impl Signal {
     /// The name without the `SIG` prefix — `INT`, `TERM` — as `trap -l`
     /// prints it.
     ///
-    /// `None` for a number outside the table. Note that a slot no
-    /// `#if defined(SIG…)` claimed answers with its own decimal digits
-    /// rather than `None`, because that is what `kill -l` prints and this
-    /// reads the same table: `signames.rs` is the generator's output and
-    /// index 0 is `EXIT`, the pseudo-signal the exit trap uses.
+    /// `None` for a number outside the table. A slot absent from the native
+    /// signal-name set answers with its own decimal digits rather than
+    /// `None`, because that is what `kill -l` prints. Index 0 is `EXIT`, the
+    /// pseudo-signal the exit trap uses.
     pub fn name(self) -> Option<&'static BStr> {
         let index = usize::try_from(self.number()).ok()?;
         if index >= crate::signames::NSIG {

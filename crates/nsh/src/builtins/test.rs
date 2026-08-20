@@ -128,15 +128,9 @@ fn operator(word: &BStr) -> Option<&'static Operator> {
     OPERATORS.iter().find(|candidate| candidate.text == word)
 }
 
-/// configure's FreeBSD-only `--enable-test-workaround`; false on Linux.
-const HAVE_TRADITIONAL_FACCESSAT: bool = false;
-
 // [spec:dash:def:test.faccessat-confused-about-superuser-fn]
 // [spec:dash:sem:test.faccessat-confused-about-superuser-fn]
-#[inline]
-fn faccessat_confused_about_superuser() -> bool {
-    HAVE_TRADITIONAL_FACCESSAT
-}
+// The disabled configure-time workaround has no runtime representation.
 
 fn is_c_space(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
@@ -537,26 +531,11 @@ fn same_file(left: &BStr, right: &BStr) -> bool {
     nsh_platform::path_is_same_file(&left, &right)
 }
 
-// [spec:dash:def:test.has-exec-bit-set-fn]
-// [spec:dash:sem:test.has-exec-bit-set-fn]
-fn has_exec_bit_set(path: &BStr) -> bool {
-    path.try_to_path_buf()
-        .and_then(|path| nsh_platform::path_metadata(&path, true))
-        .is_ok_and(|metadata| metadata.mode & 0o111 != 0)
-}
-
 // [spec:dash:def:test.test-file-access-fn]
 // [spec:dash:sem:test.test-file-access-fn]
 // [spec:dash:def:exec.test-file-access-fn]
 // [spec:dash:sem:exec.test-file-access-fn]
 pub fn test_file_access(path: &BStr, access: AccessMode) -> bool {
-    if faccessat_confused_about_superuser()
-        && access == AccessMode::EXEC_OK
-        && nsh_platform::effective_uid().is_root()
-        && !has_exec_bit_set(path)
-    {
-        return false;
-    }
     path.try_to_path_buf()
         .is_ok_and(|path| nsh_platform::effective_access(&path, access))
 }

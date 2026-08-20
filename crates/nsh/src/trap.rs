@@ -387,10 +387,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
                 }
             }
             signal if signal == Signal::from(nsh_platform::quit_signal()) => {
-                /* #ifdef DEBUG: if (debug) break; */
-                if crate::shell::DEBUG && sh.options.enabled(ShellOption::Debug) {
-                    /* break */
-                } else if sh.options.enabled(ShellOption::Interactive) {
+                if sh.options.enabled(ShellOption::Interactive) {
                     desired = crate::host::Disposition::Ignore;
                 }
             }
@@ -399,7 +396,6 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
                     desired = crate::host::Disposition::Ignore;
                 }
             }
-            /* #if JOBS */
             signal
                 if signal == Signal::from(nsh_platform::terminal_stop_signal())
                     || signal == Signal::from(nsh_platform::terminal_output_signal()) =>

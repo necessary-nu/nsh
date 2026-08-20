@@ -753,20 +753,6 @@ pub(crate) fn delete_cmd_entry(sh: &mut crate::context::Shell, name: &BStr) {
     });
 }
 
-// [spec:dash:def:exec.getcmdentry-fn]
-// [spec:dash:sem:exec.getcmdentry-fn]
-//
-// The whole function lives inside `#ifdef notdef` in `src/exec.c`
-// (lines 698-712) and is not compiled into the shell. It is carried
-// here as an annotated, never-compiled stub so the manifest symbol has
-// a target site; `#[cfg(any())]` is the Rust equivalent of the
-// unsatisfiable `#ifdef notdef` guard, and the body is the literal
-// translation of the dead C.
-#[cfg(any())]
-pub fn getcmdentry(sh: &crate::context::Shell, name: &BStr) -> Command {
-    sh.commands.resolved(name).unwrap_or(Command::Unknown)
-}
-
 /*
  * Add a new command entry, replacing any existing command entry for
  * the same name - except special builtins.

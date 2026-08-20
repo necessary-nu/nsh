@@ -26,8 +26,6 @@ use std::io::{self, Write};
 
 use core::ffi::c_int;
 
-use crate::shell::likely;
-
 const OUTBUFSIZ: usize = 8192; /* BUFSIZ */
 pub const MEM_OUT: c_int = -3; /* output to dynamically allocated memory */
 
@@ -73,7 +71,7 @@ impl Output {
             .buf
             .as_ref()
             .map_or(0, |buf| self.bufsize.saturating_sub(buf.len()));
-        if likely(nleft >= bytes.len()) {
+        if nleft >= bytes.len() {
             self.buf.as_mut().unwrap().extend_from_slice(bytes);
             return Ok(());
         }
@@ -159,12 +157,6 @@ impl ShellIo {
     // [spec:dash:sem:output.flushall-fn]
     pub(crate) fn flushall(&mut self) {
         let _ = self.stdout.flush();
-        /*
-         * #ifdef FLUSHERR
-         *	flushout(&errout);
-         * #endif
-         * — FLUSHERR is not defined in the shipped build.
-         */
     }
 
     /// The writer `dest` names.
@@ -225,12 +217,6 @@ pub enum Dest {
  * 5's `io: ShellIo` row.
  */
 
-/*
- * #ifdef notyet
- * struct output memout = { .fd = MEM_OUT, ... };
- * #endif
- */
-
 /* ------------------------------------------------------------------ */
 /* src/output.c                                                        */
 /* ------------------------------------------------------------------ */
@@ -288,7 +274,7 @@ impl Write for Output {
             .buf
             .as_ref()
             .map_or(0, |buf| self.bufsize.saturating_sub(buf.len()));
-        if likely(nleft >= bytes.len()) {
+        if nleft >= bytes.len() {
             self.buf.as_mut().unwrap().extend_from_slice(bytes);
             return Ok(bytes.len());
         }
@@ -383,9 +369,7 @@ pub fn xwrite(fd: &impl nsh_platform::AsDescriptor, bytes: &[u8]) -> c_int {
     }
 }
 
-// The reference's three C-stdio routines are inside both `#ifdef notyet`
-// and `#ifdef USE_GLIBC_STDIO`. No supported configuration contains them,
-// so there is deliberately no Rust function or inert compatibility shim.
+// The reference's unused C-stdio routines have no Rust counterparts.
 // [spec:dash:def:output.initstreams-fn]
 // [spec:dash:sem:output.initstreams-fn]
 // [spec:dash:def:output.openmemout-fn]

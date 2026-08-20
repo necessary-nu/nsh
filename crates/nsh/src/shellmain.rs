@@ -3,17 +3,9 @@
 //! prefix even though the module is called `shellmain`, since `main` is
 //! taken by the binary crate root).
 //!
-//! Translation notes:
-//!   * Startup is a sequence of named operations. Each operation declares
-//!     where an interactive shell recovers if it fails; no translated label
-//!     state or non-local jump remains.
-//!   * `PROFILE` is 0 and `GPROF` undefined, so `monitor()`/`_mcleanup`
-//!     are not compiled; `DEBUG` is off, so `opentrace`/`trargs` and
-//!     every `TRACE` are compiled out.
-//!   * The `#ifndef linux` real/effective id check around `$ENV` is not
-//!     compiled on Linux and is noted where it would go.
-//!   * `FLUSHERR` is never defined in the dash build, so the
-//!     `flushout(out2)` calls guarded by it are absent here too.
+//! Startup is a sequence of named operations. Each operation declares where
+//! an interactive shell recovers if it fails; no translated label state or
+//! non-local jump remains.
 
 // [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
@@ -30,20 +22,6 @@ use crate::options::ShellOption;
 #[inline]
 pub fn rootshell(sh: &Shell) -> c_int {
     (sh.shell_level == 0) as c_int
-}
-
-// [spec:dash:def:main.etext-fn]
-// [spec:dash:sem:main.etext-fn]
-//
-// `extern int etext();` is the linker-provided end-of-text symbol; it is
-// declared only under `#if PROFILE` (0 in this build) and its address is
-// passed to `monitor()` to bound the profiling range. There is nothing
-// to reimplement — a Rust build gets profiling from its own tooling — so
-// this is the annotated no-op that stands in for the profiling-setup
-// site. It is never called.
-#[allow(dead_code)]
-fn etext() -> c_int {
-    0
 }
 
 /*
@@ -192,14 +170,11 @@ fn run_startup_task(
 // [spec:posix:req:exit.interactive-abandons-command]
 // [spec:nsh:req:idiom.evaluator-control-flow]
 pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
-    /* #if PROFILE: monitor(4, etext, profile_buf, sizeof profile_buf, 50); */
     let mut task = StartupTask::Initialize;
     loop {
         match run_startup_task(sh, argv, task) {
             Ok(StartupAdvance::Next(next)) => task = next,
             Ok(StartupAdvance::Finished) => {
-                /* #if PROFILE: monitor(0); */
-                /* #if GPROF: _mcleanup(); */
                 return crate::trap::exitshell(sh, None);
             }
             Ok(StartupAdvance::Exit(status)) => {
@@ -229,7 +204,6 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
 
                 sh.recover_command_loop();
                 if interrupted {
-                    /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
                     let _ = sh.io.stderr().write_all(b"\n");
                 }
                 crate::error::clear_interrupt_deferral(sh);
@@ -309,7 +283,6 @@ pub(crate) fn cmdloop(
      * option table. */
     let interactive_input = sh.options.enabled(ShellOption::Interactive) && top != 0;
 
-    /* TRACE(("cmdloop(%d) called\n", top)); */
     loop {
         /* `setstackmark`/`popstackmark` per iteration: the parse tree and
          * everything the command allocated used to live in the region
@@ -326,7 +299,6 @@ pub(crate) fn cmdloop(
             crate::mail::chkmail(sh);
         }
         let parsed = crate::parser::parsecmd(sh, inter)?;
-        /* showtree(n); DEBUG */
         if let crate::parser::ParseResult::Tree(n) = parsed {
             sh.jobs.job_warning = if sh.jobs.job_warning == 2 { 1 } else { 0 };
             numeof = 0;
