@@ -186,18 +186,8 @@ impl BuiltinSpec {
 /// The words a builtin is handed, out of the fields `evalcommand`
 /// expanded.
 ///
-/// A field's bytes end with the NUL its C readers need
-/// (`strlist::textp`), because every one of them stops at a terminator. A
-/// builtin is Rust and stops at a length, so the terminator goes no
-/// further than this boundary.
 pub fn args(fields: &[crate::expand::strlist]) -> Vec<&BStr> {
-    fields
-        .iter()
-        .map(|field| {
-            debug_assert_eq!(field.text.last(), Some(&0), "a field is a C string");
-            BStr::new(&field.text[..field.text.len() - 1])
-        })
-        .collect()
+    fields.iter().map(crate::expand::strlist::as_bstr).collect()
 }
 
 pub mod alias;
@@ -543,20 +533,17 @@ mod tests {
 
     use crate::expand::strlist;
 
-    /// A field's bytes end with the NUL its C readers stop at, and a
-    /// builtin stops at a length, so exactly one byte comes off -- not the
-    /// trailing NUL of a word that ends in one.
     #[test]
-    fn args_drop_only_the_terminator() {
+    fn args_borrow_complete_fields() {
         let fields = vec![
             strlist {
-                text: BString::from(&b"echo\0"[..]),
+                text: BString::from(&b"echo"[..]),
             },
             strlist {
-                text: BString::from(&b"\0"[..]),
+                text: BString::new(Vec::new()),
             },
             strlist {
-                text: BString::from(&b"a b\0"[..]),
+                text: BString::from(&b"a b"[..]),
             },
         ];
         let args = args(&fields);

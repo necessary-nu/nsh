@@ -436,8 +436,6 @@ pub fn issimplecmd(n: Option<&Node>, name: &BStr) -> c_int {
 
 /// The last word read, as its shell-visible bytes.
 ///
-/// Input storage retains the terminating NUL expected by the lexer;
-/// `cstr_prefix` removes it without exposing a pointer.
 fn wordtext(sh: &Shell) -> &BStr {
     sh.input.word.as_bstr()
 }
@@ -445,12 +443,6 @@ fn wordtext(sh: &Shell) -> &BStr {
 /// The last word read, as a node's owned text.
 ///
 /// The bytes are cloned into the syntax tree's owned storage.
-fn wordtext_node(sh: &mut Shell) -> NodeText {
-    let mut text = BString::from(sh.input.word.as_bstr());
-    text.push(0);
-    NodeText::new(text)
-}
-
 /*
  * Read and parse a command.  Returns NEOF on end of file.  (NULL is a
  * valid parse tree indicating a blank line.)
@@ -769,7 +761,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
             }
             /* the C stores `wordtext` into the node here, before any further
              * token read can overwrite it */
-            let var = wordtext_node(sh);
+            let var = NodeText::from(wordtext(sh));
             let mut args: Vec<Node> = Vec::new();
             if readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)? == TokenKind::In {
                 while readtoken(sh, TokenContext::NONE)? == TokenKind::Word {
@@ -1015,11 +1007,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                     .ok_or_else(|| synexpect(sh, None))?;
                 return Ok(Some(Node::Function(FunctionDefinition {
                     line: linno,
-                    name: {
-                        let mut name = BString::from(word.word.as_bstr());
-                        name.push(0);
-                        NodeText::new(name)
-                    },
+                    name: NodeText::new(BString::from(word.word.as_bstr())),
                     body: Box::new(body),
                 })));
             }
@@ -1590,44 +1578,38 @@ fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Error> {
      * be a memory-safety contract is gone with the raw cursor. */
     let mut scratch: [u8; crate::escape::CONV_ESCAPE_SLOP] = [0; crate::escape::CONV_ESCAPE_SLOP];
     let mut o: usize = 0;
-    /* 10 = length of UXXXXXXXX + NUL */
-    let mut text = [0u8; 10];
-    let mut len: usize;
+    /* Longest accepted escape spelling is `UXXXXXXXX`. */
+    let mut text = Vec::with_capacity(9);
     let mut at: usize;
 
-    len = 0;
-    while len < text.len() - 1 {
+    while text.len() < text.capacity() {
         let input = pgetc(sh)?;
         let Some(byte) = input.byte() else {
             break;
         };
 
-        text[len] = byte;
-        len += 1;
+        text.push(byte);
 
         if byte == b'\'' {
             break;
         }
     }
-    text[len] = 0;
-
     at = 0;
-    if text[at] != b'c' {
+    if text.first() != Some(&b'c') {
         let ret: c_uint;
 
-        ret = crate::escape::conv_escape(&text[at..], &mut scratch, true);
+        ret = crate::escape::conv_escape(&text, &mut scratch, true);
         at += (ret >> 4) as usize;
         o += (ret & 15) as usize;
     } else {
         at += 1;
-        if text[at] != 0 {
+        if let Some(&byte) = text.get(at) {
             let conv_ch: c_int;
-            let c: c_int;
+            let c = byte as c_int;
 
-            c = text[at] as c_int;
             at += 1;
 
-            at += (((c ^ text[at] as c_int) | (c ^ '\\' as c_int)) == 0) as usize;
+            at += usize::from(c == '\\' as c_int && text.get(at) == Some(&b'\\'));
 
             conv_ch = (c & !((c & 0x40) >> 1) & 0x7f) ^ 0x40;
             /* USTPUTC(conv_ch, out) */
@@ -1636,7 +1618,7 @@ fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Error> {
         }
     }
 
-    pungetn(sh, len.saturating_sub(at) as c_int);
+    pungetn(sh, text.len().saturating_sub(at) as c_int);
     dest.extend_from_slice(&scratch[..o]);
     Ok(())
 }
@@ -1939,13 +1921,15 @@ fn readtoken1(
         /* { */
         return Err(synerror(sh, b"Missing '}'"));
     }
-    st.out.push(b'\0');
     len = st.out.len();
     if st.eofmark.is_none() {
         if (st.input.is(b'>') || st.input.is(b'<'))
             && !st.quoted
-            && len <= 2
-            && (st.out[0] == 0 || is_digit(st.out[0] as i8 as c_int))
+            && len <= 1
+            && st
+                .out
+                .first()
+                .is_none_or(|byte| is_digit(*byte as i8 as c_int))
         {
             parseredir(sh, &mut st)?;
             sh.input.lasttoken = TokenKind::Redirection;
@@ -1960,7 +1944,8 @@ fn readtoken1(
      * scratch space, which is what made `wordtext` outlive the next token.
      * Moving the buffer out is the same guarantee. */
     // [spec:nsh:def:idiom.word-ir]
-    sh.input.word = ParsedWord::from_legacy(mem::take(&mut st.out), mem::take(&mut st.bqlist));
+    let encoded = mem::take(&mut st.out);
+    sh.input.word = ParsedWord::from_legacy_fragment(&encoded, mem::take(&mut st.bqlist));
     sh.input.lasttoken = TokenKind::Word;
     Ok(Token {
         kind: TokenKind::Word,
@@ -2055,7 +2040,7 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
         HereDocument,
     }
 
-    let fdc: c_char = st.out[0] as c_char;
+    let fdc = st.out.first().copied().unwrap_or(0) as c_char;
     /* The C carves one `struct nfile` and then decides what it is by
      * assigning `np->type`, re-allocating only because `nhere` is smaller.
      * The arm has to be chosen up front here, so the type and the fd are
@@ -2127,7 +2112,7 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
  */
 fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     let mut newsyn = st.syn().syntax;
-    static types: [u8; 6] = *b"}-+?=\0";
+    static TYPES: [u8; 5] = *b"}-+?=";
     let mut subtype: c_int;
 
     st.out.push('$' as u8);
@@ -2272,10 +2257,7 @@ fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
                     /*FALLTHROUGH*/
                 }
                 /* default: */
-                /* The search runs over the whole array, terminator
-                 * included, because that is what `strchr` does: a NUL
-                 * `c` lands on index 5 rather than missing. */
-                if let Some(at) = types.iter().position(|&byte| st.input.is(byte)) {
+                if let Some(at) = TYPES.iter().position(|&byte| st.input.is(byte)) {
                     subtype |= at as c_int + VSNORMAL;
                 }
             }
@@ -2368,16 +2350,15 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
         /* We must read until the closing backquote, giving special
         treatment to some slashes, and then push the string and
         reread it as input, interpreting it normally.  */
-        let mut done = false;
         let mut input: InputUnit;
 
-        while !done {
+        loop {
             if sh.input.needprompt != 0 {
                 setprompt(sh, 2);
             }
             input = pgetc_eatbnl(sh)?;
             if input.is(b'`') {
-                done = true;
+                break;
             } else if input.is(b'\\') {
                 input = pgetc(sh)?;
                 if !input.is(b'\\')
@@ -2398,10 +2379,6 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
             }
             pstr.push(input.expect_byte());
         }
-        /* `pout[-1] = '\0'` — over the closing backquote the loop just
-         * wrote, which is why the buffer is never empty here. */
-        let last = pstr.len() - 1;
-        pstr[last] = 0;
     }
     /* The C walks to the tail of `bqlist` and appends an empty cell, then
      * fills its `n` after the recursive parse.  Reserving the slot first is
@@ -2420,11 +2397,7 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
 
     let parsed = crate::resource::with_resources(sh, |sh, _resources| {
         if oldstyle != 0 {
-            let end = pstr
-                .iter()
-                .position(|&byte| byte == 0)
-                .unwrap_or(pstr.len());
-            setinputstring(sh, BStr::new(&pstr[..end]));
+            setinputstring(sh, BStr::new(&pstr));
         }
         let mut node = list(sh, 2)?.into_node();
 

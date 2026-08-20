@@ -216,12 +216,11 @@ pub(super) fn expand_argument(
         } else {
             vec![expanded.collapse()]
         };
-        output.list.extend(fields.into_iter().map(terminated));
+        output.list.extend(fields.into_iter().map(into_field));
     } else {
         let field = expanded.collapse();
         sh.expand.buffer.clear();
         sh.expand.buffer.extend_from_slice(&field.bytes);
-        sh.expand.buffer.push(0);
     }
 
     super::ifsfree(&mut sh.expand);
@@ -245,8 +244,7 @@ pub(super) fn case_matches(sh: &mut Shell, word: &ParsedWord, value: &BStr) -> R
     Ok(pattern.matches(&sh.locale, value))
 }
 
-fn terminated(mut field: Field) -> strlist {
-    field.bytes.push(0);
+fn into_field(field: Field) -> strlist {
     strlist { text: field.bytes }
 }
 
@@ -901,10 +899,7 @@ fn command_substitution(sh: &mut Shell, command: Option<&Node>) -> Result<BStrin
 }
 
 fn effective_ifs(sh: &Shell) -> &[u8] {
-    sh.ifs
-        .ncifs
-        .strip_suffix(&[0])
-        .unwrap_or(sh.ifs.ncifs.as_slice())
+    &sh.ifs.ncifs
 }
 
 fn split_fields(sh: &Shell, fields: Vec<Field>) -> Vec<Field> {

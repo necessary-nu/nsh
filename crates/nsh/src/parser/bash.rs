@@ -4,12 +4,12 @@
 use core::ffi::c_int;
 use core::mem;
 
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{
     CTLBACKQ, CTLESC, CTLMBCHAR, CTLQUOTEMARK, Rt1, TokenContext, TokenKind, command, finalize,
     goodname, list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, pungetc, readtoken,
-    readtoken_with_flags, setinputstring, synerror, synexpect, wordtext, wordtext_node,
+    readtoken_with_flags, setinputstring, synerror, synexpect, wordtext,
 };
 use crate::context::Shell;
 use crate::error::Error;
@@ -124,7 +124,7 @@ pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
     if name_token.kind != TokenKind::Word || wordtext(sh).is_empty() {
         return Err(synerror(sh, b"invalid Bash function name"));
     }
-    let name = wordtext_node(sh);
+    let name = NodeText::from(wordtext(sh));
 
     let next = readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?;
     let style = if next == TokenKind::LeftParen {
@@ -149,7 +149,7 @@ pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
 
 pub(super) fn array_word(sh: &Shell, arg: WordNode) -> Result<Node, WordNode> {
     let encoded = arg.word.encode_legacy();
-    let bytes = BStr::new(&encoded.bytes[..encoded.bytes.len() - 1]);
+    let bytes = encoded.bytes.as_bstr();
     let Some(open) = bytes.iter().position(|&byte| byte == b'[') else {
         return Err(arg);
     };
@@ -164,7 +164,7 @@ pub(super) fn array_word(sh: &Shell, arg: WordNode) -> Result<Node, WordNode> {
     };
 
     let assignment = BashArrayAssignment {
-        name: node_text(&bytes[..open]),
+        name: NodeText::from(&bytes[..open]),
         subscript: Some(arg_part(&arg, open + 1, close)),
         operator,
         value: BashArrayValue::Word(arg_part(&arg, value_start, bytes.len())),
@@ -388,7 +388,7 @@ fn arithmetic_text(sh: &mut Shell) -> Result<NodeText, Error> {
             Quote::None => out.push(byte),
         }
     }
-    Ok(node_text(&out))
+    Ok(NodeText::from(out.as_slice()))
 }
 
 fn for_clauses(sh: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
@@ -424,9 +424,9 @@ fn for_clauses(sh: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
         return Err(synerror(sh, b"arithmetic for requires three expressions"));
     }
     Ok([
-        node_text(&text[..separators[0]]),
-        node_text(&text[separators[0] + 1..separators[1]]),
-        node_text(&text[separators[1] + 1..]),
+        NodeText::from(&text[..separators[0]]),
+        NodeText::from(&text[separators[0] + 1..separators[1]]),
+        NodeText::from(&text[separators[1] + 1..]),
     ])
 }
 
@@ -479,7 +479,7 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
             return Err(synerror(sh, b"expected unary-test operand"));
         }
         return Ok(BashConditionalExpr::Unary {
-            operator: node_text(first.arg.word.as_bstr()),
+            operator: NodeText::from(first.arg.word.as_bstr()),
             operand: take_word(sh, operand_token.quoted).arg,
         });
     }
@@ -491,12 +491,12 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
             Some(super::PendingRedirection::File { operator, .. })
                 if *operator == FileRedirectionOperator::Read =>
             {
-                Some(node_text(b"<"))
+                Some(NodeText::from(b"<".as_slice()))
             }
             Some(super::PendingRedirection::File { operator, .. })
                 if *operator == FileRedirectionOperator::Write =>
             {
-                Some(node_text(b">"))
+                Some(NodeText::from(b">".as_slice()))
             }
             _ => None,
         }
@@ -504,7 +504,7 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
         && !operator_token.quoted
         && binary_operator(wordtext(sh))
     {
-        let operator = wordtext_node(sh);
+        let operator = NodeText::from(wordtext(sh));
         Some(operator)
     } else {
         None
@@ -612,7 +612,7 @@ fn compound_prefix(sh: &Shell, node: Node) -> Option<BashArrayAssignment> {
                 return None;
             }
             Some(BashArrayAssignment {
-                name: node_text(&arg.word.as_bstr()[..name_end]),
+                name: NodeText::from(&arg.word.as_bstr()[..name_end]),
                 subscript: None,
                 operator,
                 value: BashArrayValue::Word(arg_part(
@@ -644,7 +644,7 @@ fn plain_prefix(arg: &WordNode) -> Option<(usize, BashAssignmentOperator)> {
 
 fn array_element(arg: WordNode) -> BashArrayElement {
     let encoded = arg.word.encode_legacy();
-    let bytes = BStr::new(&encoded.bytes[..encoded.bytes.len() - 1]);
+    let bytes = encoded.bytes.as_bstr();
     if bytes.first() == Some(&b'[') {
         if let Some(close) = matching_bracket(bytes, 0) {
             if let Some((operator, value_start)) = assignment_operator(bytes, close + 1) {
@@ -707,7 +707,7 @@ fn assignment_operator(bytes: &[u8], start: usize) -> Option<(BashAssignmentOper
 fn arg_part(arg: &WordNode, start: usize, end: usize) -> WordNode {
     // [spec:nsh:def:idiom.word-ir]
     let encoded = arg.word.encode_legacy();
-    let bytes = &encoded.bytes[..encoded.bytes.len() - 1];
+    let bytes = encoded.bytes.as_slice();
     let first = backquote_count(&bytes[..start]);
     let count = backquote_count(&bytes[start..end]);
     WordNode {
@@ -742,10 +742,4 @@ fn multibyte_end(bytes: &[u8], start: usize) -> usize {
     let length_at = start + 1 + usize::from(bytes.get(start + 1) == Some(&(CTLESC as u8)));
     let length = bytes.get(length_at).copied().unwrap_or(0) as usize;
     length_at.saturating_add(length).saturating_add(3)
-}
-
-fn node_text(bytes: &[u8]) -> NodeText {
-    let mut text = BString::from(bytes);
-    text.push(0);
-    NodeText::new(text)
 }

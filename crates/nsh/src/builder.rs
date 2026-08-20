@@ -379,7 +379,7 @@ mod tests {
                 .invocation_name
                 .as_ref()
                 .map(|name| name.as_slice()),
-            Some(b"nsh\0".as_slice())
+            Some(b"nsh".as_slice())
         );
     }
 

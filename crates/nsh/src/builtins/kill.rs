@@ -59,7 +59,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* the `usage:` label is a backward goto whose body only raises, so it
      * is reproduced as two returns of the same message. */
     const USAGE: &[u8] =
-        b"Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\nkill -l [exitstatus]\0";
+        b"Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\nkill -l [exitstatus]";
     let mut signal = None;
     let mut list = false;
     let mut i: c_int;
@@ -67,7 +67,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if args.len() <= 1 {
         // usage:
-        return Err(sh.diagnostics().sh_error_value(&USAGE[..USAGE.len() - 1]));
+        return Err(sh.diagnostics().sh_error_value(USAGE));
     }
 
     let mut opts = crate::options::Options::new(args);
@@ -108,7 +108,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if (signal.is_none() || operands.is_empty()) != list {
         // goto usage
-        return Err(sh.diagnostics().sh_error_value(&USAGE[..USAGE.len() - 1]));
+        return Err(sh.diagnostics().sh_error_value(USAGE));
     }
 
     if list {

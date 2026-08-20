@@ -58,14 +58,11 @@ pub(crate) use bash::{
 /// Here the bytes are owned from the moment the parser produces them, so both
 /// cases are the same case and `Clone` is derived.
 ///
-/// The trailing NUL the parser wrote is *part of the value*; `as_bstr`
-/// hides it from readers that operate on a length.
 #[derive(Clone)]
 pub struct NodeText(BString);
 
 impl NodeText {
-    /// Take ownership of a word's bytes. `text` ends in the NUL the parser
-    /// wrote, which is part of the value.
+    /// Take ownership of a grammar field's shell bytes.
     pub fn new(text: BString) -> NodeText {
         NodeText(text)
     }
@@ -76,16 +73,21 @@ impl NodeText {
      * the NUL, so the walk was answering a question the static had
      * already answered. */
 
-    /// The text without its terminating NUL.
+    /// Borrow the stored bytes.
     pub fn as_bstr(&self) -> &BStr {
-        BStr::new(&self.0[..self.0.len() - 1])
+        BStr::new(&self.0)
     }
+}
 
-    /// The text **with** its terminating NUL, which is what a reader that
-    /// walks it as the C does needs: the terminator is the stop condition,
-    /// and `argstr` counts it into the run it appends.
-    pub fn as_cbytes(&self) -> &[u8] {
-        &self.0
+impl From<&[u8]> for NodeText {
+    fn from(bytes: &[u8]) -> Self {
+        Self(BString::from(bytes))
+    }
+}
+
+impl From<&BStr> for NodeText {
+    fn from(bytes: &BStr) -> Self {
+        Self(bytes.to_owned())
     }
 }
 
@@ -266,21 +268,16 @@ mod tests {
 
     #[test]
     fn node_text_preserves_non_utf8_names() {
-        let t = NodeText::new(BString::from(vec![0xff, 0]));
+        let t = NodeText::new(BString::from(vec![0xff]));
         assert_eq!(t.as_bstr(), &[0xff]);
         assert!(core::str::from_utf8(t.as_bstr()).is_err());
-        assert_eq!(t.as_cbytes(), &[0xff, 0]);
     }
 
     #[test]
-    fn node_text_keeps_its_terminator() {
-        // `as_bstr` stops one short of the end, so a value built from
-        // bytes that already carry their NUL reads back without it -- and
-        // the storage still carries one.
-        let src = BString::from(vec![b'n', b'a', b'm', b'e', 0]);
+    fn node_text_keeps_complete_bytes() {
+        let src = BString::from(vec![b'n', b'a', b'm', b'e']);
         let t = NodeText::new(BString::from(&src[..]));
-        assert_eq!(t.as_bstr(), &src[..4]);
-        assert_eq!(t.as_cbytes()[4], 0);
+        assert_eq!(t.as_bstr(), src);
     }
 
     #[test]
@@ -299,12 +296,10 @@ mod tests {
     }
 
     #[test]
-    fn a_word_may_contain_a_nul_the_terminator_does_not_hide() {
-        // A raw NUL byte reaches the parser from the input, so the value is
-        // its bytes and not what a C reader makes of them.
-        let t = NodeText::new(BString::from(vec![b'a', 0, b'b', 0]));
+    fn node_text_preserves_embedded_nul() {
+        let t = NodeText::new(BString::from(vec![b'a', 0, b'b']));
         assert_eq!(t.as_bstr(), b"a\0b".as_slice());
-        assert_eq!(t.as_cbytes().iter().position(|byte| *byte == 0), Some(1));
+        assert_eq!(t.as_bstr().iter().position(|byte| *byte == 0), Some(1));
     }
 
     #[test]

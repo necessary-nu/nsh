@@ -54,19 +54,10 @@ fn print_escape_str(output: &mut crate::output::Output, separator: u8, s: &BStr)
     let mut buf = BString::default();
 
     done = conv_escape_str(s, &mut buf);
-    let len = buf.len();
-
-    /* `conv_escape_str`'s do-while exits only on the iteration that writes
-     * the terminating NUL, so `q[-1]` always exists. */
-    debug_assert!(len >= 1);
-
-    /* `q[-1] = (!!((f[1] - 's') | done) - 1) & f[2];` — the separator
-     * overwrites the terminator, and a `\c` suppresses it. */
-    let close = if done == 0 { separator } else { 0 };
-    buf[len - 1] = close;
-    let total = len - 1 + (close != 0) as usize;
-
-    emit(output, &buf[..total]);
+    emit(output, &buf);
+    if done == 0 && separator != 0 {
+        emit(output, &[separator]);
+    }
 
     done
 }

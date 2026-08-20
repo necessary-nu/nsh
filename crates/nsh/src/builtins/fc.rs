@@ -136,7 +136,7 @@ fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags,
 // [spec:posix:req:builtin.fc.stderr]
 // [spec:posix:req:builtin.fc.interfaces]
 pub fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut fields: Vec<strlist> = args.iter().map(|word| strlist::from_cbytes(word)).collect();
+    let mut fields: Vec<strlist> = args.iter().map(|word| strlist::from_bytes(word)).collect();
     histcmd_fields(sh, &mut fields)
 }
 
@@ -466,11 +466,8 @@ fn write_listing(
 // [spec:dash:def:histedit.fc-replace-fn]
 // [spec:dash:sem:histedit.fc-replace-fn]
 //
-// The C returns `grabstackstr(dest)`, which reserves the bytes *before* the
-// `STACKSTRNUL` — so the terminator sits one past the allocation and the
-// caller reads it anyway. An owned string carries its own terminator, and
-// returning it makes the lifetime the caller's rather than the enclosing
-// stack mark's, which matters because the caller hands it to `evalstring`.
+// The owned result makes both its byte length and lifetime explicit before
+// the caller hands it to `evalstring`.
 fn fc_replace(hay: &BStr, pattern: &mut Option<BString>, replacement: &BStr) -> BString {
     /* The C walks `s` a byte at a time and asks `*s == *p && strncmp(s,
      * p, plen)` at each position, which is `find`. The leading-byte test

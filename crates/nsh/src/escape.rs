@@ -334,13 +334,10 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
 /// `printf`'s `%b` share.
 ///
 /// Returns 0, or 0x100 when a `\c` was found — "stop all further output",
-/// which both callers obey. The value's low byte is 0, which is also what
-/// ends the loop, and what `cp`'s final byte becomes: the terminator the
-/// caller either overwrites with a separator or trims.
+/// which both callers obey. Input and output are both length-delimited.
 // [spec:dash:def:printf.conv-escape-str-fn]
 // [spec:dash:sem:printf.conv-escape-str-fn]
 pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
-    let mut c: c_int;
     let mut at = 0usize;
     let byte_at =
         |index: usize| -> c_int { input.get(index).copied().unwrap_or(0) as c_char as c_int };
@@ -350,7 +347,7 @@ pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
      * cp` at the end is its length. */
     debug_assert!(cp.is_empty());
 
-    loop {
+    while at < input.len() {
         let ret: c_uint;
         let ch: c_int;
 
@@ -358,59 +355,36 @@ pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
          * through the raw cursor below; see `CONV_ESCAPE_SLOP`. */
         cp.reserve(CONV_ESCAPE_SLOP);
 
-        // `goto putchar` is taken from two places; the flag replaces it.
-        let mut goto_putchar = false;
-
-        c = byte_at(at);
+        let c = byte_at(at);
         at += 1;
         if c != b'\\' as c_int {
-            ch = 0; /* unused on this path */
-            goto_putchar = true;
+            cp.push(c as u8);
+            continue;
         } else {
             ch = byte_at(at);
             if ch == b'c' as c_int {
-                /* \c as in SYSV echo - abort all processing.... */
-                c = 0x100;
-                goto_putchar = true;
+                return 0x100;
             }
         }
 
-        if goto_putchar {
-            // putchar:
-            /* `USTPUTC(c, cp)` truncates to `char`, which is what turns
-             * `\c`'s 0x100 into the terminating NUL. */
-            cp.push(c as u8);
-        } else {
-            /*
-             * %b string octal constants are not like those in C.
-             * They start with a \0, and are followed by 0, 1, 2,
-             * or 3 octal digits.
-             */
-            if ch == b'0' as c_int && isodigit(byte_at(at + 1)) {
-                at += 1;
-            }
-
-            /* Finally test for sequences valid in the format string */
-            /* The C lets `conv_escape` write into the stack block past
-             * the cursor and then commits part of it. Here it writes into
-             * scratch and the committed prefix is appended, which is the
-             * same bytes and the same length -- what the C left above the
-             * cursor for the next write to overwrite is simply not copied
-             * out. */
-            let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
-            ret = conv_escape(&input[at.min(input.len())..], &mut scratch, false);
-            at += (ret >> 4) as usize;
-            debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-            cp.extend_from_slice(&scratch[..(ret & 15) as usize]);
+        /*
+         * %b string octal constants are not like those in C.
+         * They start with a \0, and are followed by 0, 1, 2,
+         * or 3 octal digits.
+         */
+        if ch == b'0' as c_int && isodigit(byte_at(at + 1)) {
+            at += 1;
         }
 
-        // } while (c & 0xff);
-        if (c & 0xff) == 0 {
-            break;
-        }
+        /* Finally test for sequences valid in the format string */
+        let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
+        ret = conv_escape(&input[at.min(input.len())..], &mut scratch, false);
+        at += (ret >> 4) as usize;
+        debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
+        cp.extend_from_slice(&scratch[..(ret & 15) as usize]);
     }
 
-    c
+    0
 }
 
 /// Quote arbitrary bytes so parsing the result produces the same bytes.
@@ -450,6 +424,13 @@ pub(crate) fn shell_quote(mut input: &BStr) -> BString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escape_strings_preserve_nul_data() {
+        let mut output = BString::new(Vec::new());
+        assert_eq!(conv_escape_str(b"a\0b", &mut output), 0);
+        assert_eq!(output, BString::from(b"a\0b".as_slice()));
+    }
 
     // [spec:dash:sem:mystring.single-quote-fn/test]
     #[test]

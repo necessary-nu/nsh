@@ -5326,4 +5326,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.no-mystring}
     )}
+    {id remove-core-c-strings-terminators, covered_rules (
+        idiom.no-c-strings-core
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-c-strings-core}
+    )}
 )

@@ -546,26 +546,11 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
          * named.  Two consequences, both in the port's favour: the bytes
          * cannot be moved by the `sh_pipe`/`forkshell` allocations below —
          * the C's were only safe because neither happens to `stalloc` — and
-         * they are still NUL-terminated by `argstr`.
-         *
-         * The `strlen` the C applied here has moved *into*
-         * `expansion_result`, which hands back the bytes it would have
-         * counted rather than the base of them. */
+         * the result carries its own byte length. */
         expanded = bstr::BString::from(crate::expand::expansion_result(sh));
         expanded.as_slice()
     } else {
-        /* The unexpanded document is the node's own text. `as_bstr` drops
-         * the counted terminator and `cstr_prefix` stops at the first NUL
-         * within what is left, which together are the C's `strlen` — the
-         * second half matters because a here-document body can carry an
-         * embedded NUL and the terminator is then not the one `strlen`
-         * would have found. */
-        let bytes = document.body.word.as_bstr();
-        let end = bytes
-            .iter()
-            .position(|&byte| byte == 0)
-            .unwrap_or(bytes.len());
-        &bytes[..end]
+        document.body.word.as_bstr()
     };
 
     len = p.len();

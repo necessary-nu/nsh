@@ -14,7 +14,7 @@ use core::ffi::c_int;
 use std::io::Write;
 
 use crate::builtins::cd::cdopt;
-use crate::cd::{Pwd, cbytes, setpwd_inner};
+use crate::cd::{Pwd, setpwd_inner};
 use crate::eval::Flow;
 use crate::options::Options;
 
@@ -28,11 +28,10 @@ pub fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if sh.cwd.physdir.is_none() {
             setpwd_inner(sh, Pwd::Current, 0)?;
         }
-        cbytes(&sh.cwd.physdir)
+        sh.cwd.physdir.clone().unwrap_or_default()
     } else {
-        cbytes(&sh.cwd.curdir)
+        sh.cwd.curdir.clone().unwrap_or_default()
     };
-    dir.pop();
     dir.push(b'\n');
     let _ = sh.io.stdout().write_all(&dir);
     Ok(Flow::Done((0).into()))

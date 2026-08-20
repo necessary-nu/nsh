@@ -598,7 +598,7 @@ impl Diagnostics<'_> {
     pub fn command_warnx(&mut self, msg: &[u8]) {
         let shell_name = self
             .invocation_name
-            .map(|name| BStr::new(&name[..name.len() - 1]))
+            .map(|name| BStr::new(name.as_slice()))
             .unwrap_or(BStr::new(b"sh"));
         let errors = self.io.stderr();
         let _ = errors.write_all(shell_name);

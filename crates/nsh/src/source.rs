@@ -441,24 +441,7 @@ impl Shell {
             let n = crate::parser::makename(shell);
             let mut list = crate::expand::arglist::new();
             crate::expand::expandarg(shell, &n, Some(&mut list), mode)?;
-            Ok(list
-                .list
-                .into_iter()
-                .map(|s| {
-                    /* The unsplit field is the expansion buffer whole,
-                     * terminator and all, because its other readers -- a
-                     * here-document, `expredir` -- go on to read it as a C
-                     * string. A field cannot contain a NUL, so dropping
-                     * one trailing byte is exact rather than a heuristic,
-                     * and it is a no-op for the split fields, which
-                     * `ifsbreakup` already cut short of it. */
-                    let mut t = s.text;
-                    if t.last() == Some(&0) {
-                        t.pop();
-                    }
-                    t
-                })
-                .collect())
+            Ok(list.list.into_iter().map(|field| field.text).collect())
         })
     }
 

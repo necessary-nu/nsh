@@ -955,9 +955,7 @@ fn expredir<'a>(
                 /* `fn.list->text` with no null check: no EXP_FULL means
                  * `expandarg` took its single-field arm. */
                 debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                let mut target = fnl.list.remove(0).text;
-                debug_assert_eq!(target.last(), Some(&0), "expanded path is terminated");
-                target.pop();
+                let target = fnl.list.remove(0).text;
                 expanded.push(ExpandedRedirection::File {
                     operator: redirection.operator,
                     descriptor: redirection.descriptor,

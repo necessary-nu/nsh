@@ -105,7 +105,7 @@ pub struct ShellOptions {
     /// command bytes themselves live in [`crate::Startup`], not shell option
     /// state.
     pub(crate) command_source: bool,
-    /// `$0`, owned and NUL-terminated for the remaining C-shaped readers.
+    /// `$0`, as owned shell bytes.
     arg0: Option<BString>,
     /// The process invocation name before a command-file operand replaces
     /// `$0`. Output failures in the Smoosh profile identify the interpreter,
@@ -140,8 +140,7 @@ impl ShellOptions {
     }
 
     pub(crate) fn set_arg0(&mut self, value: &BStr) {
-        let mut owned = value.to_owned();
-        owned.push(0);
+        let owned = value.to_owned();
         if self.invocation_name.is_none() {
             self.invocation_name = Some(owned.clone());
         }
@@ -149,15 +148,11 @@ impl ShellOptions {
     }
 
     pub(crate) fn set_invocation_name(&mut self, value: &BStr) {
-        let mut owned = value.to_owned();
-        owned.push(0);
-        self.invocation_name = Some(owned);
+        self.invocation_name = Some(value.to_owned());
     }
 
     pub(crate) fn arg0(&self) -> Option<&BStr> {
-        self.arg0
-            .as_ref()
-            .map(|value| BStr::new(&value[..value.len() - 1]))
+        self.arg0.as_deref().map(BStr::new)
     }
 }
 

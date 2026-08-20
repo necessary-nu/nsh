@@ -6,21 +6,16 @@
 //! is accepted. Keeping those rules here gives callers typed results and
 //! errors without a generic string-compatibility module.
 
-use bstr::{BStr, ByteSlice as _};
+use bstr::BStr;
 
 use crate::error::{Diagnostics, Error};
-
-fn before_nul(bytes: &BStr) -> &BStr {
-    let end = bytes.find_byte(0).unwrap_or(bytes.len());
-    BStr::new(&bytes[..end])
-}
 
 // [spec:dash:def:mystring.badnum-fn]
 // [spec:dash:sem:mystring.badnum-fn]
 /// Build the shell's diagnostic for an invalid numeric operand.
 pub(crate) fn invalid_number(diagnostics: &mut Diagnostics<'_>, input: &BStr) -> Error {
     let mut message = b"Illegal number: ".to_vec();
-    message.extend_from_slice(before_nul(input));
+    message.extend_from_slice(input);
     diagnostics.sh_error_value(&message)
 }
 
@@ -35,7 +30,7 @@ pub(crate) fn parse_integer(
 ) -> Result<i64, Error> {
     debug_assert!(requested_base == 0 || (2..=36).contains(&requested_base));
 
-    let bytes = before_nul(input).as_bytes();
+    let bytes: &[u8] = input;
     let mut position = bytes
         .iter()
         .position(|&byte| !is_shell_space(byte))
@@ -317,16 +312,13 @@ mod tests {
     // [spec:dash:sem:mystring.atomax-fn/test]
     // [spec:dash:sem:mystring.badnum-fn/test]
     #[test]
-    fn nul_ends_numeric_operand() {
+    fn nul_invalidates_numeric_operand() {
         let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let diagnostics = &mut shell.diagnostics();
 
-        assert_eq!(
-            parse_integer(diagnostics, BStr::new(b"42\0junk"), 10).unwrap(),
-            42
-        );
+        assert!(parse_integer(diagnostics, BStr::new(b"42\0junk"), 10).is_err());
         let error = invalid_number(diagnostics, BStr::new(b"junk\0hidden"));
-        assert_eq!(error.message(), BStr::new(b"Illegal number: junk"));
+        assert_eq!(error.message(), BStr::new(b"Illegal number: junk\0hidden"));
     }
 
     // [spec:dash:sem:mystring.is-number-fn/test]

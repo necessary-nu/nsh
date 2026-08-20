@@ -37,17 +37,6 @@ impl Cwd {
     }
 }
 
-/// The bytes `setvar` and shell output want: a path with the terminator the C's
-/// readers read up to, `nullstr`'s empty string when the sentinel is set.
-pub(crate) fn cbytes(s: &Option<BString>) -> Vec<u8> {
-    let mut v = match s {
-        Some(b) => b.to_vec(),
-        None => Vec::new(),
-    };
-    v.push(0);
-    v
-}
-
 /*
  * Actually do the chdir.  We also call hashcd to let the routines in exec.c
  * know that the current directory has changed.

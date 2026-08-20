@@ -10,7 +10,6 @@
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
-use std::ffi::CString;
 use std::io::Write as _;
 
 use bstr::{BStr, BString};
@@ -141,14 +140,9 @@ fn read_input_line(
 fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
     let mut arglist: arglist = arglist::new();
 
-    /* `s = grabstackstr(s)`.  The C is handed the cursor one *past* the
-     * terminator and turns it into the block's base, which both names the
-     * line and reserves it so that `ifsbreakup`'s `stalloc`s land above it.
-     * An owned line is already its own base and there is nothing to reserve;
+    /* An owned line already carries its bounds and there is nothing to reserve;
      * the fields `ifsbreakup` builds copy out of it rather than pointing
      * into it, so the line only has to outlive that one call. */
-    debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
-
     crate::expand::ifsbreakup(sh, line, names.len(), &mut arglist);
     crate::expand::ifsfree(&mut sh.expand);
 
@@ -209,7 +203,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:nsh:req:idiom.lexer-tokens]
 // [spec:nsh:def:idiom.logical-descriptors]
 pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut prompt: Option<CString>;
+    let mut prompt: Option<BString>;
     let mut raw = false;
     let mut delimiter = b'\n';
 
@@ -218,7 +212,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     while let Some(i) = opts.next(&mut sh.diagnostics(), b"d:p:r")? {
         match i {
             b'd' => delimiter = opts.arg().first().copied().unwrap_or(b'\0'),
-            b'p' => prompt = Some(crate::shell::cstring(opts.arg())),
+            b'p' => prompt = Some(opts.arg().to_owned()),
             _ => raw = true,
         }
     }
@@ -229,7 +223,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .as_ref()
             .is_some_and(|fd| nsh_platform::is_terminal(fd))
         {
-            let _ = sh.io.stderr().write_all(prompt.as_bytes());
+            let _ = sh.io.stderr().write_all(prompt);
         }
     }
     // [spec:nsh:def:idiom.shell-options]
@@ -245,10 +239,6 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     let (mut line, status) = read_input_line(sh, delimiter, raw, prompt_for_continuation)?;
-    /* `STACKSTRNUL(p)` writes the terminator without advancing, and the call
-     * below then passes `p + 1` — the length *including* it.  Pushing is both
-     * halves at once. */
-    line.push(b'\0');
     readcmd_handle_line(sh, &mut line, names)?;
     Ok(Flow::Done((status).into()))
 }

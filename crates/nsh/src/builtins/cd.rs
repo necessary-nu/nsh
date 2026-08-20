@@ -16,7 +16,7 @@ use nsh_platform::NativeStrExt as _;
 use nsh_platform::ShellBytesExt as _;
 use std::io::Write;
 
-use crate::cd::{Pwd, cbytes, setpwd_inner};
+use crate::cd::{Pwd, setpwd_inner};
 use crate::eval::Flow;
 use crate::options::Options;
 
@@ -172,8 +172,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     /* out: */
     if (flags & CD_PRINT) != 0 {
-        let mut d = cbytes(&sh.cwd.curdir);
-        d.pop();
+        let mut d = sh.cwd.curdir.clone().unwrap_or_default();
         d.push(b'\n');
         let _ = sh.io.stdout().write_all(&d);
     }
@@ -197,9 +196,9 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
         } else {
             None
         };
-        /* `chdir(2)` either way -- std saves the `CString` and makes the same
-         * call, and the result is folded back to the C's 0/-1 because `docd`
-         * is a `chdir` return code to every one of its callers. */
+        /* Both logical and physical resolution cross the same typed platform
+         * boundary. The result is still folded into the translated return
+         * code until the ABI-scalar cleanup types this function. */
         let target = logical
             .as_ref()
             .map(|dir| dir.as_slice().as_bstr())

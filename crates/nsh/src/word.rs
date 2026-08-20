@@ -131,14 +131,6 @@ impl ParsedWord {
         word
     }
 
-    /// Decode the former parser transport format at the parser boundary.
-    pub(crate) fn from_legacy(mut bytes: BString, substitutions: Vec<Option<Node>>) -> Self {
-        if bytes.last() == Some(&0) {
-            bytes.pop();
-        }
-        Self::from_legacy_fragment(&bytes, substitutions)
-    }
-
     /// Decode one sliced legacy word while preserving its substitutions.
     pub(crate) fn from_legacy_fragment(bytes: &[u8], substitutions: Vec<Option<Node>>) -> Self {
         let mut decoder = Decoder {
@@ -172,7 +164,6 @@ impl ParsedWord {
             substitutions: Vec::new(),
         };
         self.encode_into(&mut encoded);
-        encoded.bytes.push(0);
         encoded
     }
 
@@ -489,9 +480,8 @@ mod tests {
             LEGACY_END_PARAMETER,
             LEGACY_QUOTE,
             LEGACY_COMMAND,
-            0,
         ]);
-        let word = ParsedWord::from_legacy(encoded, vec![None]);
+        let word = ParsedWord::from_legacy_fragment(&encoded, vec![None]);
 
         assert!(matches!(word.parts()[0], WordPart::Literal(_)));
         assert!(matches!(
@@ -520,9 +510,8 @@ mod tests {
             b'+',
             b'2',
             LEGACY_END_ARITHMETIC,
-            0,
         ]);
-        let word = ParsedWord::from_legacy(original.clone(), Vec::new());
+        let word = ParsedWord::from_legacy_fragment(&original, Vec::new());
         assert_eq!(word.encode_legacy().bytes, original);
     }
 }

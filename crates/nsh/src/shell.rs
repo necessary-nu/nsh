@@ -17,30 +17,6 @@ pub fn max_int_length(bytes: c_int) -> c_int {
     ((bytes * 8 - 1) as f64 * 0.30102999566398119521 + 14.0) as c_int
 }
 
-/*
- * The other direction had a helper here -- take a `char *` the shell is
- * about to stop owning and keep its bytes, terminator included.  It was
- * `strlen` plus a `from_raw_parts`, which is one `CStr::to_bytes_with_nul`
- * and no longer worth a name; its two callers in `expand.rs` spell it and
- * say why the terminator travels.
- */
-
-/// A word a builtin was handed, as the C string an interface that has not
-/// been converted yet still wants.
-///
-/// The bytes stop at the first NUL, which is where a `char *` reader would
-/// have stopped anyway -- so this cannot fail, and it says out loud that
-/// the truncation belongs to the C interface rather than to the word.
-///
-/// Every call is a place the byte string has to become a C string again,
-/// which makes the remaining ones countable. Not part of shell.h.
-#[inline]
-pub fn cstring(arg: &bstr::BStr) -> std::ffi::CString {
-    let bytes: &[u8] = arg.as_ref();
-    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    std::ffi::CString::new(&bytes[..end]).expect("the bytes stop at the first NUL")
-}
-
 /// Flush the coverage profile before a `_exit`.
 ///
 /// Only compiled for the instrumented build (`--cfg coverage`, set by

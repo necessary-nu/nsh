@@ -21,10 +21,9 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use std::ffi::CStr;
 use std::io::Write as _;
 
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice as _};
 use core::ffi::c_int;
 
 use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
@@ -619,19 +618,11 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 fn print_escape_str(
     sh: &mut crate::context::Shell,
     spec: &Spec,
-    word: &CStr,
+    word: &BStr,
 ) -> Result<c_int, Error> {
     let mut buf = BString::default();
-    let done = conv_escape_str(word.to_bytes(), &mut buf);
-
-    /* `conv_escape_str` exits on the iteration that writes the
-     * terminating NUL, so there is always one to drop. The C overwrote
-     * it with `echo`'s separator; every route in from here had a NUL
-     * after the conversion character and appended nothing. */
-    debug_assert!(!buf.is_empty());
-    let text = &buf[..buf.len() - 1];
-
-    emit_field(sh, spec.string(text))?;
+    let done = conv_escape_str(word, &mut buf);
+    emit_field(sh, spec.string(&buf))?;
     Ok(done)
 }
 
@@ -649,10 +640,8 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .sh_error_value(b"usage: printf format [arg ...]"));
     };
 
-    /* `conv_escape` reads through a raw cursor and stops at a NUL, so
-     * the format is copied once with a terminator on it. */
-    let format = crate::shell::cstring(format).into_bytes_with_nul();
-    let end = format.len() - 1;
+    let format = format.as_bytes();
+    let end = format.len();
     let mut operands = Operands::new(arguments);
 
     'out: loop {
@@ -682,7 +671,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
             /* A `%%` is one `%`; a `%` at the very end of the format
              * falls through and is the missing-conversion error. */
-            if ch != b'%' || format[at] == b'%' {
+            if ch != b'%' || format.get(at) == Some(&b'%') {
                 if ch == b'%' {
                     at += 1;
                 }
@@ -703,7 +692,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             while at < end && spec.flag(format[at]) {
                 at += 1;
             }
-            if format[at] == b'*' {
+            if format.get(at) == Some(&b'*') {
                 at += 1;
                 spec.set_width(operands.getuintmax(sh, true) as c_int);
             } else {
@@ -718,9 +707,9 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 at += digits;
             }
 
-            if format[at] == b'.' {
+            if format.get(at) == Some(&b'.') {
                 at += 1;
-                if format[at] == b'*' {
+                if format.get(at) == Some(&b'*') {
                     at += 1;
                     let value = operands.getuintmax(sh, true) as c_int;
                     if stop.is_none() {
@@ -742,7 +731,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 }
             }
 
-            let conversion = format[at];
+            let conversion = format.get(at).copied().unwrap_or(0);
             if conversion == 0 {
                 return Err(sh.diagnostics().sh_error_value(b"missing format character"));
             }
@@ -754,9 +743,8 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
             match conversion {
                 b'b' => {
-                    let word = crate::shell::cstring(BStr::new(operands.getstr()));
                     /* escape if a \c was encountered */
-                    if print_escape_str(sh, &spec, &word)? != 0 {
+                    if print_escape_str(sh, &spec, BStr::new(operands.getstr()))? != 0 {
                         break 'out;
                     }
                 }

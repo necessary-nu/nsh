@@ -37,6 +37,96 @@ fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
     }
 }
 
+fn contains_c_literal(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at..].starts_with(b"//") {
+            at += bytes[at..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .unwrap_or(bytes.len() - at);
+            continue;
+        }
+        if bytes[at..].starts_with(b"/*") {
+            let mut depth = 1usize;
+            at += 2;
+            while at < bytes.len() && depth != 0 {
+                if bytes[at..].starts_with(b"/*") {
+                    depth += 1;
+                    at += 2;
+                } else if bytes[at..].starts_with(b"*/") {
+                    depth -= 1;
+                    at += 2;
+                } else {
+                    at += 1;
+                }
+            }
+            continue;
+        }
+
+        let boundary = at == 0 || !bytes[at - 1].is_ascii_alphanumeric() && bytes[at - 1] != b'_';
+        if boundary && bytes[at] == b'c' {
+            let mut quote = at + 1;
+            if bytes.get(quote) == Some(&b'r') {
+                quote += 1;
+                while bytes.get(quote) == Some(&b'#') {
+                    quote += 1;
+                }
+            }
+            if bytes.get(quote) == Some(&b'"') {
+                return true;
+            }
+        }
+
+        let mut quote = at;
+        if matches!(bytes.get(quote), Some(b'b')) {
+            quote += 1;
+        }
+        let raw = if bytes.get(quote) == Some(&b'r') {
+            quote += 1;
+            while bytes.get(quote) == Some(&b'#') {
+                quote += 1;
+            }
+            true
+        } else {
+            false
+        };
+        if bytes.get(quote) == Some(&b'"') {
+            let hashes = quote.saturating_sub(at + usize::from(bytes[at] == b'b') + 1);
+            quote += 1;
+            loop {
+                let Some(relative) = bytes[quote..].iter().position(|byte| *byte == b'"') else {
+                    return false;
+                };
+                quote += relative + 1;
+                if !raw {
+                    let backslashes = bytes[..quote - 1]
+                        .iter()
+                        .rev()
+                        .take_while(|byte| **byte == b'\\')
+                        .count();
+                    if backslashes % 2 != 0 {
+                        continue;
+                    }
+                    at = quote;
+                    break;
+                }
+                if bytes
+                    .get(quote..quote + hashes)
+                    .is_some_and(|suffix| suffix.iter().all(|byte| *byte == b'#'))
+                {
+                    at = quote + hashes;
+                    break;
+                }
+            }
+            continue;
+        }
+        at += 1;
+    }
+    false
+}
+
 // [spec:nsh:req:idiom.no-port-fossils/test]
 #[test]
 fn port_fossils_are_absent() {
@@ -212,6 +302,45 @@ fn mystring_module_is_absent() {
         "generic compatibility module still exists"
     );
     assert!(!LIBRARY.contains("mod mystring"));
+}
+
+// [spec:nsh:req:idiom.no-c-strings-core/test]
+#[test]
+fn core_strings_are_length_delimited() {
+    let mut sources = Vec::new();
+    rust_sources_below(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut sources,
+    );
+    sources.sort();
+
+    let forbidden = [
+        "CStr",
+        "CString",
+        "to_bytes_with_nul",
+        "from_bytes_with_nul",
+        "as_cbytes",
+        "from_cbytes",
+        "push(0)",
+        "push(b'\\0')",
+        "extend_from_slice(b\"\\0\")",
+        "last(), Some(&0)",
+    ];
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        assert!(
+            !contains_c_literal(&source),
+            "{} contains a C string literal",
+            path.display()
+        );
+        for framing in forbidden {
+            assert!(
+                !source.contains(framing),
+                "{} retains C-string framing {framing:?}",
+                path.display()
+            );
+        }
+    }
 }
 
 // [spec:nsh:req:idiom.parser-control-flow/test]

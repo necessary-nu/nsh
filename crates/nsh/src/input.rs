@@ -45,7 +45,7 @@ pub struct StrPush {
     pub prevnleft: c_int,
     /// if push was associated with an alias
     pub alias_name: Option<BString>,
-    /// the pushed text, NUL-terminated the way the C's `s` was
+    /// the complete pushed text
     pub string: Vec<u8>,
     /// `sp->spfree`: the pending-free chain hidden while this string is read
     pub spfree: Vec<StrPush>,
@@ -858,13 +858,10 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
             input_set_lleft(cur_pf(&mut sh.input), more);
         }
 
-        let savec = {
+        {
             let pf = cur_pf(&mut sh.input);
             pf.nleft = (q - pf.pos) as c_int - 1;
-            let savec = pf.buf[q];
-            pf.buf[q] = b'\0';
-            savec
-        };
+        }
 
         let line = {
             let pf = cur_pf(&mut sh.input);
@@ -889,7 +886,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
             let bytes = bytes.to_vec();
             crate::histedit::record_history_line(sh, &bytes, first != 0, true);
         }
-        Ok::<_, Error>(Some((line, q, savec)))
+        Ok::<_, Error>(Some(line))
     })?;
 
     /* A read interrupted while this scope was active becomes deliverable at
@@ -899,7 +896,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
         return Err(e);
     }
 
-    let Some((line, q, savec)) = buffered else {
+    let Some(line) = buffered else {
         cur_pf(&mut sh.input).eof = 3;
         return Ok(InputUnit::EndOfInput);
     };
@@ -907,8 +904,6 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
     if sh.options.enabled(ShellOption::Verbose) {
         let _ = sh.io.stderr().write_all(&line);
     }
-
-    cur_pf(&mut sh.input).buf[q] = savec;
 
     let pf = cur_pf(&mut sh.input);
     let byte = pf.buf[pf.pos];
@@ -953,9 +948,7 @@ pub fn pushstring(sh: &mut Shell, s: &BStr, alias_name: Option<BString>) {
          * needs neither, and the condition it picked on was only ever about
          * whether the inline slot was still spoken for. */
         let pf = cur_pf(&mut sh.input);
-        let mut string: Vec<u8> = Vec::with_capacity(len + 1);
-        string.extend_from_slice(s);
-        string.push(0);
+        let string = s.to_vec();
         let sp = StrPush {
             prevpos: pf.pos,
             prevnleft: pf.nleft,
@@ -1079,9 +1072,7 @@ pub fn setinputstring(sh: &mut Shell, string: &BStr) {
          * which is why `evalstring` has to keep its `sstrdup` alive across the
          * `popfile` and why `parsebackq` cannot release the stack block it
          * grabbed. The level owns its text here. */
-        pf.buf = Vec::with_capacity(len + 1);
-        pf.buf.extend_from_slice(string);
-        pf.buf.push(0);
+        pf.buf = string.to_vec();
         pf.pos = 0;
         pf.nleft = len as c_int;
         pf.eof = 2;

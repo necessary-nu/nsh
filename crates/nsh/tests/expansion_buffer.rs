@@ -62,13 +62,10 @@ fn arithmetic_text_survives_being_read_from_above_the_cursor() {
     assert_eq!(String::from_utf8_lossy(&out), want);
 }
 
-/// `subevalvar` closes with `*loc = '\0'; STADJUST(loc - expdest, expdest)`,
-/// which puts the terminator one past the length. The claim is that
-/// `argstr` re-supplies the word's own terminator before anything reads
-/// the buffer as a string -- so a trim must be usable both at the end of a
-/// word and in the middle of one, with more expansion after it.
+/// A trim must preserve exact byte bounds both at the end of a word and in
+/// the middle of one, with more expansion after it.
 #[test]
-fn a_trim_leaves_the_word_terminated_wherever_it_sits() {
+fn a_trim_preserves_the_surrounding_word() {
     let pad = "q".repeat(300);
     let script = format!(
         "x={pad}TAIL; y=abc; \
@@ -81,10 +78,8 @@ fn a_trim_leaves_the_word_terminated_wherever_it_sits() {
     assert_eq!(String::from_utf8_lossy(&out), want);
 }
 
-/// `expandarg(n, NULL, flag)` does not grab its result; the two callers
-/// read it back out of the buffer. `parser::expandstr` is the one a
-/// conversion that reads only `expand.c` misses, and all it costs is the
-/// `+ ` on an xtrace line -- so pin both readers together.
+/// A prompt and a here-document consume the same length-delimited expansion
+/// result. Pin both readers together.
 #[test]
 fn the_ungrabbed_result_reaches_ps4_and_a_here_document() {
     let out = out_of("PS4='+X+ '; set -x; echo traced; set +x");
@@ -102,9 +97,8 @@ fn the_ungrabbed_result_reaches_ps4_and_a_here_document() {
     assert_eq!(String::from_utf8_lossy(&out), format!("{pad}VVS42\n"));
 }
 
-/// The word's terminator comes from `argstr`'s `*(q - 1) &= end - 1`,
-/// which turns the closing NUL/CTLENDVAR/CTLENDARI into a NUL. A `$'\0'`
-/// inside a word ends it there, and the byte count is what says so.
+/// Shell variable values cannot carry NUL. That language-level restriction
+/// is independent of how the surrounding byte buffer is framed.
 #[test]
 fn an_embedded_nul_ends_the_word() {
     let out = out_of("x=$'a\\0b'; printf '[%s][%d]\\n' \"$x\" \"${#x}\"");
