@@ -666,10 +666,10 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
     /* The C's `fd == 0` means "this parse file is the shell's standard
      * input", which is the condition for line editing and for teeing --
      * not descriptor 0 for its own sake. */
-    use_tee = uses_stdin && !crate::histedit::editing_active(sh) && !stdin_bufferable(sh);
+    use_tee = uses_stdin && !crate::editor::editing_active(sh) && !stdin_bufferable(sh);
 
     'retry: loop {
-        if uses_stdin && crate::histedit::editing_active(sh) {
+        if uses_stdin && crate::editor::editing_active(sh) {
             /* `docs/api-design.md` §5.5: nothing the shell hands to a
              * callee may borrow from the shell, and `read_edit_line`
              * takes the shell too. The buffer is moved out, filled, and
@@ -677,7 +677,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
              * a copy. Nothing can reach this frame's buffer while it is
              * out, which is the same thing the borrow used to assert. */
             let mut buf = core::mem::take(&mut cur_pf(&mut sh.input).buf);
-            let result = crate::histedit::read_edit_line(sh, &mut buf[off..off + requested]);
+            let result = crate::editor::read_edit_line(sh, &mut buf[off..off + requested]);
             cur_pf(&mut sh.input).buf = buf;
             return match result {
                 Ok(count) => Ok(count),
@@ -886,7 +886,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
         let top_level_history_input =
             cur_pf(&mut sh.input).uses_stdin || sh.input.cur == sh.input.top;
         if top_level_history_input
-            && crate::histedit::history_active(sh)
+            && crate::editor::history_active(sh)
             && !sh.options.enabled(ShellOption::NoLog)
             && something
         {
@@ -895,7 +895,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
                 &pf.buf[pf.pos..q]
             };
             let bytes = bytes.to_vec();
-            crate::histedit::record_history_line(sh, &bytes, first, true);
+            crate::editor::record_history_line(sh, &bytes, first, true);
         }
         Ok::<_, Error>(Some(line))
     })?;

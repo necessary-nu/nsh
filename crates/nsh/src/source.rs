@@ -214,7 +214,7 @@ impl Shell {
     /// it remains the frontend's responsibility.
     // [spec:nsh:req:idiom.shell-entrypoint]
     pub fn run_to_completion(&mut self, startup: Startup) -> ExitStatus {
-        let status = crate::shellmain::run(self, &startup);
+        let status = crate::runtime::run(self, &startup);
         self.exited = Some(status);
         status
     }
@@ -312,8 +312,8 @@ impl Shell {
                 Kind::Bytes(_) => {
                     crate::eval::parse_execute(shell, crate::eval::EvalContext::DEFAULT)
                 }
-                Kind::File(_) => crate::shellmain::cmdloop(shell, false),
-                Kind::Stream => crate::shellmain::cmdloop(shell, true),
+                Kind::File(_) => crate::runtime::cmdloop(shell, false),
+                Kind::Stream => crate::runtime::cmdloop(shell, true),
             }
         });
         match outcome {

@@ -8,7 +8,7 @@ use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 use super::Field;
 use crate::context::Shell;
-use crate::pmatch::Pattern;
+use crate::pattern::Pattern;
 
 pub(super) fn expand(sh: &Shell, fields: Vec<Field>) -> Vec<Field> {
     fields
@@ -60,7 +60,10 @@ fn matches(locale: &nsh_platform::Locale, pattern: &Pattern) -> Vec<BString> {
                 let Ok(entries) = nsh_platform::read_directory(&directory) else {
                     continue;
                 };
-                let mut names = entries.into_iter().map(|entry| entry.name).collect::<Vec<_>>();
+                let mut names = entries
+                    .into_iter()
+                    .map(|entry| entry.name)
+                    .collect::<Vec<_>>();
                 if component.starts_with_literal_dot() {
                     names.push(OsString::from("."));
                     names.push(OsString::from(".."));

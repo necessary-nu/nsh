@@ -15,7 +15,10 @@ const OPTION_MODEL: &str = include_str!("../src/options/model.rs");
 const BUILTIN_READ: &str = include_str!("../src/builtins/read.rs");
 const BUILTIN_BREAK: &str = include_str!("../src/builtins/break.rs");
 const BUILTIN_RETURN: &str = include_str!("../src/builtins/return.rs");
-const SHELL_MAIN: &str = include_str!("../src/shellmain.rs");
+const ARITHMETIC: &str = include_str!("../src/arithmetic.rs");
+const PATTERN: &str = include_str!("../src/pattern.rs");
+const RUNTIME: &str = include_str!("../src/runtime.rs");
+const EDITOR: &str = include_str!("../src/editor/mod.rs");
 const ALIASES: &str = include_str!("../src/alias.rs");
 const ERRORS: &str = include_str!("../src/error.rs");
 const INPUT: &str = include_str!("../src/input.rs");
@@ -360,9 +363,9 @@ fn builtin_registry_is_fully_typed() {
 // [spec:nsh:req:idiom.shell-entrypoint/test]
 #[test]
 fn shell_entrypoint_uses_public_runtime() {
-    assert!(LIBRARY.contains("pub(crate) mod shellmain;"));
-    assert!(SHELL_MAIN.contains("pub(crate) fn run("));
-    assert!(SHELL_MAIN.contains("startup: &Startup"));
+    assert!(LIBRARY.contains("pub(crate) mod runtime;"));
+    assert!(RUNTIME.contains("pub(crate) fn run("));
+    assert!(RUNTIME.contains("startup: &Startup"));
     assert!(CLI.contains("nsh::Shell::builder()"));
     assert!(CLI.contains("shell.run_to_completion(startup)"));
     assert!(CLI_INVOCATION.contains("fn parse("));
@@ -375,10 +378,44 @@ fn shell_entrypoint_uses_public_runtime() {
     ] {
         assert!(
             !LIBRARY.contains(forbidden)
-                && !SHELL_MAIN.contains(forbidden)
+                && !RUNTIME.contains(forbidden)
                 && !OPTIONS.contains(forbidden)
                 && !CLI.contains(forbidden),
             "startup retains translated public entrypoint {forbidden:?}"
+        );
+    }
+}
+
+// [spec:nsh:req:idiom.module-boundaries/test]
+#[test]
+fn modules_follow_rust_subsystems() {
+    for module in ["arithmetic", "pattern", "runtime", "editor"] {
+        assert!(
+            LIBRARY.contains(&format!("mod {module};")),
+            "missing subsystem module {module}"
+        );
+    }
+    for (source, boundary) in [
+        (ARITHMETIC, "struct Parser"),
+        (PATTERN, "struct Matcher"),
+        (RUNTIME, "enum StartupTask"),
+        (EDITOR, "mod state;"),
+    ] {
+        assert!(source.contains(boundary), "missing boundary {boundary}");
+    }
+
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for old_file in [
+        "arith_yacc.rs",
+        "pmatch.rs",
+        "shellmain.rs",
+        "shell.rs",
+        "histedit.rs",
+        "linedit.rs",
+    ] {
+        assert!(
+            !source.join(old_file).exists(),
+            "compatibility module {old_file} still exists"
         );
     }
 }
@@ -558,24 +595,20 @@ fn evaluator_control_is_carried_by_flow() {
     for variant in ["Break {", "Continue {", "Return {"] {
         assert!(EVALUATOR.contains(variant), "Flow is missing {variant}");
     }
-    for (name, source) in [("read", BUILTIN_READ), ("startup", SHELL_MAIN)] {
+    for (name, source) in [("read", BUILTIN_READ), ("startup", RUNTIME)] {
         assert!(
             !source.contains("let mut pc"),
             "{name} has a program counter"
         );
         assert!(!source.contains("const L_"), "{name} has translated labels");
     }
-    assert!(SHELL_MAIN.contains("enum StartupTask"));
+    assert!(RUNTIME.contains("enum StartupTask"));
 }
 
 // [spec:nsh:req:idiom.jobs-startup-control-flow/test]
 #[test]
 fn jobs_read_startup_are_structured() {
-    for (name, source) in [
-        ("jobs", JOBS),
-        ("read", BUILTIN_READ),
-        ("startup", SHELL_MAIN),
-    ] {
+    for (name, source) in [("jobs", JOBS), ("read", BUILTIN_READ), ("startup", RUNTIME)] {
         for forbidden in ["goto", "at_start", "let mut phase", "StartupPhase"] {
             assert!(
                 !source.contains(forbidden),
@@ -595,8 +628,8 @@ fn jobs_read_startup_are_structured() {
     assert!(JOBS.contains("fn record_child_status"));
     assert!(BUILTIN_READ.contains("fn read_input_line"));
     assert!(BUILTIN_READ.contains("escaped_region_end.take()"));
-    assert!(SHELL_MAIN.contains("fn run_startup_task"));
-    assert!(SHELL_MAIN.contains("const fn recovery"));
+    assert!(RUNTIME.contains("fn run_startup_task"));
+    assert!(RUNTIME.contains("const fn recovery"));
 }
 
 // [spec:nsh:def:idiom.job-control-model/test]

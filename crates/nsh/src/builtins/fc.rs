@@ -22,9 +22,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
+use crate::editor::{HistoryEvent, history_active, history_mut, record_history_line};
 use crate::expand::strlist;
-use crate::histedit::{history_active, history_mut, record_history_line};
-use crate::linedit::HistoryEvent;
 use crate::output::Dest;
 
 /// max recursions through fc

@@ -16,17 +16,17 @@ pub fn historycmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     if clear {
-        let Some(history) = crate::histedit::history_mut(sh) else {
+        let Some(history) = crate::editor::history_mut(sh) else {
             return Ok(Flow::Done((1).into()));
         };
-        *history = crate::linedit::History::new();
+        *history = crate::editor::History::new();
         let size = crate::var::histsizeval(sh);
-        crate::histedit::sethistsize(sh, BStr::new(size.as_slice()));
-        crate::histedit::save_history(sh);
+        crate::editor::sethistsize(sh, BStr::new(size.as_slice()));
+        crate::editor::save_history(sh);
         return Ok(Flow::Done((0).into()));
     }
 
-    let Some(contents) = crate::histedit::history_mut(sh).map(|history| history.file_contents())
+    let Some(contents) = crate::editor::history_mut(sh).map(|history| history.file_contents())
     else {
         return Ok(Flow::Done((1).into()));
     };

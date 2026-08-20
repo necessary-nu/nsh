@@ -162,7 +162,7 @@ impl ShellOptions {
 pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     crate::exec::dispatch_changed(sh);
     crate::trap::setinteractive(sh, sh.options.enabled(ShellOption::Interactive));
-    crate::histedit::histedit(sh);
+    crate::editor::histedit(sh);
     crate::jobs::setjobctl(sh, sh.options.enabled(ShellOption::Monitor))
 }
 

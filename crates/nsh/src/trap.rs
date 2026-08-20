@@ -370,7 +370,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
         TrapAction::Ignore => crate::host::Disposition::Ignore,
         TrapAction::Command(_) => crate::host::Disposition::Catch,
     };
-    if crate::shellmain::rootshell(sh) && desired == crate::host::Disposition::Default {
+    if crate::runtime::rootshell(sh) && desired == crate::host::Disposition::Default {
         match signal {
             signal if signal == Signal::from(nsh_platform::interrupt_signal()) => {
                 if sh.options.enabled(ShellOption::Interactive)
@@ -685,7 +685,7 @@ pub fn exitshell(
         }
     }
     /* out: */
-    crate::histedit::save_history(sh);
+    crate::editor::save_history(sh);
     sh.clear_evaluation_resources();
     sh.flush_input();
     /*
@@ -700,7 +700,7 @@ pub fn exitshell(
     if sh.io.flushall().is_err() {
         // Exit teardown retains the status already selected by the shell.
     }
-    crate::shell::flush_coverage();
+    nsh_platform::flush_coverage_profile();
     sh.status
 }
 

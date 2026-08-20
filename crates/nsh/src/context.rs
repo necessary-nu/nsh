@@ -120,7 +120,7 @@ pub struct Shell {
     /// Interactive history, the line editor, and `fc` recursion state.
     /// `histedit.rs` owns the shape; keeping it here makes two shell
     /// instances independent instead of sharing a process-global editor.
-    pub(crate) histedit: crate::histedit::HistEditState,
+    pub(crate) histedit: crate::editor::HistEditState,
     /// The trap actions, the disposition cache and their two counters.
     /// `trap.rs` owns the shape; this owns the value.
     ///
@@ -228,7 +228,7 @@ impl Shell {
             ifs: crate::expand::IfsCache::new(),
             expand: crate::expand::ExpandState::new(),
             displayhist: false,
-            histedit: crate::histedit::HistEditState::new(),
+            histedit: crate::editor::HistEditState::new(),
             traps: crate::trap::TrapTable::new(),
             input: crate::input::InputStack::new(),
             status: crate::status::ExitStatus::SUCCESS,

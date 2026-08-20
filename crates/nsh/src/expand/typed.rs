@@ -16,7 +16,7 @@ use crate::error::Error;
 use crate::nodes::Node;
 use crate::options::{OPTION_SPECS, ShellOption};
 // [spec:nsh:def:idiom.shell-options]
-use crate::pmatch::Pattern;
+use crate::pattern::Pattern;
 use crate::var::value::VariableValue;
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
 
@@ -327,7 +327,7 @@ fn expand_parts(sh: &mut Shell, parts: &[WordPart], context: Context) -> Result<
                 };
                 let expression =
                     expand_parts(sh, expression.parts(), arithmetic_context)?.collapse();
-                let number = crate::arith_yacc::arith(sh, expression.bytes.as_bstr())?;
+                let number = crate::arithmetic::arith(sh, expression.bytes.as_bstr())?;
                 let rendered = number.to_string();
                 result.append(Expansion::one(Field::from_bytes(
                     rendered.as_bytes(),

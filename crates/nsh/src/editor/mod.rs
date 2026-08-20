@@ -1,4 +1,4 @@
-//! Native `nshedit` integration for interactive `nsh` sessions.
+//! Interactive editor subsystem for `nsh` sessions.
 //!
 //! The editor and its read driver are Rust values.  They borrow duplicated
 //! terminal descriptors, consume and produce owned [`Text`] values, and ask
@@ -99,6 +99,12 @@ const REVERSE_HISTORY_SEARCH: Binding = Binding::Effect(EffectCommand::SearchHis
 
 mod history;
 pub use history::{History, HistoryEvent};
+
+mod state;
+pub(crate) use state::{
+    HistEditState, editing_active, histedit, history_active, history_mut, read_edit_line,
+    record_history_line, save_history, sethistsize,
+};
 
 /// A native editor/session integration error.
 #[derive(Debug)]

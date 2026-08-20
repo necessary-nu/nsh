@@ -303,7 +303,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, enabled: bool) -> Result<(), Er
     let process_group: Option<ProcessGroupState>;
     let mut fd: Option<Descriptor>;
 
-    if enabled == sh.jobs.jobctl || !crate::shellmain::rootshell(sh) {
+    if enabled == sh.jobs.jobctl || !crate::runtime::rootshell(sh) {
         return Ok(());
     }
     /* Turning job control *on* is three operations on the host's process:
@@ -788,11 +788,11 @@ fn growjobtab(jobs: &mut JobTable) -> JobId {
 /// through frames copied from the parent and resume work the child must
 /// never resume, so this is a terminus. The child ends the way `main`'s
 /// handler ends every forked child, which `forkchild`'s own `shlvl += 1`
-/// is what guarantees (see `shellmain::exit_from_child`). The diagnostic
+/// is what guarantees (see `runtime::exit_from_child`). The diagnostic
 /// has already been written.
 #[cold]
 fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
-    crate::shellmain::exit_from_child(sh, Err(e))
+    crate::runtime::exit_from_child(sh, Err(e))
 }
 
 // [spec:dash:def:jobs.forkchild-fn]
@@ -808,7 +808,7 @@ fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
 fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>, mode: ForkMode) {
     let oldlvl: usize;
 
-    crate::shell::reset_coverage();
+    nsh_platform::reset_coverage_counters();
 
     oldlvl = sh.shell_level;
     sh.shell_level += 1;
@@ -1009,7 +1009,7 @@ pub fn forkexec(
         Ok(nsh_platform::ForkResult::Child) => {
             forkchild(sh, Some(jp), Some(n), ForkMode::Foreground);
             let outcome = crate::exec::shellexec(sh, argv, path, path_index);
-            crate::shellmain::exit_from_child(sh, outcome);
+            crate::runtime::exit_from_child(sh, outcome);
         }
         Ok(nsh_platform::ForkResult::Parent(pid)) => pid,
         Err(_) => {

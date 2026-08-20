@@ -1,4 +1,4 @@
-//! Interactive editing, command history, and the `fc` builtin.
+//! Shell-owned interactive editing and history policy.
 //! Rules: `docs/spec/port/src/histedit.md`, `docs/spec/port/src/myhistedit.md`.
 //!
 //! `nsh` owns one semantic history store and, while editing is enabled, one
@@ -16,7 +16,7 @@
 //!   * `crate::number::parse_decimal`
 //!   * `crate::eval::evalstring`
 //!   * `crate::parser::getprompt`
-//!   * `crate::shellmain::readcmdfile` (src/main.c:283)
+//!   * `crate::runtime::readcmdfile` (src/main.c:283)
 
 use bstr::{BStr, BString};
 use nsh_platform::ShellBytesExt as _;
@@ -24,8 +24,8 @@ use nshedit::domain::EditingMode;
 use std::fs::File;
 use std::io::{Read as _, Seek as _, Write};
 
+use super::{History, LineEditor, LineEditorError, declared_terminal_supports_line_editing};
 use crate::fd::LogicalDescriptor;
-use crate::linedit::{History, LineEditor};
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
 
@@ -101,7 +101,7 @@ pub fn editing_active(sh: &crate::context::Shell) -> bool {
 pub fn read_edit_line(
     sh: &mut crate::context::Shell,
     destination: &mut [u8],
-) -> Result<usize, crate::linedit::LineEditorError> {
+) -> Result<usize, LineEditorError> {
     let Some(mut editor) = sh.histedit.editor.take() else {
         return Ok(0);
     };
@@ -219,7 +219,7 @@ pub fn histedit(sh: &mut crate::context::Shell) {
         let mode = if sh.options.enabled(ShellOption::Vi) {
             Some(EditingMode::Vi)
         } else if sh.options.enabled(ShellOption::Emacs)
-            || crate::linedit::declared_terminal_supports_line_editing()
+            || declared_terminal_supports_line_editing()
         {
             // Every native editor needs a command family. Emacs is nshedit's
             // insertion-oriented baseline; selecting it here does not mutate

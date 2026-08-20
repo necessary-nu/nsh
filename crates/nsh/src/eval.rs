@@ -922,7 +922,7 @@ fn evalsubshell(
          * The same trap in a different clothing as `shellmain.rs`'s note
          * about `exit:` living inside the loop -- a subshell in an EXIT
          * trap, which the corpus has now caught twice. */
-        crate::shellmain::exit_from_child(sh, outcome);
+        crate::runtime::exit_from_child(sh, outcome);
     }
     /* Not forked: this is still the same process, so the frames this returns
      * through are its own. */
@@ -1114,7 +1114,7 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, context: EvalContext) -> Result
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
             let outcome = evaltreenr(sh, Some(command), context);
-            crate::shellmain::exit_from_child(sh, outcome);
+            crate::runtime::exit_from_child(sh, outcome);
         }
     }
 }
@@ -1166,7 +1166,7 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
              * and `evalpipe` may return their `Flow` instead: they reach
              * the same place by the longer road. */
             let outcome = evaltreenr(sh, n, EvalContext::EXITING);
-            crate::shellmain::exit_from_child(sh, outcome);
+            crate::runtime::exit_from_child(sh, outcome);
             /* NOTREACHED */
         }
         drop(pipe.write);

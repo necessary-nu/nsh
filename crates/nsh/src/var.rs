@@ -502,7 +502,7 @@ fn run_callback(sh: &mut Shell, callback: Callback, name: &BStr, value: Option<&
             crate::exec::changepath(&mut sh.interrupt_deferral, &mut sh.commands, effective)
         }
         Callback::Getopts => crate::options::getoptsreset(sh, effective),
-        Callback::History => crate::histedit::sethistsize(sh, effective),
+        Callback::History => crate::editor::sethistsize(sh, effective),
         Callback::Locale => {
             // Locale selection depends on the complete variable table, not
             // merely on the entry that triggered this callback.

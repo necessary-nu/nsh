@@ -14,7 +14,7 @@ use nsh_platform::ShellBytesExt as _;
 
 use crate::eval::Flow;
 use crate::exec::PathCursor;
-use crate::shellmain::cmdloop;
+use crate::runtime::cmdloop;
 
 // [spec:dash:def:main.find-dot-file-fn]
 // [spec:dash:sem:main.find-dot-file-fn]

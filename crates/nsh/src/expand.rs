@@ -17,7 +17,7 @@ use crate::error::Error;
 use crate::nodes::Node;
 use crate::options::{OPTION_SPECS, ShellOption};
 // [spec:nsh:def:idiom.shell-options]
-use crate::pmatch::pmatch_slices;
+use crate::pattern::pmatch_slices;
 
 mod bytes;
 mod mode;
@@ -946,7 +946,7 @@ fn expari(
         /* `arith` returns its diagnostic now instead of raising it, and as
          * of this commit so does `expari`, so the bridge that stood here is
          * gone and the value travels. */
-        result = crate::arith_yacc::arith(sh, arithmetic.as_bstr())?;
+        result = crate::arithmetic::arith(sh, arithmetic.as_bstr())?;
 
         len = cvtnum(&sh.locale, result, mode, expb(state));
 
@@ -2569,7 +2569,7 @@ fn expmeta(
                 &mut globenc,
             );
             let subject = globenc.as_slice();
-            if crate::pmatch::pmatch_slices(locale, pat, subject) {
+            if crate::pattern::pmatch_slices(locale, pat, subject) {
                 /* `enddir = stnputs(dname, len, enddir)` — an
                  * append at a cursor below the end, which is
                  * truncate-then-append. */
@@ -2949,7 +2949,7 @@ pub fn restore_handler_expandarg(
  * reachable as `nsh::expand::arith` until the surface closed, which is
  * what had been standing in for a use. */
 #[allow(unused_imports)]
-pub use crate::arith_yacc::arith;
+pub use crate::arithmetic::arith;
 
 // The `expcmd(int, char **)` declaration in `expand.h` has no definition
 // or caller. It is intentionally represented by no Rust item.

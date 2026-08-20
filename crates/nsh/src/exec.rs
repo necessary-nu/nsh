@@ -633,7 +633,7 @@ pub fn find_command(
         };
 
         if candidate.option.is_some() {
-            let flow = crate::shellmain::readcmdfile(sh, BStr::new(fullname.as_slice()))?;
+            let flow = crate::runtime::readcmdfile(sh, BStr::new(fullname.as_slice()))?;
             if let exit @ crate::eval::Flow::Exit { .. } = flow {
                 return Ok(exit);
             }

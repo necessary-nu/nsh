@@ -596,10 +596,10 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
         nsh_platform::configure_here_document_writer_signals();
         if let Err(error) = nsh_platform::write_all(&pip.write, p) {
             drop(here_document_write_error(sh, error));
-            crate::shell::flush_coverage();
+            nsh_platform::flush_coverage_profile();
             nsh_platform::exit_immediately(1);
         }
-        crate::shell::flush_coverage();
+        nsh_platform::flush_coverage_profile();
         nsh_platform::exit_immediately(0);
     }
     /* out: */

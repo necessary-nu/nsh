@@ -5346,4 +5346,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.no-artificial-limits}
     )}
+    {id reorganize-rust-modules, covered_rules (
+        idiom.module-boundaries
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.module-boundaries}
+    )}
 )

@@ -2494,7 +2494,7 @@ fn setprompt(sh: &mut Shell, prompt: PromptKind) -> Result<(), Error> {
     sh.input.needprompt = false;
     sh.input.prompt = Some(prompt);
 
-    if !crate::histedit::editing_active(sh) && crate::input::cur_pf(&mut sh.input).nleft == 0 {
+    if !crate::editor::editing_active(sh) && crate::input::cur_pf(&mut sh.input).nleft == 0 {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
          * `expandstr` had left in the region for `out2str` to read.  The
          * expansion buffer is owned, so there is nothing to bound. */
@@ -2633,7 +2633,7 @@ pub fn getprompt(sh: &mut Shell) -> BString {
      * callback the line editor invokes with nowhere to put a `&mut Shell`
      * -- stopped
      * being true when the editor moved to its native Rust API: nothing
-     * calls this through a pointer any more. `linedit::shell_prompt`
+     * calls this through a pointer any more. `editor::shell_prompt`
      * calls it, and `setprompt` calls it, and both are ordinary Rust
      * frames that can carry a receiver. So this is threading after all,
      * not the handle `docs/api-design.md` §5.1 keeps for the signal

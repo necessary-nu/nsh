@@ -111,7 +111,6 @@ pub(crate) mod escape;
 pub(crate) mod fd;
 pub(crate) mod number;
 pub(crate) mod output;
-pub(crate) mod shell;
 pub(crate) mod siginbox;
 pub(crate) mod status;
 pub mod streams;
@@ -143,17 +142,17 @@ pub(crate) mod trap;
 pub(crate) mod var;
 
 // ---- parsing and expansion -------------------------------------------
-pub(crate) mod arith_yacc;
+// [spec:nsh:req:idiom.module-boundaries]
+pub(crate) mod arithmetic;
 pub(crate) mod expand;
 pub(crate) mod parser;
-pub(crate) mod pmatch;
+pub(crate) mod pattern;
 
 // ---- execution --------------------------------------------------------
 pub(crate) mod eval;
 pub(crate) mod exec;
 pub(crate) mod jobs;
-pub(crate) mod shellmain;
+pub(crate) mod runtime;
 
-// ---- builtins ---------------------------------------------------------
-pub(crate) mod histedit;
-pub(crate) mod linedit;
+// ---- interactive editor ----------------------------------------------
+pub(crate) mod editor;
