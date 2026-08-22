@@ -1,6 +1,6 @@
 //! Dialect-sensitive built-in cache invalidation.
 
-use super::{CommandTable, Command};
+use super::{Command, CommandTable};
 use crate::options::Dialect;
 
 impl CommandTable {

@@ -197,10 +197,10 @@ pub fn args(fields: &[crate::expand::ExpandedField]) -> Vec<&BStr> {
 }
 
 pub mod alias;
-pub mod declare;
 pub mod r#break;
 pub mod cd;
 pub mod command;
+pub mod declare;
 pub mod dot;
 pub mod echo;
 pub mod eval;

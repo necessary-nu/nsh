@@ -12,10 +12,16 @@ fn find(shell: &mut crate::context::Shell, name: &BStr) -> Command {
     let path = crate::variables::path_value(shell);
     let mut entry = Command::Unknown;
     assert!(
-        find_command(shell, name, &mut entry, CommandSearch::DEFAULT, path.as_bstr())
-            .unwrap()
-            .status()
-            .is_some()
+        find_command(
+            shell,
+            name,
+            &mut entry,
+            CommandSearch::DEFAULT,
+            path.as_bstr()
+        )
+        .unwrap()
+        .status()
+        .is_some()
     );
     entry
 }

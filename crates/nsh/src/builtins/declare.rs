@@ -177,8 +177,7 @@ fn assign(shell: &mut Shell, name: &BStr, base: &BStr, value: &BStr) -> Result<(
     match bytes.find_byte(b'[') {
         Some(at) if bytes.last() == Some(&b']') => {
             let subscript = BStr::new(&bytes[at + 1..bytes.len() - 1]).to_owned();
-            let selector =
-                arrays::resolve_selector(shell, base, BStr::new(subscript.as_slice()))?;
+            let selector = arrays::resolve_selector(shell, base, BStr::new(subscript.as_slice()))?;
             arrays::assign_element(shell, base, &selector, value, false)
         }
         _ => set_bytes(shell, base, Some(value), VariableAttributes::NONE),
@@ -188,9 +187,7 @@ fn assign(shell: &mut Shell, name: &BStr, base: &BStr, value: &BStr) -> Result<(
 fn valid_operand(shell: &mut Shell, operand: &BStr) -> bool {
     let bytes: &[u8] = operand.as_ref();
     let name = bytes.find_byte(b'=').map_or(bytes, |at| &bytes[..at]);
-    let name = name
-        .find_byte(b'[')
-        .map_or(name, |at| &name[..at]);
+    let name = name.find_byte(b'[').map_or(name, |at| &name[..at]);
     crate::parser::is_valid_name(&shell.locale, BStr::new(name))
 }
 

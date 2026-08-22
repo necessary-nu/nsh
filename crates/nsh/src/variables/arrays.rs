@@ -351,8 +351,8 @@ fn store(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::variables::value::variable_value;
     use crate::test_support::lock;
+    use crate::variables::value::variable_value;
 
     fn shell() -> Shell {
         Shell::new(crate::streams::Streams::INHERIT)
@@ -417,7 +417,14 @@ mod tests {
         let shell = &mut shell();
         let name = BStr::new("Tarr3");
 
-        assign_element(shell, name, &ArraySelector::Index(0), BStr::new("one"), false).unwrap();
+        assign_element(
+            shell,
+            name,
+            &ArraySelector::Index(0),
+            BStr::new("one"),
+            false,
+        )
+        .unwrap();
         assign_element(shell, name, &ArraySelector::Index(0), BStr::new("X"), true).unwrap();
         assert_eq!(
             variable_value(shell, name).and_then(|value| value.indexed(0)),

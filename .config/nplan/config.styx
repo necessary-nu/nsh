@@ -11,6 +11,35 @@ platforms (
             }
         }
     }
+    // The Rust crates were unchecked until 2026-08-22: the gate ran only
+    // the Python platform above, so nothing here was formatted or linted
+    // on the way in. Two `clippy::type_complexity` findings and eight
+    // rustfmt diffs had accumulated unnoticed.
+    //
+    // `--all-targets` is the point of the lint entry. Without it clippy
+    // skips test targets, which is exactly where both findings were, and
+    // the command exits 0 while the tree is dirty.
+    //
+    // Deliberately no `test` entry. `cargo test --workspace` spawns real
+    // shells, and this repo requires those to run under
+    // `scripts/sandboxed` so a misbehaving case cannot signal the
+    // operator's terminal -- see enforce-survey-test-containment. A gate
+    // command running them bare would reintroduce that hazard, and the
+    // suite is far past the check budget besides. Run tests with
+    // `scripts/sandboxed -- cargo test --workspace`.
+    {
+        platform "rust/workspace"
+        files (crates/**/*.rs crates/**/Cargo.toml Cargo.toml Cargo.lock)
+        checks {
+            fmt {
+                cmd "cargo fmt --all --check"
+                fix "cargo fmt --all"
+            }
+            lint {
+                cmd "cargo clippy --workspace --all-targets -- -D warnings"
+            }
+        }
+    }
 )
 
 commit {
