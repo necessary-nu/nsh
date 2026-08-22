@@ -389,7 +389,6 @@ children (
                 priority 1
                 implements {
                     shell (
-                        [spec:posix:syn:cmd.format-descriptions-informal]
                         [spec:posix:def:cmd.command-kinds]
                         [spec:posix:req:cmd.default-exit-status]
                         [spec:posix:req:cmd.no-size-limit]
@@ -522,6 +521,14 @@ children (
                         author "brendan@necessary.nu"
                         kind @note
                         text "Recovered the abandoned dead-PID claim without source changes, then mapped all 110 command-language rules across parser, evaluator, command resolution/exec, and job lifecycle boundaries. Focused harness for all 109 registered rules: 62 PASS, 0 FAIL; cmd.format-descriptions-informal is the planned non-runnable meta-rule. cargo test -p nsh: 262 passed, 0 failed, 1 ignored; git diff --check clean."
+                    }
+
+                    {
+                        at 2026-08-22T09:48:57.221191146Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "Removed the `cmd.format-descriptions-informal` claim. The node's earlier log called it \"the planned non-runnable meta-rule\", but it was never defined in posix/docs/spec/commands.md, so it stood as a dangling reference that `nplan audit` reported under undefined_refs. Defining it is the wrong repair: the harness only honours a `not-applicable` disposition whose reason quotes an escape phrase verbatim from the rule body (\"unspecified\", \"may\", \"need not\", ...), and this text contains none — it says the section's command formats \"aid the reader in recognizing the command type\" and do \"not formally represent the syntax\", deferring the formal definition to 2.10 Shell Grammar. catalog.py's own guidance covers exactly this case: text about the document rather than about the shell keeps no rule marker and stays as prose. The paragraph remains in commands.md untagged; the stale annotation on parser.rs's parse_command is removed with it. The grammar rules it defers to carry the testable content."
+                        after_done true
                     }
                 )
             }

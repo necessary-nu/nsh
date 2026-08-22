@@ -430,7 +430,6 @@ pub fn is_simple_command(node: Option<&Node>, name: &BStr) -> bool {
 // [spec:dash:sem:parser.parsecmd-fn]
 // [spec:posix:syn:grammar.program]
 // [spec:posix:def:cmd.command-kinds]
-// [spec:posix:syn:cmd.format-descriptions-informal]
 // [spec:posix:req:cmd.no-size-limit]
 // [spec:nsh:req:compat.bash.parse-boundary]
 pub fn parse_command(shell: &mut Shell, interactive: bool) -> Result<ParseResult, Error> {
