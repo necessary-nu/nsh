@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-22T09:51:23.597906164Z
+last_sync_at 2026-08-22T15:28:32.155403151Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -1395,6 +1395,7 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.strict-lints, version 0}
     )}
+    {id enforce-bash-safe-core}
     {id enforce-zero-cism-gates, covered_rules (
         idiom.regression-gates
     ), covered_claims (
@@ -1957,11 +1958,15 @@ impl_evidence (
         compat.bash.conditionals-arithmetic
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.conditionals-arithmetic}
+    ), rule_versions_seen (
+        {id compat.bash.conditionals-arithmetic, version 0}
     )}
     {id implement-bash-functions-scoping, covered_rules (
         compat.bash.functions-scoping
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.functions-scoping}
+    ), rule_versions_seen (
+        {id compat.bash.functions-scoping, version 0}
     )}
     {id implement-bash-mode-selection, covered_rules (
         compat.bash.default-isolation
@@ -1975,6 +1980,13 @@ impl_evidence (
         {impl_name nsh-library, rule compat.bash.parse-boundary}
         {impl_name nsh-library, rule compat.bash.selection}
         {impl_name nsh-library, rule compat.bash.state-isolation}
+    )}
+    {id implement-bash-traps-introspection, covered_rules (
+        compat.bash.traps-introspection
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.traps-introspection}
+    ), rule_versions_seen (
+        {id compat.bash.traps-introspection, version 0}
     )}
     {id implement-cli-metadata-options, covered_rules (
         cli.metadata-options
@@ -5418,10 +5430,5 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
-    )}
-    {id implement-bash-traps-introspection, covered_rules (
-        compat.bash.traps-introspection
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.bash.traps-introspection}
     )}
 )
