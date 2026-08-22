@@ -6166,6 +6166,14 @@ children (
                                         kind @note
                                         text "Definition of done: close the calibrated [[, regex, pattern, arithmetic-command, and arithmetic-for subset, including quoting, precedence, side effects, diagnostics, and truth statuses, while retaining POSIX test behavior in default mode."
                                     }
+
+                                    {
+                                        at 2026-08-22T14:15:59.549491372Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Adversarial review of the hand-written ERE engine in crates/nsh/src/regex.rs, run against the merge at 9b509d6 and diffed case-by-case against GNU Bash 5.3.\n\nCatastrophic backtracking: none observed. `(a+)+b`, `(a*)*b`, `(x+x+)+y` against 25-char non-matching subjects, and `(a|aa)+$` against 34 chars, all return promptly with Bash's answers. The step budget does its job.\n\nFalse negatives from the step budget: none observed at scale. `a*b` and `^a*b$` over 5,000 a's, `^(a|b)*c$` over a 4,000-char alternating subject, and `^(a{2})*$` over 5,000 a's all match with the correct match length, identical to Bash.\n\nMalformed and edge-case patterns: 13 of 14 identical to Bash in both match text and exit status, including `[]]`, `[^]]`, `[a-]`, `[[:alpha:]]+`, bare `(`, `[`, `*`, `a{`, the empty pattern, and `^$`.\n\nTwo divergences worth recording rather than leaving to be rediscovered:\n\n1. A trailing-backslash pattern (`a\\`) exits 1 (no match) where Bash exits 2 (invalid regex). Malformed-pattern detection is incomplete for that one form.\n\n2. nsh writes a diagnostic to stderr for every rejected pattern (\"Unmatched ( or \\(\", \"Invalid content of \\{\\}\", ...) where Bash is silent. Both agree on status, so the survey does not catch it, but any case comparing stderr byte-for-byte would diverge.\n\nNeither blocks this node's definition of done; both belong to the final compatibility-profile verification."
+                                        after_done true
+                                    }
                                 )
                             }
 
