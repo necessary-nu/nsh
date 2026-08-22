@@ -33,6 +33,12 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     for name in option_scan.operands() {
         if flag != b'f' {
+            // Bash unsets the variable a name reference points at.
+            // [spec:nsh:req:compat.bash.functions-scoping]
+            let referenced = crate::variables::nameref::read_name(shell, name);
+            let name = referenced
+                .as_ref()
+                .map_or(*name, |target| BStr::new(target.as_slice()));
             if variable_attributes(shell, name).is_some_and(|attributes| attributes.read_only) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" is read-only");

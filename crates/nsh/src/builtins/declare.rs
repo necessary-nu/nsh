@@ -15,8 +15,18 @@ use crate::evaluation::Flow;
 use crate::output::OutputDestination;
 use crate::status::ExitStatus;
 use crate::variables::arrays;
-use crate::variables::value::{BashAttribute, VariableKind};
+use crate::variables::nameref::{self, LocalValue};
+use crate::variables::value::{BashAttribute, VariableKind, VariableValue};
 use crate::variables::{VariableAttributes, add_attributes, set_bytes};
+
+/// Which entry a declaration operand creates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Scope {
+    /// The shell's own variable table.
+    Global,
+    /// A name the running function's return restores.
+    Local,
+}
 
 /// Which attributes a single invocation turns on or off.
 #[derive(Clone, Copy, Default)]
@@ -28,13 +38,14 @@ struct Requested {
     nameref: Option<bool>,
     trace: Option<bool>,
     read_only: bool,
-    exported: bool,
+    exported: Option<bool>,
     global: bool,
     print: bool,
     functions: bool,
 }
 
 // [spec:nsh:req:compat.bash.arrays-declarations]
+// [spec:nsh:req:compat.bash.functions-scoping]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let (requested, operands) = match parse(args) {
         Ok(parsed) => parsed,
@@ -51,10 +62,19 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return print(shell, &requested, operands);
     }
 
+    /* Bash's `local` is this built-in restricted to the running function,
+     * and a bare `declare` in a function body is local already unless
+     * `-g` sends it to the shell's own table. */
+    let forced_local = args.first().is_some_and(|name| *name == "local");
+    let scope = if !requested.global && (forced_local || nameref::in_function_scope(shell)) {
+        Scope::Local
+    } else {
+        Scope::Global
+    };
+
     let mut status = ExitStatus::SUCCESS;
     for operand in operands {
-        apply(shell, &requested, operand)?;
-        if !valid_operand(shell, operand) {
+        if !apply(shell, &requested, operand, scope)? || !valid_operand(shell, operand) {
             status = ExitStatus::FAILURE;
         }
     }
@@ -85,7 +105,7 @@ fn parse<'a>(args: &'a [&'a BStr]) -> Result<(Requested, &'a [&'a BStr]), u8> {
                 b'n' => requested.nameref = Some(enable),
                 b't' => requested.trace = Some(enable),
                 b'r' => requested.read_only = enable,
-                b'x' => requested.exported = enable,
+                b'x' => requested.exported = Some(enable),
                 b'g' => requested.global = enable,
                 b'p' => requested.print = true,
                 b'f' | b'F' => requested.functions = true,
@@ -98,7 +118,19 @@ fn parse<'a>(args: &'a [&'a BStr]) -> Result<(Requested, &'a [&'a BStr]), u8> {
 }
 
 /// Apply one operand, which is either `name` or `name=value`.
-fn apply(shell: &mut Shell, requested: &Requested, operand: &BStr) -> Result<(), Error> {
+///
+/// Order matters twice over. An attribute that reshapes a value -- `-i`,
+/// `-u`, `-l` -- has to exist before the value is stored, while `-r` and
+/// `-x` must wait until after it, or `declare -r x=1` would refuse its
+/// own assignment. And `-n` is cleared first because `declare -n ref=y`
+/// re-points the reference rather than writing through it.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn apply(
+    shell: &mut Shell,
+    requested: &Requested,
+    operand: &BStr,
+    scope: Scope,
+) -> Result<bool, Error> {
     let bytes: &[u8] = operand.as_ref();
     let (name, value) = match bytes.find_byte(b'=') {
         Some(at) => (
@@ -112,64 +144,72 @@ fn apply(shell: &mut Shell, requested: &Requested, operand: &BStr) -> Result<(),
         Some(at) if name.last() == Some(&b']') => BStr::new(&name[..at]).to_owned(),
         _ => name.clone(),
     };
+    let base = BStr::new(base.as_slice());
+
+    // A reference may only be given the name of something to refer to.
+    if requested.nameref == Some(true)
+        && let Some(value) = &value
+        && !nameref::is_valid_target(shell, BStr::new(value.as_slice()))
+    {
+        return Ok(false);
+    }
+
+    if scope == Scope::Local {
+        let held = if value.is_some() {
+            LocalValue::Assigned
+        } else {
+            LocalValue::Discard
+        };
+        nameref::make_local(shell, base, held);
+    }
+    // A declaration records the name even with nothing to store in it,
+    // so the attributes below have an entry to live on.
+    nameref::ensure_entry(shell, base);
 
     if let Some(kind) = requested.kind {
-        arrays::ensure_kind(
-            shell,
-            BStr::new(base.as_slice()),
-            kind,
-            VariableAttributes::NONE,
-        )?;
-    }
-
-    if let Some(value) = value {
-        assign(
-            shell,
-            BStr::new(name.as_slice()),
-            BStr::new(base.as_slice()),
-            BStr::new(value.as_slice()),
-        )?;
-    } else if requested.kind.is_none()
-        && crate::variables::variable_attributes(shell, BStr::new(base.as_slice())).is_none()
-    {
-        // A bare `declare name` creates the name unset but declared, so
-        // later attribute reads see an entry. It must not touch a name
-        // that already exists: `ref=1; typeset -n ref` keeps the value,
-        // and `set_bytes(.., None, NONE)` would remove the entry.
-        set_bytes(
-            shell,
-            BStr::new(base.as_slice()),
-            None,
-            VariableAttributes::NONE,
-        )?;
-    }
-
-    let attributes = VariableAttributes {
-        exported: requested.exported,
-        read_only: requested.read_only,
-        fixed: false,
-    };
-    if attributes != VariableAttributes::NONE {
-        add_attributes(shell, BStr::new(base.as_slice()), attributes);
+        arrays::ensure_kind(shell, base, kind, VariableAttributes::NONE)?;
     }
 
     for (attribute, enabled) in [
         (BashAttribute::Integer, requested.integer),
         (BashAttribute::Lowercase, requested.lowercase),
         (BashAttribute::Uppercase, requested.uppercase),
-        (BashAttribute::Nameref, requested.nameref),
         (BashAttribute::Trace, requested.trace),
     ] {
         if let Some(enabled) = enabled {
-            crate::variables::value::set_bash_attribute(
-                shell,
-                BStr::new(base.as_slice()),
-                attribute,
-                enabled,
-            );
+            crate::variables::value::set_bash_attribute(shell, base, attribute, enabled);
         }
     }
-    Ok(())
+    if requested.nameref.is_some() {
+        nameref::clear_reference(shell, base);
+    }
+
+    if let Some(value) = value {
+        assign(
+            shell,
+            BStr::new(name.as_slice()),
+            base,
+            BStr::new(value.as_slice()),
+        )?;
+    }
+
+    if requested.nameref == Some(true) {
+        crate::variables::value::set_bash_attribute(shell, base, BashAttribute::Nameref, true);
+    }
+
+    let attributes = VariableAttributes {
+        exported: requested.exported == Some(true),
+        read_only: requested.read_only,
+        fixed: false,
+    };
+    if attributes != VariableAttributes::NONE {
+        add_attributes(shell, base, attributes);
+    }
+    // `+x` is the one attribute Bash lets a declaration take back.
+    if requested.exported == Some(false) {
+        crate::variables::value::clear_exported(shell, base);
+    }
+    Ok(true)
 }
 
 fn assign(shell: &mut Shell, name: &BStr, base: &BStr, value: &BStr) -> Result<(), Error> {
@@ -200,7 +240,12 @@ fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result
     }
 
     let names: Vec<BString> = if operands.is_empty() {
+        // A listing with no operands reports only the names the
+        // requested attributes select, as `declare -pn` does.
         crate::variables::value::declared_names(shell)
+            .into_iter()
+            .filter(|name| selected(shell, requested, BStr::new(name.as_slice())))
+            .collect()
     } else {
         operands.iter().map(|name| (*name).to_owned()).collect()
     };
@@ -223,6 +268,34 @@ fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result
     Ok(Flow::Done(status))
 }
 
+/// Whether an attribute-filtered listing includes `name`.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn selected(shell: &Shell, requested: &Requested, name: &BStr) -> bool {
+    let attributes = crate::variables::variable_attributes(shell, name).unwrap_or_default();
+    let bash = crate::variables::value::bash_attributes(shell, name).unwrap_or_default();
+    if requested.read_only && !attributes.read_only {
+        return false;
+    }
+    if requested.exported == Some(true) && !attributes.exported {
+        return false;
+    }
+    for (attribute, wanted) in [
+        (BashAttribute::Integer, requested.integer),
+        (BashAttribute::Lowercase, requested.lowercase),
+        (BashAttribute::Uppercase, requested.uppercase),
+        (BashAttribute::Nameref, requested.nameref),
+        (BashAttribute::Trace, requested.trace),
+    ] {
+        if wanted == Some(true) && !bash.contains(attribute) {
+            return false;
+        }
+    }
+    match requested.kind {
+        Some(kind) => crate::variables::value::variable_kind(shell, name) == Some(kind),
+        None => true,
+    }
+}
+
 /// `declare -p` quotes with double quotes, escaping only what would
 /// otherwise be expanded when the line is read back.
 fn double_quote(value: &BStr) -> BString {
@@ -238,15 +311,17 @@ fn double_quote(value: &BStr) -> BString {
 }
 
 fn render(shell: &Shell, name: &BStr) -> Option<BString> {
-    let value = crate::variables::value::variable_value(shell, name)?;
+    // A name that was declared without a value still has a declaration
+    // to print; only a name with no entry at all is missing.
     let attributes = crate::variables::variable_attributes(shell, name)?;
+    let value = crate::variables::value::variable_value(shell, name);
     let bash = crate::variables::value::bash_attributes(shell, name).unwrap_or_default();
 
     let mut flags = Vec::new();
-    match value.kind() {
-        VariableKind::Indexed => flags.push(b'a'),
-        VariableKind::Associative => flags.push(b'A'),
-        VariableKind::Scalar => {}
+    match value.map(VariableValue::kind) {
+        Some(VariableKind::Indexed) => flags.push(b'a'),
+        Some(VariableKind::Associative) => flags.push(b'A'),
+        Some(VariableKind::Scalar) | None => {}
     }
     for (attribute, letter) in [
         (BashAttribute::Integer, b'i'),
@@ -273,6 +348,9 @@ fn render(shell: &Shell, name: &BStr) -> Option<BString> {
     line.extend_from_slice(&flags);
     line.push(b' ');
     line.extend_from_slice(name.as_ref());
+    let Some(value) = value else {
+        return Some(line);
+    };
     match value.kind() {
         VariableKind::Scalar => {
             if let Some(scalar) = value.scalar_ref() {

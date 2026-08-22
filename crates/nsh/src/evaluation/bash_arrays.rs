@@ -17,7 +17,13 @@ use crate::variables::arrays::{self, ArraySelector, CompoundElement};
 /// Apply one `a=(...)`, `a[i]=v`, or `a+=(...)` assignment.
 // [spec:nsh:req:compat.bash.arrays-declarations]
 pub(crate) fn assign(shell: &mut Shell, assignment: &BashArrayAssignment) -> Result<(), Error> {
-    let name = assignment.name.as_bstr().to_owned();
+    // An assignment to a Bash name reference reaches the variable it
+    // names, so the reference is resolved before any subscript is.
+    // [spec:nsh:req:compat.bash.functions-scoping]
+    let Some(name) = crate::variables::nameref::element_base(shell, assignment.name.as_bstr())
+    else {
+        return Ok(());
+    };
     let append = assignment.operator == BashAssignmentOperator::Append;
 
     match &assignment.value {

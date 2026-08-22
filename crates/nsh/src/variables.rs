@@ -24,6 +24,8 @@ use value::{BashAttributes, VariableValue};
 
 pub(crate) mod arrays;
 
+pub(crate) mod nameref;
+
 /// Persistent attributes of a shell variable.
 // [spec:nsh:def:idiom.variable-expansion-state]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -146,6 +148,12 @@ pub struct VariableTable {
     entries: BTreeMap<BString, Variable>,
     pub(crate) line_number: i32,
     locals: Vec<LocalVariableScopes>,
+    /// Which local frame each running function body owns, innermost last.
+    ///
+    /// A declaration built-in pushes a frame of its own, so the frame on
+    /// top is not the one whose restore a `local` must land in.
+    // [spec:nsh:req:compat.bash.functions-scoping]
+    function_frames: Vec<usize>,
 }
 
 impl VariableTable {
@@ -154,6 +162,7 @@ impl VariableTable {
             entries: BTreeMap::new(),
             line_number: 0,
             locals: Vec::new(),
+            function_frames: Vec::new(),
         }
     }
 
@@ -478,6 +487,7 @@ impl Shell {
     }
 
     pub(crate) fn unwind_local_variables(&mut self) {
+        self.variables.function_frames.clear();
         while !self.variables.locals.is_empty() {
             pop_local_scope(self);
         }
@@ -635,14 +645,29 @@ pub(crate) fn lookup_bytes(shell: &mut Shell, name: &BStr) -> Option<BString> {
 }
 
 // [spec:dash:sem:var.setvar-fn]
+// [spec:nsh:req:compat.bash.functions-scoping]
 pub(crate) fn set_bytes(
     shell: &mut Shell,
     name: &BStr,
     value: Option<&BStr>,
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
+    let Some(value) = value else {
+        return crate::error::with_interrupts_deferred(shell, |shell| {
+            set_entry(shell, name, None, attributes, CallbackPolicy::Run)
+        });
+    };
+    /* A Bash name reference sends the value somewhere else entirely, and
+     * a declaration attribute reshapes it before it is stored. Neither is
+     * reachable without `declare`, so a name that carries no Bash
+     * attribute pays one map probe and takes the ordinary path. */
+    if nameref::assign_through(shell, name, value, attributes)? {
+        return Ok(());
+    }
+    let converted = nameref::declared_value(shell, name, value)?;
+    let stored = converted.as_ref().map_or(value, |text| BStr::new(text));
     crate::error::with_interrupts_deferred(shell, |shell| {
-        set_entry(shell, name, value, attributes, CallbackPolicy::Run)
+        set_entry(shell, name, Some(stored), attributes, CallbackPolicy::Run)
     })
 }
 

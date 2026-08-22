@@ -213,6 +213,16 @@ pub(crate) fn bash_attributes(shell: &Shell, name: &BStr) -> Option<BashAttribut
         .map(|var| var.bash_attributes)
 }
 
+/// Take the export attribute away, which only `declare +x` asks for.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(crate) fn clear_exported(shell: &mut Shell, name: &BStr) -> bool {
+    let Some(var) = shell.variables.entries.get_mut(name) else {
+        return false;
+    };
+    var.attributes.exported = false;
+    true
+}
+
 pub(crate) fn set_bash_attribute(
     shell: &mut Shell,
     name: &BStr,

@@ -632,6 +632,25 @@ pub fn evaluate_tree(
                 bash_arrays::assign(shell, assignment)?;
                 ExitStatus::SUCCESS
             }
+            // Both Bash spellings define the same kind of function; the
+            // owned body is retained exactly as the POSIX form's is.
+            // [spec:nsh:req:compat.bash.functions-scoping]
+            Node::Bash(crate::nodes::BashNode::Function(function)) => {
+                if shell.options.enabled(ShellOption::HashAll) {
+                    flow!(prehash_tree(shell, Some(function.body.as_ref())));
+                }
+                let definition = FunctionDefinition {
+                    line: function.line,
+                    name: function.name.clone(),
+                    body: function.body.clone(),
+                };
+                crate::execution::define_function(
+                    &mut shell.interrupt_deferral,
+                    &mut shell.commands,
+                    &definition,
+                );
+                ExitStatus::SUCCESS
+            }
             Node::Bash(_) => {
                 return Err(shell
                     .diagnostics()
@@ -1943,7 +1962,12 @@ fn evaluate_function(
     });
     crate::options::set_positional_parameters(shell, args.get(1..).unwrap_or_default());
 
-    let outcome = evaluate_tree(shell, Some(function.body.as_ref()), context.tested_only());
+    /* The frame `evalcommand` already pushed is the one a declaration in
+     * this body must save into; a declaration built-in pushes another. */
+    // [spec:nsh:req:compat.bash.functions-scoping]
+    let outcome = crate::variables::nameref::with_function_scope(shell, |shell| {
+        evaluate_tree(shell, Some(function.body.as_ref()), context.tested_only())
+    });
 
     // funcdone:
     crate::error::with_interrupts_deferred(shell, |shell| {

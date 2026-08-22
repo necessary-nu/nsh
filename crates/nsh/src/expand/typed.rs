@@ -14,7 +14,7 @@ use super::{ExpandedField, ExpandedFields, ExpansionMode};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::nodes::Node;
-use crate::options::{OPTION_SPECS, ShellOption};
+use crate::options::{Dialect, OPTION_SPECS, ShellOption};
 // [spec:nsh:def:idiom.shell-options]
 use crate::pattern::Pattern;
 use crate::variables::value::VariableValue;
@@ -496,13 +496,20 @@ fn expand_parameter(
     }
 
     let name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
-    let value = match split_subscript(name.as_bstr()) {
-        Some((base, subscript)) => {
-            let base = base.to_owned();
-            let subscript = subscript.to_owned();
-            subscripted_value(shell, base.as_bstr(), subscript.as_bstr())?
-        }
-        None => parameter_value(shell, name.as_bstr()),
+    // A Bash name reference reads the variable it points at; a circular
+    // chain has nothing to read and behaves as unset.
+    // [spec:nsh:req:compat.bash.functions-scoping]
+    let target = crate::variables::nameref::read_name(shell, name.as_bstr());
+    let value = match target.as_ref().map(|target| target.as_bstr()) {
+        None => Value::Unset,
+        Some(target) => match split_subscript(target) {
+            Some((base, subscript)) => {
+                let base = base.to_owned();
+                let subscript = subscript.to_owned();
+                subscripted_value(shell, base.as_bstr(), subscript.as_bstr())?
+            }
+            None => parameter_value(shell, target),
+        },
     };
     let unavailable = value.is_unset() || (parameter.colon && value.is_empty(shell, context));
 
@@ -656,6 +663,19 @@ fn split_subscript(name: &BStr) -> Option<(&BStr, &BStr)> {
 // [spec:nsh:req:compat.bash.arrays-declarations]
 fn subscripted_value(shell: &mut Shell, base: &BStr, subscript: &BStr) -> Result<Value, Error> {
     use crate::variables::arrays::{self, ArraySelector};
+
+    /* A read keeps its subscript as text, so an expansion written inside
+     * one is resolved here; the assignment side already carries a word. */
+    // [spec:nsh:req:compat.bash.functions-scoping]
+    let expanded;
+    let subscript = if shell.options.dialect() == Dialect::Bash
+        && subscript.iter().any(|byte| matches!(byte, b'$' | b'`'))
+    {
+        expanded = crate::parser::expand_string(shell, subscript)?;
+        BStr::new(expanded.as_slice())
+    } else {
+        subscript
+    };
 
     let selector = arrays::resolve_selector(shell, base, subscript)?;
     let Some(stored) = crate::variables::value::variable_value(shell, base).cloned() else {
