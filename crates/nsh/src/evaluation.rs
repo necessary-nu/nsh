@@ -591,7 +591,7 @@ pub fn evaluate_tree(
                  * `${PIPESTATUS[@]}` says so. The forked forms publish
                  * from `wait_for_job`, which is the only place that can
                  * still see every member. */
-                // [spec:nsh:req:compat.bash.special-variables]
+                // [spec:nsh:req:compat.bash.builtins-special-variables]
                 let status = flow!(evaluate_command(shell, command, context));
                 crate::variables::special::set_pipeline_status(shell, &[status]);
                 status

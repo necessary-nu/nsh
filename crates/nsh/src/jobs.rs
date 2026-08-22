@@ -1088,7 +1088,7 @@ pub fn wait_for_job(
     /* Read while the job is still live: the entry is removed below once
      * it is done, and `${PIPESTATUS[@]}` is the only reader that wants
      * every member rather than the last. */
-    // [spec:nsh:req:compat.bash.special-variables]
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
     let statuses = pipeline_statuses(shell, job_id);
     crate::variables::special::set_pipeline_status(shell, &statuses);
     if shell.jobs[job_id].job_control {
@@ -1645,7 +1645,7 @@ fn set_terminal_process_group_on(
 /// A process that has not been waited for has no status to report and
 /// answers 0, which is what Bash's array holds for a job it has not
 /// reaped.
-// [spec:nsh:req:compat.bash.special-variables]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn pipeline_statuses(
     shell: &crate::context::Shell,
     job_id: JobId,

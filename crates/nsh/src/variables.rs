@@ -87,7 +87,7 @@ enum Callback {
     History,
     Locale,
     /// A name `special` recomputes on read and reacts to on assignment.
-    // [spec:nsh:req:compat.bash.special-variables]
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
     Special,
 }
 
@@ -166,7 +166,7 @@ pub struct VariableTable {
     // [spec:nsh:req:compat.bash.traps-introspection]
     pub(crate) call_stack: call_stack::CallStack,
     /// The generators, clocks and published facts of the Bash dialect.
-    // [spec:nsh:req:compat.bash.special-variables]
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
     pub(crate) special: special::SpecialState,
 }
 

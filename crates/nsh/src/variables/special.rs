@@ -87,7 +87,7 @@ impl SpecialState {
 /// Called from the completed-option-change path, so a `set -o bash`
 /// midway through a script publishes exactly what starting in Bash mode
 /// would have.
-// [spec:nsh:req:compat.bash.special-variables]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn dialect_changed(shell: &mut Shell) {
     if shell.options.dialect() != Dialect::Bash || shell.variables.special.published {
         return;
@@ -100,7 +100,7 @@ pub(crate) fn dialect_changed(shell: &mut Shell) {
 
 /// The release string `$BASH_VERSION` carries, assembled from the same
 /// fields `$BASH_VERSINFO` publishes so the two can never disagree.
-// [spec:nsh:req:compat.bash.special-variables]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn version_text() -> String {
     let mut version = String::new();
     for (position, field) in VERSION_FIELDS.iter().take(3).enumerate() {
@@ -246,7 +246,7 @@ fn store_array(shell: &mut Shell, name: &BStr, elements: &[BString]) {
 /// an ordinary indexed array answers `${PIPESTATUS[@]}`, `${#PIPESTATUS[@]}`
 /// and `${PIPESTATUS[1]}` without the expansion pipeline knowing that
 /// this module exists.
-// [spec:nsh:req:compat.bash.special-variables]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn set_pipeline_status(shell: &mut Shell, statuses: &[ExitStatus]) {
     if shell.options.dialect() != Dialect::Bash {
         return;
@@ -260,7 +260,7 @@ pub(crate) fn set_pipeline_status(shell: &mut Shell, statuses: &[ExitStatus]) {
 
 /// Recompute the value of a name whose stored bytes are stale by
 /// construction, immediately before a reader borrows it.
-// [spec:nsh:req:compat.bash.special-variables]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn refresh(shell: &mut Shell, name: &BStr) {
     let Some(entry) = shell.variables.entries.get(name) else {
         return;
@@ -341,7 +341,7 @@ fn write_back(shell: &mut Shell, name: &BStr, value: &BStr) {
 /// `[dec:nsh:safety-trumps-compatibility]` says a generator anything
 /// security-adjacent might reach must not be seedable by the data it is
 /// generating for.
-// [spec:nsh:req:compat.bash.special-variables]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn assigned(shell: &mut Shell, name: &BStr, value: Option<&BStr>) {
     match name.as_ref() as &[u8] {
         b"SECONDS" => {
@@ -357,7 +357,7 @@ pub(crate) fn assigned(shell: &mut Shell, name: &BStr, value: Option<&BStr>) {
 
 /// The attribute letters `${name@a}` renders, in the order Bash's
 /// `var_attribute_string` writes them.
-// [spec:nsh:req:compat.bash.special-variables]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn attribute_letters(shell: &Shell, name: &BStr) -> BString {
     use super::value::BashAttribute;
 
@@ -458,7 +458,7 @@ mod tests {
         shell
     }
 
-    // [spec:nsh:req:compat.bash.special-variables/test]
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn facts_are_published_once_the_dialect_selects_them() {
         let _guard = lock();
@@ -481,7 +481,7 @@ mod tests {
 
     /// A generated value changes between reads, and an assignment does
     /// not make the sequence replayable.
-    // [spec:nsh:req:compat.bash.special-variables/test]
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn random_is_not_seedable_from_a_script() {
         let _guard = lock();
@@ -519,7 +519,7 @@ mod tests {
         );
     }
 
-    // [spec:nsh:req:compat.bash.special-variables/test]
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn seconds_restarts_from_an_assignment() {
         let _guard = lock();
@@ -539,7 +539,7 @@ mod tests {
         );
     }
 
-    // [spec:nsh:req:compat.bash.special-variables/test]
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn pipeline_status_is_an_ordinary_indexed_array() {
         let _guard = lock();
@@ -562,7 +562,7 @@ mod tests {
         );
     }
 
-    // [spec:nsh:req:compat.bash.special-variables/test]
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn attribute_letters_follow_bash_order() {
         let _guard = lock();
