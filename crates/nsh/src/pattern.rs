@@ -163,6 +163,7 @@ impl Matcher<'_> {
     /// Return the continuation and every subject width matched by one
     /// well-formed bracket expression. `None` means `[` is an ordinary byte.
     // [spec:dash:sem:expand.ccmatch-fn]
+    // [spec:posix:req:pattern.unmatched-open-bracket-unspecified]
     fn bracket(&self, mut at: usize, subject_at: usize) -> Option<(usize, Vec<usize>)> {
         let inverted = (self.pattern.active(at, b'!') || self.pattern.active(at, b'^'))
             .then(|| at += 1)

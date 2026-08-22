@@ -14,6 +14,11 @@ use crate::pattern::Pattern;
 // sorting uses the shell locale. These operations collectively replace the
 // cursor-based glob, escape-counting, and linked-list merge-sort helpers.
 // [spec:posix:req:expand.pathname]
+// [spec:posix:def:pattern.filename-expansion-qualification]
+// [spec:posix:req:pattern.filename-expansion-trigger]
+// [spec:posix:req:pattern.no-special-chars-unchanged]
+// [spec:posix:req:pattern.no-match-unchanged]
+// [spec:posix:req:pattern.replacement-sorted]
 // [spec:dash:sem:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addglob-fn]
@@ -48,6 +53,10 @@ pub(super) fn expand(shell: &Shell, fields: Vec<Field>) -> Vec<Field> {
         .collect()
 }
 
+// [spec:posix:req:pattern.leading-period]
+// [spec:posix:req:pattern.leading-period-in-bracket-unspecified]
+// [spec:posix:req:pattern.directory-permissions]
+// [spec:posix:req:pattern.permission-errors-not-fatal]
 fn matches(locale: &nsh_platform::Locale, pattern: &Pattern) -> Vec<BString> {
     let components = components(pattern);
     let absolute = pattern.as_bytes().first() == Some(&b'/');
@@ -135,6 +144,8 @@ fn matches(locale: &nsh_platform::Locale, pattern: &Pattern) -> Vec<BString> {
     }
 }
 
+// [spec:posix:req:pattern.slash-explicit-match]
+// [spec:posix:syn:pattern.slash-terminates-bracket]
 fn components(pattern: &Pattern) -> Vec<Pattern> {
     let mut components = Vec::new();
     let mut start = 0;
