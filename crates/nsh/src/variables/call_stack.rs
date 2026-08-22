@@ -228,7 +228,16 @@ fn refresh(shell: &mut Shell) {
         for (index, element) in elements.iter().enumerate() {
             value.set_indexed(index as u64, BStr::new(element.as_slice()));
         }
-        drop(arrays::store(shell, name, value, VariableAttributes::NONE));
+        // The shell is landing its own bookkeeping, not performing a user
+        // assignment, so a read-only mark on one of these names must not
+        // leave the call stack stale.
+        drop(arrays::store(
+            shell,
+            name,
+            value,
+            VariableAttributes::NONE,
+            arrays::ReadOnlyGuard::Declaration,
+        ));
     }
 }
 
