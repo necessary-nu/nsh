@@ -6252,6 +6252,14 @@ children (
                                         kind @note
                                         text "Definition of done: close calibrated DEBUG, RETURN, ERR, functrace, errtrace, caller, and call-stack observations without regressing the POSIX/Smoosh trap contracts; cover nesting, source files, functions, subshells, and disabled-option cases."
                                     }
+
+                                    {
+                                        at 2026-08-22T15:12:18.408978627Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Carried forward from the implementing agent, for the compatibility-profile verification: FUNCNAME, BASH_SOURCE and BASH_LINENO are materialised through `set_entry`, so under `set -a` they would be exported. Bash does not export them. No case in the pinned Oils corpus covers it, so it was flagged rather than fixed blind.\n\nFour cases in `builtin-trap-err` were declined with reasons rather than matched, and the reasons should survive: `trap ERR with redirect` (#18) encodes Bash's own failure to advance $LINENO for a redirect, and matching it would mean suppressing the command-line record on redirect nodes, degrading diagnostics; `trap ERR pipelines without simple commands` (#6) is a Bash double-fire the spec file itself annotates as an anomaly; `set -o errtrace: trap ERR with &` (#12) turns on a distinction between `false &` and `{ ...; } &` for which no principled rule was found, so it was left rather than guessed; `trap ERR with YSH proc` (#19) cannot match because its `case $SH in bash|...)` guard sees a path, which is a harness shape, not shell behaviour."
+                                        after_done true
+                                    }
                                 )
                             }
 
