@@ -254,6 +254,7 @@ impl ParameterSyntax {
         }
     }
 
+    // [spec:posix:syn:param.positional-multi-digit-braces]
     const fn accepts_multiple_name_digits(self) -> bool {
         self.braced
             && matches!(

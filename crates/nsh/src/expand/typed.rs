@@ -361,6 +361,7 @@ fn matching_quote(parts: &[WordPart], open: usize) -> usize {
     parts.len()
 }
 
+// [spec:posix:req:param.special-at-no-positional]
 fn is_empty_quoted_at(shell: &Shell, parts: &[WordPart], context: Context) -> bool {
     context.full
         && shell.options.positional_parameters.parameter_count == 0
@@ -613,6 +614,18 @@ fn expand_parameter(
     }
 }
 
+// [spec:posix:def:param.special-parameters]
+// [spec:posix:def:param.positional-definition]
+// [spec:posix:req:param.positional-zero-not-positional]
+// [spec:posix:req:param.special-at]
+// [spec:posix:req:param.special-asterisk]
+// [spec:posix:req:param.special-hash]
+// [spec:posix:req:param.special-question]
+// [spec:posix:sem:param.special-question-assignment]
+// [spec:posix:req:param.special-hyphen]
+// [spec:posix:req:param.special-dollar]
+// [spec:posix:req:param.special-bang]
+// [spec:posix:req:param.special-zero]
 fn parameter_value(shell: &mut Shell, name: &BStr) -> Value {
     match name.first().copied() {
         Some(b'$') if name.len() == 1 => Value::Variable(VariableValue::Scalar(BString::from(
@@ -675,6 +688,7 @@ fn parameter_value(shell: &mut Shell, name: &BStr) -> Value {
     }
 }
 
+// [spec:posix:req:param.positional-decimal-digits]
 fn decimal_index(name: &BStr) -> Option<usize> {
     name.iter().try_fold(0usize, |value, byte| {
         byte.is_ascii_digit().then(|| {
@@ -685,6 +699,7 @@ fn decimal_index(name: &BStr) -> Option<usize> {
     })
 }
 
+// [spec:posix:req:param.special-at-double-quotes]
 fn value_expansion(
     shell: &mut Shell,
     name: &BStr,
