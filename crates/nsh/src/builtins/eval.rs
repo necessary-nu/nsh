@@ -16,11 +16,11 @@ use crate::evaluation::{EvaluationContext, Flow, evaluate_string};
 use bstr::{BStr, BString, ByteSlice};
 
 // [spec:dash:sem:eval.evalcmd-fn]
-// [spec:posix:syn:builtin.evaluation.syn]
-// [spec:posix:req:builtin.evaluation.construct-and-execute]
-// [spec:posix:req:builtin.evaluation.stderr]
-// [spec:posix:req:builtin.evaluation.interfaces]
-// [spec:posix:req:builtin.evaluation.exit-status]
+// [spec:posix:syn:builtin.eval.syn]
+// [spec:posix:req:builtin.eval.construct-and-execute]
+// [spec:posix:req:builtin.eval.stderr]
+// [spec:posix:req:builtin.eval.interfaces]
+// [spec:posix:req:builtin.eval.exit-status]
 pub(crate) fn evaluate_arguments(
     shell: &mut Shell,
     args: &[&BStr],
