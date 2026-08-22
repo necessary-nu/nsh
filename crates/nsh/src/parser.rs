@@ -386,6 +386,9 @@ pub(crate) enum PendingRedirection {
 /// pop. No cursor into the vector survives a push or pop.
 pub struct SyntaxFrame {
     pub syntax: SyntaxContext,
+    /// Bash's `$[expression]` ends at `]` rather than at `))`.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub bracketed: bool,
     pub inner_double_quote: bool,
     pub variable_context_pushed: bool,
     pub double_quoted: bool,
@@ -1580,6 +1583,10 @@ struct WordLexer<'a> {
     dollar_single_quoted: bool,
     input: InputUnit,
     quoted: bool,
+    /// How many `X(` extended-glob groups are open in this word. While
+    /// one is, `(`, `)`, `|`, and blanks are the pattern's own bytes.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    extglob_depth: usize,
     /// Typed lexer events for the word being built.
     output: Vec<WordToken>,
     delimiter: EofMark<'a>,
@@ -1622,6 +1629,7 @@ fn read_word_token(
     let mut lexer = WordLexer {
         syntax_frames: vec![SyntaxFrame {
             syntax,
+            bracketed: false,
             inner_double_quote: false,
             variable_context_pushed: false,
             double_quoted: syntax == SyntaxContext::DoubleQuoted,
@@ -1640,6 +1648,7 @@ fn read_word_token(
         dollar_single_quoted: false,
         input: first_input,
         quoted: false,
+        extglob_depth: 0,
         output: Vec::new(),
         delimiter,
         strip_tabs,
@@ -1650,8 +1659,11 @@ fn read_word_token(
         /* Until end of line or end of word */
         loop {
             let position = WordPosition::of(lexer.current_syntax());
-            let field_splitting = position.field_splitting;
+            let field_splitting = position.field_splitting && lexer.extglob_depth == 0;
             bash::process_substitutions(shell, &mut lexer, field_splitting)?;
+            if bash::open_extended_glob(shell, &mut lexer)? {
+                continue;
+            }
             /* The C's CHECKSTRSPACE, which permits max(MB_LEN_MAX, 23)
              * calls to USTPUTC, has no counterpart here: `getmbc`
              * writes into its own scratch and `getmbc_at` appends
@@ -1686,7 +1698,11 @@ fn read_word_token(
                     lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
                     continue 'word;
                 }
-                SyntaxClass::Word => lexer.push_literal(lexer.input.expect_byte()),
+                SyntaxClass::Word => {
+                    if !bash::close_arithmetic_bracket(&mut lexer) {
+                        lexer.push_literal(lexer.input.expect_byte());
+                    }
+                }
                 SyntaxClass::Control => {
                     if lexer.dollar_single_quoted && lexer.input.is(b'\\') {
                         parse_dollar_single_quote_escape(shell, &mut lexer.output)?;
@@ -1735,7 +1751,9 @@ fn read_word_token(
                 }
                 SyntaxClass::EndOfInput | SyntaxClass::EndOfAlias => break 'word,
                 SyntaxClass::WordSeparator => {
-                    if lexer.input.is(b')')
+                    if bash::inside_extended_glob(&mut lexer) {
+                        lexer.push_literal(lexer.input.expect_byte());
+                    } else if lexer.input.is(b')')
                         && lexer.current_syntax().backquote == BackquoteContext::Modern
                     {
                         syntax_stack::pop(&mut lexer.syntax_frames);
@@ -1752,7 +1770,14 @@ fn read_word_token(
             lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
         }
     }
-    /* endword: */
+    finish_word_token(shell, &mut lexer)
+}
+
+/// Close one word: reject an unterminated construct, hand a bare
+/// descriptor digit to the redirection parser, and otherwise publish the
+/// structural word the lexer built.
+// [spec:dash:sem:parser.readtoken1-fn]
+fn finish_word_token(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<Token, Error> {
     if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
         return Err(syntax_error(shell, b"Missing '))'"));
     }
@@ -1774,17 +1799,15 @@ fn read_word_token(
         _ => None,
     };
     if lexer.delimiter.is_none() {
-        if (lexer.input.is(b'>') || lexer.input.is(b'<'))
-            && !lexer.quoted
-            && descriptor_digit.is_some()
+        if let Some(digit) = descriptor_digit
+            .filter(|_| (lexer.input.is(b'>') || lexer.input.is(b'<')) && !lexer.quoted)
         {
-            parse_redirection(shell, &mut lexer, descriptor_digit.unwrap_or(0))?;
+            parse_redirection(shell, lexer, digit)?;
             shell.input.last_token = TokenKind::Redirection;
             shell.input.last_token_quoted = false;
             return Ok(Token::plain(TokenKind::Redirection));
-        } else {
-            unread_input_unit(shell);
         }
+        unread_input_unit(shell);
     }
     shell.input.last_token_quoted = lexer.quoted;
     /* `grabstackblock(len)` reserved the bytes the C had been writing into
@@ -1972,7 +1995,10 @@ fn parse_parameter_operator(
             lexer.push_literal(lexer.input.expect_byte());
         }
 
-        if lexer.input.is(b'%') || lexer.input.is(b'#') {
+        if let Some(operation) = bash::parameter_operator(shell, lexer)? {
+            parameter_syntax.operation = operation;
+            *nested_syntax = SyntaxContext::Base;
+        } else if lexer.input.is(b'%') || lexer.input.is(b'#') {
             let trim_prefix = lexer.input.is(b'#');
             parameter_syntax.operation = if trim_prefix {
                 ParameterOperation::RemoveSmallestPrefix
@@ -2003,11 +2029,23 @@ fn parse_parameter_operator(
                 }
             }
             parameter_syntax.operation = match lexer.input.byte() {
-                Some(b'}') => ParameterOperation::Value,
+                Some(b'}') if !parameter_syntax.colon || !bash::active(shell) => {
+                    ParameterOperation::Value
+                }
                 Some(b'-') => ParameterOperation::Default,
                 Some(b'+') => ParameterOperation::Alternate,
                 Some(b'?') => ParameterOperation::Error,
                 Some(b'=') => ParameterOperation::Assign,
+                _ if parameter_syntax.colon && bash::active(shell) => {
+                    // `${name:offset:length}` reuses the colon that
+                    // `${name:-word}` spends on its own operator, so the
+                    // byte that decided against those forms belongs to
+                    // the offset expression and is read again.
+                    unread_input_unit(shell);
+                    parameter_syntax.colon = false;
+                    *nested_syntax = SyntaxContext::Base;
+                    ParameterOperation::Substring
+                }
                 _ => ParameterOperation::Invalid,
             };
         }
@@ -2051,6 +2089,10 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         lexer.current_syntax_mut().syntax = SyntaxContext::SingleQuoted;
         lexer.record_quote_boundary(QuoteBoundary::Open, false);
         return Ok(());
+    } else if bash::locale_quote(shell, lexer, nested_syntax, substitution_start)
+        || bash::arithmetic_bracket(shell, lexer, substitution_start)
+    {
+        return Ok(());
     } else if lexer.input.is(b'{')
         || lexer.input.begins_name(&shell.locale)
         || lexer.input.is_special_parameter()
@@ -2064,6 +2106,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             lexer.input = read_unit_skipping_line_continuations(shell)?;
             parameter_syntax = ParameterSyntax::braced();
         }
+        let indirect = bash::parameter_indirection(shell, lexer, parameter_syntax.braced)?;
         let name_start = lexer.output.len();
         'assignment_name: loop {
             if lexer.input.begins_name(&shell.locale) {
@@ -2137,6 +2180,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             bad_substitution,
             parameter_syntax.accepts_subscript_operand(),
         )?;
+        bash::parameter_prefix_selector(shell, lexer, indirect && !bad_substitution)?;
         let name_end = lexer.output.len();
 
         parse_parameter_operator(
@@ -2176,6 +2220,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                 name,
                 operation: parameter_syntax.operation,
                 colon: parameter_syntax.colon,
+                indirect,
             });
         }
     } else {

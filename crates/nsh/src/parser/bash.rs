@@ -6,10 +6,10 @@ use core::mem;
 use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{
-    ListMode, TokenContext, TokenKind, WordLexer, command, consume_newline_without_prompt,
-    expected_token_error, finalize, is_valid_name, list, parse_here_documents, read_input_unit,
-    read_token, read_unit_skipping_line_continuations, set_input_string, syntax_error,
-    unread_input_unit,
+    InputUnit, ListMode, SyntaxClass, SyntaxContext, TokenContext, TokenKind, WordLexer, command,
+    consume_newline_without_prompt, expected_token_error, finalize, is_valid_name, list,
+    parse_here_documents, read_input_unit, read_token, read_unit_skipping_line_continuations,
+    set_input_string, syntax_error, syntax_stack, unread_input_unit,
 };
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
@@ -20,8 +20,8 @@ use crate::nodes::{
     BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution,
     FileRedirectionOperator, Node, NodeText, WordNode,
 };
-use crate::options::Dialect;
-use crate::word::{ParsedWord, QuoteBoundary, WordPart, WordToken, WordUnit};
+use crate::options::{BashShopt, Dialect};
+use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, WordPart, WordToken, WordUnit};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Quote {
@@ -107,7 +107,18 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
     })))
 }
 
+/// Bash enables extended globs inside `[[ ]]` regardless of `shopt`, so
+/// the lexer has to keep `@(`-style groups in one word here even when
+/// `extglob` is off. The flag is saved and restored rather than cleared,
+/// because a conditional can nest inside a command substitution.
 pub(super) fn conditional(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+    let enclosing = mem::replace(&mut shell.input.parsing_conditional, true);
+    let parsed = conditional_expression(shell, line);
+    shell.input.parsing_conditional = enclosing;
+    parsed
+}
+
+fn conditional_expression(shell: &mut Shell, line: i32) -> Result<Node, Error> {
     let first = read_token(shell, TokenContext::NONE)?;
     // `[[ ]]` has nothing to be true or false about, and Bash rejects it
     // while parsing rather than answering with a status.
@@ -791,4 +802,196 @@ fn literal_bytes(units: &[WordUnit]) -> Option<BString> {
         })
         .collect::<Option<Vec<_>>>()
         .map(BString::from)
+}
+
+/// Recognise Bash's `${!name}` marker.
+///
+/// `${!}` is still the special parameter, so the marker is only taken
+/// when a name can follow it.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn parameter_indirection(
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+    braced: bool,
+) -> Result<bool, Error> {
+    if !braced || !active(shell) || !lexer.input.is(b'!') {
+        return Ok(false);
+    }
+    let next = read_unit_skipping_line_continuations(shell)?;
+    if next.begins_name(&shell.locale) || next.is_digit() || next.is(b'@') || next.is(b'*') {
+        lexer.input = next;
+        return Ok(true);
+    }
+    unread_input_unit(shell);
+    Ok(false)
+}
+
+/// `${!prefix*}` and `${!prefix@}` name every variable whose name starts
+/// with the prefix, so the trailing selector belongs to the name and not
+/// to an operator. `${!name@Q}` does not: there the `@` introduces one.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn parameter_prefix_selector(
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+    indirect: bool,
+) -> Result<(), Error> {
+    if !indirect || !active(shell) {
+        return Ok(());
+    }
+    if lexer.input.is(b'*') {
+        lexer.push_literal(b'*');
+        lexer.input = read_unit_skipping_line_continuations(shell)?;
+        return Ok(());
+    }
+    if !lexer.input.is(b'@') {
+        return Ok(());
+    }
+    let next = read_unit_skipping_line_continuations(shell)?;
+    if next.is(b'}') {
+        lexer.push_literal(b'@');
+        lexer.input = next;
+    } else {
+        unread_input_unit(shell);
+    }
+    Ok(())
+}
+
+/// The Bash-only parameter operators, each of which has a doubled
+/// spelling that widens what it applies to.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn parameter_operator(
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+) -> Result<Option<ParameterOperation>, Error> {
+    if !active(shell) {
+        return Ok(None);
+    }
+    let (single, doubled) = match lexer.input.byte() {
+        Some(b'/') => (
+            ParameterOperation::SubstituteFirst,
+            ParameterOperation::SubstituteAll,
+        ),
+        Some(b'^') => (ParameterOperation::UpperFirst, ParameterOperation::UpperAll),
+        Some(b',') => (ParameterOperation::LowerFirst, ParameterOperation::LowerAll),
+        Some(b'@') => return Ok(Some(ParameterOperation::Transform)),
+        _ => return Ok(None),
+    };
+    let first = lexer.input;
+    lexer.input = read_unit_skipping_line_continuations(shell)?;
+    if lexer.input == first {
+        if lexer.check_here_document_end {
+            lexer.push_literal(lexer.input.expect_byte());
+        }
+        return Ok(Some(doubled));
+    }
+    unread_input_unit(shell);
+    Ok(Some(single))
+}
+
+/// `$"…"` marks a string for locale translation. Without a message
+/// catalogue the translation is the string itself, so the only lasting
+/// effect is that the contents are double-quoted.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn locale_quote(
+    shell: &Shell,
+    lexer: &mut WordLexer<'_>,
+    nested: SyntaxContext,
+    substitution_start: usize,
+) -> bool {
+    if !active(shell)
+        || !lexer.input.is(b'"')
+        || nested.classify(InputUnit::Byte(b'&')) == SyntaxClass::Word
+    {
+        return false;
+    }
+    lexer.output.truncate(substitution_start);
+    lexer.current_syntax_mut().syntax = SyntaxContext::DoubleQuoted;
+    lexer.current_syntax_mut().double_quoted = true;
+    lexer.record_quote_boundary(QuoteBoundary::Open, true);
+    true
+}
+
+/// `$[expression]` is Bash's older spelling of `$((expression))`; it
+/// evaluates the same way and only its terminator differs.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn arithmetic_bracket(
+    shell: &Shell,
+    lexer: &mut WordLexer<'_>,
+    substitution_start: usize,
+) -> bool {
+    if !active(shell) || !lexer.input.is(b'[') || lexer.check_here_document_end {
+        return false;
+    }
+    syntax_stack::push(&mut lexer.syntax_frames, SyntaxContext::Arithmetic);
+    lexer.current_syntax_mut().double_quoted = true;
+    lexer.current_syntax_mut().bracketed = true;
+    lexer.output.truncate(substitution_start);
+    lexer.output.push(WordToken::ArithmeticStart);
+    true
+}
+
+/// Close a `$[…]` expression, counting the brackets a subscript inside
+/// it opens. `true` means the byte was consumed.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn close_arithmetic_bracket(lexer: &mut WordLexer<'_>) -> bool {
+    if !lexer.current_syntax().bracketed {
+        return false;
+    }
+    if lexer.input.is(b'[') {
+        lexer.current_syntax_mut().parenthesis_depth += 1;
+        return false;
+    }
+    if !lexer.input.is(b']') {
+        return false;
+    }
+    if lexer.current_syntax().parenthesis_depth > 0 {
+        lexer.current_syntax_mut().parenthesis_depth -= 1;
+        return false;
+    }
+    syntax_stack::pop(&mut lexer.syntax_frames);
+    lexer.output.push(WordToken::ArithmeticEnd);
+    true
+}
+
+/// Open an `X(alternative|…)` extended-glob group.
+///
+/// `shopt -s extglob` has to be read while the word is being lexed,
+/// because it decides whether `(` belongs to the word or ends it.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn open_extended_glob(
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+) -> Result<bool, Error> {
+    if !active(shell)
+        || !(shell.options.shopt(BashShopt::ExtGlob) || shell.input.parsing_conditional)
+        || lexer.current_syntax().syntax != SyntaxContext::Base
+        || !matches!(lexer.input.byte(), Some(b'?' | b'*' | b'+' | b'@' | b'!'))
+    {
+        return Ok(false);
+    }
+    let operator = lexer.input;
+    lexer.input = read_unit_skipping_line_continuations(shell)?;
+    if !lexer.input.is(b'(') {
+        unread_input_unit(shell);
+        lexer.input = operator;
+        return Ok(false);
+    }
+    lexer.push_literal(operator.expect_byte());
+    lexer.push_literal(b'(');
+    lexer.extglob_depth += 1;
+    lexer.input = super::read_unit_for_syntax(shell, lexer.current_syntax())?;
+    Ok(true)
+}
+
+/// Whether this word separator is inside an extended-glob group, and so
+/// is one of the pattern's own bytes.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn inside_extended_glob(lexer: &mut WordLexer<'_>) -> bool {
+    if lexer.extglob_depth == 0 {
+        return false;
+    }
+    if lexer.input.is(b')') {
+        lexer.extglob_depth -= 1;
+    }
+    true
 }

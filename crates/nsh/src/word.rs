@@ -53,6 +53,7 @@ pub(crate) enum WordToken {
         name: BString,
         operation: ParameterOperation,
         colon: bool,
+        indirect: bool,
     },
     ParameterEnd,
     Command(Option<Node>),
@@ -80,6 +81,9 @@ pub(crate) struct ParameterExpansion {
     pub(crate) name: BString,
     pub(crate) operation: ParameterOperation,
     pub(crate) colon: bool,
+    /// Bash's `${!name}`: the named variable holds the name to expand.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub(crate) indirect: bool,
     pub(crate) operand: Option<Box<ParsedWord>>,
 }
 
@@ -96,6 +100,23 @@ pub(crate) enum ParameterOperation {
     RemoveSmallestPrefix,
     RemoveLargestPrefix,
     Length,
+    /// Bash's `${name:offset:length}`.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    Substring,
+    /// Bash's `${name/pattern/replacement}`.
+    SubstituteFirst,
+    /// Bash's `${name//pattern/replacement}`.
+    SubstituteAll,
+    /// Bash's `${name^pattern}`.
+    UpperFirst,
+    /// Bash's `${name^^pattern}`.
+    UpperAll,
+    /// Bash's `${name,pattern}`.
+    LowerFirst,
+    /// Bash's `${name,,pattern}`.
+    LowerAll,
+    /// Bash's `${name@operator}`.
+    Transform,
     Invalid,
 }
 
@@ -131,6 +152,7 @@ impl ParsedWord {
                     name: name.into(),
                     operation: ParameterOperation::Value,
                     colon: false,
+                    indirect: false,
                     operand: None,
                 }),
                 WordPart::Quote(QuoteBoundary::Close),
@@ -269,6 +291,14 @@ impl ParameterOperation {
             Self::RemoveLargestSuffix => b"%%",
             Self::RemoveSmallestPrefix => b"#",
             Self::RemoveLargestPrefix => b"##",
+            Self::Substring => b":",
+            Self::SubstituteFirst => b"/",
+            Self::SubstituteAll => b"//",
+            Self::UpperFirst => b"^",
+            Self::UpperAll => b"^^",
+            Self::LowerFirst => b",",
+            Self::LowerAll => b",,",
+            Self::Transform => b"@",
             Self::Length | Self::Invalid => b"",
         }
     }
@@ -281,6 +311,9 @@ impl ParameterExpansion {
         } else {
             b"${"
         });
+        if self.indirect {
+            output.push(b'!');
+        }
         output.extend_from_slice(&self.name);
         if self.colon {
             output.push(b':');
@@ -325,6 +358,7 @@ impl TokenDecoder<'_> {
                     name,
                     operation,
                     colon,
+                    indirect,
                 } => {
                     let operand = (*operation != ParameterOperation::Value)
                         .then(|| Box::new(self.word_until(TokenBoundary::Parameter)));
@@ -332,6 +366,7 @@ impl TokenDecoder<'_> {
                         name: name.clone(),
                         operation: *operation,
                         colon: *colon,
+                        indirect: *indirect,
                         operand,
                     }));
                 }
@@ -388,6 +423,9 @@ impl ParsedWord {
                         if parameter.operation == ParameterOperation::Length {
                             output.push(b'#');
                         }
+                        if parameter.indirect {
+                            output.push(b'!');
+                        }
                         output.extend_from_slice(&parameter.name);
                         if parameter.colon {
                             output.push(b':');
@@ -422,6 +460,7 @@ mod tests {
                 name: BString::from("x"),
                 operation: ParameterOperation::Default,
                 colon: true,
+                indirect: false,
             },
             WordToken::Literal(b'y'),
             WordToken::ParameterEnd,

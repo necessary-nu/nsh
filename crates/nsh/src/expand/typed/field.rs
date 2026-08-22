@@ -1,6 +1,6 @@
 use bstr::BString;
 
-use crate::pattern::Pattern;
+use crate::pattern::{Pattern, PatternOptions};
 
 #[derive(Clone, Debug)]
 pub(super) struct Field {
@@ -158,7 +158,7 @@ impl Field {
         at == range.end
     }
 
-    pub(super) fn pattern(&self) -> Pattern {
+    pub(super) fn pattern(&self, options: PatternOptions) -> Pattern {
         let mut bytes = Vec::with_capacity(self.bytes.len());
         let mut quoted = Vec::with_capacity(self.bytes.len());
         let mut at = 0;
@@ -175,6 +175,6 @@ impl Field {
             }
         }
 
-        Pattern::new(BString::from(bytes), quoted)
+        Pattern::new(BString::from(bytes), quoted).with_options(options)
     }
 }

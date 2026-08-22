@@ -526,7 +526,10 @@ pub(crate) fn conditional_pattern(
     shell: &mut crate::context::Shell,
     word: &crate::nodes::WordNode,
 ) -> Result<crate::pattern::Pattern, Error> {
-    typed::pattern_of(shell, &word.word)
+    // Bash gives `[[ ]]` extended globs whether or not `shopt -s extglob`
+    // is on, which is why this is not the `case` entry point.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    typed::conditional_pattern_of(shell, &word.word)
 }
 
 /*
