@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-22T00:26:46.748990409Z
+last_sync_at 2026-08-22T09:51:23.597906164Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -525,7 +525,6 @@ rule_versions (
     {id cmd.for-format, version 0}
     {id cmd.for-iteration, version 0}
     {id cmd.for-omitted-in, version 0}
-    {id cmd.format-descriptions-informal, version 0}
     {id cmd.function-definition-term, version 0}
     {id cmd.function-exit-status, version 0}
     {id cmd.function-format, version 0}
@@ -1946,6 +1945,13 @@ impl_evidence (
         compat.bash.options-builtins-dispatch
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.options-builtins-dispatch}
+    )}
+    {id implement-bash-arrays-declarations, covered_rules (
+        compat.bash.arrays-declarations
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.arrays-declarations}
+    ), rule_versions_seen (
+        {id compat.bash.arrays-declarations, version 0}
     )}
     {id implement-bash-mode-selection, covered_rules (
         compat.bash.default-isolation
@@ -3415,7 +3421,6 @@ impl_evidence (
         cmd.for-format
         cmd.for-iteration
         cmd.for-omitted-in
-        cmd.format-descriptions-informal
         cmd.function-definition-term
         cmd.function-exit-status
         cmd.function-format
@@ -3526,7 +3531,6 @@ impl_evidence (
         {impl_name shell, rule cmd.for-format}
         {impl_name shell, rule cmd.for-iteration}
         {impl_name shell, rule cmd.for-omitted-in}
-        {impl_name shell, rule cmd.format-descriptions-informal}
         {impl_name shell, rule cmd.function-definition-term}
         {impl_name shell, rule cmd.function-exit-status}
         {impl_name shell, rule cmd.function-format}
@@ -3637,7 +3641,6 @@ impl_evidence (
         {id cmd.for-format, version 0}
         {id cmd.for-iteration, version 0}
         {id cmd.for-omitted-in, version 0}
-        {id cmd.format-descriptions-informal, version 0}
         {id cmd.function-definition-term, version 0}
         {id cmd.function-exit-status, version 0}
         {id cmd.function-format, version 0}
@@ -5405,10 +5408,5 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
-    )}
-    {id implement-bash-arrays-declarations, covered_rules (
-        compat.bash.arrays-declarations
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.bash.arrays-declarations}
     )}
 )
