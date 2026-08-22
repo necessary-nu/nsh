@@ -154,6 +154,7 @@ pub(crate) struct TokenContext {
     reserved_words: bool,
     skip_newlines: bool,
     check_here_document_end: bool,
+    regex_operand: bool,
 }
 
 impl TokenContext {
@@ -162,6 +163,13 @@ impl TokenContext {
         reserved_words: false,
         skip_newlines: false,
         check_here_document_end: false,
+        regex_operand: false,
+    };
+    /// Read the next word as the operand of Bash's `=~`.
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    const REGEX_OPERAND: Self = Self {
+        regex_operand: true,
+        ..Self::NONE
     };
     const ALIASES: Self = Self {
         aliases: true,
@@ -202,6 +210,7 @@ impl TokenContext {
             reserved_words: self.reserved_words || other.reserved_words,
             skip_newlines: self.skip_newlines || other.skip_newlines,
             check_here_document_end: self.check_here_document_end || other.check_here_document_end,
+            regex_operand: self.regex_operand || other.regex_operand,
         }
     }
 }
@@ -732,7 +741,11 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         closing_token = Some(TokenKind::Done);
     } else if token == TokenKind::For {
         let var_token = read_token(shell, TokenContext::NONE)?;
+        // The arithmetic form takes its own closing token, because Bash
+        // lets it end at `}` as well as at `done`.
+        let mut arithmetic_form = false;
         if var_token.kind == TokenKind::DoubleParen {
+            arithmetic_form = true;
             parsed_command = Some(bash::arithmetic_for(shell, saved_line_number)?);
         } else {
             if var_token.kind != TokenKind::Word
@@ -784,7 +797,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
                 variable: var,
             }));
         }
-        closing_token = Some(TokenKind::Done);
+        closing_token = (!arithmetic_form).then_some(TokenKind::Done);
     } else if token == TokenKind::Case {
         if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Word {
             return Err(expected_token_error(shell, Some(TokenKind::Word)));
@@ -1156,7 +1169,11 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
     let mut token: Token;
 
     loop {
-        token = read_next_token(shell, context.check_here_document_end)?;
+        token = read_next_token(
+            shell,
+            context.check_here_document_end,
+            context.regex_operand,
+        )?;
 
         /*
          * eat newlines
@@ -1167,7 +1184,11 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
                 /* The alias bit is dropped with the rest: dash clears the
                  * whole of `checkkwd` here, and the bit lived in it. */
                 shell.input.clear_alias_boundary();
-                token = read_next_token(shell, context.check_here_document_end)?;
+                token = read_next_token(
+                    shell,
+                    context.check_here_document_end,
+                    context.regex_operand,
+                )?;
             }
         }
 
@@ -1249,7 +1270,11 @@ fn consume_newline_without_prompt(shell: &mut Shell) {
 // [spec:posix:syn:token.unquoted-blank-delimits]
 // [spec:posix:syn:token.comment]
 // [spec:posix:syn:token.start-new-word]
-fn read_next_token(shell: &mut Shell, check_here_document_end: bool) -> Result<Token, Error> {
+fn read_next_token(
+    shell: &mut Shell,
+    check_here_document_end: bool,
+    regex_operand: bool,
+) -> Result<Token, Error> {
     let mut input: InputUnit;
 
     if shell.input.token_pushed_back {
@@ -1269,7 +1294,7 @@ fn read_next_token(shell: &mut Shell, check_here_document_end: bool) -> Result<T
         if input.is(b' ') || input.is(b'\t') {
             shell.input.last_token_after_blank = true;
             continue;
-        } else if input.is(b'#') {
+        } else if input.is(b'#') && !regex_operand {
             loop {
                 input = read_input_unit(shell)?;
                 if input.is(b'\n') || input == InputUnit::EndOfInput {
@@ -1287,6 +1312,21 @@ fn read_next_token(shell: &mut Shell, check_here_document_end: bool) -> Result<T
             shell.input.last_token = TokenKind::Eof;
             shell.input.last_token_quoted = false;
             return Ok(Token::plain(TokenKind::Eof));
+        } else if regex_operand && !matches!(input.byte(), Some(b'&' | b';' | b')')) {
+            /* A regular-expression operand keeps `(`, `|` and the rest of
+             * its own syntax; only the operators Bash still needs to see
+             * fall through to the ordinary reader below. */
+            let token = read_word_token(
+                shell,
+                input,
+                SyntaxContext::Regex,
+                EofMark::None,
+                false,
+                check_here_document_end,
+            )?;
+            if token.kind != TokenKind::Blank {
+                return Ok(token);
+            }
         } else if input.is(b'&') {
             if read_unit_skipping_line_continuations(shell)?.is(b'&') {
                 shell.input.last_token = TokenKind::AndIf;
@@ -1388,6 +1428,7 @@ mod syntax_stack;
 mod word_lexer;
 
 pub(crate) use multibyte::MultibyteMode;
+use word_lexer::{ParenthesisOutcome, WordPosition, close_parenthesis};
 
 /// Result of decoding the input unit at the current lexer position.
 pub(crate) enum MultibyteInput {
@@ -1532,6 +1573,8 @@ struct WordLexer<'a> {
     /// Owned parse contexts, base first and current last. Popping retains the
     /// allocation, matching the C's reuse of its most recently popped level.
     syntax_frames: Vec<SyntaxFrame>,
+    /// The unquoted context a closing quote returns to.
+    base_syntax: SyntaxContext,
     check_here_document_end: bool,
     preserve_escapes: bool,
     dollar_single_quoted: bool,
@@ -1587,6 +1630,11 @@ fn read_word_token(
             parenthesis_depth: 0,
             double_quote_variable_depth: 0,
         }],
+        base_syntax: if syntax == SyntaxContext::Regex {
+            SyntaxContext::Regex
+        } else {
+            SyntaxContext::Base
+        },
         check_here_document_end,
         preserve_escapes: syntax == SyntaxContext::SingleQuoted,
         dollar_single_quoted: false,
@@ -1601,9 +1649,8 @@ fn read_word_token(
         finish_word_if_delimited(shell, &mut lexer)?;
         /* Until end of line or end of word */
         loop {
-            let field_splitting = lexer.current_syntax().syntax == SyntaxContext::Base
-                && lexer.current_syntax().variable_depth == 0
-                && lexer.current_syntax().backquote == BackquoteContext::None;
+            let position = WordPosition::of(lexer.current_syntax());
+            let field_splitting = position.field_splitting;
             bash::process_substitutions(shell, &mut lexer, field_splitting)?;
             /* The C's CHECKSTRSPACE, which permits max(MB_LEN_MAX, 23)
              * calls to USTPUTC, has no counterpart here: `getmbc`
@@ -1631,7 +1678,7 @@ fn read_word_token(
 
             match class {
                 SyntaxClass::Newline => {
-                    if field_splitting {
+                    if field_splitting || position.regex_word {
                         break 'word;
                     }
                     lexer.push_literal(lexer.input.expect_byte());
@@ -1671,26 +1718,11 @@ fn read_word_token(
                     lexer.current_syntax_mut().parenthesis_depth += 1;
                     lexer.push_literal(lexer.input.expect_byte());
                 }
-                SyntaxClass::RightParen => {
-                    if lexer.current_syntax().parenthesis_depth > 0 {
-                        lexer.current_syntax_mut().parenthesis_depth -= 1;
-                    } else if read_unit_skipping_line_continuations(shell)?.is(b')') {
-                        syntax_stack::pop(&mut lexer.syntax_frames);
-                        if lexer.check_here_document_end {
-                            lexer.push_literal(lexer.input.expect_byte());
-                            lexer.push_literal(b')');
-                        } else {
-                            lexer.output.push(WordToken::ArithmeticEnd);
-                        }
-                        lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
-                        continue;
-                    } else {
-                        unread_input_unit(shell);
-                    }
-                    if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
-                        lexer.push_literal(lexer.input.expect_byte());
-                    }
-                }
+                SyntaxClass::RightParen => match close_parenthesis(shell, &mut lexer, position)? {
+                    ParenthesisOutcome::EndWord => break 'word,
+                    ParenthesisOutcome::Advanced => continue,
+                    ParenthesisOutcome::Consumed => {}
+                },
                 SyntaxClass::Backquote => {
                     if lexer.current_syntax().backquote == BackquoteContext::Legacy {
                         syntax_stack::pop(&mut lexer.syntax_frames);
@@ -1709,7 +1741,7 @@ fn read_word_token(
                         syntax_stack::pop(&mut lexer.syntax_frames);
                         lexer.preserve_escapes = false;
                         lexer.push_literal(lexer.input.expect_byte());
-                    } else if field_splitting {
+                    } else if field_splitting || position.regex_boundary {
                         break 'word;
                     } else {
                         lexer.push_literal(lexer.input.expect_byte());
@@ -1724,7 +1756,10 @@ fn read_word_token(
     if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
         return Err(syntax_error(shell, b"Missing '))'"));
     }
-    if (lexer.current_syntax().syntax != SyntaxContext::Base && lexer.delimiter.is_none())
+    if (!matches!(
+        lexer.current_syntax().syntax,
+        SyntaxContext::Base | SyntaxContext::Regex
+    ) && lexer.delimiter.is_none())
         || lexer.current_syntax().backquote != BackquoteContext::None
     {
         return Err(syntax_error(shell, b"Unterminated quoted string"));

@@ -24,7 +24,9 @@
 //! that unwinding *runs `Drop`* (C's `longjmp` does not), and that a
 //! `longjmp` cannot cross a non-Rust frame.
 //!
+mod bash_arithmetic;
 mod bash_arrays;
+mod bash_conditional;
 
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
@@ -650,6 +652,17 @@ pub fn evaluate_tree(
                     &definition,
                 );
                 ExitStatus::SUCCESS
+            }
+            Node::Bash(crate::nodes::BashNode::Conditional(conditional)) => {
+                check_exit = true;
+                bash_conditional::evaluate(shell, conditional)?
+            }
+            Node::Bash(crate::nodes::BashNode::ArithmeticCommand(arithmetic)) => {
+                check_exit = true;
+                bash_arithmetic::command(shell, arithmetic)?
+            }
+            Node::Bash(crate::nodes::BashNode::ArithmeticFor(loop_command)) => {
+                flow!(bash_arithmetic::for_loop(shell, loop_command, context))
             }
             Node::Bash(_) => {
                 return Err(shell

@@ -12,6 +12,7 @@ use super::{
     unread_input_unit,
 };
 use crate::context::Shell;
+use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
 use crate::nodes::{
     BashArithmeticCommand, BashArithmeticFor, BashArrayAssignment, BashArrayElement,
@@ -73,8 +74,8 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
     let [init, test, update] = for_clauses(shell, text.as_bstr())?;
 
     let separator = read_token(shell, TokenContext::RESERVED_WORDS)?.kind;
-    let do_token = if separator == TokenKind::Do {
-        TokenKind::Do
+    let opener = if matches!(separator, TokenKind::Do | TokenKind::LeftBrace) {
+        separator
     } else if separator == TokenKind::Semicolon {
         read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind
     } else if separator == TokenKind::Newline {
@@ -83,13 +84,20 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
     } else {
         return Err(expected_token_error(shell, Some(TokenKind::Do)));
     };
-    if do_token != TokenKind::Do {
-        return Err(expected_token_error(shell, Some(TokenKind::Do)));
-    }
+    // Bash accepts a brace group as the loop body, which is the ksh
+    // spelling this whole construct came from.
+    let closer = match opener {
+        TokenKind::Do => TokenKind::Done,
+        TokenKind::LeftBrace => TokenKind::RightBrace,
+        _ => return Err(expected_token_error(shell, Some(TokenKind::Do))),
+    };
 
     let body = list(shell, ListMode::Compound)?
         .into_node()
         .ok_or_else(|| expected_token_error(shell, None))?;
+    if read_token(shell, TokenContext::RESERVED_WORDS)?.kind != closer {
+        return Err(expected_token_error(shell, Some(closer)));
+    }
     Ok(Node::Bash(BashNode::ArithmeticFor(BashArithmeticFor {
         line,
         init,
@@ -101,17 +109,17 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
 
 pub(super) fn conditional(shell: &mut Shell) -> Result<Node, Error> {
     let first = read_token(shell, TokenContext::NONE)?;
-    let expression = if closes_conditional(shell, first.kind, first.quoted) {
-        BashConditionalExpr::Empty
-    } else {
-        shell.input.token_pushed_back = true;
-        let expression = conditional_or(shell)?;
-        let close = read_token(shell, TokenContext::NONE)?;
-        if !closes_conditional(shell, close.kind, close.quoted) {
-            return Err(syntax_error(shell, b"expected ']]'"));
-        }
-        expression
-    };
+    // `[[ ]]` has nothing to be true or false about, and Bash rejects it
+    // while parsing rather than answering with a status.
+    if closes_conditional(shell, first.kind, first.quoted) {
+        return Err(syntax_error(shell, b"expected a conditional expression"));
+    }
+    shell.input.token_pushed_back = true;
+    let expression = conditional_or(shell)?;
+    let close = read_token(shell, TokenContext::NONE)?;
+    if !closes_conditional(shell, close.kind, close.quoted) {
+        return Err(syntax_error(shell, b"expected ']]'"));
+    }
 
     Ok(Node::Bash(BashNode::Conditional(BashConditional {
         expression,
@@ -471,7 +479,9 @@ fn for_clauses(shell: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
 fn conditional_or(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
     let mut left = conditional_and(shell)?;
     loop {
-        let token = read_token(shell, TokenContext::NONE)?.kind;
+        // A newline inside `[[ ]]` continues the expression, so a long
+        // condition can be written over several lines.
+        let token = read_token(shell, TokenContext::SKIP_NEWLINES)?.kind;
         if token != TokenKind::OrIf {
             shell.input.token_pushed_back = true;
             return Ok(left);
@@ -483,7 +493,7 @@ fn conditional_or(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
 fn conditional_and(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
     let mut left = conditional_primary(shell)?;
     loop {
-        let token = read_token(shell, TokenContext::NONE)?.kind;
+        let token = read_token(shell, TokenContext::SKIP_NEWLINES)?.kind;
         if token != TokenKind::AndIf {
             shell.input.token_pushed_back = true;
             return Ok(left);
@@ -527,18 +537,26 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
     let operator_token = read_token(shell, TokenContext::NONE)?;
     let operator = if operator_token.kind == super::TokenKind::Redirection {
         let redirection = shell.input.pending_redirection.take();
+        /* `[[ a < b ]]` compares strings, but `[[ a 3< b ]]` names a
+         * descriptor, and a descriptor is not an operator here. */
         match redirection.as_ref() {
-            Some(super::PendingRedirection::File { operator, .. })
-                if *operator == FileRedirectionOperator::Read =>
+            Some(super::PendingRedirection::File {
+                operator,
+                descriptor,
+            }) if *operator == FileRedirectionOperator::Read
+                && *descriptor == LogicalDescriptor::STDIN =>
             {
                 Some(NodeText::from(b"<".as_slice()))
             }
-            Some(super::PendingRedirection::File { operator, .. })
-                if *operator == FileRedirectionOperator::Write =>
+            Some(super::PendingRedirection::File {
+                operator,
+                descriptor,
+            }) if *operator == FileRedirectionOperator::Write
+                && *descriptor == LogicalDescriptor::STDOUT =>
             {
                 Some(NodeText::from(b">".as_slice()))
             }
-            _ => None,
+            _ => return Err(syntax_error(shell, b"unexpected redirection in '[[ ]]'")),
         }
     } else if operator_token.kind == TokenKind::Word
         && !operator_token.quoted
@@ -554,7 +572,12 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
         return Ok(BashConditionalExpr::Word(first.arg));
     };
 
-    let right_token = read_token(shell, TokenContext::NONE)?;
+    let context = if operator.as_bstr() == BStr::new(b"=~") {
+        TokenContext::REGEX_OPERAND
+    } else {
+        TokenContext::NONE
+    };
+    let right_token = read_token(shell, context)?;
     if right_token.kind != TokenKind::Word
         || closes_conditional(shell, right_token.kind, right_token.quoted)
     {

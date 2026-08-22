@@ -1,0 +1,689 @@
+//! POSIX extended regular expressions for Bash's `=~` operator.
+//!
+//! This is deliberately not part of [`crate::pattern`]: shell patterns and
+//! EREs share no syntax beyond the bracket expression, and conflating them
+//! is how `*` ends up meaning two things in one matcher. The compiler takes
+//! the operand's bytes together with the quote bit each byte carries out of
+//! word expansion, so a byte the shell quoted is a literal character here
+//! without a re-escaping round trip.
+//!
+//! Matching is leftmost-longest, as POSIX requires: the search takes the
+//! first start offset that matches at all, and at that offset explores the
+//! whole expression to keep the longest end. Exploration is bounded by a
+//! step budget so a pathological expression yields "no match" rather than
+//! an unbounded run.
+
+use bstr::BString;
+
+/// How much of the search space one match attempt may visit.
+const STEP_BUDGET: u64 = 400_000;
+
+/// The largest repetition count an interval may name.
+const MAX_REPEAT: u32 = 1000;
+
+/// A compiled extended regular expression.
+pub(crate) struct Regex {
+    root: Expr,
+    group_count: usize,
+}
+
+/// Byte offsets of the whole match and each capturing group.
+pub(crate) struct Captures {
+    pub(crate) groups: Vec<Option<(usize, usize)>>,
+}
+
+#[derive(Clone, Debug)]
+enum Expr {
+    Empty,
+    Literal(Vec<u8>),
+    AnyCharacter,
+    Bracket(Bracket),
+    Start,
+    End,
+    Sequence(Vec<Expr>),
+    Alternation(Vec<Expr>),
+    Repeat {
+        body: Box<Expr>,
+        min: u32,
+        max: Option<u32>,
+    },
+    Group {
+        index: usize,
+        body: Box<Expr>,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct Bracket {
+    negated: bool,
+    members: Vec<Member>,
+}
+
+#[derive(Clone, Debug)]
+enum Member {
+    Character(Vec<u8>),
+    Range(u8, u8),
+    Class(BString),
+    Collating(BString),
+}
+
+impl Regex {
+    /// Compile one operand. `quoted[i]` marks a byte that shell quoting
+    /// already made literal, so it never carries regular-expression syntax.
+    pub(crate) fn compile(bytes: &[u8], quoted: &[bool]) -> Result<Self, BString> {
+        let mut parser = Parser {
+            bytes,
+            quoted,
+            pos: 0,
+            groups: 0,
+        };
+        let root = parser.alternation()?;
+        if parser.pos != bytes.len() {
+            return Err(BString::from(&b"Unmatched ) or \\)"[..]));
+        }
+        Ok(Self {
+            root,
+            group_count: parser.groups,
+        })
+    }
+
+    /// Search `subject` for the leftmost-longest match.
+    pub(crate) fn search(&self, locale: &nsh_platform::Locale, subject: &[u8]) -> Option<Captures> {
+        let mut start = 0;
+        loop {
+            if let Some(captures) = self.match_at(locale, subject, start) {
+                return Some(captures);
+            }
+            if start >= subject.len() {
+                return None;
+            }
+            start = character_end(locale, subject, start);
+        }
+    }
+
+    fn match_at(
+        &self,
+        locale: &nsh_platform::Locale,
+        subject: &[u8],
+        start: usize,
+    ) -> Option<Captures> {
+        let mut matcher = Matcher {
+            locale,
+            subject,
+            groups: vec![None; self.group_count + 1],
+            steps: 0,
+        };
+        let mut longest: Option<Vec<Option<(usize, usize)>>> = None;
+        let mut best_end = 0;
+        matcher.matches(&self.root, start, &mut |state, end| {
+            if longest.is_none() || end > best_end {
+                best_end = end;
+                let mut groups = state.groups.clone();
+                groups[0] = Some((start, end));
+                longest = Some(groups);
+            }
+            false
+        });
+        longest.map(|groups| Captures { groups })
+    }
+}
+
+// ---- parsing ---------------------------------------------------------
+
+struct Parser<'a> {
+    bytes: &'a [u8],
+    quoted: &'a [bool],
+    pos: usize,
+    groups: usize,
+}
+
+impl Parser<'_> {
+    fn active(&self, at: usize, byte: u8) -> bool {
+        self.bytes.get(at) == Some(&byte) && !self.quoted.get(at).copied().unwrap_or(true)
+    }
+
+    fn here(&self, byte: u8) -> bool {
+        self.active(self.pos, byte)
+    }
+
+    fn alternation(&mut self) -> Result<Expr, BString> {
+        let mut branches = vec![self.sequence()?];
+        while self.here(b'|') {
+            self.pos += 1;
+            branches.push(self.sequence()?);
+        }
+        Ok(if branches.len() == 1 {
+            branches.pop().expect("one branch was just built")
+        } else {
+            Expr::Alternation(branches)
+        })
+    }
+
+    fn sequence(&mut self) -> Result<Expr, BString> {
+        let mut pieces: Vec<Expr> = Vec::new();
+        while self.pos < self.bytes.len() && !self.here(b'|') && !self.here(b')') {
+            let atom = self.atom()?;
+            pieces.push(self.quantified(atom)?);
+        }
+        Ok(match pieces.len() {
+            0 => Expr::Empty,
+            1 => pieces.pop().expect("one piece was just built"),
+            _ => Expr::Sequence(pieces),
+        })
+    }
+
+    /// Apply every quantifier that follows one atom.
+    fn quantified(&mut self, atom: Expr) -> Result<Expr, BString> {
+        let mut body = atom;
+        loop {
+            let (min, max) = if self.here(b'*') {
+                self.pos += 1;
+                (0, None)
+            } else if self.here(b'+') {
+                self.pos += 1;
+                (1, None)
+            } else if self.here(b'?') {
+                self.pos += 1;
+                (0, Some(1))
+            } else if self.here(b'{') {
+                match self.interval()? {
+                    Some(bounds) => bounds,
+                    None => return Ok(body),
+                }
+            } else {
+                return Ok(body);
+            };
+            if matches!(body, Expr::Start | Expr::End) {
+                return Err(BString::from(&b"Invalid preceding regular expression"[..]));
+            }
+            body = Expr::Repeat {
+                body: Box::new(body),
+                min,
+                max,
+            };
+        }
+    }
+
+    /// Parse `{n}`, `{n,}` or `{n,m}`. A brace that opens no interval is a
+    /// malformed expression, matching glibc rather than treating it as text.
+    fn interval(&mut self) -> Result<Option<(u32, Option<u32>)>, BString> {
+        let bad = || BString::from(&b"Invalid content of \\{\\}"[..]);
+        let mut at = self.pos + 1;
+        let Some(min) = self.digits(&mut at) else {
+            return Err(bad());
+        };
+        let max = if self.active(at, b',') {
+            at += 1;
+            self.digits(&mut at)
+        } else {
+            Some(min)
+        };
+        if !self.active(at, b'}') {
+            return Err(bad());
+        }
+        if min > MAX_REPEAT || max.is_some_and(|max| max > MAX_REPEAT) {
+            return Err(BString::from(&b"Regular expression too big"[..]));
+        }
+        if max.is_some_and(|max| max < min) {
+            return Err(bad());
+        }
+        self.pos = at + 1;
+        Ok(Some((min, max)))
+    }
+
+    fn digits(&self, at: &mut usize) -> Option<u32> {
+        let start = *at;
+        let mut value = 0u32;
+        while self.bytes.get(*at).is_some_and(|byte| {
+            byte.is_ascii_digit() && !self.quoted.get(*at).copied().unwrap_or(true)
+        }) {
+            value = value
+                .saturating_mul(10)
+                .saturating_add(u32::from(self.bytes[*at] - b'0'));
+            *at += 1;
+        }
+        (*at != start).then_some(value)
+    }
+
+    fn atom(&mut self) -> Result<Expr, BString> {
+        if self.here(b'(') {
+            self.pos += 1;
+            self.groups += 1;
+            let index = self.groups;
+            let body = self.alternation()?;
+            if !self.here(b')') {
+                return Err(BString::from(&b"Unmatched ( or \\("[..]));
+            }
+            self.pos += 1;
+            return Ok(Expr::Group {
+                index,
+                body: Box::new(body),
+            });
+        }
+        if self.here(b'[') {
+            return self.bracket();
+        }
+        if self.here(b'^') {
+            self.pos += 1;
+            return Ok(Expr::Start);
+        }
+        if self.here(b'$') {
+            self.pos += 1;
+            return Ok(Expr::End);
+        }
+        if self.here(b'.') {
+            self.pos += 1;
+            return Ok(Expr::AnyCharacter);
+        }
+        if self.here(b'*') || self.here(b'+') || self.here(b'?') {
+            return Err(BString::from(&b"Invalid preceding regular expression"[..]));
+        }
+        // A brace reaches an atom only when no atom precedes it, so it can
+        // never open the interval that would make it syntax.
+        if self.here(b'{') {
+            return Err(BString::from(&b"Invalid content of \\{\\}"[..]));
+        }
+        let start = self.pos;
+        self.pos = literal_end(self.bytes, self.pos);
+        Ok(Expr::Literal(self.bytes[start..self.pos].to_vec()))
+    }
+
+    /// Parse one bracket expression.
+    ///
+    /// Quoting inside the brackets is discarded rather than honoured, so
+    /// `["a-z"]` is the range and not three literals. That is not a
+    /// simplification: every shell that implements `=~` agrees on it,
+    /// because the operand reaches `regcomp` with the shell's quotes
+    /// already removed and only the brackets left to interpret.
+    // [spec:posix:syn:pattern.bracket-expression]
+    fn bracket(&mut self) -> Result<Expr, BString> {
+        let unmatched = || BString::from(&b"Unmatched [, [^, [:, [., or [="[..]);
+        let mut at = self.pos + 1;
+        let negated = self.bytes.get(at) == Some(&b'^');
+        if negated {
+            at += 1;
+        }
+        let mut members = Vec::new();
+        let mut first = true;
+        loop {
+            if at >= self.bytes.len() {
+                return Err(unmatched());
+            }
+            if self.bytes[at] == b']' && !first {
+                self.pos = at + 1;
+                return Ok(Expr::Bracket(Bracket { negated, members }));
+            }
+            first = false;
+            if self.bytes[at] == b'['
+                && let Some(next) = self.bracket_member(at, &mut members)
+            {
+                at = next;
+                continue;
+            }
+            let member_end = literal_end(self.bytes, at);
+            let member = &self.bytes[at..member_end];
+            at = member_end;
+            if self.bytes.get(at) == Some(&b'-')
+                && at + 1 < self.bytes.len()
+                && self.bytes[at + 1] != b']'
+            {
+                let end = literal_end(self.bytes, at + 1);
+                if member.len() == 1 && end - (at + 1) == 1 {
+                    members.push(Member::Range(member[0], self.bytes[at + 1]));
+                } else {
+                    members.push(Member::Character(member.to_vec()));
+                    members.push(Member::Character(self.bytes[at + 1..end].to_vec()));
+                }
+                at = end;
+                continue;
+            }
+            members.push(Member::Character(member.to_vec()));
+        }
+    }
+
+    /// Recognise `[:class:]`, `[.collate.]` and `[=equivalence=]`.
+    fn bracket_member(&self, at: usize, members: &mut Vec<Member>) -> Option<usize> {
+        let delimiter = *self.bytes.get(at + 1)?;
+        if !matches!(delimiter, b':' | b'.' | b'=') {
+            return None;
+        }
+        let mut close = at + 2;
+        while close + 1 < self.bytes.len() {
+            if self.bytes[close] == delimiter && self.bytes[close + 1] == b']' {
+                break;
+            }
+            close += 1;
+        }
+        if close + 1 >= self.bytes.len() {
+            return None;
+        }
+        let body = BString::from(&self.bytes[at + 2..close]);
+        if body.is_empty() {
+            return None;
+        }
+        members.push(if delimiter == b':' {
+            Member::Class(body)
+        } else {
+            Member::Collating(body)
+        });
+        Some(close + 2)
+    }
+}
+
+/// One literal character, treating a malformed multibyte lead as one byte.
+fn literal_end(bytes: &[u8], at: usize) -> usize {
+    let width = utf8_width(bytes, at);
+    (at + width).min(bytes.len())
+}
+
+fn utf8_width(bytes: &[u8], at: usize) -> usize {
+    let Some(&lead) = bytes.get(at) else {
+        return 1;
+    };
+    let width = match lead {
+        0x00..=0x7f => 1,
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => return 1,
+    };
+    if bytes
+        .get(at + 1..at + width)
+        .is_some_and(|tail| tail.iter().all(|byte| (0x80..0xc0).contains(byte)))
+    {
+        width
+    } else {
+        1
+    }
+}
+
+fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usize {
+    if at >= bytes.len() {
+        return at;
+    }
+    let width = locale
+        .multibyte_len(&bytes[at..])
+        .filter(|width| *width > 0)
+        .unwrap_or(1);
+    (at + width).min(bytes.len())
+}
+
+// ---- matching --------------------------------------------------------
+
+struct Matcher<'a> {
+    locale: &'a nsh_platform::Locale,
+    subject: &'a [u8],
+    groups: Vec<Option<(usize, usize)>>,
+    steps: u64,
+}
+
+type Continue<'a> = dyn FnMut(&mut Matcher<'_>, usize) -> bool + 'a;
+
+impl Matcher<'_> {
+    fn matches(&mut self, expr: &Expr, pos: usize, next: &mut Continue<'_>) -> bool {
+        self.steps += 1;
+        if self.steps > STEP_BUDGET {
+            return false;
+        }
+        match expr {
+            Expr::Empty => next(self, pos),
+            Expr::Literal(bytes) => match self.subject.get(pos..pos + bytes.len()) {
+                Some(found) if found == bytes.as_slice() => next(self, pos + bytes.len()),
+                _ => false,
+            },
+            Expr::AnyCharacter | Expr::Bracket(_) => match self.single(expr, pos) {
+                Some(end) => next(self, end),
+                None => false,
+            },
+            Expr::Start => pos == 0 && next(self, pos),
+            Expr::End => pos == self.subject.len() && next(self, pos),
+            Expr::Sequence(parts) => self.match_sequence(parts, pos, next),
+            Expr::Alternation(branches) => {
+                for branch in branches {
+                    if self.matches(branch, pos, next) {
+                        return true;
+                    }
+                }
+                false
+            }
+            Expr::Repeat { body, min, max } => self.match_repeat(body, *min, *max, 0, pos, next),
+            Expr::Group { index, body } => self.match_group(*index, body, pos, next),
+        }
+    }
+
+    fn match_sequence(&mut self, parts: &[Expr], pos: usize, next: &mut Continue<'_>) -> bool {
+        match parts.split_first() {
+            None => next(self, pos),
+            Some((head, tail)) => self.matches(head, pos, &mut |state, at| {
+                state.match_sequence(tail, at, next)
+            }),
+        }
+    }
+
+    fn match_group(
+        &mut self,
+        index: usize,
+        body: &Expr,
+        pos: usize,
+        next: &mut Continue<'_>,
+    ) -> bool {
+        let saved = self.groups[index];
+        let matched = self.matches(body, pos, &mut |state, at| {
+            let previous = state.groups[index];
+            state.groups[index] = Some((pos, at));
+            if next(state, at) {
+                return true;
+            }
+            state.groups[index] = previous;
+            false
+        });
+        if !matched {
+            self.groups[index] = saved;
+        }
+        matched
+    }
+
+    fn match_repeat(
+        &mut self,
+        body: &Expr,
+        min: u32,
+        max: Option<u32>,
+        count: u32,
+        pos: usize,
+        next: &mut Continue<'_>,
+    ) -> bool {
+        if count == 0
+            && let Some(outcome) = self.repeat_single(body, min, max, pos, next)
+        {
+            return outcome;
+        }
+        if count < min {
+            return self.matches(body, pos, &mut |state, at| {
+                state.match_repeat(body, min, max, count + 1, at, next)
+            });
+        }
+        if max.is_none_or(|max| count < max)
+            && self.matches(body, pos, &mut |state, at| {
+                at != pos && state.match_repeat(body, min, max, count + 1, at, next)
+            })
+        {
+            return true;
+        }
+        next(self, pos)
+    }
+
+    /// Repeat a single-character atom without recursing once per repetition,
+    /// which is what keeps `.*` over a long subject off the call stack.
+    fn repeat_single(
+        &mut self,
+        body: &Expr,
+        min: u32,
+        max: Option<u32>,
+        pos: usize,
+        next: &mut Continue<'_>,
+    ) -> Option<bool> {
+        if !matches!(
+            body,
+            Expr::AnyCharacter | Expr::Bracket(_) | Expr::Literal(_)
+        ) {
+            return None;
+        }
+        let mut offsets = vec![pos];
+        let mut at = pos;
+        while max.is_none_or(|max| (offsets.len() as u32) <= max) {
+            let Some(end) = self.single(body, at) else {
+                break;
+            };
+            at = end;
+            offsets.push(at);
+        }
+        let lowest = min as usize;
+        if offsets.len() <= lowest {
+            return Some(false);
+        }
+        for &end in offsets[lowest..].iter().rev() {
+            if next(self, end) {
+                return Some(true);
+            }
+        }
+        Some(false)
+    }
+
+    /// Match one single-character atom, returning where it ends.
+    fn single(&self, expr: &Expr, pos: usize) -> Option<usize> {
+        if pos >= self.subject.len() {
+            return None;
+        }
+        let end = character_end(self.locale, self.subject, pos);
+        match expr {
+            Expr::AnyCharacter => Some(end),
+            Expr::Literal(bytes) => (self.subject.get(pos..pos + bytes.len())
+                == Some(bytes.as_slice()))
+            .then_some(pos + bytes.len()),
+            Expr::Bracket(bracket) => self.bracket_matches(bracket, pos, end).then_some(end),
+            _ => None,
+        }
+    }
+
+    fn bracket_matches(&self, bracket: &Bracket, pos: usize, end: usize) -> bool {
+        let character = &self.subject[pos..end];
+        let mut found = false;
+        for member in &bracket.members {
+            found |= match member {
+                Member::Character(bytes) => bytes.as_slice() == character,
+                Member::Range(low, high) => {
+                    character.len() == 1 && (*low..=*high).contains(&character[0])
+                }
+                Member::Class(name) => {
+                    self.locale
+                        .wide_class_matches(name, &self.subject[pos..], end - pos)
+                        == Some(true)
+                }
+                Member::Collating(body) => self.collating_matches(body, character),
+            };
+            if found {
+                break;
+            }
+        }
+        found != bracket.negated
+    }
+
+    fn collating_matches(&self, body: &BString, character: &[u8]) -> bool {
+        let mut expression = Vec::with_capacity(body.len() + 6);
+        expression.extend_from_slice(b"[[=");
+        expression.extend_from_slice(body);
+        expression.extend_from_slice(b"=]]");
+        self.locale
+            .collating_bracket_matches(&expression, character)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn compile(pattern: &[u8]) -> Regex {
+        Regex::compile(pattern, &vec![false; pattern.len()]).expect("pattern compiles")
+    }
+
+    fn find(pattern: &[u8], subject: &[u8]) -> Option<Vec<Option<(usize, usize)>>> {
+        let locale = nsh_platform::Locale::c().expect("the C locale exists");
+        compile(pattern)
+            .search(&locale, subject)
+            .map(|captures| captures.groups)
+    }
+
+    #[test]
+    fn a_match_is_unanchored_at_both_ends() {
+        assert!(find(b"a", b"bar").is_some());
+        assert!(find(b"X", b"bar").is_none());
+    }
+
+    #[test]
+    fn groups_report_their_spans() {
+        let groups = find(b"([a-z]+)([0-9]+)", b"foo123").expect("the pattern matches");
+        assert_eq!(groups[0], Some((0, 6)));
+        assert_eq!(groups[1], Some((0, 3)));
+        assert_eq!(groups[2], Some((3, 6)));
+    }
+
+    #[test]
+    fn alternation_takes_the_longest_match() {
+        let groups = find(b"a|ab", b"ab").expect("the pattern matches");
+        assert_eq!(groups[0], Some((0, 2)));
+    }
+
+    #[test]
+    fn nested_empty_groups_are_retained() {
+        let groups = find(b"([a-z]+)(()z)", b"zz").expect("the pattern matches");
+        assert_eq!(groups[1], Some((0, 1)));
+        assert_eq!(groups[3], Some((1, 1)));
+    }
+
+    #[test]
+    fn quoted_bytes_lose_their_syntax() {
+        let regex = Regex::compile(b"a|b", &[false, true, false]).expect("pattern compiles");
+        let locale = nsh_platform::Locale::c().expect("the C locale exists");
+        assert!(regex.search(&locale, b"a|b").is_some());
+        assert!(regex.search(&locale, b"a").is_none());
+    }
+
+    #[test]
+    fn malformed_expressions_are_rejected() {
+        for pattern in [b"*".as_slice(), b"{", b")a(", b"[abc", b"a{2,1}"] {
+            let quoted = vec![false; pattern.len()];
+            assert!(Regex::compile(pattern, &quoted).is_err());
+        }
+    }
+
+    #[test]
+    fn intervals_bound_repetition() {
+        assert!(find(b"^a{2,3}$", b"aa").is_some());
+        assert!(find(b"^a{2,3}$", b"a").is_none());
+        assert!(find(b"^a{2,3}$", b"aaaa").is_none());
+    }
+
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic/test]
+    #[test]
+    fn a_bracket_expression_ignores_shell_quoting() {
+        let pattern = b"[a-z]";
+        let quoted = vec![false, true, true, true, false];
+        let regex = Regex::compile(pattern, &quoted).expect("pattern compiles");
+        let locale = nsh_platform::Locale::c().expect("the C locale exists");
+        assert!(regex.search(&locale, b"b").is_some());
+        assert!(regex.search(&locale, b"-").is_none());
+    }
+
+    #[test]
+    fn anchors_and_classes_apply() {
+        assert!(find(b"^[[:digit:]]+$", b"1234").is_some());
+        assert!(find(b"^[[:digit:]]+$", b"12a4").is_none());
+        assert!(find(b"^[^0-9]+$", b"abc").is_some());
+    }
+
+    #[test]
+    fn a_long_subject_does_not_exhaust_the_stack() {
+        let subject = vec![b'x'; 200_000];
+        assert!(find(b"^x*$", &subject).is_some());
+    }
+}

@@ -516,6 +516,19 @@ pub fn update_ifs_cache(shell: &mut crate::context::Shell, ifs: &BStr) {
     };
 }
 
+/// Expand a `[[ ... ]]` operand that is used as a shell pattern.
+///
+/// The quote bit each byte carries is what distinguishes `[[ x == $p ]]`
+/// from `[[ x == "$p" ]]`, so the pattern is returned rather than a
+/// match result: the regular-expression operator needs the same bits.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+pub(crate) fn conditional_pattern(
+    shell: &mut crate::context::Shell,
+    word: &crate::nodes::WordNode,
+) -> Result<crate::pattern::Pattern, Error> {
+    typed::pattern_of(shell, &word.word)
+}
+
 /*
  * See if a pattern matches in a case statement.
  */
@@ -531,5 +544,6 @@ pub fn case_pattern_matches(
             .diagnostics()
             .shell_error(b"case matching requires a word node"));
     };
-    typed::case_matches(shell, &word.word, value)
+    let pattern = typed::pattern_of(shell, &word.word)?;
+    Ok(pattern.matches(&shell.locale, value))
 }

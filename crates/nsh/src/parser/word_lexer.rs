@@ -1,6 +1,7 @@
 use super::{
     BackquoteContext, Error, InputUnit, MultibyteInput, MultibyteMode, Shell, SyntaxContext,
-    SyntaxFrame, WordLexer, read_input_unit, read_multibyte_character, unread_input_unit,
+    SyntaxFrame, WordLexer, read_input_unit, read_multibyte_character, read_unit_for_syntax,
+    read_unit_skipping_line_continuations, syntax_stack, unread_input_unit,
 };
 use crate::word::{QuoteBoundary, WordToken};
 use bstr::BString;
@@ -70,7 +71,7 @@ impl WordLexer<'_> {
                 self.dollar_single_quoted = false;
             }
 
-            self.current_syntax_mut().syntax = SyntaxContext::Base;
+            self.current_syntax_mut().syntax = self.base_syntax;
             self.current_syntax_mut().double_quoted = false;
         }
 
@@ -130,4 +131,75 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         }
     }
     Ok(())
+}
+
+/// What the current parse context says about where a word may end.
+///
+/// The three facts travel together because they are read together: a
+/// Bash regular-expression operand ends at a blank or a shell operator,
+/// but only outside its own parentheses, so `(a  b)` stays one word.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+#[derive(Clone, Copy)]
+pub(super) struct WordPosition {
+    pub(super) field_splitting: bool,
+    pub(super) regex_word: bool,
+    pub(super) regex_boundary: bool,
+}
+
+impl WordPosition {
+    pub(super) fn of(frame: &SyntaxFrame) -> Self {
+        let outermost = frame.variable_depth == 0 && frame.backquote == BackquoteContext::None;
+        let regex_word = frame.syntax == SyntaxContext::Regex && outermost;
+        Self {
+            field_splitting: frame.syntax == SyntaxContext::Base && outermost,
+            regex_word,
+            regex_boundary: regex_word && frame.parenthesis_depth == 0,
+        }
+    }
+}
+
+/// What the caller must do once a `)` has been handled.
+pub(super) enum ParenthesisOutcome {
+    /// The word ends here.
+    EndWord,
+    /// The byte was consumed and the next input unit is already read.
+    Advanced,
+    /// The byte was consumed; the caller reads the next input unit.
+    Consumed,
+}
+
+/// Handle one `)` in whichever parse context is current.
+// [spec:dash:sem:parser.readtoken1-fn]
+pub(super) fn close_parenthesis(
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+    position: WordPosition,
+) -> Result<ParenthesisOutcome, Error> {
+    if position.regex_boundary {
+        return Ok(ParenthesisOutcome::EndWord);
+    }
+    if position.regex_word {
+        lexer.current_syntax_mut().parenthesis_depth -= 1;
+        lexer.push_literal(lexer.input.expect_byte());
+        return Ok(ParenthesisOutcome::Consumed);
+    }
+    if lexer.current_syntax().parenthesis_depth > 0 {
+        lexer.current_syntax_mut().parenthesis_depth -= 1;
+    } else if read_unit_skipping_line_continuations(shell)?.is(b')') {
+        syntax_stack::pop(&mut lexer.syntax_frames);
+        if lexer.check_here_document_end {
+            lexer.push_literal(lexer.input.expect_byte());
+            lexer.push_literal(b')');
+        } else {
+            lexer.output.push(WordToken::ArithmeticEnd);
+        }
+        lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
+        return Ok(ParenthesisOutcome::Advanced);
+    } else {
+        unread_input_unit(shell);
+    }
+    if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
+        lexer.push_literal(lexer.input.expect_byte());
+    }
+    Ok(ParenthesisOutcome::Consumed)
 }

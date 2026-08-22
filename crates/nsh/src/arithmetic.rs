@@ -8,13 +8,21 @@
 //! now owns its byte offset, tokens carry their values, and a parser owns its
 //! lookahead. One shell evaluation cannot overwrite another's state.
 
-use bstr::{BStr, ByteSlice};
+use bstr::{BStr, BString, ByteSlice};
 
 use crate::context::Shell;
 use crate::error::Error;
+use crate::options::{Dialect, ShellOption};
+use crate::variables::arrays::{self, ArraySelector};
 use crate::variables::{
-    CallbackPolicy, VariableAttributes, lookup_integer_bytes, set_integer_bytes,
+    CallbackPolicy, VariableAttributes, lookup_bytes, lookup_integer_bytes, set_integer_bytes,
 };
+
+/// How deep one variable's value may be re-read as an expression.
+///
+/// Bash evaluates a name's *value* as an expression, so `a=b; b=a` is a
+/// cycle rather than a number. The limit turns that into a diagnostic.
+const MAX_NAME_DEPTH: u32 = 32;
 
 /// The value carried by an arithmetic token.
 ///
@@ -25,17 +33,33 @@ enum Token<'a> {
     End,
     Bad,
     Number(i64),
-    Variable(&'a BStr),
+    Variable(Name<'a>),
     Assign(Option<BinaryOperator>),
     LogicalOr,
     LogicalAnd,
     Not,
     BitNot,
     Binary(BinaryOperator),
+    Power,
+    Increment,
+    Decrement,
+    Comma,
     LParen,
     RParen,
     Question,
     Colon,
+}
+
+/// A name an expression can read or assign.
+///
+/// The subscript travels with the base rather than as separate bracket
+/// tokens, because `a[i]` is one lvalue: the expression `a[i]++` has to
+/// read and write the same element, and a parser that had already split
+/// the brackets apart could not say so.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Name<'a> {
+    base: &'a BStr,
+    subscript: Option<&'a BStr>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,6 +80,7 @@ enum BinaryOperator {
     BitXor,
     Divide,
     NotEqual,
+    Power,
 }
 
 impl BinaryOperator {
@@ -70,6 +95,9 @@ impl BinaryOperator {
             Self::BitAnd => 5,
             Self::BitXor => 6,
             Self::BitOr => 7,
+            // `**` is parsed by its own right-associative level and never
+            // reaches the precedence climb; the arm exists for `**=`.
+            Self::Power => 0,
         }
     }
 
@@ -83,14 +111,16 @@ struct Lexer<'a> {
     input: &'a [u8],
     pos: usize,
     locale: nsh_platform::Locale,
+    bash: bool,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(input: &'a BStr, locale: nsh_platform::Locale) -> Self {
+    fn new(input: &'a BStr, locale: nsh_platform::Locale, bash: bool) -> Self {
         Self {
             input: input.as_ref(),
             pos: 0,
             locale,
+            bash,
         }
     }
 
@@ -111,8 +141,14 @@ impl<'a> Lexer<'a> {
     // [spec:dash:sem:arith-yylex.yylex-fn]
     // [spec:dash:sem:expand.yylex-fn]
     fn next(&mut self) -> Token<'a> {
-        while matches!(self.peek(0), Some(b' ' | b'\t' | b'\n')) {
-            self.pos += 1;
+        loop {
+            match self.peek(0) {
+                Some(b' ' | b'\t' | b'\n') => self.pos += 1,
+                // Bash removes quoting before it evaluates, so `a['k']`
+                // and `i = '3'` name the same things as their bare forms.
+                Some(b'\'' | b'"') if self.bash => self.pos += 1,
+                _ => break,
+            }
         }
 
         let Some(byte) = self.peek(0) else {
@@ -133,7 +169,9 @@ impl<'a> Lexer<'a> {
             {
                 self.pos += 1;
             }
-            return Token::Variable(self.input[start..self.pos].as_bstr());
+            let base = self.input[start..self.pos].as_bstr();
+            let subscript = if self.bash { self.subscript() } else { None };
+            return Token::Variable(Name { base, subscript });
         }
 
         self.pos += 1;
@@ -196,14 +234,24 @@ impl<'a> Lexer<'a> {
                     Token::Not
                 }
             }
+            b',' if self.bash => Token::Comma,
             b'(' => Token::LParen,
             b')' => Token::RParen,
             b'~' => Token::BitNot,
             b'?' => Token::Question,
             b':' => Token::Colon,
+            b'*' if self.bash && self.take_if(b'*') => {
+                if self.take_if(b'=') {
+                    Token::Assign(Some(BinaryOperator::Power))
+                } else {
+                    Token::Power
+                }
+            }
             b'*' => self.binary_or_assign(BinaryOperator::Multiply),
             b'/' => self.binary_or_assign(BinaryOperator::Divide),
             b'%' => self.binary_or_assign(BinaryOperator::Remainder),
+            b'+' if self.bash && self.take_if(b'+') => Token::Increment,
+            b'-' if self.bash && self.take_if(b'-') => Token::Decrement,
             b'+' => self.binary_or_assign(BinaryOperator::Add),
             b'-' => self.binary_or_assign(BinaryOperator::Subtract),
             b'^' => self.binary_or_assign(BinaryOperator::BitXor),
@@ -217,6 +265,52 @@ impl<'a> Lexer<'a> {
         } else {
             Token::Binary(op)
         }
+    }
+
+    /// Capture the bracketed subscript that follows a name, if any.
+    fn subscript(&mut self) -> Option<&'a BStr> {
+        if self.peek(0) != Some(b'[') {
+            return None;
+        }
+        let start = self.pos + 1;
+        let mut depth = 1usize;
+        let mut at = start;
+        while let Some(byte) = self.input.get(at).copied() {
+            match byte {
+                b'[' => depth += 1,
+                b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        self.pos = at + 1;
+                        return Some(self.input[start..at].as_bstr());
+                    }
+                }
+                _ => {}
+            }
+            at += 1;
+        }
+        None
+    }
+
+    /// Read `base#digits`, Bash's explicit-radix literal.
+    fn radix_literal(&mut self, base: i64) -> Token<'a> {
+        if !(2..=64).contains(&base) {
+            return Token::Bad;
+        }
+        self.pos += 1;
+        let start = self.pos;
+        let mut value = 0i64;
+        while let Some(digit) = self.peek(0).and_then(radix_digit) {
+            if i64::from(digit) >= base {
+                break;
+            }
+            value = value.saturating_mul(base).saturating_add(i64::from(digit));
+            self.pos += 1;
+        }
+        if self.pos == start {
+            return Token::Bad;
+        }
+        Token::Number(value)
     }
 
     fn number(&mut self) -> Token<'a> {
@@ -242,7 +336,22 @@ impl<'a> Lexer<'a> {
                 .saturating_add(digit as i64);
             self.pos += 1;
         }
+        if self.bash && self.peek(0) == Some(b'#') && base == 10 {
+            return self.radix_literal(value);
+        }
         Token::Number(value)
+    }
+}
+
+/// Digit values for `base#digits`, whose alphabet runs past base 36.
+fn radix_digit(byte: u8) -> Option<u32> {
+    match byte {
+        b'0'..=b'9' => Some(u32::from(byte - b'0')),
+        b'a'..=b'z' => Some(u32::from(byte - b'a') + 10),
+        b'A'..=b'Z' => Some(u32::from(byte - b'A') + 36),
+        b'@' => Some(62),
+        b'_' => Some(63),
+        _ => None,
     }
 }
 
@@ -260,14 +369,17 @@ struct Parser<'a, 'shell> {
     input: &'a BStr,
     tokens: Vec<Token<'a>>,
     pos: usize,
+    bash: bool,
+    depth: u32,
 }
 
 impl<'a, 'shell> Parser<'a, 'shell> {
     // The C header's `arith_lex_reset()` was an empty macro in this build.
     // Local lexer state makes reset synonymous with constructing a parser.
     // [spec:dash:sem:expand.arith-lex-reset-fn]
-    fn new(shell: &'shell mut Shell, input: &'a BStr) -> Self {
-        let mut lexer = Lexer::new(input, shell.locale.clone());
+    fn new(shell: &'shell mut Shell, input: &'a BStr, depth: u32) -> Self {
+        let bash = shell.options.dialect() == Dialect::Bash;
+        let mut lexer = Lexer::new(input, shell.locale.clone(), bash);
         let mut tokens = Vec::new();
         loop {
             let token = lexer.next();
@@ -281,6 +393,8 @@ impl<'a, 'shell> Parser<'a, 'shell> {
             input,
             tokens,
             pos: 0,
+            bash,
+            depth,
         }
     }
 
@@ -313,6 +427,17 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         self.shell.diagnostics().shell_error(&text)
     }
 
+    /// Bash's comma operator: evaluate each side, answer with the right.
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    fn comma(&mut self, evaluate: bool) -> Result<i64, Error> {
+        let mut value = self.assignment(evaluate)?;
+        while self.current() == Token::Comma {
+            self.advance();
+            value = self.assignment(evaluate)?;
+        }
+        Ok(value)
+    }
+
     // [spec:dash:sem:arith-yacc.assignment-fn]
     fn assignment(&mut self, evaluate: bool) -> Result<i64, Error> {
         if let (Token::Variable(name), Token::Assign(op)) = (self.current(), self.peek(1)) {
@@ -322,20 +447,76 @@ impl<'a, 'shell> Parser<'a, 'shell> {
                 return Ok(result);
             }
             let value = if let Some(op) = op {
-                let current = lookup_integer_bytes(self.shell, name)?;
+                let current = self.read(name)?;
                 self.apply(op, current, result)?
             } else {
                 result
             };
+            return self.write(name, value);
+        }
+        self.conditional(evaluate)
+    }
+
+    /// Read one name, or one array element.
+    fn read(&mut self, name: Name<'a>) -> Result<i64, Error> {
+        let Some(subscript) = name.subscript else {
+            return self.scalar(name.base);
+        };
+        let subscript = unquote(subscript);
+        let selector = arrays::resolve_selector(self.shell, name.base, subscript.as_bstr())?;
+        let text = element_text(self.shell, name.base, &selector);
+        self.value_of(text)
+    }
+
+    /// Read one plain name. Bash evaluates the stored text as an
+    /// expression, which is what makes `x=1+2; $((x))` three.
+    fn scalar(&mut self, name: &BStr) -> Result<i64, Error> {
+        if !self.bash {
+            return lookup_integer_bytes(self.shell, name);
+        }
+        match lookup_bytes(self.shell, name) {
+            Some(value) => self.value_of(value),
+            None if self.shell.options.enabled(ShellOption::Nounset) => {
+                let mut message = name.to_vec();
+                message.extend_from_slice(b": parameter not set");
+                Err(self.shell.diagnostics().shell_error(&message))
+            }
+            None => Ok(0),
+        }
+    }
+
+    fn value_of(&mut self, text: BString) -> Result<i64, Error> {
+        if text.iter().all(u8::is_ascii_whitespace) {
+            return Ok(0);
+        }
+        if self.depth >= MAX_NAME_DEPTH {
+            return Err(self.error(b"expression recursion level exceeded"));
+        }
+        evaluate_at_depth(self.shell, text.as_bstr(), self.depth + 1)
+    }
+
+    /// Assign one name, or one array element.
+    fn write(&mut self, name: Name<'a>, value: i64) -> Result<i64, Error> {
+        if name.subscript.is_none() {
             return set_integer_bytes(
                 self.shell,
-                name,
+                name.base,
                 value,
                 VariableAttributes::NONE,
                 CallbackPolicy::Run,
             );
         }
-        self.conditional(evaluate)
+        let subscript = unquote(name.subscript.unwrap_or_default());
+        let selector = arrays::resolve_selector(self.shell, name.base, subscript.as_bstr())?;
+        let text = value.to_string();
+        arrays::assign_element(
+            self.shell,
+            name.base,
+            &selector,
+            BStr::new(text.as_bytes()),
+            false,
+        )?;
+        Ok(value)
     }
 
     // [spec:dash:sem:arith-yacc.cond-fn]
@@ -382,8 +563,23 @@ impl<'a, 'shell> Parser<'a, 'shell> {
 
     // [spec:dash:sem:arith-yacc.binop-fn]
     fn binary(&mut self, evaluate: bool) -> Result<i64, Error> {
-        let left = self.primary(evaluate)?;
+        let left = self.power(evaluate)?;
         self.binary_rhs(left, 1, evaluate)
+    }
+
+    /// `**`, which is right-associative and binds tighter than a sign.
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    fn power(&mut self, evaluate: bool) -> Result<i64, Error> {
+        let base = self.primary(evaluate)?;
+        if self.current() != Token::Power {
+            return Ok(base);
+        }
+        self.advance();
+        let exponent = self.power(evaluate)?;
+        if !evaluate {
+            return Ok(exponent);
+        }
+        self.apply(BinaryOperator::Power, base, exponent)
     }
 
     // [spec:dash:sem:arith-yacc.binop2-fn]
@@ -397,7 +593,7 @@ impl<'a, 'shell> Parser<'a, 'shell> {
                 return Ok(left);
             }
             self.advance();
-            let mut right = self.primary(evaluate)?;
+            let mut right = self.power(evaluate)?;
             if let Token::Binary(next) = self.current() {
                 if next.binding_power() > power {
                     right = self.binary_rhs(right, power + 1, evaluate)?;
@@ -415,27 +611,50 @@ impl<'a, 'shell> Parser<'a, 'shell> {
     fn primary(&mut self, evaluate: bool) -> Result<i64, Error> {
         match self.advance() {
             Token::Number(value) => Ok(value),
-            Token::Variable(name) => {
-                if evaluate {
-                    lookup_integer_bytes(self.shell, name)
-                } else {
-                    Ok(0)
-                }
-            }
+            Token::Variable(name) => self.name_primary(name, evaluate),
+            Token::Increment => self.step(1, evaluate),
+            Token::Decrement => self.step(-1, evaluate),
             Token::LParen => {
-                let value = self.assignment(evaluate)?;
+                let value = self.comma(evaluate)?;
                 if self.current() != Token::RParen {
                     return Err(self.error(b"expecting ')'"));
                 }
                 self.advance();
                 Ok(value)
             }
-            Token::Binary(BinaryOperator::Add) => self.primary(evaluate),
-            Token::Binary(BinaryOperator::Subtract) => Ok(self.primary(evaluate)?.wrapping_neg()),
-            Token::Not => Ok((self.primary(evaluate)? == 0) as i64),
-            Token::BitNot => Ok(!self.primary(evaluate)?),
+            Token::Binary(BinaryOperator::Add) => self.power(evaluate),
+            Token::Binary(BinaryOperator::Subtract) => Ok(self.power(evaluate)?.wrapping_neg()),
+            Token::Not => Ok((self.power(evaluate)? == 0) as i64),
+            Token::BitNot => Ok(!self.power(evaluate)?),
             _ => Err(self.error(b"expecting primary")),
         }
+    }
+
+    /// A name, with the postfix `++`/`--` that may follow it.
+    fn name_primary(&mut self, name: Name<'a>, evaluate: bool) -> Result<i64, Error> {
+        let value = if evaluate { self.read(name)? } else { 0 };
+        let delta = match self.current() {
+            Token::Increment => 1,
+            Token::Decrement => -1,
+            _ => return Ok(value),
+        };
+        self.advance();
+        if evaluate {
+            self.write(name, value.wrapping_add(delta))?;
+        }
+        Ok(value)
+    }
+
+    /// Prefix `++`/`--`, which answer with the value they stored.
+    fn step(&mut self, delta: i64, evaluate: bool) -> Result<i64, Error> {
+        let Token::Variable(name) = self.advance() else {
+            return Err(self.error(b"expecting a name to increment"));
+        };
+        if !evaluate {
+            return Ok(0);
+        }
+        let value = self.read(name)?.wrapping_add(delta);
+        self.write(name, value)
     }
 
     // [spec:dash:sem:arith-yacc.do-binop-fn]
@@ -456,6 +675,12 @@ impl<'a, 'shell> Parser<'a, 'shell> {
             BinaryOperator::BitAnd => left & right,
             BinaryOperator::BitXor => left ^ right,
             BinaryOperator::BitOr => left | right,
+            BinaryOperator::Power => {
+                if right < 0 {
+                    return Err(self.error(b"exponent less than 0"));
+                }
+                left.saturating_pow(right.min(i64::from(u32::MAX)) as u32)
+            }
             BinaryOperator::Remainder | BinaryOperator::Divide => {
                 if right == 0 || (left == i64::MIN && right == -1) {
                     return Err(self.error(b"division error"));
@@ -483,12 +708,61 @@ impl<'a, 'shell> Parser<'a, 'shell> {
 // [spec:posix:req:xcurel.arithmetic-operators]
 // [spec:posix:req:xcurel.arithmetic-expression-evaluation]
 pub fn evaluate(shell: &mut Shell, input: &BStr) -> Result<i64, Error> {
-    let mut parser = Parser::new(shell, input);
-    let result = parser.assignment(true)?;
+    evaluate_at_depth(shell, input, 0)
+}
+
+fn evaluate_at_depth(shell: &mut Shell, input: &BStr, depth: u32) -> Result<i64, Error> {
+    let mut parser = Parser::new(shell, input, depth);
+    // Bash's empty expression is zero rather than a diagnostic, which is
+    // what makes `(( ))` false and `$(( ))` print nothing but a zero.
+    if parser.bash && parser.current() == Token::End {
+        return Ok(0);
+    }
+    let result = parser.comma(true)?;
     if parser.current() != Token::End {
         return Err(parser.error(b"expecting EOF"));
     }
     Ok(result)
+}
+
+/// Remove the quoting Bash removes before it reads a subscript, so that
+/// `A['k']`, `A["k"]` and `A[k]` all name the key `k`.
+fn unquote(subscript: &BStr) -> BString {
+    let mut output = BString::default();
+    let mut escaped = false;
+    for &byte in subscript.iter() {
+        if escaped {
+            output.push(byte);
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte != b'\'' && byte != b'"' {
+            output.push(byte);
+        }
+    }
+    output
+}
+
+/// The stored text of one array element, empty when it is unset.
+fn element_text(shell: &mut Shell, base: &BStr, selector: &ArraySelector) -> BString {
+    let Some(stored) = crate::variables::value::variable_value(shell, base).cloned() else {
+        return BString::default();
+    };
+    match selector {
+        ArraySelector::Index(index) => stored
+            .indexed(*index)
+            .map(BStr::to_owned)
+            .or_else(|| (*index == 0).then(|| stored.scalar_owned()).flatten())
+            .unwrap_or_default(),
+        ArraySelector::Key(key) => stored
+            .associative(BStr::new(key.as_slice()))
+            .map(BStr::to_owned)
+            .unwrap_or_default(),
+        ArraySelector::All | ArraySelector::Joined => arrays::elements(&stored)
+            .first()
+            .cloned()
+            .unwrap_or_default(),
+    }
 }
 
 #[cfg(test)]

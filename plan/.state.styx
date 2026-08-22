@@ -1289,55 +1289,55 @@ derived_priorities (
 )
 
 assertions (
-    {id posix-harness, kind @complete, author "brendan@necessary.nu", at 2026-08-04T00:31:09.803718675Z}
-    {id host-owns-streams, kind @complete, author "brendan@necessary.nu", at 2026-08-07T09:33:13.662151863Z}
-    {id owned-nodes, kind @complete, author "brendan@necessary.nu", at 2026-08-07T11:42:00.055092499Z}
+    {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}
+    {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}
     {id crate-rename, kind @complete, author "brendan@necessary.nu", at 2026-08-08T02:12:48.664729127Z}
-    {id sanctioned-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-08T08:45:40.959456042Z}
+    {id define-oils-survey-manifests, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:31:55.474877325Z}
     {id delete-gen, kind @complete, author "brendan@necessary.nu", at 2026-08-08T10:58:15.738053128Z}
-    {id public-api-design, kind @complete, author "brendan@necessary.nu", at 2026-08-08T10:58:17.762829462Z}
-    {id sorted-tables, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:56.014094132Z}
-    {id owned-strings, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:36.630845046Z}
-    {id edition-2024, kind @complete, author "brendan@necessary.nu", at 2026-08-09T19:30:39.321605436Z}
+    {id delete-libc-calls, kind @complete, author "brendan@necessary.nu", at 2026-08-12T10:14:51.965438121Z}
     {id delete-memalloc, kind @complete, author "brendan@necessary.nu", at 2026-08-09T22:07:54.34344606Z}
+    {id edition-2024, kind @complete, author "brendan@necessary.nu", at 2026-08-09T19:30:39.321605436Z}
+    {id enforce-survey-test-containment, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:16:19.694214821Z}
+    {id errors-are-values, kind @complete, author "brendan@necessary.nu", at 2026-08-14T12:52:12.404369098Z}
+    {id fix-edit-stty-character-refresh, kind @complete, author "brendan@necessary.nu", at 2026-08-18T12:02:07.487828669Z}
+    {id fix-ignoreeof-noninteractive-eof, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:13:56.638277641Z}
+    {id fix-nplan-cpp-format-check, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:45:28.732506317Z}
+    {id host-owns-signals, kind @complete, author "brendan@necessary.nu", at 2026-08-16T11:54:37.641373271Z}
+    {id host-owns-streams, kind @complete, author "brendan@necessary.nu", at 2026-08-07T09:33:13.662151863Z}
+    {id import-oils-osh-corpus, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:26:59.601425552Z}
+    {id integrate-smoosh-posix, kind @complete, author "brendan@necessary.nu", at 2026-08-18T14:24:55.39603219Z}
+    {id locale-sweep, kind @complete, author "brendan@necessary.nu", at 2026-08-18T00:25:43.344831243Z}
+    {id logical-descriptor-table, kind @complete, author "brendan@necessary.nu", at 2026-08-17T22:09:30.050387716Z}
+    {id move-state, kind @complete, author "brendan@necessary.nu", at 2026-08-15T15:03:27.901722046Z}
+    {id native-oils-spec-runner, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:56:22.707009617Z}
     {id nshedit-in-tree, kind @complete, author "brendan@necessary.nu", at 2026-08-18T02:59:21.452184578Z}
     {id output-is-a-writer, kind @complete, author "brendan@necessary.nu", at 2026-08-11T20:55:43.687147342Z}
-    {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}
-    {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}
-    {id printf-builtin, kind @complete, author "brendan@necessary.nu", at 2026-08-12T08:29:30.995973456Z}
-    {id delete-libc-calls, kind @complete, author "brendan@necessary.nu", at 2026-08-12T10:14:51.965438121Z}
-    {id printf-errata, kind @complete, author "brendan@necessary.nu", at 2026-08-12T12:44:06.822539927Z}
-    {id errors-are-values, kind @complete, author "brendan@necessary.nu", at 2026-08-14T12:52:12.404369098Z}
-    {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
-    {id move-state, kind @complete, author "brendan@necessary.nu", at 2026-08-15T15:03:27.901722046Z}
+    {id owned-nodes, kind @complete, author "brendan@necessary.nu", at 2026-08-07T11:42:00.055092499Z}
+    {id owned-strings, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:36.630845046Z}
     {id owned-words, kind @complete, author "brendan@necessary.nu", at 2026-08-16T13:04:57.636490448Z}
-    {id host-owns-signals, kind @complete, author "brendan@necessary.nu", at 2026-08-16T11:54:37.641373271Z}
+    {id pin-oils-spec-corpus, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:13:53.358034773Z}
+    {id posix-harness, kind @complete, author "brendan@necessary.nu", at 2026-08-04T00:31:09.803718675Z}
+    {id printf-builtin, kind @complete, author "brendan@necessary.nu", at 2026-08-12T08:29:30.995973456Z}
+    {id printf-errata, kind @complete, author "brendan@necessary.nu", at 2026-08-12T12:44:06.822539927Z}
+    {id process-environment-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-17T23:28:19.757024423Z}
+    {id process-environment-verification, kind @complete, author "brendan@necessary.nu", at 2026-08-18T02:43:02.931653061Z}
     {id process-model, kind @complete, author "brendan@necessary.nu", at 2026-08-16T12:55:01.103836061Z}
     {id public-api, kind @complete, author "brendan@necessary.nu", at 2026-08-16T23:27:45.282676769Z}
-    {id statics-that-are-not-state, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:12:31.996289016Z}
-    {id unsafe-is-a-crate, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:13:01.501479926Z}
-    {id logical-descriptor-table, kind @complete, author "brendan@necessary.nu", at 2026-08-17T22:09:30.050387716Z}
-    {id process-environment-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-17T23:28:19.757024423Z}
-    {id locale-sweep, kind @complete, author "brendan@necessary.nu", at 2026-08-18T00:25:43.344831243Z}
-    {id process-environment-verification, kind @complete, author "brendan@necessary.nu", at 2026-08-18T02:43:02.931653061Z}
-    {id fix-edit-stty-character-refresh, kind @complete, author "brendan@necessary.nu", at 2026-08-18T12:02:07.487828669Z}
-    {id test-fc-histfile-reload-format, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:11:25.747215108Z}
-    {id fix-ignoreeof-noninteractive-eof, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:13:56.638277641Z}
-    {id register-posix-dash-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-18T11:45:38.225345042Z}
-    {id spec-default-history-navigation, kind @complete, author "brendan@necessary.nu", at 2026-08-18T12:02:47.032570368Z}
-    {id pin-oils-spec-corpus, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:13:53.358034773Z}
-    {id import-oils-osh-corpus, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:26:59.601425552Z}
-    {id define-oils-survey-manifests, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:31:55.474877325Z}
-    {id native-oils-spec-runner, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:56:22.707009617Z}
-    {id integrate-smoosh-posix, kind @complete, author "brendan@necessary.nu", at 2026-08-18T14:24:55.39603219Z}
-    {id enforce-survey-test-containment, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:16:19.694214821Z}
+    {id public-api-design, kind @complete, author "brendan@necessary.nu", at 2026-08-08T10:58:17.762829462Z}
     {id record-bash-oracle-baseline, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:26:03.079941802Z}
-    {id specify-smoosh-failure-contracts, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:36:02.180018603Z}
-    {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
-    {id specify-bash-compatibility-profile, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:36:22.237930781Z}
-    {id fix-nplan-cpp-format-check, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:45:28.732506317Z}
     {id refresh-project-readmes, kind @complete, author "brendan@necessary.nu", at 2026-08-19T22:47:09.703433578Z}
+    {id register-posix-dash-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-18T11:45:38.225345042Z}
+    {id sanctioned-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-08T08:45:40.959456042Z}
+    {id sorted-tables, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:56.014094132Z}
+    {id spec-default-history-navigation, kind @complete, author "brendan@necessary.nu", at 2026-08-18T12:02:47.032570368Z}
+    {id specify-bash-compatibility-profile, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:36:22.237930781Z}
     {id specify-idiomatic-core-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-20T00:12:33.787954465Z}
+    {id specify-smoosh-failure-contracts, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:36:02.180018603Z}
+    {id statics-that-are-not-state, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:12:31.996289016Z}
+    {id test-fc-histfile-reload-format, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:11:25.747215108Z}
+    {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
+    {id unsafe-is-a-crate, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:13:01.501479926Z}
+    {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
 )
 
 impl_evidence (
@@ -1952,6 +1952,16 @@ impl_evidence (
         {impl_name nsh-library, rule compat.bash.arrays-declarations}
     ), rule_versions_seen (
         {id compat.bash.arrays-declarations, version 0}
+    )}
+    {id implement-bash-conditionals-arithmetic, covered_rules (
+        compat.bash.conditionals-arithmetic
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.conditionals-arithmetic}
+    )}
+    {id implement-bash-functions-scoping, covered_rules (
+        compat.bash.functions-scoping
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.functions-scoping}
     )}
     {id implement-bash-mode-selection, covered_rules (
         compat.bash.default-isolation
@@ -5408,10 +5418,5 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
-    )}
-    {id implement-bash-functions-scoping, covered_rules (
-        compat.bash.functions-scoping
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.bash.functions-scoping}
     )}
 )

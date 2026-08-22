@@ -33,6 +33,13 @@ impl Pattern {
         &self.bytes
     }
 
+    /// The quote bit beside each byte, which the regular-expression
+    /// compiler needs for the same reason the matcher does.
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    pub(crate) fn quote_bits(&self) -> &[bool] {
+        &self.quoted
+    }
+
     pub(crate) fn has_meta(&self) -> bool {
         self.bytes
             .iter()

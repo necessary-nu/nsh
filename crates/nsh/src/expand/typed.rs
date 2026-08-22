@@ -190,12 +190,14 @@ pub(super) fn expand_argument(
     Ok(())
 }
 
+/// Expand one word in a pattern position, retaining its quote bits.
+///
+/// `case` and `[[ ]]` ask the same question of a word, and the answer is
+/// the pattern rather than a match: the regular-expression operator needs
+/// the same bits to decide which bytes the shell already made literal.
 // [spec:nsh:sem:idiom.typed-expansion]
-pub(super) fn case_matches(
-    shell: &mut Shell,
-    word: &ParsedWord,
-    value: &BStr,
-) -> Result<bool, Error> {
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+pub(super) fn pattern_of(shell: &mut Shell, word: &ParsedWord) -> Result<Pattern, Error> {
     let context = Context {
         quoted: false,
         full: false,
@@ -205,10 +207,9 @@ pub(super) fn case_matches(
         tilde_after_equal: false,
         tilde_after_colon: false,
     };
-    let pattern = expand_parts(shell, word.parts(), context)?
+    Ok(expand_parts(shell, word.parts(), context)?
         .collapse()
-        .pattern();
-    Ok(pattern.matches(&shell.locale, value))
+        .pattern())
 }
 
 // Quote protection is metadata during expansion and is discarded only when
