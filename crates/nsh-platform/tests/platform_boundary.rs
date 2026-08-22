@@ -234,6 +234,12 @@ fn process_identities_are_typed() {
     let _: fn() -> nsh_platform::ProcessId = nsh_platform::current_process_id;
     let _: fn() -> Option<nsh_platform::ProcessId> = nsh_platform::parent_process_id;
     let _: fn() -> nsh_platform::ProcessGroupState = nsh_platform::current_process_group;
+    // The written-out signature is the assertion: factoring it into a
+    // type alias would hide the very shape this test exists to pin.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the spelled-out signature is what this test pins"
+    )]
     let _: fn(
         bool,
         bool,
@@ -314,6 +320,12 @@ fn signal_and_wait_values_are_typed() {
         nsh_platform::send_signal;
     let _: fn(nsh_platform::Signal) -> std::io::Result<nsh_platform::SignalAction> =
         nsh_platform::signal_action;
+    // The written-out signature is the assertion: factoring it into a
+    // type alias would hide the very shape this test exists to pin.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the spelled-out signature is what this test pins"
+    )]
     let _: fn(
         bool,
         bool,
