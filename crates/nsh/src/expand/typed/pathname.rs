@@ -13,6 +13,7 @@ use crate::pattern::Pattern;
 // Quote protection is part of `Pattern`, candidates are owned paths, and
 // sorting uses the shell locale. These operations collectively replace the
 // cursor-based glob, escape-counting, and linked-list merge-sort helpers.
+// [spec:posix:req:expand.pathname]
 // [spec:dash:sem:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addglob-fn]

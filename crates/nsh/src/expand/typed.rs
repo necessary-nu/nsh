@@ -231,6 +231,7 @@ fn into_field(field: Field) -> ExpandedField {
 // [spec:dash:sem:expand.expari-fn]
 // [spec:dash:sem:expand.expcmd-fn]
 // [spec:dash:sem:shell.max-int-length-fn]
+// [spec:posix:req:expand.arith-token-expansion]
 fn expand_parts(
     shell: &mut Shell,
     parts: &[WordPart],
@@ -334,6 +335,8 @@ fn expand_parts(
     Ok(result)
 }
 
+// [spec:posix:def:expand.tilde-prefix]
+// [spec:posix:def:expand.tilde-prefix-in-assignment]
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum TildePosition {
     None,
@@ -371,6 +374,8 @@ fn is_empty_quoted_at(shell: &Shell, parts: &[WordPart], context: Context) -> bo
         )
 }
 
+// [spec:posix:sem:expand.tilde-no-further-expansion]
+// [spec:posix:req:expand.tilde-result-quoted]
 // [spec:dash:sem:expand.chtodest-fn]
 // [spec:dash:sem:expand.mbtodest-fn]
 // [spec:dash:sem:expand.memtodest-fn]
@@ -422,6 +427,9 @@ fn append_literal(
     }
 }
 
+// [spec:posix:req:expand.tilde-home]
+// [spec:posix:req:expand.tilde-login-name]
+// [spec:posix:req:expand.tilde-replacement-pathname]
 // [spec:dash:sem:expand.exptilde-fn]
 fn tilde_home(shell: &mut Shell, user: &[u8]) -> Option<Vec<u8>> {
     if user.is_empty() {
@@ -465,6 +473,13 @@ impl Value {
 // [spec:dash:sem:expand.cvtnum-fn]
 // [spec:dash:sem:expand.evalvar-fn]
 // [spec:dash:sem:expand.scanleft-fn]
+// [spec:posix:req:expand.param-simple]
+// [spec:posix:req:expand.param-word-expansion]
+// [spec:posix:req:expand.param-colon-effect]
+// [spec:posix:req:expand.param-use-default]
+// [spec:posix:req:expand.param-assign-default]
+// [spec:posix:req:expand.param-error-if-unset]
+// [spec:posix:req:expand.param-use-alternative]
 // [spec:dash:sem:expand.scanright-fn]
 // [spec:dash:sem:expand.subevalvar-fn]
 // [spec:dash:sem:expand.varunset-fn]
@@ -828,6 +843,7 @@ fn value_bytes(shell: &Shell, value: Value, context: Context) -> BString {
     }
 }
 
+// [spec:posix:req:expand.param-string-length]
 fn value_length(shell: &Shell, value: &Value) -> usize {
     match value {
         Value::Unset => 0,
@@ -846,6 +862,11 @@ fn value_length(shell: &Shell, value: &Value) -> usize {
     }
 }
 
+// [spec:posix:req:expand.param-substring-common]
+// [spec:posix:req:expand.param-remove-smallest-suffix]
+// [spec:posix:req:expand.param-remove-largest-suffix]
+// [spec:posix:req:expand.param-remove-smallest-prefix]
+// [spec:posix:req:expand.param-remove-largest-prefix]
 fn trim(
     locale: &nsh_platform::Locale,
     value: &[u8],
@@ -909,6 +930,8 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
     at + width
 }
 
+// [spec:posix:req:expand.cmdsub-semantics]
+// [spec:posix:req:expand.cmdsub-no-reexpansion]
 // [spec:dash:sem:expand.expbackq-fn]
 fn command_substitution(shell: &mut Shell, command: Option<&Node>) -> Result<BString, Error> {
     let mut result = crate::evaluation::CommandSubstitution {

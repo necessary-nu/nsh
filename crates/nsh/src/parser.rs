@@ -1908,6 +1908,7 @@ fn parse_redirection(
     Ok(())
 }
 
+// [spec:posix:req:expand.param-hash-requires-word]
 fn parse_parameter_operator(
     shell: &mut Shell,
     lexer: &mut WordLexer<'_>,
@@ -1976,6 +1977,9 @@ fn parse_parameter_operator(
  * Parse a substitution.  At this point, we have read the dollar sign
  * and nothing else.
  */
+// [spec:posix:syn:expand.param-format]
+// [spec:posix:syn:expand.param-braces-optional]
+// [spec:posix:syn:expand.param-unbraced-resolution]
 fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     let mut nested_syntax = lexer.current_syntax().syntax;
     let substitution_start = lexer.output.len();
