@@ -48,13 +48,13 @@ pub(super) fn command_prefix(
         return Ok(None);
     }
     if token == TokenKind::DoubleParen {
-        return arithmetic_command(shell).map(Some);
+        return arithmetic_command(shell, line).map(Some);
     }
     if token != TokenKind::Word || shell.input.last_token_quoted {
         return Ok(None);
     }
     if shell.input.word_text() == BStr::new(b"[[") {
-        conditional(shell).map(Some)
+        conditional(shell, line).map(Some)
     } else if shell.input.word_text() == BStr::new(b"function") {
         function(shell, line).map(Some)
     } else {
@@ -62,10 +62,10 @@ pub(super) fn command_prefix(
     }
 }
 
-pub(super) fn arithmetic_command(shell: &mut Shell) -> Result<Node, Error> {
+pub(super) fn arithmetic_command(shell: &mut Shell, line: i32) -> Result<Node, Error> {
     let expression = arithmetic_text(shell)?;
     Ok(Node::Bash(BashNode::ArithmeticCommand(
-        BashArithmeticCommand { expression },
+        BashArithmeticCommand { line, expression },
     )))
 }
 
@@ -107,7 +107,7 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
     })))
 }
 
-pub(super) fn conditional(shell: &mut Shell) -> Result<Node, Error> {
+pub(super) fn conditional(shell: &mut Shell, line: i32) -> Result<Node, Error> {
     let first = read_token(shell, TokenContext::NONE)?;
     // `[[ ]]` has nothing to be true or false about, and Bash rejects it
     // while parsing rather than answering with a status.
@@ -122,6 +122,7 @@ pub(super) fn conditional(shell: &mut Shell) -> Result<Node, Error> {
     }
 
     Ok(Node::Bash(BashNode::Conditional(BashConditional {
+        line,
         expression,
     })))
 }

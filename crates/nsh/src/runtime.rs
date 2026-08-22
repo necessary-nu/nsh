@@ -139,6 +139,11 @@ fn configure_startup(shell: &mut Shell, startup: &Startup) -> Result<(), crate::
     }
     if let Some(path) = startup.script_path() {
         crate::input::set_command_input_file(shell, path)?;
+        /* The named command file is the bottom of the call stack Bash's
+         * `BASH_SOURCE` and `caller` report; `-c` and standard input
+         * have no such frame. */
+        // [spec:nsh:req:compat.bash.traps-introspection]
+        crate::variables::call_stack::set_script_file(shell, path);
     }
 
     crate::options::apply_option_changes(shell)?;

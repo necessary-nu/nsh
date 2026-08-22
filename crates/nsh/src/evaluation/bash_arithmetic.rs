@@ -9,7 +9,10 @@
 
 use bstr::{BStr, BString, ByteSlice as _};
 
-use super::{EvaluationContext, Flow, LoopStep, catch_one_loop, evaluate_tree};
+use super::{
+    EvaluationContext, Flow, LoopStep, catch_one_loop, evaluate_tree, flow, record_command_line,
+    repeat_debug_trap,
+};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::nodes::{BashArithmeticCommand, BashArithmeticFor};
@@ -34,13 +37,13 @@ pub(crate) fn for_loop(
     node: &BashArithmeticFor,
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
-    shell.evaluation.diagnostic_line = node.line;
-    shell.variables.line_number = node.line;
-    if shell.evaluation.function_line != 0 {
-        shell.variables.line_number -= shell.evaluation.function_line - 1;
-    }
-
+    record_command_line(shell, node.line);
     let context = context.tested_only();
+    /* Bash raises `DEBUG` for each of the three expressions, so the
+     * header's line is re-recorded before each one: the body between
+     * them has moved `$LINENO` on. */
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    flow!(repeat_debug_trap(shell, node.line));
     if value(shell, node.init.as_bstr())?.is_none() {
         return Ok(Flow::Done(ExitStatus::ERROR));
     }
@@ -49,6 +52,7 @@ pub(crate) fn for_loop(
     shell.evaluation.loop_depth += 1;
     let outcome = (|| {
         loop {
+            flow!(repeat_debug_trap(shell, node.line));
             match condition(shell, node.test.as_bstr())? {
                 None => return Ok(Flow::Done(ExitStatus::ERROR)),
                 Some(false) => return Ok(Flow::Done(status)),
@@ -60,6 +64,7 @@ pub(crate) fn for_loop(
                 LoopStep::Continue(next_status) => status = next_status,
                 LoopStep::Propagate(control) => return Ok(control),
             }
+            flow!(repeat_debug_trap(shell, node.line));
             if value(shell, node.update.as_bstr())?.is_none() {
                 return Ok(Flow::Done(ExitStatus::ERROR));
             }

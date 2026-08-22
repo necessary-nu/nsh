@@ -8,6 +8,8 @@
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use bstr::{BStr, BString, ByteSlice};
 
+pub(crate) mod bash;
+
 use crate::error::Error;
 use crate::evaluation::Flow;
 use crate::options::ShellOption;
@@ -71,6 +73,13 @@ pub struct TrapTable {
     dispositions: [DispositionState; SIGNAL_SLOT_COUNT - 1],
     /// Cached interactive signal policy.
     interactive: bool,
+    /// The Bash `DEBUG`, `ERR` and `RETURN` actions.
+    ///
+    /// A separate table because these are not signals: they carry no
+    /// disposition, they are never delivered asynchronously, and every
+    /// loop over `action` above means "for each signal".
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    pub(crate) bash: bash::BashTraps,
 }
 
 impl TrapTable {
@@ -94,6 +103,7 @@ impl TrapTable {
             trap_count: 0,
             dispositions: [DispositionState::Unknown; SIGNAL_SLOT_COUNT - 1],
             interactive: false,
+            bash: bash::BashTraps::new(),
         }
     }
 
@@ -164,8 +174,12 @@ impl TrapTable {
 }
 
 // [spec:dash:sem:trap.have-traps-fn]
+/// A Bash pseudo-condition counts too: a subshell that would run one has
+/// to be a real child for the same reason a signal trap does, so the
+/// no-fork shortcut has to see it.
+// [spec:nsh:req:compat.bash.traps-introspection]
 pub fn has_traps(shell: &crate::context::Shell) -> bool {
-    shell.traps.trap_count != 0
+    shell.traps.trap_count != 0 || shell.traps.bash.any_action()
 }
 
 impl crate::context::Shell {
@@ -181,6 +195,10 @@ impl crate::context::Shell {
     pub(crate) fn prepare_traps_for_child(&mut self, command: Option<&Node>) {
         self.traps.begin_subshell_listing();
         clear_traps(self, command);
+        /* A child has no frame to restore into, so the saved actions
+         * `suppress_uninherited` hands back are dropped rather than kept. */
+        // [spec:nsh:req:compat.bash.traps-introspection]
+        drop(bash::suppress_uninherited(self));
     }
 }
 

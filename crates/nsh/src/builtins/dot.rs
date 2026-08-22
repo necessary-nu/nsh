@@ -90,6 +90,10 @@ fn run_dot_with_missing_status(
                 .builtin_error_value(missing_status, &message));
         };
 
+        /* The line the `.` was written on, which is what this frame
+         * contributes to `BASH_LINENO`. */
+        // [spec:nsh:req:compat.bash.traps-introspection]
+        let call_line = shell.variables.line_number;
         let outcome = crate::resource::with_resources(shell, |shell, _resources| {
             crate::input::set_input_file(
                 shell,
@@ -98,14 +102,32 @@ fn run_dot_with_missing_status(
             )?;
             /* `evalbltin`'s epilogue reads `commandname` after this returns.
              * The owned path remains valid independently of the input frame. */
-            shell.evaluation.command_name = Some(full_path);
+            shell.evaluation.command_name = Some(full_path.clone());
 
             // A dot script is a fresh lexical command context for loop control:
             // loops active in its caller do not enclose commands read here.
             // [spec:nsh:req:compat.smoosh.control-boundaries]
             let caller_loopnest = shell.evaluation.loop_depth;
             shell.evaluation.loop_depth = 0;
+            crate::variables::call_stack::push_source(
+                shell,
+                full_path.as_slice().as_bstr(),
+                call_line,
+            );
             let outcome = command_loop(shell, false);
+            /* A dot script's `RETURN` action runs whatever `functrace`
+             * says: Bash withholds the trap from *functions*, and this is
+             * not one. It runs while the frame is still innermost. */
+            // [spec:nsh:req:compat.bash.traps-introspection]
+            let outcome = match outcome {
+                Ok(flow) => crate::trap::bash::run_return(shell).map(|action| match action {
+                    Flow::Done(_) => flow,
+                    control => control,
+                }),
+                failed => failed,
+            };
+            crate::variables::call_stack::pop(shell);
+            crate::evaluation::restore_caller_line(shell, call_line);
             shell.evaluation.loop_depth = caller_loopnest;
             outcome
         });

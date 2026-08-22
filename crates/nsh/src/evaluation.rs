@@ -421,6 +421,51 @@ pub(crate) fn evaluate_top_level(
     evaluate_interactive_sequence(shell, node, context)
 }
 
+/// Record the line the command about to run begins on.
+///
+/// dash reports `$LINENO` inside a function body relative to the
+/// function's own first line; Bash reports the line in the file, which is
+/// what `BASH_LINENO`, `caller`, and the `DEBUG` and `ERR` actions all
+/// read. The subtraction is therefore the POSIX dialect's alone.
+// [spec:nsh:req:compat.bash.traps-introspection]
+fn record_command_line(shell: &mut Shell, line: i32) {
+    shell.evaluation.diagnostic_line = line;
+    shell.variables.line_number = line;
+    if shell.evaluation.function_line != 0
+        && shell.options.dialect() == crate::options::Dialect::Posix
+    {
+        shell.variables.line_number -= shell.evaluation.function_line - 1;
+    }
+}
+
+/// Put `$LINENO` back where the call was written.
+///
+/// Bash's `$LINENO` after a function returns is the caller's line again,
+/// which is what an `ERR` action raised *by the call* reports. dash never
+/// restored it, so this is the Bash dialect's alone.
+// [spec:nsh:req:compat.bash.traps-introspection]
+pub(crate) fn restore_caller_line(shell: &mut Shell, line: i32) {
+    if shell.options.dialect() == crate::options::Dialect::Bash {
+        shell.variables.line_number = line;
+    }
+}
+
+/// Re-record `line` and raise `DEBUG` for a command Bash announces more
+/// than once: a `for` header once per iteration, a pipeline element once
+/// per element, a `for ((;;))` header once per expression.
+///
+/// The dialect guard is here rather than at each site because the line is
+/// re-recorded as well as the action raised, and re-recording is only
+/// wanted where Bash's repetition is.
+// [spec:nsh:req:compat.bash.traps-introspection]
+fn repeat_debug_trap(shell: &mut Shell, line: i32) -> Result<Flow, Error> {
+    if shell.options.dialect() != crate::options::Dialect::Bash {
+        return Ok(Flow::Done(shell.status));
+    }
+    record_command_line(shell, line);
+    crate::trap::bash::run_debug(shell)
+}
+
 fn redirection_only_status(
     status: ExitStatus,
     redirection_error: Option<&Error>,
@@ -518,11 +563,7 @@ pub fn evaluate_tree(
         // [spec:nsh:req:idiom.structural-ast]
         status = match node {
             Node::Redirect(redirection) => {
-                shell.evaluation.diagnostic_line = redirection.line;
-                shell.variables.line_number = redirection.line;
-                if shell.evaluation.function_line != 0 {
-                    shell.variables.line_number -= shell.evaluation.function_line - 1;
-                }
+                record_command_line(shell, redirection.line);
                 let expanded_redirections = expand_redirections(shell, &redirection.redirections)?;
                 let outcome = crate::resource::with_resources(shell, |shell, resources| {
                     match resources.apply_redirections(shell, &expanded_redirections) {
@@ -628,6 +669,8 @@ pub fn evaluate_tree(
                     &mut shell.commands,
                     definition,
                 );
+                // [spec:nsh:req:compat.bash.traps-introspection]
+                crate::variables::call_stack::record_definition(shell, definition.name.as_bstr());
                 ExitStatus::SUCCESS
             }
             Node::Bash(crate::nodes::BashNode::ArrayAssignment(assignment)) => {
@@ -655,14 +698,22 @@ pub fn evaluate_tree(
                     &mut shell.commands,
                     &definition,
                 );
+                // [spec:nsh:req:compat.bash.traps-introspection]
+                crate::variables::call_stack::record_definition(shell, definition.name.as_bstr());
                 ExitStatus::SUCCESS
             }
             Node::Bash(crate::nodes::BashNode::Conditional(conditional)) => {
                 check_exit = true;
+                record_command_line(shell, conditional.line);
+                // [spec:nsh:req:compat.bash.traps-introspection]
+                flow!(crate::trap::bash::run_debug(shell));
                 bash_conditional::evaluate(shell, conditional)?
             }
             Node::Bash(crate::nodes::BashNode::ArithmeticCommand(arithmetic)) => {
                 check_exit = true;
+                record_command_line(shell, arithmetic.line);
+                // [spec:nsh:req:compat.bash.traps-introspection]
+                flow!(crate::trap::bash::run_debug(shell));
                 bash_arithmetic::command(shell, arithmetic)?
             }
             Node::Bash(crate::nodes::BashNode::ArithmeticFor(loop_command)) => {
@@ -695,10 +746,16 @@ pub fn evaluate_tree(
     }
     flow!(crate::trap::run_pending_traps(shell));
 
-    let abort_for_errexit = shell.options.enabled(ShellOption::Errexit)
-        && check_exit
-        && !context.is_tested()
-        && !status.success();
+    /* Bash raises `ERR` exactly where `errexit` would act, which is not
+     * a coincidence to be re-derived: both ask whether this command's
+     * failure is the shell's to notice, and a status the surrounding
+     * syntax consumes is neither's business. One predicate, read twice. */
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    let acted_on_failure = check_exit && !context.is_tested() && !status.success();
+    if acted_on_failure {
+        flow!(crate::trap::bash::run_err(shell));
+    }
+    let abort_for_errexit = acted_on_failure && shell.options.enabled(ShellOption::Errexit);
     if !abort_for_errexit && !context.exits() {
         return Ok(Flow::Done(shell.status));
     }
@@ -803,11 +860,7 @@ fn evaluate_for(
     let mut status: ExitStatus;
     let context = context.tested_only();
 
-    shell.evaluation.diagnostic_line = command.line;
-    shell.variables.line_number = command.line;
-    if shell.evaluation.function_line != 0 {
-        shell.variables.line_number -= shell.evaluation.function_line - 1;
-    }
+    record_command_line(shell, command.line);
 
     for argument in &command.words {
         crate::expand::expand_argument(
@@ -821,6 +874,15 @@ fn evaluate_for(
     status = ExitStatus::SUCCESS;
     shell.evaluation.loop_depth += 1;
     for field in &expanded_fields.fields {
+        /* Bash raises `DEBUG` once per iteration for a `for` command,
+         * not once for the whole loop. */
+        match repeat_debug_trap(shell, command.line)? {
+            Flow::Done(_) => {}
+            control => {
+                shell.evaluation.loop_depth -= 1;
+                return Ok(control);
+            }
+        }
         crate::variables::set_bytes(
             shell,
             command.variable.as_bstr(),
@@ -860,11 +922,9 @@ fn evaluate_case(
     let mut status = ExitStatus::SUCCESS;
     let mut fallthrough = false;
 
-    shell.evaluation.diagnostic_line = command.line;
-    shell.variables.line_number = command.line;
-    if shell.evaluation.function_line != 0 {
-        shell.variables.line_number -= shell.evaluation.function_line - 1;
-    }
+    record_command_line(shell, command.line);
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    flow!(crate::trap::bash::run_debug(shell));
 
     crate::expand::expand_argument(
         shell,
@@ -941,11 +1001,7 @@ fn evaluate_subshell(
     let mut status = ExitStatus::SUCCESS;
     let mut context = context;
 
-    shell.evaluation.diagnostic_line = command.line;
-    shell.variables.line_number = command.line;
-    if shell.evaluation.function_line != 0 {
-        shell.variables.line_number -= shell.evaluation.function_line - 1;
-    }
+    record_command_line(shell, command.line);
 
     let expanded_redirections = expand_redirections(shell, &command.redirections)?;
     /* Whether the tail below runs in a child of this process or in this
@@ -1092,6 +1148,24 @@ fn descriptor_source(shell: &mut Shell, text: &BStr) -> Result<Option<LogicalDes
     }
 }
 
+/// Raise `DEBUG` for a pipeline's simple commands, in the shell that
+/// forks them.
+///
+/// Bash's children do not inherit the trap, so a compound element -- a
+/// brace group, a subshell -- contributes nothing and the elements that
+/// do are announced by the parent before any of them starts. Recording
+/// each element's line is not only for the action: it is also what leaves
+/// `$LINENO` on the pipeline for an `ERR` action to read afterwards.
+// [spec:nsh:req:compat.bash.traps-introspection]
+fn run_pipeline_debug_traps(shell: &mut Shell, pipeline: &Pipeline) -> Result<Flow, Error> {
+    for command in &pipeline.commands {
+        if let Node::Command(simple) = command {
+            flow!(repeat_debug_trap(shell, simple.line));
+        }
+    }
+    Ok(Flow::Done(shell.status))
+}
+
 /*
  * Evaluate a pipeline.  All the processes in the pipeline are children
  * of the process creating the pipeline.  (This differs from some versions
@@ -1112,6 +1186,7 @@ fn evaluate_pipeline(
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
     let context = context.with_exit();
+    flow!(run_pipeline_debug_traps(shell, pipeline));
 
     enum PipelineStart<'a> {
         Parent(ExitStatus),
@@ -1450,11 +1525,9 @@ fn evaluate_command_in_scope(
     let mut use_local_variables: bool;
     let mut command_control: Option<Flow> = None;
 
-    shell.evaluation.diagnostic_line = command.line;
-    shell.variables.line_number = command.line;
-    if shell.evaluation.function_line != 0 {
-        shell.variables.line_number -= shell.evaluation.function_line - 1;
-    }
+    record_command_line(shell, command.line);
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    flow!(crate::trap::bash::run_debug(shell));
     if command
         .assignments
         .iter()
@@ -2010,6 +2083,14 @@ fn evaluate_function(
     });
     crate::options::set_positional_parameters(shell, args.get(1..).unwrap_or_default());
 
+    /* The call line is read before the body runs, because that is what
+     * `BASH_LINENO[0]` names: where the call was written, not where the
+     * body is. */
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    let call_line = shell.variables.line_number;
+    crate::variables::call_stack::push_function(shell, function.name.as_bstr(), call_line);
+    let suppressed = crate::trap::bash::suppress_uninherited(shell);
+
     /* The frame `evalcommand` already pushed is the one a declaration in
      * this body must save into; a declaration built-in pushes another. */
     // [spec:nsh:req:compat.bash.functions-scoping]
@@ -2017,10 +2098,26 @@ fn evaluate_function(
         evaluate_tree(shell, Some(function.body.as_ref()), context.tested_only())
     });
 
+    /* Bash's `RETURN` action belongs to the frame that is finishing, so
+     * it runs while that frame is still innermost and while the body's
+     * own view of the trap table is still installed -- which is what
+     * makes `functrace` decide whether it runs at all. */
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    let outcome = match outcome {
+        Ok(flow) => crate::trap::bash::run_return(shell).map(|action| match action {
+            Flow::Done(_) => flow,
+            control => control,
+        }),
+        failed => failed,
+    };
+    crate::trap::bash::restore(shell, suppressed);
+    crate::variables::call_stack::pop(shell);
+
     // funcdone:
     crate::error::with_interrupts_deferred(shell, |shell| {
         shell.evaluation.loop_depth = saved_loop_depth;
         shell.evaluation.function_line = saved_function_line;
+        restore_caller_line(shell, call_line);
         crate::options::restore_positional_parameters(shell, saved_parameters);
     });
     match outcome? {
@@ -2100,6 +2197,9 @@ fn prehash_tree(shell: &mut Shell, node: Option<&Node>) -> Result<Flow, Error> {
         }
         Node::Function(definition) => {
             flow!(prehash_tree(shell, Some(definition.body.as_ref())));
+        }
+        Node::Bash(crate::nodes::BashNode::Function(function)) => {
+            flow!(prehash_tree(shell, Some(function.body.as_ref())));
         }
         Node::Not(command) => {
             flow!(prehash_tree(shell, Some(command.command.as_ref())));

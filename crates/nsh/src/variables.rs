@@ -26,6 +26,8 @@ pub(crate) mod arrays;
 
 pub(crate) mod nameref;
 
+pub(crate) mod call_stack;
+
 /// Persistent attributes of a shell variable.
 // [spec:nsh:def:idiom.variable-expansion-state]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -154,6 +156,10 @@ pub struct VariableTable {
     /// top is not the one whose restore a `local` must land in.
     // [spec:nsh:req:compat.bash.functions-scoping]
     function_frames: Vec<usize>,
+    /// The call stack `FUNCNAME`, `BASH_SOURCE`, `BASH_LINENO` and
+    /// `caller` report.
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    pub(crate) call_stack: call_stack::CallStack,
 }
 
 impl VariableTable {
@@ -163,6 +169,7 @@ impl VariableTable {
             line_number: 0,
             locals: Vec::new(),
             function_frames: Vec::new(),
+            call_stack: call_stack::CallStack::new(),
         }
     }
 
