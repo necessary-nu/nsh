@@ -153,7 +153,10 @@ pub(super) fn array_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode>
         .iter()
         .position(|unit| matches!(unit, WordUnit::Literal(b'[')))
     else {
-        return Err(arg);
+        // `name+=value` and `name+=` are assignments too, but the POSIX
+        // recogniser cannot see them: `+` is not a name byte, so the
+        // whole word would be classified as an argument.
+        return append_word(shell, arg);
     };
     let Some(name) = literal_bytes(&units[..open]) else {
         return Err(arg);
@@ -177,6 +180,33 @@ pub(super) fn array_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode>
     Ok(Node::Bash(BashNode::ArrayAssignment(assignment)))
 }
 
+/// Recognise an unsubscripted `name+=...` append assignment.
+fn append_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode> {
+    let units = arg.word.units();
+    let Some(plus) = units
+        .iter()
+        .position(|unit| matches!(unit, WordUnit::Literal(b'+')))
+    else {
+        return Err(arg);
+    };
+    if plus == 0 || !matches!(units.get(plus + 1), Some(WordUnit::Literal(b'='))) {
+        return Err(arg);
+    }
+    let Some(name) = literal_bytes(&units[..plus]) else {
+        return Err(arg);
+    };
+    if !is_valid_name(&shell.locale, name.as_bstr()) {
+        return Err(arg);
+    }
+    let value = arg_part(&arg, plus + 2, units.len());
+    Ok(Node::Bash(BashNode::ArrayAssignment(BashArrayAssignment {
+        name: NodeText::from(name.as_bstr()),
+        subscript: None,
+        operator: BashAssignmentOperator::Append,
+        value: BashArrayValue::Word(value),
+    })))
+}
+
 pub(super) fn declaration_context(args: &[Node]) -> bool {
     let Some(Node::Word(command)) = args.first() else {
         return false;
@@ -193,6 +223,11 @@ pub(super) fn compound_array(
     variables: &mut Vec<Node>,
     args: &mut Vec<Node>,
 ) -> Result<bool, Error> {
+    // Bash requires `name=` and `(` to be adjacent: `a= (1 2)` is a
+    // syntax error, not a compound assignment followed by a subshell.
+    if shell.input.last_token_after_blank {
+        return Ok(false);
+    }
     let use_args = declaration_context(args) && compound_candidate(shell, args.last());
     let use_vars = args.is_empty() && compound_candidate(shell, variables.last());
     let target = if use_args {

@@ -496,7 +496,14 @@ fn expand_parameter(
     }
 
     let name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
-    let value = parameter_value(shell, name.as_bstr());
+    let value = match split_subscript(name.as_bstr()) {
+        Some((base, subscript)) => {
+            let base = base.to_owned();
+            let subscript = subscript.to_owned();
+            subscripted_value(shell, base.as_bstr(), subscript.as_bstr())?
+        }
+        None => parameter_value(shell, name.as_bstr()),
+    };
     let unavailable = value.is_unset() || (parameter.colon && value.is_empty(shell, context));
 
     match parameter.operation {
@@ -562,7 +569,18 @@ fn expand_parameter(
             if value.is_unset() && shell.options.enabled(ShellOption::Nounset) {
                 return Err(parameter_error(shell, name.as_bstr(), false, None));
             }
-            let length = value_length(shell, &value);
+            // `${#a[@]}` counts elements; `${#a[0]}` counts characters.
+            // The distinction is the subscript, not the value's kind.
+            let whole_array = split_subscript(name.as_bstr())
+                .is_some_and(|(_, subscript)| subscript == "@" || subscript == "*");
+            let length = if whole_array {
+                match &value {
+                    Value::At(words) | Value::Star(words) => words.len(),
+                    _ => value_length(shell, &value),
+                }
+            } else {
+                value_length(shell, &value)
+            };
             Ok(Expansion::one(Field::from_bytes(
                 length.to_string().as_bytes(),
                 context.protects(),
@@ -613,6 +631,53 @@ fn expand_parameter(
         }
         ParameterOperation::Invalid => unreachable!(),
     }
+}
+
+/// Split `a[expr]` into its name and subscript bytes.
+///
+/// Only a trailing `]` at the very end counts, so an ordinary name that
+/// happens to contain a bracket is left alone.
+fn split_subscript(name: &BStr) -> Option<(&BStr, &BStr)> {
+    let bytes = name.as_ref() as &[u8];
+    if bytes.last() != Some(&b']') {
+        return None;
+    }
+    let open = bytes.iter().position(|byte| *byte == b'[')?;
+    if open == 0 {
+        return None;
+    }
+    Some((
+        BStr::new(&bytes[..open]),
+        BStr::new(&bytes[open + 1..bytes.len() - 1]),
+    ))
+}
+
+/// Read one element, or every element, of an array-valued name.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn subscripted_value(shell: &mut Shell, base: &BStr, subscript: &BStr) -> Result<Value, Error> {
+    use crate::variables::arrays::{self, ArraySelector};
+
+    let selector = arrays::resolve_selector(shell, base, subscript)?;
+    let Some(stored) = crate::variables::value::variable_value(shell, base).cloned() else {
+        return Ok(Value::Unset);
+    };
+    Ok(match selector {
+        ArraySelector::All => Value::At(arrays::elements(&stored)),
+        ArraySelector::Joined => Value::Star(arrays::elements(&stored)),
+        ArraySelector::Index(index) => match stored.indexed(index) {
+            Some(element) => Value::Variable(VariableValue::Scalar(element.to_owned())),
+            // An indexed read of a scalar sees it as element zero.
+            None if index == 0 => match stored.scalar_ref() {
+                Some(element) => Value::Variable(VariableValue::Scalar(element.to_owned())),
+                None => Value::Unset,
+            },
+            None => Value::Unset,
+        },
+        ArraySelector::Key(key) => match stored.associative(BStr::new(key.as_slice())) {
+            Some(element) => Value::Variable(VariableValue::Scalar(element.to_owned())),
+            None => Value::Unset,
+        },
+    })
 }
 
 // [spec:posix:def:param.special-parameters]

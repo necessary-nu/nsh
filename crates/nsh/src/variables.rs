@@ -22,6 +22,8 @@ use crate::options::{OptionSet, ShellOption, options_changed};
 pub(crate) mod value;
 use value::{BashAttributes, VariableValue};
 
+pub(crate) mod arrays;
+
 /// Persistent attributes of a shell variable.
 // [spec:nsh:def:idiom.variable-expansion-state]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

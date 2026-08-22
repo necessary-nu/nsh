@@ -24,6 +24,8 @@
 //! that unwinding *runs `Drop`* (C's `longjmp` does not), and that a
 //! `longjmp` cannot cross a non-Rust frame.
 //!
+mod bash_arrays;
+
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
@@ -624,6 +626,10 @@ pub fn evaluate_tree(
                     &mut shell.commands,
                     definition,
                 );
+                ExitStatus::SUCCESS
+            }
+            Node::Bash(crate::nodes::BashNode::ArrayAssignment(assignment)) => {
+                bash_arrays::assign(shell, assignment)?;
                 ExitStatus::SUCCESS
             }
             Node::Bash(_) => {
@@ -1403,11 +1409,14 @@ fn evaluate_command_in_scope(
         .assignments
         .iter()
         .chain(command.arguments.iter())
-        .any(|node| matches!(node, Node::Bash(_)))
+        .any(|node| {
+            matches!(node, Node::Bash(inner)
+                if !matches!(inner, crate::nodes::BashNode::ArrayAssignment(_)))
+        })
     {
         return Err(shell
             .diagnostics()
-            .shell_error(b"Bash array syntax is not executable yet"));
+            .shell_error(b"Bash syntax is parsed but not executable yet"));
     }
 
     /* First expand the arguments. */
@@ -1544,6 +1553,12 @@ fn evaluate_command_in_scope(
             }
 
             for assignment in &command.assignments {
+                // A structural array assignment is applied whole; it has
+                // no single expanded field to hand the scalar path.
+                if let Node::Bash(crate::nodes::BashNode::ArrayAssignment(array)) = assignment {
+                    bash_arrays::assign(shell, array)?;
+                    continue;
+                }
                 let assignment_index = assignment_fields.fields.len();
                 crate::expand::expand_argument(
                     shell,

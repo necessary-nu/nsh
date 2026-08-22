@@ -267,6 +267,16 @@ impl ParameterSyntax {
         self.braced && matches!(self.operation, ParameterOperation::Invalid)
     }
 
+    /// `${#a[@]}` carries a subscript too, so the length operator has to
+    /// be admitted here even though it cannot introduce one itself.
+    const fn accepts_subscript_operand(self) -> bool {
+        self.braced
+            && matches!(
+                self.operation,
+                ParameterOperation::Invalid | ParameterOperation::Length
+            )
+    }
+
     const fn has_operand(self) -> bool {
         !matches!(self.operation, ParameterOperation::Value)
     }
@@ -1250,6 +1260,7 @@ fn read_next_token(shell: &mut Shell, check_here_document_end: bool) -> Result<T
             quoted: shell.input.last_token_quoted,
         });
     }
+    shell.input.last_token_after_blank = false;
     if shell.input.prompt_needed {
         select_prompt(shell, PromptKind::Continuation)?;
     }
@@ -1257,6 +1268,7 @@ fn read_next_token(shell: &mut Shell, check_here_document_end: bool) -> Result<T
         /* until token or start of word found */
         input = read_unit_skipping_line_continuations(shell)?;
         if input.is(b' ') || input.is(b'\t') {
+            shell.input.last_token_after_blank = true;
             continue;
         } else if input.is(b'#') {
             loop {
@@ -2089,7 +2101,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             shell,
             lexer,
             bad_substitution,
-            parameter_syntax.accepts_array_subscript(),
+            parameter_syntax.accepts_subscript_operand(),
         )?;
         let name_end = lexer.output.len();
 

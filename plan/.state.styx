@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-20T07:44:24.867126181Z
+last_sync_at 2026-08-22T00:26:46.748990409Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -820,7 +820,7 @@ rule_versions (
     {id idiom.owned-lifecycle, version 0}
     {id idiom.parser-control-flow, version 0}
     {id idiom.platform-errors, version 0}
-    {id idiom.port-provenance, version 0}
+    {id idiom.port-provenance, version 1}
     {id idiom.process-group-zero-state, version 0}
     {id idiom.process-identity, version 0}
     {id idiom.regression-gates, version 0}
@@ -829,7 +829,7 @@ rule_versions (
     {id idiom.shell-entrypoint, version 0}
     {id idiom.shell-options, version 0}
     {id idiom.signal-wait, version 0}
-    {id idiom.specified-defects, version 0}
+    {id idiom.specified-defects, version 1}
     {id idiom.status-flow-signal, version 0}
     {id idiom.strict-lints, version 0}
     {id idiom.structural-ast, version 0}
@@ -1337,7 +1337,6 @@ assertions (
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
     {id specify-bash-compatibility-profile, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:36:22.237930781Z}
     {id fix-nplan-cpp-format-check, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:45:28.732506317Z}
-    {id implement-bash-arrays-declarations, kind @blocked, reason "Operator paused Bash implementation until the idiomatic-core prerequisite chain is complete; partial arrays work is preserved in stash 642f76c.", author "brendan@necessary.nu", at 2026-08-20T03:48:47.75753982Z}
     {id refresh-project-readmes, kind @complete, author "brendan@necessary.nu", at 2026-08-19T22:47:09.703433578Z}
     {id specify-idiomatic-core-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-20T00:12:33.787954465Z}
 )
@@ -1349,6 +1348,20 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.status-flow-signal}
     ), rule_versions_seen (
         {id idiom.status-flow-signal, version 0}
+    )}
+    {id audit-bug-for-bug-behavior, covered_rules (
+        idiom.specified-defects
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.specified-defects}
+    ), rule_versions_seen (
+        {id idiom.specified-defects, version 1}
+    )}
+    {id audit-ignored-results, covered_rules (
+        idiom.no-ignored-results
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-ignored-results}
+    ), rule_versions_seen (
+        {id idiom.no-ignored-results, version 0}
     )}
     {id calibrate-bash-5-3-oracle, covered_rules (
         compat.bash.reference-profile
@@ -1362,12 +1375,33 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.descriptor-materialization, version 0}
     )}
+    {id delete-port-configuration-fossils, covered_rules (
+        idiom.no-port-fossils
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-port-fossils}
+    ), rule_versions_seen (
+        {id idiom.no-port-fossils, version 0}
+    )}
     {id enable-default-history-navigation, covered_rules (
         interactive.default-history-navigation
     ), covered_claims (
         {impl_name nsh-library, rule interactive.default-history-navigation}
     ), rule_versions_seen (
         {id interactive.default-history-navigation, version 0}
+    )}
+    {id enable-strict-rust-lints, covered_rules (
+        idiom.strict-lints
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.strict-lints}
+    ), rule_versions_seen (
+        {id idiom.strict-lints, version 0}
+    )}
+    {id enforce-zero-cism-gates, covered_rules (
+        idiom.regression-gates
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.regression-gates}
+    ), rule_versions_seen (
+        {id idiom.regression-gates, version 0}
     )}
     {id extend-bash-mode-aware-parser, covered_rules (
         compat.bash.parser-ast
@@ -1399,6 +1433,8 @@ impl_evidence (
         builtin.cd.step8-canonical-form-dot-dot
     ), covered_claims (
         {impl_name shell, rule builtin.cd.step8-canonical-form-dot-dot}
+    ), rule_versions_seen (
+        {id builtin.cd.step8-canonical-form-dot-dot, version 0}
     )}
     {id fix-builtin-cd-step9-path-max-relative, covered_rules (
         builtin.cd.step9-path-max-relative
@@ -1791,14 +1827,12 @@ impl_evidence (
         {impl_name shell, rule exit.shell-error-consequences}
     ), rule_versions_seen (
         {id exit.shell-error-consequences, version 0}
-        {id exit.unrecoverable-read-error, version 0}
     )}
     {id fix-exit-unrecoverable-read-error, covered_rules (
         exit.unrecoverable-read-error
     ), covered_claims (
         {impl_name shell, rule exit.unrecoverable-read-error}
     ), rule_versions_seen (
-        {id exit.shell-error-consequences, version 0}
         {id exit.unrecoverable-read-error, version 0}
     )}
     {id fix-grammar-case-clause, covered_rules (
@@ -1948,9 +1982,42 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.structural-ast}
     ), rule_versions_seen (
-        {id compat.smoosh.error-contracts, version 0}
         {id idiom.structural-ast, version 0}
-        {id idiom.word-ir, version 0}
+    )}
+    {id modernize-builtin-registry, covered_rules (
+        idiom.builtin-registry
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.builtin-registry}
+    ), rule_versions_seen (
+        {id idiom.builtin-registry, version 0}
+    )}
+    {id modernize-output-error-results, covered_rules (
+        idiom.output-results
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.output-results}
+    ), rule_versions_seen (
+        {id idiom.output-results, version 0}
+    )}
+    {id modernize-shell-entrypoint, covered_rules (
+        idiom.shell-entrypoint
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.shell-entrypoint}
+    ), rule_versions_seen (
+        {id idiom.shell-entrypoint, version 0}
+    )}
+    {id modernize-shell-lifecycle, covered_rules (
+        idiom.owned-lifecycle
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.owned-lifecycle}
+    ), rule_versions_seen (
+        {id idiom.owned-lifecycle, version 0}
+    )}
+    {id narrow-shell-context, covered_rules (
+        idiom.narrow-shell-context
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.narrow-shell-context}
+    ), rule_versions_seen (
+        {id idiom.narrow-shell-context, version 0}
     )}
     {id posix-builtins-alias, covered_rules (
         builtin.alias.create-or-display
@@ -5100,13 +5167,33 @@ impl_evidence (
     ), rule_versions_seen (
         {id embedding-safety.process-environment-is-read-only, version 0}
     )}
+    {id remove-artificial-buffer-limits, covered_rules (
+        idiom.no-artificial-limits
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-artificial-limits}
+    ), rule_versions_seen (
+        {id idiom.no-artificial-limits, version 0}
+    )}
     {id remove-ast-shared-mutation, covered_rules (
         idiom.immutable-ast
     ), covered_claims (
         {impl_name nsh-library, rule idiom.immutable-ast}
     ), rule_versions_seen (
         {id idiom.immutable-ast, version 0}
-        {id idiom.structural-ast, version 0}
+    )}
+    {id remove-core-abi-scalars, covered_rules (
+        idiom.no-abi-scalars-core
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-abi-scalars-core}
+    ), rule_versions_seen (
+        {id idiom.no-abi-scalars-core, version 0}
+    )}
+    {id remove-core-c-strings-terminators, covered_rules (
+        idiom.no-c-strings-core
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-c-strings-core}
+    ), rule_versions_seen (
+        {id idiom.no-c-strings-core, version 0}
     )}
     {id remove-core-raw-fd-observation, covered_rules (
         idiom.no-raw-fd-core
@@ -5114,6 +5201,27 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.no-raw-fd-core}
     ), rule_versions_seen (
         {id idiom.no-raw-fd-core, version 0}
+    )}
+    {id remove-mystring-module, covered_rules (
+        idiom.no-mystring
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-mystring}
+    ), rule_versions_seen (
+        {id idiom.no-mystring, version 0}
+    )}
+    {id rename-c-shaped-symbols, covered_rules (
+        idiom.rust-naming
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.rust-naming}
+    ), rule_versions_seen (
+        {id idiom.rust-naming, version 0}
+    )}
+    {id reorganize-rust-modules, covered_rules (
+        idiom.module-boundaries
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.module-boundaries}
+    ), rule_versions_seen (
+        {id idiom.module-boundaries, version 0}
     )}
     {id replace-command-tag-payload-protocols, covered_rules (
         idiom.command-dispatch
@@ -5127,7 +5235,6 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.shell-options}
     ), rule_versions_seen (
-        {id compat.bash.selection, version 0}
         {id idiom.shell-options, version 0}
     )}
     {id replace-job-slot-linkage, covered_rules (
@@ -5135,8 +5242,14 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.job-storage}
     ), rule_versions_seen (
-        {id idiom.job-control-model, version 0}
         {id idiom.job-storage, version 0}
+    )}
+    {id retire-port-topology-contracts, covered_rules (
+        idiom.port-provenance
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.port-provenance}
+    ), rule_versions_seen (
+        {id idiom.port-provenance, version 1}
     )}
     {id rewrite-expansion-over-typed-words, covered_rules (
         idiom.typed-expansion
@@ -5144,20 +5257,6 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.typed-expansion}
     ), rule_versions_seen (
         {id idiom.typed-expansion, version 0}
-        {id idiom.word-ir, version 0}
-        {id pattern.asterisk, version 0}
-        {id pattern.asterisk-longest-match, version 0}
-        {id pattern.asterisk-matches-any-string, version 0}
-        {id pattern.bracket-expression, version 0}
-        {id pattern.concatenation, version 0}
-        {id pattern.invalid-byte-sequence-unspecified, version 0}
-        {id pattern.left-bracket-literal, version 0}
-        {id pattern.match-by-bit-pattern, version 0}
-        {id pattern.notation-purpose, version 0}
-        {id pattern.ordinary-character, version 0}
-        {id pattern.question-mark, version 0}
-        {id pattern.single-character-patterns, version 0}
-        {id pattern.special-pattern-characters, version 0}
     )}
     {id scoped-locale-boundary, covered_rules (
         embedding-safety.process-locale-is-unchanged
@@ -5202,12 +5301,33 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.evaluator-control-flow, version 0}
     )}
+    {id structure-interrupt-deferral, covered_rules (
+        idiom.interrupt-deferral
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.interrupt-deferral}
+    ), rule_versions_seen (
+        {id idiom.interrupt-deferral, version 0}
+    )}
+    {id structure-jobs-startup-control-flow, covered_rules (
+        idiom.jobs-startup-control-flow
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.jobs-startup-control-flow}
+    ), rule_versions_seen (
+        {id idiom.jobs-startup-control-flow, version 0}
+    )}
     {id structure-parser-expander-control-flow, covered_rules (
         idiom.parser-control-flow
     ), covered_claims (
         {impl_name nsh-library, rule idiom.parser-control-flow}
     ), rule_versions_seen (
         {id idiom.parser-control-flow, version 0}
+    )}
+    {id structure-resource-scopes, covered_rules (
+        idiom.resource-scopes
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.resource-scopes}
+    ), rule_versions_seen (
+        {id idiom.resource-scopes, version 0}
     )}
     {id type-evaluation-redirection-modes, covered_rules (
         idiom.operation-modes
@@ -5228,7 +5348,6 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.lexer-tokens}
     ), rule_versions_seen (
-        {id grammar.token-symbols, version 0}
         {id idiom.lexer-tokens, version 0}
     )}
     {id type-platform-errors, covered_rules (
@@ -5237,6 +5356,13 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.platform-errors}
     ), rule_versions_seen (
         {id idiom.platform-errors, version 0}
+    )}
+    {id type-platform-exec-api, covered_rules (
+        idiom.exec-boundary
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.exec-boundary}
+    ), rule_versions_seen (
+        {id idiom.exec-boundary, version 0}
     )}
     {id type-platform-filesystem-account-api, covered_rules (
         idiom.filesystem-account-bytes
@@ -5259,124 +5385,30 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.signal-wait, version 0}
     )}
-    {id structure-jobs-startup-control-flow, covered_rules (
-        idiom.jobs-startup-control-flow
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.jobs-startup-control-flow}
-    )}
-    {id type-platform-exec-api, covered_rules (
-        idiom.exec-boundary
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.exec-boundary}
-    )}
     {id type-trap-disposition-state, covered_rules (
         idiom.trap-dispositions
     ), covered_claims (
         {impl_name nsh-library, rule idiom.trap-dispositions}
+    ), rule_versions_seen (
+        {id idiom.trap-dispositions, version 0}
     )}
     {id type-variable-expansion-state, covered_rules (
         idiom.variable-expansion-state
     ), covered_claims (
         {impl_name nsh-library, rule idiom.variable-expansion-state}
-    )}
-    {id structure-resource-scopes, covered_rules (
-        idiom.resource-scopes
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.resource-scopes}
-    )}
-    {id structure-interrupt-deferral, covered_rules (
-        idiom.interrupt-deferral
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.interrupt-deferral}
-    )}
-    {id modernize-shell-lifecycle, covered_rules (
-        idiom.owned-lifecycle
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.owned-lifecycle}
-    )}
-    {id delete-port-configuration-fossils, covered_rules (
-        idiom.no-port-fossils
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.no-port-fossils}
-    )}
-    {id narrow-shell-context, covered_rules (
-        idiom.narrow-shell-context
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.narrow-shell-context}
-    )}
-    {id modernize-output-error-results, covered_rules (
-        idiom.output-results
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.output-results}
-    )}
-    {id modernize-builtin-registry, covered_rules (
-        idiom.builtin-registry
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.builtin-registry}
-    )}
-    {id modernize-shell-entrypoint, covered_rules (
-        idiom.shell-entrypoint
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.shell-entrypoint}
-    )}
-    {id remove-mystring-module, covered_rules (
-        idiom.no-mystring
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.no-mystring}
-    )}
-    {id remove-core-c-strings-terminators, covered_rules (
-        idiom.no-c-strings-core
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.no-c-strings-core}
-    )}
-    {id remove-core-abi-scalars, covered_rules (
-        idiom.no-abi-scalars-core
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.no-abi-scalars-core}
-    )}
-    {id audit-ignored-results, covered_rules (
-        idiom.no-ignored-results
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.no-ignored-results}
-    )}
-    {id remove-artificial-buffer-limits, covered_rules (
-        idiom.no-artificial-limits
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.no-artificial-limits}
-    )}
-    {id reorganize-rust-modules, covered_rules (
-        idiom.module-boundaries
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.module-boundaries}
-    )}
-    {id rename-c-shaped-symbols, covered_rules (
-        idiom.rust-naming
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.rust-naming}
-    )}
-    {id audit-bug-for-bug-behavior, covered_rules (
-        idiom.specified-defects
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.specified-defects}
-    )}
-    {id retire-port-topology-contracts, covered_rules (
-        idiom.port-provenance
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.port-provenance}
-    )}
-    {id enable-strict-rust-lints, covered_rules (
-        idiom.strict-lints
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.strict-lints}
-    )}
-    {id enforce-zero-cism-gates, covered_rules (
-        idiom.regression-gates
-    ), covered_claims (
-        {impl_name nsh-library, rule idiom.regression-gates}
+    ), rule_versions_seen (
+        {id idiom.variable-expansion-state, version 0}
     )}
     {id verify-idiomatic-core-conformance, covered_rules (
         idiom.conformance-closure
     ), covered_claims (
         {impl_name nsh-library, rule idiom.conformance-closure}
+    ), rule_versions_seen (
+        {id idiom.conformance-closure, version 0}
+    )}
+    {id implement-bash-arrays-declarations, covered_rules (
+        compat.bash.arrays-declarations
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.arrays-declarations}
     )}
 )

@@ -3,11 +3,6 @@
 //! Scalar-facing APIs keep borrowing or cloning element zero, while Bash
 //! consumers can work with sparse indexed and associative maps directly.
 
-#![expect(
-    dead_code,
-    reason = "Bash arrays and attributes are staged for the paused compatibility implementation"
-)]
-
 use std::collections::BTreeMap;
 
 use bstr::{BStr, BString};
@@ -73,14 +68,6 @@ impl VariableValue {
             Self::Associative(values) => {
                 values.insert(BString::from("0"), value.to_owned());
             }
-        }
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        match self {
-            Self::Scalar(_) => 1,
-            Self::Indexed(values) => values.len(),
-            Self::Associative(values) => values.len(),
         }
     }
 
@@ -203,6 +190,21 @@ pub(crate) fn variable_kind(shell: &Shell, name: &BStr) -> Option<VariableKind> 
     variable_value(shell, name).map(VariableValue::kind)
 }
 
+/// The names a bare `declare` listing prints.
+///
+/// Only names that currently hold a value: an entry that exists solely
+/// to carry attributes has nothing to render, and Bash omits it rather
+/// than reporting it as missing.
+pub(crate) fn declared_names(shell: &Shell) -> Vec<BString> {
+    shell
+        .variables
+        .entries
+        .iter()
+        .filter(|(_, var)| matches!(var.state, VariableState::Set(_)))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 pub(crate) fn bash_attributes(shell: &Shell, name: &BStr) -> Option<BashAttributes> {
     shell
         .variables
@@ -254,7 +256,6 @@ mod tests {
         assert!(value.set_indexed(2, BStr::new(b"two")));
         assert!(value.set_indexed(1_000_000, BStr::new(b"far")));
 
-        assert_eq!(value.len(), 2);
         assert_eq!(value.indexed_keys(), Some(vec![2, 1_000_000]));
         assert_eq!(value.indexed(1_000_000), Some(BStr::new(b"far")));
         assert_eq!(value.unset_indexed(2), Some(BString::from("two")));
@@ -388,8 +389,8 @@ mod tests {
             Some(VariableKind::Associative)
         );
         assert_eq!(
-            variable_value(&shell, array).map(VariableValue::len),
-            Some(0)
+            variable_value(&shell, array).and_then(VariableValue::associative_keys),
+            Some(Vec::new())
         );
 
         unset_bytes(&mut shell, array).unwrap();

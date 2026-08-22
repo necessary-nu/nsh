@@ -6128,6 +6128,20 @@ children (
                                         kind @blocker
                                         text "Operator paused Bash implementation until the idiomatic-core prerequisite chain is complete; partial arrays work is preserved in stash 642f76c."
                                     }
+
+                                    {
+                                        at 2026-08-22T00:25:38.820578652Z
+                                        author "brendan@necessary.nu"
+                                        kind @unblock
+                                        text "Operator lifted the pause on 2026-08-22. The blocker's stated condition is satisfied: the C-shaped core surface has been specified and idiomatized (`close-idiomatic-core` closed at 573d53f, `verify-idiomatic-core-conformance` Done), and the POSIX annotation regression that the rewrite introduced has been repaired (39ec732..38e0842, posix coverage back to 1083/1083). Re-survey against release 4cd80d5f reproduces the pinned Bash baseline exactly — 74/1121 bash-extension, 1100/2735 comparison, 4/112 named — with zero timeouts and zero runner errors, so the starting point is measured rather than assumed. Preserved WIP in stash 642f76c is based 58 commits back on renamed-away modules (eval.rs, var.rs, arith_yacc.rs) and imports the deleted c_int/EXP_* API, so it is a design reference only; the implementation is rebuilt against the typed core."
+                                    }
+
+                                    {
+                                        at 2026-08-22T00:27:23.294671038Z
+                                        author "brendan@necessary.nu"
+                                        kind @unblock
+                                        text "Operator lifted the pause on 2026-08-22; the idiomatic-core prerequisite chain is complete and the POSIX annotation regression it introduced is repaired."
+                                    }
                                 )
                             }
 

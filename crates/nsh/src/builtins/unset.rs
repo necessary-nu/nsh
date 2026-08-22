@@ -38,6 +38,23 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 message.extend_from_slice(b" is read-only");
                 return Err(shell.diagnostics().builtin_error_value(1, &message));
             }
+            // `unset a[i]` removes one element; the whole-array forms
+            // clear the elements but keep the declaration.
+            if let Some((base, subscript)) = subscripted(name) {
+                let base = base.to_owned();
+                let subscript = subscript.to_owned();
+                let selector = crate::variables::arrays::resolve_selector(
+                    shell,
+                    BStr::new(base.as_slice()),
+                    BStr::new(subscript.as_slice()),
+                )?;
+                crate::variables::arrays::unset_element(
+                    shell,
+                    BStr::new(base.as_slice()),
+                    &selector,
+                )?;
+                continue;
+            }
             unset_bytes(shell, name)?;
             continue;
         }
@@ -50,6 +67,23 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
     Ok(Flow::Done((0).into()))
+}
+
+/// Split `a[expr]` into its name and subscript, when the operand is one.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn subscripted(operand: &BStr) -> Option<(&BStr, &BStr)> {
+    let bytes: &[u8] = operand.as_ref();
+    if bytes.last() != Some(&b']') {
+        return None;
+    }
+    let open = bytes.iter().position(|byte| *byte == b'[')?;
+    if open == 0 {
+        return None;
+    }
+    Some((
+        BStr::new(&bytes[..open]),
+        BStr::new(&bytes[open + 1..bytes.len() - 1]),
+    ))
 }
 
 #[cfg(test)]

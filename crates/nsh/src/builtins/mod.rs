@@ -99,6 +99,7 @@ pub(crate) enum BuiltinId {
     Unset,
     Wait,
     Shopt,
+    Declare,
 }
 
 /// Typed, independent properties of a built-in command.
@@ -196,6 +197,7 @@ pub fn args(fields: &[crate::expand::ExpandedField]) -> Vec<&BStr> {
 }
 
 pub mod alias;
+pub mod declare;
 pub mod r#break;
 pub mod cd;
 pub mod command;
@@ -525,12 +527,26 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
 /// current shell has Bash Compatibility Mode enabled. Keeping a separate
 /// sorted table prevents profile-only names from leaking into default mode
 /// and permits a future Bash implementation to override a baseline entry.
-pub(crate) static BASH_BUILTINS: &[BuiltinSpec] = &[BuiltinSpec {
-    id: BuiltinId::Shopt,
-    name: b"shopt",
-    handler: BuiltinHandler::Standard(shopt::run),
-    attributes: BuiltinAttributes::NONE,
-}];
+pub(crate) static BASH_BUILTINS: &[BuiltinSpec] = &[
+    BuiltinSpec {
+        id: BuiltinId::Declare,
+        name: b"declare",
+        handler: BuiltinHandler::Standard(declare::run),
+        attributes: BuiltinAttributes::REGULAR_ASSIGNMENT,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Shopt,
+        name: b"shopt",
+        handler: BuiltinHandler::Standard(shopt::run),
+        attributes: BuiltinAttributes::NONE,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Declare,
+        name: b"typeset",
+        handler: BuiltinHandler::Standard(declare::run),
+        attributes: BuiltinAttributes::REGULAR_ASSIGNMENT,
+    },
+];
 
 #[cfg(test)]
 mod tests {

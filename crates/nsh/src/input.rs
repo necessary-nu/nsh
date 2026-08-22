@@ -196,6 +196,10 @@ pub struct InputStack {
     /// `lasttoken` so pushing a token back preserves the complete token;
     /// ordinary parser code receives it as part of `readtoken`'s result.
     pub(crate) last_token_quoted: bool,
+    /// Whether a blank separated this token from the one before it.
+    /// Bash's compound array assignment requires `name=` and `(` to be
+    /// adjacent, so `a= (1 2)` stays a syntax error.
+    pub(crate) last_token_after_blank: bool,
     /// `tokpushback` — one token of lookahead, pushed back.
     pub(crate) token_pushed_back: bool,
     /// The option-derived dialect captured at the current parser entry.
@@ -235,6 +239,7 @@ impl InputStack {
             prompt_needed: false,
             last_token: crate::parser::TokenKind::Eof,
             last_token_quoted: false,
+            last_token_after_blank: false,
             token_pushed_back: false,
             parse_dialect: crate::options::Dialect::Posix,
             word: crate::word::ParsedWord::new(),
