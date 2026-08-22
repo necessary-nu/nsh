@@ -313,7 +313,7 @@ impl<'a> TestParser<'a> {
             let Some(operand) = self.word(self.pos) else {
                 return Err(syntax(shell, Some(op.text), b"argument expected"));
             };
-            return self.unary(shell, token, operand);
+            return unary(shell, token, operand);
         }
 
         self.lex(self.pos + 1);
@@ -325,25 +325,6 @@ impl<'a> TestParser<'a> {
         }
 
         Ok(self.word(self.pos).is_some_and(|word| !word.is_empty()))
-    }
-
-    // [spec:nsh:def:idiom.logical-descriptors]
-    fn unary(&self, shell: &mut Shell, token: Token, operand: &BStr) -> Result<bool, Error> {
-        Ok(match token {
-            Token::StringEmpty => operand.is_empty(),
-            Token::StringNonempty => !operand.is_empty(),
-            Token::FileTerminal => {
-                let descriptor = parse_operand_integer(shell, operand)? as i32;
-                LogicalDescriptor::new(descriptor)
-                    .and_then(|descriptor| shell.descriptors.get(descriptor))
-                    .as_ref()
-                    .is_some_and(nsh_platform::is_terminal)
-            }
-            Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
-            Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),
-            Token::FileExecutable => test_file_access(operand, AccessMode::EXEC_OK),
-            _ => file_stat(operand, token),
-        })
     }
 
     // [spec:dash:sem:test.binop-fn]
@@ -386,6 +367,58 @@ impl<'a> TestParser<'a> {
             Token::FileSame => same_file(left, right),
             _ => left == right,
         })
+    }
+}
+
+// [spec:nsh:def:idiom.logical-descriptors]
+fn unary(shell: &mut Shell, token: Token, operand: &BStr) -> Result<bool, Error> {
+    Ok(match token {
+        Token::StringEmpty => operand.is_empty(),
+        Token::StringNonempty => !operand.is_empty(),
+        Token::FileTerminal => {
+            let descriptor = parse_operand_integer(shell, operand)? as i32;
+            LogicalDescriptor::new(descriptor)
+                .and_then(|descriptor| shell.descriptors.get(descriptor))
+                .as_ref()
+                .is_some_and(nsh_platform::is_terminal)
+        }
+        Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
+        Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),
+        Token::FileExecutable => test_file_access(operand, AccessMode::EXEC_OK),
+        _ => file_stat(operand, token),
+    })
+}
+
+/// Evaluate one `test` unary operator named by its spelling.
+///
+/// `[[ ]]` asks the same filesystem and string questions, so it borrows
+/// the answers rather than restating them. `None` means the spelling is
+/// not a unary operator here.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+pub(crate) fn unary_test(
+    shell: &mut Shell,
+    name: &BStr,
+    operand: &BStr,
+) -> Option<Result<bool, Error>> {
+    let found = operator(name).filter(|found| found.kind == OperatorKind::Unary)?;
+    Some(unary(shell, found.token, operand))
+}
+
+/// Whether a path exists, for the `-a` and `-e` spellings.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+pub(crate) fn file_exists(path: &BStr) -> bool {
+    file_stat(path, Token::FileExists)
+}
+
+/// The `-nt`, `-ot` and `-ef` file comparisons by spelling.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+pub(crate) fn file_comparison(name: &BStr, left: &BStr, right: &BStr) -> Option<bool> {
+    let name: &[u8] = name.as_ref();
+    match name {
+        b"-nt" => Some(newer(left, right)),
+        b"-ot" => Some(older(left, right)),
+        b"-ef" => Some(same_file(left, right)),
+        _ => None,
     }
 }
 

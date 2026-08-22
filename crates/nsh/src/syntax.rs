@@ -90,6 +90,14 @@ pub(crate) enum SyntaxContext {
     DoubleQuoted,
     SingleQuoted,
     Arithmetic,
+    /// The operand of Bash's `=~`, where regular-expression syntax wins.
+    ///
+    /// A regular expression and the shell disagree about `(`, `|` and `)`,
+    /// and Bash resolves it by lexing this one operand differently rather
+    /// than by making scripts quote every group. Blanks and the operators
+    /// the shell still needs end the word only outside parentheses.
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    Regex,
 }
 
 impl SyntaxContext {
@@ -135,6 +143,19 @@ impl SyntaxContext {
                 b'\'' => SyntaxClass::EndQuote,
                 b'!' | b'*' | b'-' | b'/' | b':' | b'=' | b'?' | b'[' | b'\\' | b']' | b'^'
                 | b'~' => SyntaxClass::Control,
+                _ => SyntaxClass::Word,
+            },
+            Self::Regex => match byte {
+                b'\n' => SyntaxClass::Newline,
+                b'\\' => SyntaxClass::Backslash,
+                b'\'' => SyntaxClass::SingleQuote,
+                b'"' => SyntaxClass::DoubleQuote,
+                b'`' => SyntaxClass::Backquote,
+                b'$' => SyntaxClass::Variable,
+                b'}' => SyntaxClass::EndVariable,
+                b'(' => SyntaxClass::LeftParen,
+                b')' => SyntaxClass::RightParen,
+                b' ' | b'\t' | b'&' | b';' | b'<' | b'>' => SyntaxClass::WordSeparator,
                 _ => SyntaxClass::Word,
             },
             Self::Arithmetic => match byte {
@@ -184,6 +205,7 @@ mod tests {
             SyntaxContext::DoubleQuoted,
             SyntaxContext::SingleQuoted,
             SyntaxContext::Arithmetic,
+            SyntaxContext::Regex,
         ] {
             assert_eq!(
                 context.classify(InputUnit::EndOfInput),
@@ -214,6 +236,25 @@ mod tests {
             SyntaxContext::Arithmetic.classify(InputUnit::Byte(b'(')),
             SyntaxClass::LeftParen
         );
+    }
+
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic/test]
+    #[test]
+    fn the_regex_context_keeps_group_syntax() {
+        for (byte, class) in [
+            (b'(', SyntaxClass::LeftParen),
+            (b')', SyntaxClass::RightParen),
+            (b'|', SyntaxClass::Word),
+            (b'{', SyntaxClass::Word),
+            (b';', SyntaxClass::WordSeparator),
+            (b' ', SyntaxClass::WordSeparator),
+        ] {
+            assert_eq!(
+                SyntaxContext::Regex.classify(InputUnit::Byte(byte)),
+                class,
+                "byte {byte:?}"
+            );
+        }
     }
 
     #[test]

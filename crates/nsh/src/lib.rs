@@ -158,6 +158,7 @@ pub(crate) mod arithmetic;
 pub(crate) mod expand;
 pub(crate) mod parser;
 pub(crate) mod pattern;
+pub(crate) mod regex;
 
 // ---- execution --------------------------------------------------------
 pub(crate) mod evaluation;

@@ -5409,4 +5409,9 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
     )}
+    {id implement-bash-conditionals-arithmetic, covered_rules (
+        compat.bash.conditionals-arithmetic
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.conditionals-arithmetic}
+    )}
 )
