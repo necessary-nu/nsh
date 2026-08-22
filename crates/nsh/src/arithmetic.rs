@@ -515,6 +515,7 @@ impl<'a, 'shell> Parser<'a, 'shell> {
             &selector,
             BStr::new(text.as_bytes()),
             false,
+            arrays::ReadOnlyGuard::Enforce,
         )?;
         Ok(value)
     }

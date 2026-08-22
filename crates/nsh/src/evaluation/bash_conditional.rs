@@ -205,7 +205,13 @@ fn regex_match(shell: &mut Shell, subject: &BStr, word: &WordNode) -> Result<Tru
             })
             .collect()
     });
-    arrays::assign_compound(shell, BStr::new(b"BASH_REMATCH"), elements, false)?;
+    arrays::assign_compound(
+        shell,
+        BStr::new(b"BASH_REMATCH"),
+        elements,
+        false,
+        arrays::ReadOnlyGuard::Enforce,
+    )?;
     Ok(Truth::from(matched))
 }
 

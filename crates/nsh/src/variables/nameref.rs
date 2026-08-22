@@ -232,6 +232,7 @@ pub(crate) fn assign_through(
                     Some(stored),
                     attributes,
                     super::CallbackPolicy::Run,
+                    arrays::ReadOnlyGuard::Enforce,
                 )
             })?;
             Ok(true)
@@ -239,7 +240,14 @@ pub(crate) fn assign_through(
         Target::Element { base, subscript } => {
             let base = BStr::new(base.as_slice());
             let selector = arrays::resolve_selector(shell, base, BStr::new(subscript.as_slice()))?;
-            arrays::assign_element(shell, base, &selector, value, false)?;
+            arrays::assign_element(
+                shell,
+                base,
+                &selector,
+                value,
+                false,
+                arrays::ReadOnlyGuard::Enforce,
+            )?;
             Ok(true)
         }
     }
@@ -512,6 +520,7 @@ mod tests {
             &arrays::ArraySelector::Index(2),
             BStr::new("two"),
             false,
+            arrays::ReadOnlyGuard::Enforce,
         )
         .unwrap();
         declare_reference(shell, BStr::new("Tnr_e"), BStr::new("Tnr_arr[2]"));

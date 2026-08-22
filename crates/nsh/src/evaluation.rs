@@ -631,7 +631,11 @@ pub fn evaluate_tree(
                 ExitStatus::SUCCESS
             }
             Node::Bash(crate::nodes::BashNode::ArrayAssignment(assignment)) => {
-                bash_arrays::assign(shell, assignment)?;
+                bash_arrays::assign(
+                    shell,
+                    assignment,
+                    crate::variables::arrays::ReadOnlyGuard::Enforce,
+                )?;
                 ExitStatus::SUCCESS
             }
             // Both Bash spellings define the same kind of function; the
@@ -1275,19 +1279,21 @@ pub fn evaluate_command_substitution(
 // or NULL if the argument list ran out without producing one. As an index it
 // is the length the list had on entry, so the answer is `Some` exactly when
 // the list grew.
-fn append_expanded_arguments(
+fn append_expanded_arguments<'a>(
     shell: &mut Shell,
     expanded_fields: &mut ExpandedFields,
-    remaining_argument_nodes: &mut &[Node],
+    remaining_argument_nodes: &mut &'a [Node],
+    held: &mut Vec<bash_arrays::Declaration<'a>>,
 ) -> Result<Option<usize>, Error> {
     let initial_field_count = expanded_fields.fields.len();
 
     while let Some((argument, rest)) = remaining_argument_nodes.split_first() {
-        crate::expand::expand_argument(
+        bash_arrays::expand_command_argument(
             shell,
             argument,
-            Some(expanded_fields),
+            expanded_fields,
             ExpansionMode::SPLIT | ExpansionMode::TILDE,
+            held,
         )?;
         *remaining_argument_nodes = rest;
         if expanded_fields.fields.len() != initial_field_count {
@@ -1313,13 +1319,14 @@ fn append_expanded_arguments(
 // `head` is the C's `arglist->list`, which this function reassigns to skip
 // the `command [-p]` words it consumed. A `Vec`'s start does not move, so the
 // head is an index the caller keeps; see [`crate::expand::arglist`].
-fn parse_command_args(
+fn parse_command_args<'a>(
     shell: &mut Shell,
     expanded_fields: &mut ExpandedFields,
-    remaining_argument_nodes: &mut &[Node],
+    remaining_argument_nodes: &mut &'a [Node],
     path: &mut Option<BString>,
     standard_path: &BStr,
     head: &mut usize,
+    held: &mut Vec<bash_arrays::Declaration<'a>>,
 ) -> Result<Option<CommandSearch>, Error> {
     let mut argument_index = *head;
 
@@ -1328,7 +1335,8 @@ fn parse_command_args(
         argument_index = if argument_index + 1 < expanded_fields.fields.len() {
             argument_index + 1
         } else {
-            match append_expanded_arguments(shell, expanded_fields, remaining_argument_nodes)? {
+            match append_expanded_arguments(shell, expanded_fields, remaining_argument_nodes, held)?
+            {
                 Some(field_index) => field_index,
                 None => return Ok(None),
             }
@@ -1343,8 +1351,13 @@ fn parse_command_args(
         }
         if options == b"-" {
             if argument_index + 1 >= expanded_fields.fields.len()
-                && append_expanded_arguments(shell, expanded_fields, remaining_argument_nodes)?
-                    .is_none()
+                && append_expanded_arguments(
+                    shell,
+                    expanded_fields,
+                    remaining_argument_nodes,
+                    held,
+                )?
+                .is_none()
             {
                 return Ok(None);
             }
@@ -1414,6 +1427,11 @@ fn evaluate_command_in_scope(
     resources: &mut crate::resource::ResourceScope,
 ) -> Result<Flow, Error> {
     let mut remaining_arguments: &[Node];
+    /* A declaration built-in's `a=(1 2)` operand cannot be expanded into
+     * a word: the value is structural, and its kind depends on the
+     * attributes the built-in has yet to apply. The name goes into the
+     * argument list and the assignment waits here. */
+    let mut held_declarations = Vec::new();
     let mut expanded_fields = ExpandedFields::new();
     let mut assignment_fields = ExpandedFields::new();
     let mut argument_count: usize;
@@ -1461,8 +1479,12 @@ fn evaluate_command_in_scope(
     use_local_variables = false;
     argument_count = 0;
     remaining_arguments = command.arguments.as_slice();
-    let original_fields_start =
-        append_expanded_arguments(shell, &mut expanded_fields, &mut remaining_arguments)?;
+    let original_fields_start = append_expanded_arguments(
+        shell,
+        &mut expanded_fields,
+        &mut remaining_arguments,
+        &mut held_declarations,
+    )?;
     if original_fields_start.is_some() {
         let mut assignments_are_arguments = false;
 
@@ -1513,6 +1535,7 @@ fn evaluate_command_in_scope(
                 &mut path,
                 standard_path.as_slice().as_bstr(),
                 &mut head,
+                &mut held_declarations,
             )?
             else {
                 break;
@@ -1521,20 +1544,21 @@ fn evaluate_command_in_scope(
         }
 
         for argument in remaining_arguments {
-            crate::expand::expand_argument(
+            let mode = if assignments_are_arguments
+                && matches!(
+                    argument,
+                    Node::Word(word) if word.word.is_assignment(&shell.locale)
+                ) {
+                ExpansionMode::ASSIGNMENT_TILDE
+            } else {
+                ExpansionMode::SPLIT | ExpansionMode::TILDE
+            };
+            bash_arrays::expand_command_argument(
                 shell,
                 argument,
-                Some(&mut expanded_fields),
-                if assignments_are_arguments
-                    && matches!(
-                        argument,
-                        Node::Word(word) if word.word.is_assignment(&shell.locale)
-                    )
-                {
-                    ExpansionMode::ASSIGNMENT_TILDE
-                } else {
-                    ExpansionMode::SPLIT | ExpansionMode::TILDE
-                },
+                &mut expanded_fields,
+                mode,
+                &mut held_declarations,
             )?;
         }
 
@@ -1588,7 +1612,11 @@ fn evaluate_command_in_scope(
                 // A structural array assignment is applied whole; it has
                 // no single expanded field to hand the scalar path.
                 if let Node::Bash(crate::nodes::BashNode::ArrayAssignment(array)) = assignment {
-                    bash_arrays::assign(shell, array)?;
+                    bash_arrays::assign(
+                        shell,
+                        array,
+                        crate::variables::arrays::ReadOnlyGuard::Enforce,
+                    )?;
                     continue;
                 }
                 let assignment_index = assignment_fields.fields.len();
@@ -1808,6 +1836,13 @@ fn evaluate_command_in_scope(
                 }
             }
 
+            /* The attributes exist now, so the structural values the
+             * declaration was written with can finally land. A
+             * declaration that failed -- an unknown option, a name it
+             * may not touch -- stores nothing, and has already said so. */
+            if shell.status.success() {
+                bash_arrays::apply_declarations(shell, &held_declarations)?;
+            }
             status = crate::jobs::wait_for_job(shell, job_id)?;
             crate::error::clear_interrupt_deferral(&mut shell.interrupt_deferral);
             break 'command_done;

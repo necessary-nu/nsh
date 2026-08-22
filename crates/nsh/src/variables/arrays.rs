@@ -31,6 +31,22 @@ pub(crate) enum ArraySelector {
     Joined,
 }
 
+/// Whether an existing read-only attribute refuses an assignment.
+///
+/// A declaration built-in sets `-r` before its own value lands, so
+/// `declare -r a=(1)` would otherwise be refused by the attribute the
+/// same command had just added. The declaration path therefore reports
+/// the state the name held *before* it ran, which keeps
+/// `readonly x=1; declare -a x=(2)` an error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) enum ReadOnlyGuard {
+    /// An ordinary assignment: a read-only name refuses it.
+    Enforce,
+    /// A declaration landing the value it was written with.
+    Declaration,
+}
+
 /// Resolve a subscript's bytes against the kind the variable already has.
 ///
 /// Bash decides this by the *target's* kind, not the subscript's shape:
@@ -88,7 +104,7 @@ pub(crate) fn ensure_kind(
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
     reject_bad_name(shell, name)?;
-    reject_read_only(shell, name)?;
+    reject_read_only(shell, name, ReadOnlyGuard::Enforce)?;
 
     let existing = super::value::variable_value(shell, name).cloned();
     let converted = match existing {
@@ -96,7 +112,7 @@ pub(crate) fn ensure_kind(
         Some(value) => convert(value, kind),
         None => VariableValue::empty(kind),
     };
-    store(shell, name, converted, attributes)
+    store(shell, name, converted, attributes, ReadOnlyGuard::Enforce)
 }
 
 fn convert(value: VariableValue, kind: VariableKind) -> VariableValue {
@@ -125,9 +141,10 @@ pub(crate) fn assign_element(
     selector: &ArraySelector,
     value: &BStr,
     append: bool,
+    guard: ReadOnlyGuard,
 ) -> Result<(), Error> {
     reject_bad_name(shell, name)?;
-    reject_read_only(shell, name)?;
+    reject_read_only(shell, name, guard)?;
 
     let kind = match selector {
         ArraySelector::Key(_) => VariableKind::Associative,
@@ -164,7 +181,7 @@ pub(crate) fn assign_element(
             return Err(shell.diagnostics().shell_error(&message));
         }
     }
-    store(shell, name, current, VariableAttributes::NONE)
+    store(shell, name, current, VariableAttributes::NONE, guard)
 }
 
 fn existing_element(value: &VariableValue, selector: &ArraySelector) -> Option<BString> {
@@ -193,9 +210,10 @@ pub(crate) fn assign_compound(
     name: &BStr,
     elements: Vec<CompoundElement>,
     append: bool,
+    guard: ReadOnlyGuard,
 ) -> Result<(), Error> {
     reject_bad_name(shell, name)?;
-    reject_read_only(shell, name)?;
+    reject_read_only(shell, name, guard)?;
 
     let declared = super::value::variable_kind(shell, name);
     let kind = declared.filter(|kind| *kind != VariableKind::Scalar);
@@ -250,7 +268,7 @@ pub(crate) fn assign_compound(
             }
         }
     }
-    store(shell, name, current, VariableAttributes::NONE)
+    store(shell, name, current, VariableAttributes::NONE, guard)
 }
 
 /// `unset a[i]` removes one element; `unset a` is the ordinary path.
@@ -259,7 +277,7 @@ pub(crate) fn unset_element(
     name: &BStr,
     selector: &ArraySelector,
 ) -> Result<(), Error> {
-    reject_read_only(shell, name)?;
+    reject_read_only(shell, name, ReadOnlyGuard::Enforce)?;
     let Some(mut current) = super::value::variable_value(shell, name).cloned() else {
         return Ok(());
     };
@@ -275,7 +293,13 @@ pub(crate) fn unset_element(
             current = VariableValue::empty(current.kind());
         }
     }
-    store(shell, name, current, VariableAttributes::NONE)
+    store(
+        shell,
+        name,
+        current,
+        VariableAttributes::NONE,
+        ReadOnlyGuard::Enforce,
+    )
 }
 
 /// Every element in subscript order, for `${a[@]}` and friends.
@@ -310,7 +334,10 @@ fn reject_bad_name(shell: &mut Shell, name: &BStr) -> Result<(), Error> {
     Err(shell.diagnostics().shell_error(&message))
 }
 
-fn reject_read_only(shell: &mut Shell, name: &BStr) -> Result<(), Error> {
+fn reject_read_only(shell: &mut Shell, name: &BStr, guard: ReadOnlyGuard) -> Result<(), Error> {
+    if guard == ReadOnlyGuard::Declaration {
+        return Ok(());
+    }
     let read_only = super::variable_attributes(shell, name).is_some_and(|attrs| attrs.read_only);
     if !read_only {
         return Ok(());
@@ -328,6 +355,7 @@ fn store(
     name: &BStr,
     value: VariableValue,
     attributes: VariableAttributes,
+    guard: ReadOnlyGuard,
 ) -> Result<(), Error> {
     let seeded = value.scalar_owned().unwrap_or_default();
     crate::error::with_interrupts_deferred(shell, |shell| {
@@ -337,6 +365,7 @@ fn store(
             Some(BStr::new(seeded.as_slice())),
             attributes,
             CallbackPolicy::Run,
+            guard,
         )
     })?;
     let entry = shell
@@ -367,7 +396,15 @@ mod tests {
         let shell = &mut shell();
         let name = BStr::new("Tarr1");
 
-        assign_element(shell, name, &ArraySelector::Index(3), BStr::new("x"), false).unwrap();
+        assign_element(
+            shell,
+            name,
+            &ArraySelector::Index(3),
+            BStr::new("x"),
+            false,
+            ReadOnlyGuard::Enforce,
+        )
+        .unwrap();
 
         let value = variable_value(shell, name).expect("the name exists");
         assert_eq!(value.kind(), VariableKind::Indexed);
@@ -401,7 +438,7 @@ mod tests {
                 append: false,
             },
         ];
-        assign_compound(shell, name, elements, false).unwrap();
+        assign_compound(shell, name, elements, false, ReadOnlyGuard::Enforce).unwrap();
 
         let value = variable_value(shell, name).expect("the name exists");
         assert_eq!(value.indexed_keys(), Some(vec![0, 5, 6]));
@@ -423,9 +460,18 @@ mod tests {
             &ArraySelector::Index(0),
             BStr::new("one"),
             false,
+            ReadOnlyGuard::Enforce,
         )
         .unwrap();
-        assign_element(shell, name, &ArraySelector::Index(0), BStr::new("X"), true).unwrap();
+        assign_element(
+            shell,
+            name,
+            &ArraySelector::Index(0),
+            BStr::new("X"),
+            true,
+            ReadOnlyGuard::Enforce,
+        )
+        .unwrap();
         assert_eq!(
             variable_value(shell, name).and_then(|value| value.indexed(0)),
             Some(BStr::new("oneX"))
@@ -440,6 +486,7 @@ mod tests {
                 append: false,
             }],
             true,
+            ReadOnlyGuard::Enforce,
         )
         .unwrap();
         let value = variable_value(shell, name).expect("the name exists");
@@ -462,6 +509,7 @@ mod tests {
                 &ArraySelector::Index(index),
                 BStr::new("v"),
                 false,
+                ReadOnlyGuard::Enforce,
             )
             .unwrap();
         }
@@ -488,7 +536,15 @@ mod tests {
         let selector = resolve_selector(shell, name, BStr::new("1+1")).unwrap();
         assert_eq!(selector, ArraySelector::Key(BString::from("1+1")));
 
-        assign_element(shell, name, &selector, BStr::new("v"), false).unwrap();
+        assign_element(
+            shell,
+            name,
+            &selector,
+            BStr::new("v"),
+            false,
+            ReadOnlyGuard::Enforce,
+        )
+        .unwrap();
         assert_eq!(
             variable_value(shell, name).and_then(|value| value.associative(BStr::new("1+1"))),
             Some(BStr::new("v"))
@@ -512,6 +568,38 @@ mod tests {
         assert_eq!(value.indexed(0), Some(BStr::new("v")));
     }
 
+    /// A declaration lands the value it was written with past the
+    /// read-only attribute the same command just added, while a name
+    /// that arrived read-only still refuses one.
+    #[test]
+    // [spec:nsh:req:compat.bash.arrays-declarations/test]
+    fn a_declaration_passes_its_own_read_only_flag() {
+        let _g = lock();
+        let shell = &mut shell();
+        let name = BStr::new("Tarr8");
+        let element = || {
+            vec![CompoundElement {
+                subscript: None,
+                value: BString::from("v"),
+                append: false,
+            }]
+        };
+
+        super::super::set_bytes(shell, name, None, VariableAttributes::READ_ONLY).unwrap();
+        assign_compound(shell, name, element(), false, ReadOnlyGuard::Declaration).unwrap();
+
+        assert_eq!(
+            variable_value(shell, name).and_then(|value| value.indexed(0)),
+            Some(BStr::new("v"))
+        );
+        assert!(
+            super::super::variable_attributes(shell, name)
+                .expect("the name exists")
+                .read_only
+        );
+        assert!(assign_compound(shell, name, element(), false, ReadOnlyGuard::Enforce).is_err());
+    }
+
     /// `unset a[i]` removes one element and leaves the rest in place.
     #[test]
     // [spec:nsh:req:compat.bash.arrays-declarations/test]
@@ -527,6 +615,7 @@ mod tests {
                 &ArraySelector::Index(index),
                 BStr::new("v"),
                 false,
+                ReadOnlyGuard::Enforce,
             )
             .unwrap();
         }

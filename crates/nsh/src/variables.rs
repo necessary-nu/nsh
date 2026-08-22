@@ -539,6 +539,7 @@ fn set_entry(
     value: Option<&BStr>,
     mut attributes: VariableAttributes,
     callback_policy: CallbackPolicy,
+    guard: arrays::ReadOnlyGuard,
 ) -> Result<(), Error> {
     if !valid_name(&shell.locale, name) {
         let mut message = name.to_vec();
@@ -577,7 +578,7 @@ fn set_entry(
         return Ok(());
     };
 
-    if old.attributes.read_only {
+    if old.attributes.read_only && guard == arrays::ReadOnlyGuard::Enforce {
         let mut message = name.to_vec();
         message.extend_from_slice(b": is read only");
         return Err(shell.diagnostics().shell_error(&message));
@@ -654,7 +655,14 @@ pub(crate) fn set_bytes(
 ) -> Result<(), Error> {
     let Some(value) = value else {
         return crate::error::with_interrupts_deferred(shell, |shell| {
-            set_entry(shell, name, None, attributes, CallbackPolicy::Run)
+            set_entry(
+                shell,
+                name,
+                None,
+                attributes,
+                CallbackPolicy::Run,
+                arrays::ReadOnlyGuard::Enforce,
+            )
         });
     };
     /* A Bash name reference sends the value somewhere else entirely, and
@@ -667,7 +675,14 @@ pub(crate) fn set_bytes(
     let converted = nameref::declared_value(shell, name, value)?;
     let stored = converted.as_ref().map_or(value, |text| BStr::new(text));
     crate::error::with_interrupts_deferred(shell, |shell| {
-        set_entry(shell, name, Some(stored), attributes, CallbackPolicy::Run)
+        set_entry(
+            shell,
+            name,
+            Some(stored),
+            attributes,
+            CallbackPolicy::Run,
+            arrays::ReadOnlyGuard::Enforce,
+        )
     })
 }
 
@@ -701,6 +716,7 @@ pub(crate) fn set_integer_bytes(
             Some(BStr::new(text.as_bytes())),
             attributes,
             callback_policy,
+            arrays::ReadOnlyGuard::Enforce,
         )
     })?;
     Ok(value)

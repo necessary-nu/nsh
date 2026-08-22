@@ -10,13 +10,17 @@ use bstr::{BStr, BString};
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::expand::{ExpandedFields, ExpansionMode, expand_argument};
+use crate::expand::{ExpandedField, ExpandedFields, ExpansionMode, expand_argument};
 use crate::nodes::{BashArrayAssignment, BashArrayValue, BashAssignmentOperator, Node, WordNode};
-use crate::variables::arrays::{self, ArraySelector, CompoundElement};
+use crate::variables::arrays::{self, ArraySelector, CompoundElement, ReadOnlyGuard};
 
 /// Apply one `a=(...)`, `a[i]=v`, or `a+=(...)` assignment.
 // [spec:nsh:req:compat.bash.arrays-declarations]
-pub(crate) fn assign(shell: &mut Shell, assignment: &BashArrayAssignment) -> Result<(), Error> {
+pub(crate) fn assign(
+    shell: &mut Shell,
+    assignment: &BashArrayAssignment,
+    guard: ReadOnlyGuard,
+) -> Result<(), Error> {
     // An assignment to a Bash name reference reaches the variable it
     // names, so the reference is resolved before any subscript is.
     // [spec:nsh:req:compat.bash.functions-scoping]
@@ -43,6 +47,7 @@ pub(crate) fn assign(shell: &mut Shell, assignment: &BashArrayAssignment) -> Res
                         &selector,
                         BStr::new(value.as_slice()),
                         append,
+                        guard,
                     )
                 }
                 // `a+=v` with no subscript appends to the zero element,
@@ -55,6 +60,7 @@ pub(crate) fn assign(shell: &mut Shell, assignment: &BashArrayAssignment) -> Res
                         &selector,
                         BStr::new(value.as_slice()),
                         append,
+                        guard,
                     )
                 }
             }
@@ -76,9 +82,67 @@ pub(crate) fn assign(shell: &mut Shell, assignment: &BashArrayAssignment) -> Res
                     });
                 }
             }
-            arrays::assign_compound(shell, BStr::new(name.as_slice()), resolved, append)
+            arrays::assign_compound(shell, BStr::new(name.as_slice()), resolved, append, guard)
         }
     }
+}
+
+/// A declaration built-in's structural operand, held until the built-in
+/// has applied its attributes.
+///
+/// `declare -A m=([k]=v)` is associative only because `-A` was seen
+/// first, so the compound value cannot land while the command line is
+/// still being assembled. The built-in is handed the operand's bare name
+/// in its place, and the assignment runs once the built-in has returned.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) struct Declaration<'a> {
+    assignment: &'a BashArrayAssignment,
+    /// Whether the name was already read-only when the command started.
+    was_read_only: bool,
+}
+
+/// Expand one command argument, holding back a declaration operand.
+///
+/// The name is what the built-in has to see: it lives inside the node
+/// rather than among the words, so dropping the node outright would
+/// leave `declare -A` with nothing to apply `-A` to.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn expand_command_argument<'a>(
+    shell: &mut Shell,
+    argument: &'a Node,
+    fields: &mut ExpandedFields,
+    mode: ExpansionMode,
+    held: &mut Vec<Declaration<'a>>,
+) -> Result<(), Error> {
+    let Node::Bash(crate::nodes::BashNode::ArrayAssignment(assignment)) = argument else {
+        return expand_argument(shell, argument, Some(fields), mode);
+    };
+    let name = assignment.name.as_bstr();
+    let was_read_only = crate::variables::variable_attributes(shell, name)
+        .is_some_and(|attributes| attributes.read_only);
+    fields.fields.push(ExpandedField::from_bytes(name.as_ref()));
+    held.push(Declaration {
+        assignment,
+        was_read_only,
+    });
+    Ok(())
+}
+
+/// Land every held operand now that the declaration's attributes exist.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn apply_declarations(shell: &mut Shell, held: &[Declaration<'_>]) -> Result<(), Error> {
+    for declaration in held {
+        // A name the command itself just made read-only is still waiting
+        // for the value it was written with; one that arrived read-only
+        // refuses it, as an ordinary assignment would.
+        let guard = if declaration.was_read_only {
+            ReadOnlyGuard::Enforce
+        } else {
+            ReadOnlyGuard::Declaration
+        };
+        assign(shell, declaration.assignment, guard)?;
+    }
+    Ok(())
 }
 
 /// Expand a word to exactly one field, as an assignment right-hand side.
