@@ -9,14 +9,31 @@
 //!
 //! Matching is leftmost-longest, as POSIX requires: the search takes the
 //! first start offset that matches at all, and at that offset explores the
-//! whole expression to keep the longest end. Exploration is bounded by a
-//! step budget so a pathological expression yields "no match" rather than
-//! an unbounded run.
+//! whole expression to keep the longest end.
+//!
+//! Two bounds hold the exploration down, and both are needed. The step
+//! budget is spent by the whole search rather than by one attempt, because
+//! an attempt is made at every character and a per-attempt budget would
+//! multiply by the subject's length instead of bounding it. The depth
+//! bound is separate because steps do not measure stack: a quantified
+//! group consumes one subject character per nested continuation, so a
+//! long subject reaches the budget only after the call stack is already
+//! gone. Exceeding either yields a shorter match or none, never a crash.
 
 use bstr::BString;
 
-/// How much of the search space one match attempt may visit.
+/// How much of the search space one whole search may visit.
 const STEP_BUDGET: u64 = 400_000;
+
+/// How deeply the continuation chain may nest.
+///
+/// Every nested [`Matcher::matches`] is one continuation frame, and a
+/// quantified group spends one per subject character. Measured against a
+/// debug build, `(a)+` over an unbroken run exhausts an eight-megabyte
+/// stack at roughly five thousand five hundred nested frames; this leaves
+/// the bound a factor of two below that, for a shell whose stack is
+/// already carrying an evaluator.
+const MAX_DEPTH: u32 = 2_000;
 
 /// The largest repetition count an interval may name.
 const MAX_REPEAT: u32 = 1000;
@@ -89,9 +106,14 @@ impl Regex {
 
     /// Search `subject` for the leftmost-longest match.
     pub(crate) fn search(&self, locale: &nsh_platform::Locale, subject: &[u8]) -> Option<Captures> {
+        /* One budget for every attempt this search makes. Charging each
+         * start offset separately would let a subject `n` bytes long buy
+         * `n` full budgets, which is the shape that turns a rejected
+         * pattern into an unbounded run. */
+        let mut steps = 0_u64;
         let mut start = 0;
         loop {
-            if let Some(captures) = self.match_at(locale, subject, start) {
+            if let Some(captures) = self.match_at(locale, subject, start, &mut steps) {
                 return Some(captures);
             }
             if start >= subject.len() {
@@ -106,12 +128,14 @@ impl Regex {
         locale: &nsh_platform::Locale,
         subject: &[u8],
         start: usize,
+        steps: &mut u64,
     ) -> Option<Captures> {
         let mut matcher = Matcher {
             locale,
             subject,
             groups: vec![None; self.group_count + 1],
-            steps: 0,
+            steps,
+            depth: 0,
         };
         let mut longest: Option<Vec<Option<(usize, usize)>>> = None;
         let mut best_end = 0;
@@ -414,17 +438,30 @@ struct Matcher<'a> {
     locale: &'a nsh_platform::Locale,
     subject: &'a [u8],
     groups: Vec<Option<(usize, usize)>>,
-    steps: u64,
+    steps: &'a mut u64,
+    depth: u32,
 }
 
 type Continue<'a> = dyn FnMut(&mut Matcher<'_>, usize) -> bool + 'a;
 
 impl Matcher<'_> {
+    /// Charge one step, take one frame, and explore the expression.
+    ///
+    /// Every recursion in this matcher passes through here, so the two
+    /// bounds are checked in one place and cannot be reached around by
+    /// nesting groups, alternations or repetitions.
     fn matches(&mut self, expr: &Expr, pos: usize, next: &mut Continue<'_>) -> bool {
-        self.steps += 1;
-        if self.steps > STEP_BUDGET {
+        *self.steps += 1;
+        if *self.steps > STEP_BUDGET || self.depth >= MAX_DEPTH {
             return false;
         }
+        self.depth += 1;
+        let matched = self.explore(expr, pos, next);
+        self.depth -= 1;
+        matched
+    }
+
+    fn explore(&mut self, expr: &Expr, pos: usize, next: &mut Continue<'_>) -> bool {
         match expr {
             Expr::Empty => next(self, pos),
             Expr::Literal(bytes) => match self.subject.get(pos..pos + bytes.len()) {
@@ -685,5 +722,27 @@ mod tests {
     fn a_long_subject_does_not_exhaust_the_stack() {
         let subject = vec![b'x'; 200_000];
         assert!(find(b"^x*$", &subject).is_some());
+    }
+
+    /// A quantified *group* cannot be repeated without recursion, so this
+    /// is the shape that reaches the stack. The bound turns it into a
+    /// shorter match rather than a crash.
+    // [spec:nsh:req:compat.bash.safe-core/test]
+    #[test]
+    fn a_quantified_group_is_depth_bounded() {
+        let subject = vec![b'a'; 200_000];
+        let groups = find(b"(a)+", &subject).expect("a truncated match is still a match");
+        let (start, end) = groups[0].expect("the whole match has a span");
+        assert_eq!(start, 0);
+        assert!(end > 0 && end < subject.len());
+    }
+
+    /// One budget for the whole search: an attempt at every one of `n`
+    /// start offsets must not buy `n` budgets.
+    // [spec:nsh:req:compat.bash.safe-core/test]
+    #[test]
+    fn one_budget_covers_every_start_offset() {
+        let subject = vec![b'a'; 20_000];
+        assert!(find(b"(a*)*b", &subject).is_none());
     }
 }

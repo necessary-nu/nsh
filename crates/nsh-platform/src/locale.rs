@@ -213,6 +213,9 @@ impl Locale {
     /// Start an incremental multibyte decoder bound to this locale.
     pub fn decoder(&self) -> LocaleDecoder {
         LocaleDecoder {
+            // SAFETY: an all-zero `mbstate_t` is the initial conversion
+            // state C requires of every `mbrtowc` sequence, and the type
+            // holds no pointer or reference for which zero is invalid.
             state: unsafe { std::mem::zeroed() },
             locale: self.clone(),
         }

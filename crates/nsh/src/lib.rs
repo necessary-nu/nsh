@@ -68,6 +68,11 @@
 #![deny(missing_docs)]
 // [spec:nsh:req:idiom.strict-lints]
 // [spec:nsh:req:idiom.regression-gates]
+// The compiler is where "Bash compatibility work stays safe Rust" is
+// actually enforced; `crates/nsh/tests/idiomatic_control_flow.rs` gates
+// the things a lint cannot see -- a direct `libc` dependency, a raw
+// descriptor in a signature, a manual `dup2`, copied upstream code.
+// [spec:nsh:req:compat.bash.safe-core]
 #![deny(unsafe_code)]
 #![deny(dead_code)]
 #![deny(non_camel_case_types)]

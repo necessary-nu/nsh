@@ -518,3 +518,51 @@ these are named POSIX survey cases driven through a terminal. Their executable
 evidence remains those survey cases. A future result showing the port ahead in
 exactly these two cases is therefore expected; a different editor mismatch is
 not covered by this entry.
+
+## Bash-compatibility divergences taken under `[dec:nsh:safety-trumps-compatibility]`
+
+These are not dash divergences and have no entry in
+`tests/harness/divergences.sh`: the reference is Bash, the evidence is
+the oils survey, and the survey has no counterpart to `## BUG bash` for
+a case *we* refuse on purpose. Each one is therefore recorded here and
+on the plan node that owns the surface, per that decision's deferred
+consequence.
+
+### A process-substitution name lives no longer than its syntax node
+
+**Status:** deliberate, with a stated limit.
+`crates/nsh/src/evaluation/bash_process_substitution.rs`.
+
+Bash keeps every `<(list)` and `>(list)` name open until the *outermost*
+command finishes. A loop body therefore opens one pipe per iteration, and
+every unrelated program the shell runs in between inherits the
+descriptor. Here the shell's end is an owned close-on-exec `Descriptor`
+released by `Drop` when the syntax node whose word produced it finishes
+evaluating, so the descriptor cannot outlive the name and no path --
+error, interrupt or early return -- can skip the release.
+
+Observable difference: a name produced by one command of a `;` list is
+gone by the next command of that same list, where Bash's would still
+open. The node that built the name is still the unit, so `for w in
+<(list); do ... done` and a redirected group both keep theirs for as long
+as they need them.
+
+A second, smaller one: where the system publishes no descriptor-table
+directory (`/dev/fd`, `/proc/self/fd`) the substitution is a diagnostic
+rather than a temporary FIFO. A carelessly created FIFO is the shape of
+CVE-2000-1134, and a plausible pathname that will not open is worse than
+a refusal.
+
+The limit worth stating, because the module's ownership rules do not
+reach it: close-on-exec is cleared at exactly one site, in
+`execute_external_command` after the last fork this process makes -- but
+it is cleared for *every* name still live in that process, not only for
+the name the command being run was given. A name has to survive
+indirection (`for w in <(list); do cat $w; done` reads it from a
+different node than the one that built it), and the process cannot tell
+which of its live names the image it is about to become will open. So an
+external command run from inside a command substitution, or from the body
+of a loop redirected from a substitution, inherits the shell's end of a
+pipe it has no use for. The descriptor is still owned and still released
+on time; what it is not is private to one image.
+

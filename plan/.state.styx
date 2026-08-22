@@ -1395,7 +1395,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.strict-lints, version 0}
     )}
-    {id enforce-bash-safe-core}
+    {id enforce-bash-safe-core, covered_rules (
+        compat.bash.safe-core
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.safe-core}
+    )}
     {id enforce-zero-cism-gates, covered_rules (
         idiom.regression-gates
     ), covered_claims (

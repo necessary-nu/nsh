@@ -45,9 +45,15 @@ pub fn descriptor_name(_fd: &Descriptor) -> Option<PathBuf> {
 /// Keep one descriptor open across the `exec` this process is about to make.
 ///
 /// Every descriptor the shell owns is close-on-exec, so a program the shell
-/// runs inherits only what it was given. Clearing that flag publishes one
-/// descriptor to one image, and is meaningful only at a process terminus
-/// where nothing will ever fork again.
+/// runs inherits only what it was given. Clearing that flag hands this one
+/// descriptor to whatever image the calling process becomes, so it is
+/// meaningful only at a process terminus where nothing will ever fork
+/// again. Which descriptors a terminus publishes is the caller's decision,
+/// not this function's.
+///
+/// It borrows rather than takes: the caller keeps the owner, and no
+/// descriptor number crosses this boundary.
+// [spec:nsh:req:compat.bash.safe-core]
 #[cfg(unix)]
 pub fn publish_descriptor_across_exec(fd: &Descriptor) -> std::io::Result<()> {
     let flags = rustix::io::fcntl_getfd(fd).map_err(std::io::Error::from)?;

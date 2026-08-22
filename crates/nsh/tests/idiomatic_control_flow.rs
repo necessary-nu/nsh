@@ -32,6 +32,95 @@ const LIBRARY: &str = include_str!("../src/lib.rs");
 const CLI: &str = include_str!("../../nsh-cli/src/main.rs");
 const CLI_INVOCATION: &str = include_str!("../../nsh-cli/src/invocation.rs");
 
+/// Host scalar spellings that only exist to match a C ABI.
+const ABI_SCALARS: &[&str] = &[
+    "c_char",
+    "c_schar",
+    "c_uchar",
+    "c_short",
+    "c_ushort",
+    "c_int",
+    "c_uint",
+    "c_long",
+    "c_ulong",
+    "c_longlong",
+    "c_ulonglong",
+    "c_float",
+    "c_double",
+    "c_void",
+];
+
+/// NUL-framed string types and the conversions that produce them.
+const C_STRINGS: &[&str] = &[
+    "CStr",
+    "CString",
+    "to_bytes_with_nul",
+    "from_bytes_with_nul",
+    "as_cbytes",
+    "from_cbytes",
+];
+
+/// Descriptor spellings that carry a number instead of an owner.
+const RAW_DESCRIPTORS: &[&str] = &[
+    "RawFd",
+    "AsRawFd",
+    "IntoRawFd",
+    "FromRawFd",
+    "BorrowedFd",
+    "OwnedFd",
+];
+
+/// Descriptor operations that move a number rather than an owner.
+const MANUAL_DESCRIPTOR_CALLS: &[&str] = &["dup2", "dup3", "fcntl", "close_range", "posix_spawn"];
+
+/// The crates that name the host directly, and the crates that must not.
+const LOW_LEVEL_CRATES: &[&str] = &["libc", "rustix", "windows_sys", "ntapi", "nshedit_plat"];
+
+/// The only files permitted to name the host's low-level facilities.
+///
+/// One list, shared by every gate in this file: two allowlists that
+/// disagree are worse than one, and a new platform file is meant to be an
+/// explicit addition here rather than a silent one.
+const PRIVATE_PLATFORM_ALLOWLIST: &[&str] = &[
+    "crates/nsh-platform/src/descriptor.rs",
+    "crates/nsh-platform/src/descriptor_name.rs",
+    "crates/nsh-platform/src/editor_terminal.rs",
+    "crates/nsh-platform/src/locale.rs",
+    "crates/nsh-platform/src/signal_names.rs",
+    "crates/nsh-platform/src/terminal.rs",
+    "crates/nsh-platform/src/unix.rs",
+    "crates/nsh-platform/src/unix_facts.rs",
+    "crates/nsh-platform/src/windows.rs",
+];
+
+/// Every source tree that must hold the safe-core line, including the
+/// tests: a test that reaches for the host directly is a way around the
+/// boundary, not an exception to it.
+const SAFE_CORE_TREES: &[&str] = &[
+    "crates/nsh/src",
+    "crates/nsh/tests",
+    "crates/nsh-cli/src",
+    "crates/nsh-platform/tests",
+];
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn relative_to_workspace(path: &Path, workspace: &Path) -> String {
+    path.strip_prefix(workspace)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn rust_sources_in(workspace: &Path, tree: &str) -> Vec<PathBuf> {
+    let mut sources = Vec::new();
+    rust_sources_below(&workspace.join(tree), &mut sources);
+    sources.sort();
+    sources
+}
+
 fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(directory).expect("source directory is readable") {
         let path = entry.expect("source entry is readable").path();
@@ -271,30 +360,6 @@ fn core_enforces_strict_rust_lints() {
 // [spec:nsh:req:idiom.regression-gates/test]
 #[test]
 fn zero_cism_gate_covers_boundary() {
-    const ABI_SCALARS: &[&str] = &[
-        "c_char",
-        "c_schar",
-        "c_uchar",
-        "c_short",
-        "c_ushort",
-        "c_int",
-        "c_uint",
-        "c_long",
-        "c_ulong",
-        "c_longlong",
-        "c_ulonglong",
-        "c_float",
-        "c_double",
-        "c_void",
-    ];
-    const C_STRINGS: &[&str] = &[
-        "CStr",
-        "CString",
-        "to_bytes_with_nul",
-        "from_bytes_with_nul",
-        "as_cbytes",
-        "from_cbytes",
-    ];
     const CONTROL_BYTE_WORDS: &[&str] = &[
         "CTLESC",
         "CTLVAR",
@@ -324,26 +389,7 @@ fn zero_cism_gate_covers_boundary() {
         "0x87",
         "0x88",
     ];
-    const RAW_DESCRIPTORS: &[&str] = &[
-        "RawFd",
-        "AsRawFd",
-        "IntoRawFd",
-        "FromRawFd",
-        "BorrowedFd",
-        "OwnedFd",
-    ];
-    const PRIVATE_PLATFORM_ALLOWLIST: &[&str] = &[
-        "crates/nsh-platform/src/descriptor.rs",
-        "crates/nsh-platform/src/descriptor_name.rs",
-        "crates/nsh-platform/src/locale.rs",
-        "crates/nsh-platform/src/signal_names.rs",
-        "crates/nsh-platform/src/terminal.rs",
-        "crates/nsh-platform/src/unix.rs",
-        "crates/nsh-platform/src/unix_facts.rs",
-        "crates/nsh-platform/src/windows.rs",
-    ];
-
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workspace = workspace_root();
     let mut violations = Vec::new();
     for root in ["crates/nsh/src", "crates/nsh-cli/src"] {
         let mut sources = Vec::new();
@@ -406,7 +452,8 @@ fn zero_cism_gate_covers_boundary() {
                 .iter()
                 .chain(C_STRINGS)
                 .chain(RAW_DESCRIPTORS)
-                .chain(["unsafe", "libc", "rustix", "windows_sys", "ntapi"].iter())
+                .chain(LOW_LEVEL_CRATES)
+                .chain(["unsafe"].iter())
                 .any(|forbidden| identifier == forbidden)
         }) || scan.contains_c_literal;
         let relative = path
@@ -940,4 +987,432 @@ fn typed_shell_options() {
             "shell options retain legacy representation {forbidden:?}"
         );
     }
+}
+
+// ---- the Bash compatibility delta's safe-core gate ------------------
+
+/// Does this line open an `unsafe` expression block?
+///
+/// `unsafe extern` declaration blocks and `unsafe fn` signatures are
+/// excluded: the obligation they carry belongs to their call sites, which
+/// are the blocks this looks for.
+fn opens_unsafe_block(line: &str) -> bool {
+    let Some(at) = line.find("unsafe") else {
+        return false;
+    };
+    let before_is_word = line[..at]
+        .chars()
+        .next_back()
+        .is_some_and(|character| character.is_alphanumeric() || character == '_');
+    !before_is_word && line[at + "unsafe".len()..].trim_start().starts_with('{')
+}
+
+/// Every source file below one of the safe-core trees, with its scan.
+fn scanned_safe_core_sources(workspace: &Path) -> Vec<(String, SourceScan)> {
+    let mut scanned = Vec::new();
+    for tree in SAFE_CORE_TREES {
+        for path in rust_sources_in(workspace, tree) {
+            let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+            scanned.push((
+                relative_to_workspace(&path, workspace),
+                scan_rust_source(&source),
+            ));
+        }
+    }
+    scanned
+}
+
+/// The compatibility delta stays safe Rust, tests included.
+///
+/// The rule names five things Bash work may not introduce: `unsafe`,
+/// direct `libc`, `RawFd` storage or parameters, and manual `dup2` or
+/// `close`. The first four are identifiers, so they are matched as
+/// identifiers rather than as substrings -- a comment discussing `unsafe`
+/// or a table listing `"RawFd"` is prose, not a bypass. Manual descriptor
+/// moves are matched the same way.
+// [spec:nsh:req:compat.bash.safe-core/test]
+#[test]
+fn the_compatibility_delta_stays_safe() {
+    let workspace = workspace_root();
+    let mut violations = Vec::new();
+
+    for (relative, scan) in scanned_safe_core_sources(&workspace) {
+        for forbidden in ABI_SCALARS
+            .iter()
+            .chain(C_STRINGS)
+            .chain(RAW_DESCRIPTORS)
+            .chain(MANUAL_DESCRIPTOR_CALLS)
+            .chain(LOW_LEVEL_CRATES)
+            .chain(["unsafe"].iter())
+        {
+            if scan.identifiers.iter().any(|name| name == forbidden) {
+                violations.push(format!("{relative} names {forbidden}"));
+            }
+        }
+        if scan.contains_c_literal {
+            violations.push(format!("{relative} contains a C string literal"));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "safe-core violations in the shell crates:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// `unsafe` lives in the platform crate, in named files, with a reason.
+///
+/// The allowlist is exact in both directions: a file that names the host
+/// must be on it, and every entry must still exist, so a deleted file
+/// cannot leave a permission behind for a later one to inherit.
+// [spec:nsh:req:compat.bash.safe-core/test]
+#[test]
+fn platform_unsafe_is_named_and_justified() {
+    let workspace = workspace_root();
+    let mut violations = Vec::new();
+
+    for entry in PRIVATE_PLATFORM_ALLOWLIST {
+        if !workspace.join(entry).exists() {
+            violations.push(format!("{entry} is allowlisted but does not exist"));
+        }
+    }
+
+    for path in rust_sources_in(&workspace, "crates/nsh-platform/src") {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        let relative = relative_to_workspace(&path, &workspace);
+        let scan = scan_rust_source(&source);
+        let names_host = scan
+            .identifiers
+            .iter()
+            .any(|name| name == "unsafe" || LOW_LEVEL_CRATES.contains(&name.as_str()));
+        if names_host && !PRIVATE_PLATFORM_ALLOWLIST.contains(&relative.as_str()) {
+            violations.push(format!("{relative} names the host outside the allowlist"));
+        }
+
+        let lines: Vec<&str> = source.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            if opens_unsafe_block(line)
+                && !lines[index.saturating_sub(8)..index]
+                    .iter()
+                    .any(|earlier| earlier.contains("SAFETY"))
+            {
+                violations.push(format!(
+                    "{relative}:{} opens an unsafe block with no SAFETY note",
+                    index + 1
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "platform unsafe violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// A descriptor crosses the platform boundary as an owner, never a number.
+///
+/// `dup2` and `close` on a raw number exist exactly once each in the whole
+/// workspace, inside the one transaction that materializes a child's
+/// descriptor table after the last fork. Anywhere else they would be a
+/// second, unowned lifetime for a descriptor the shell already owns.
+// [spec:nsh:req:compat.bash.safe-core/test]
+#[test]
+fn descriptors_cross_the_boundary_owned() {
+    let workspace = workspace_root();
+    let mut violations = Vec::new();
+
+    let descriptor =
+        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/descriptor.rs")).unwrap();
+    for required in [
+        "pub(crate) fn number(&self) -> i32",
+        "pub(crate) fn borrowed(&self) -> BorrowedFd<'_>",
+    ] {
+        assert!(
+            descriptor.contains(required),
+            "the descriptor number stopped being private: {required}"
+        );
+    }
+
+    let mut manual_moves = 0_usize;
+    for path in rust_sources_in(&workspace, "crates/nsh-platform/src") {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        let relative = relative_to_workspace(&path, &workspace);
+        manual_moves += source.matches("libc::dup2(").count();
+        manual_moves += source.matches("libc::close(").count();
+
+        for line in source.lines() {
+            let line = line.trim_start();
+            if !line.starts_with("pub fn") && !line.starts_with("pub unsafe fn") {
+                continue;
+            }
+            for spelling in RAW_DESCRIPTORS {
+                if line.contains(spelling) {
+                    violations.push(format!("{relative} exposes {spelling} in `{line}`"));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        manual_moves, 2,
+        "manual descriptor moves are no longer the two in the materialization transaction"
+    );
+
+    for (function, borrow) in [
+        ("descriptor_name", "fd: &Descriptor"),
+        ("publish_descriptor_across_exec", "fd: &Descriptor"),
+    ] {
+        let source =
+            std::fs::read_to_string(workspace.join("crates/nsh-platform/src/descriptor_name.rs"))
+                .unwrap();
+        assert!(
+            source.contains(&format!("pub fn {function}({borrow}")),
+            "{function} stopped borrowing its descriptor"
+        );
+    }
+
+    let facts =
+        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix_facts.rs")).unwrap();
+    for required in [
+        "pub fn terminal_name(fd: &impl AsDescriptor)",
+        "pub fn wait_for_input(fd: &impl AsDescriptor",
+    ] {
+        assert!(
+            facts.contains(required),
+            "missing borrowed signature: {required}"
+        );
+    }
+
+    assert!(
+        violations.is_empty(),
+        "raw descriptors cross the platform boundary:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// The process-substitution ownership edges, pinned where they are made.
+///
+/// Each assertion here is one edge the audit walked: the name's scope has
+/// a single opening, close-on-exec is cleared at a single site, the
+/// substitution's own child disowns its parent's names, and the child is
+/// forked without a job. Release is by `Drop` and nothing else, so no path
+/// -- error, interrupt or early return -- can skip it.
+// [spec:nsh:req:compat.bash.safe-core/test]
+#[test]
+fn process_substitution_ownership_is_pinned() {
+    let workspace = workspace_root();
+    let module = "crates/nsh/src/evaluation/bash_process_substitution.rs";
+    let source = std::fs::read_to_string(workspace.join(module)).unwrap();
+
+    for required in [
+        "pub(crate) struct SubstitutionStack(Arc<Mutex<Vec<Descriptor>>>)",
+        "impl Drop for NameScope",
+        "self.stack.open().truncate(self.mark)",
+        "shell.process_substitutions.open().clear()",
+        "crate::jobs::ForkMode::WithoutJob",
+        "fork_shell(shell, None, None,",
+        "drop(shell_end)",
+        "drop(child_end)",
+    ] {
+        assert!(
+            source.contains(required),
+            "{module} no longer states {required:?}"
+        );
+    }
+    for forbidden in [
+        "ManuallyDrop",
+        "std::mem::forget",
+        "into_raw",
+        "fn release(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "{module} released a name outside Drop with {forbidden:?}"
+        );
+    }
+
+    let mut scopes = 0_usize;
+    let mut publishes = 0_usize;
+    for path in rust_sources_in(&workspace, "crates/nsh/src") {
+        let text = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        let relative = relative_to_workspace(&path, &workspace);
+        let opened = text.matches("bash_process_substitution::scope(").count();
+        let published = text
+            .matches("bash_process_substitution::publish_before_exec(")
+            .count();
+        assert!(
+            opened == 0 || relative == "crates/nsh/src/evaluation.rs",
+            "{relative} opens a second substitution scope"
+        );
+        assert!(
+            published == 0 || relative == "crates/nsh/src/execution.rs",
+            "{relative} publishes substitution names outside the exec terminus"
+        );
+        scopes += opened;
+        publishes += published;
+    }
+    assert_eq!(scopes, 1, "the name scope has more than one opening");
+    assert_eq!(
+        publishes, 1,
+        "close-on-exec is cleared at more than one site"
+    );
+
+    let execution = std::fs::read_to_string(workspace.join("crates/nsh/src/execution.rs")).unwrap();
+    let publish = execution
+        .find("bash_process_substitution::publish_before_exec(")
+        .expect("the exec terminus publishes");
+    let materialize = execution
+        .find("shell.descriptors.materialize()")
+        .expect("the exec terminus materializes");
+    assert!(
+        publish < materialize,
+        "names are published after the descriptor table is materialized"
+    );
+}
+
+/// No GNU Bash or Readline code was copied into this workspace.
+///
+/// Two checks, because the rule has two failure modes. A copied file
+/// brings its notice with it, so any Free Software Foundation or GPL
+/// notice under `crates/` is a finding on its own. A copied *fragment*
+/// brings the upstream's identifiers instead, so those are matched as
+/// identifiers -- prose naming a Bash function in a comment is a citation,
+/// which the scanner drops along with the rest of the comment.
+///
+/// The Readline reference tables are the one place upstream *data* is
+/// reproduced, so they must carry a provenance record naming what produced
+/// them and which version was observed.
+// [spec:nsh:req:compat.bash.safe-core/test]
+#[test]
+fn no_gnu_bash_code_was_copied() {
+    const UPSTREAM_NOTICES: &[&str] = &[
+        "Free Software Foundation",
+        "GNU General Public License",
+        "This file is part of GNU Bash",
+        "This file is part of the GNU Readline",
+        "SPDX-License-Identifier: GPL",
+    ];
+    const UPSTREAM_IDENTIFIERS: &[&str] = &[
+        "rl_insert",
+        "rl_bind_key",
+        "rl_funmap_names",
+        "rl_untranslate_keyseq",
+        "emacs_standard_keymap",
+        "emacs_meta_keymap",
+        "vi_movement_keymap",
+        "decode_prompt_string",
+        "expand_word_internal",
+        "execute_command_internal",
+        "make_word_list",
+        "dispose_words",
+        "WORD_DESC",
+        "SHELL_VAR",
+        "sh_xmalloc",
+        "internal_getopt",
+        "builtin_usage",
+    ];
+
+    let workspace = workspace_root();
+    let mut violations = Vec::new();
+    let mut sources = Vec::new();
+    rust_sources_below(&workspace.join("crates"), &mut sources);
+    sources.sort();
+
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        let relative = relative_to_workspace(&path, &workspace);
+        /* This file spells every notice out in order to look for it, so
+         * it is the one file the search cannot include. */
+        let checker = relative == "crates/nsh/tests/idiomatic_control_flow.rs";
+        for notice in UPSTREAM_NOTICES {
+            if !checker && source.contains(notice) {
+                violations.push(format!("{relative} carries an upstream notice: {notice:?}"));
+            }
+        }
+        let scan = scan_rust_source(&source);
+        for identifier in UPSTREAM_IDENTIFIERS {
+            if scan.identifiers.iter().any(|name| name == identifier) {
+                violations.push(format!("{relative} names upstream symbol {identifier}"));
+            }
+        }
+    }
+
+    let tables =
+        std::fs::read_to_string(workspace.join("crates/nsh/src/builtins/bind/tables.rs")).unwrap();
+    for required in [
+        "# Provenance",
+        "Observed, not transcribed from source",
+        "is `bind -l`",
+        "is `bind -v`",
+        "is `bind -p`",
+        "GNU bash 5.2.37(1)-release",
+        "No GNU source file is an input",
+    ] {
+        assert!(
+            tables.contains(required),
+            "the Readline reference tables lost their provenance record: {required:?}"
+        );
+    }
+
+    assert!(
+        violations.is_empty(),
+        "GNU Bash provenance violations:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// The expression engine bounds its own work, in steps and in stack.
+///
+/// A step budget alone does not bound recursion: a quantified group takes
+/// one continuation frame per subject character, so a long subject reaches
+/// the budget only after the stack is already gone. Both bounds are read
+/// in the one place every recursion passes through, so nesting cannot get
+/// around either.
+// [spec:nsh:req:compat.bash.safe-core/test]
+#[test]
+fn the_expression_engine_bounds_its_work() {
+    let workspace = workspace_root();
+    let source = std::fs::read_to_string(workspace.join("crates/nsh/src/regex.rs")).unwrap();
+    let scan = scan_rust_source(&source);
+
+    assert!(
+        !scan.identifiers.iter().any(|name| name == "unsafe"),
+        "the expression engine is no longer safe Rust"
+    );
+    for required in [
+        "const STEP_BUDGET: u64",
+        "const MAX_DEPTH: u32",
+        "steps: &'a mut u64",
+        "depth: u32",
+        "if *self.steps > STEP_BUDGET || self.depth >= MAX_DEPTH {",
+    ] {
+        assert!(
+            source.contains(required),
+            "the engine lost its bound: {required:?}"
+        );
+    }
+    assert_eq!(
+        source.matches("STEP_BUDGET").count(),
+        2,
+        "the step budget is read somewhere other than its single guard"
+    );
+    assert_eq!(
+        source.matches("MAX_DEPTH").count(),
+        2,
+        "the depth bound is read somewhere other than its single guard"
+    );
+
+    let search = source
+        .split_once("pub(crate) fn search(")
+        .expect("the engine has a search")
+        .1
+        .split_once("    fn match_at(")
+        .expect("the search is followed by the attempt it makes")
+        .0;
+    assert!(
+        search.contains("let mut steps = 0_u64;") && search.contains("&mut steps"),
+        "the search buys a fresh budget at every start offset"
+    );
 }

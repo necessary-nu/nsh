@@ -197,3 +197,34 @@ fn the_child_is_not_a_job() {
     let mixed = output(true, b"true & read line < <(echo hi); echo \"${!:+set}\"");
     assert_eq!(mixed, "set\n");
 }
+
+/// A substitution's own child disowns its parent's other names.
+///
+/// The reader behind `>(list)` sees end of file when the last write end
+/// closes. The shell holds one; a sibling substitution forked after it was
+/// opened inherits another, and would hold it for as long as that sibling
+/// runs. The child clears the stack it inherited, so the reader is not
+/// made to wait for a process that has nothing to do with it.
+// [spec:nsh:req:compat.bash.safe-core/test]
+// [spec:nsh:req:compat.bash.process-substitution/test]
+#[test]
+fn a_sibling_does_not_deny_end_of_file() {
+    let scratch = scratch_path("sibling-eof");
+    drop(std::fs::remove_file(&scratch));
+    let script = format!(
+        "true >(cat >/dev/null; echo released > {}) <(sleep 5)",
+        scratch.display()
+    );
+
+    let (status, _) = run(&mut shell(true), script.as_bytes());
+    assert_eq!(status, 0);
+    // Well under the sibling's lifetime: waiting for it would be the
+    // failure this is looking for.
+    let released = contents_within(&scratch, std::time::Duration::from_millis(1500));
+    drop(std::fs::remove_file(&scratch));
+
+    assert_eq!(
+        released, "released\n",
+        "the sibling held the write end open"
+    );
+}
