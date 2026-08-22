@@ -481,6 +481,7 @@ impl Value {
 // [spec:posix:req:expand.param-assign-default]
 // [spec:posix:req:expand.param-error-if-unset]
 // [spec:posix:req:expand.param-use-alternative]
+// [spec:posix:req:exit.expansion-error]
 // [spec:dash:sem:expand.scanright-fn]
 // [spec:dash:sem:expand.subevalvar-fn]
 // [spec:dash:sem:expand.varunset-fn]
