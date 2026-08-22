@@ -187,6 +187,8 @@ pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
 /// Quote arbitrary bytes so parsing the result produces the same bytes.
 // [spec:dash:sem:mystring.single-quote-fn]
 // [spec:nsh:req:idiom.no-mystring]
+pub(crate) mod bash;
+
 pub(crate) fn shell_quote(mut input: &BStr) -> BString {
     let mut quoted = BString::new(Vec::new());
     loop {

@@ -42,22 +42,65 @@ use conv::{LIMIT, Spec};
 /// it.
 const WIDTH: &[u8] = b"*0123456789";
 
-/// Write one rendered conversion to standard output.
-fn emit(shell: &mut crate::context::Shell, bytes: &[u8]) -> Result<(), Error> {
-    shell.write_output(OutputDestination::Stdout, bytes)
+/// Where the rendered conversions go.
+///
+/// Bash's `-v NAME` does not change how anything is rendered, only where
+/// the rendering lands, so it is one value threaded through the writers
+/// rather than a second copy of the format loop. A `printf` without
+/// `-v` writes each conversion straight out, exactly as the C did.
+enum Destination {
+    Standard,
+    /// `-v NAME`: the variable to assign, and what has been rendered so
+    /// far. It has to be collected because one format string can be
+    /// reused over several arguments and the variable takes all of it.
+    Variable {
+        name: BString,
+        rendered: Vec<u8>,
+    },
 }
 
-/// Write one rendered conversion, or raise what the C raised when it
-/// could not render it.
-///
-/// `None` is a field longer than `vsnprintf` counts in an `int`. The C
-/// asked glibc to lay every conversion out and `xvasprintf` treated the
-/// refusal as fatal, so the builtin stops there: whatever the format had
-/// already printed stays printed, and the shell's status is 2.
-fn emit_field(shell: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
-    match rendered {
-        Some(bytes) => emit(shell, &bytes),
-        None => Err(shell.diagnostics().shell_error(b"xvsnprintf failed")),
+impl Destination {
+    /// Write one rendered conversion to wherever this invocation sends
+    /// its output.
+    fn emit(&mut self, shell: &mut crate::context::Shell, bytes: &[u8]) -> Result<(), Error> {
+        match self {
+            Self::Standard => shell.write_output(OutputDestination::Stdout, bytes),
+            Self::Variable { rendered, .. } => {
+                rendered.extend_from_slice(bytes);
+                Ok(())
+            }
+        }
+    }
+
+    /// Write one rendered conversion, or raise what the C raised when it
+    /// could not render it.
+    ///
+    /// `None` is a field longer than `vsnprintf` counts in an `int`. The C
+    /// asked glibc to lay every conversion out and `xvasprintf` treated the
+    /// refusal as fatal, so the builtin stops there: whatever the format had
+    /// already printed stays printed, and the shell's status is 2.
+    fn emit_field(
+        &mut self,
+        shell: &mut crate::context::Shell,
+        rendered: Option<Vec<u8>>,
+    ) -> Result<(), Error> {
+        match rendered {
+            Some(bytes) => self.emit(shell, &bytes),
+            None => Err(shell.diagnostics().shell_error(b"xvsnprintf failed")),
+        }
+    }
+
+    /// Land a `-v NAME` result, once the format loop has finished.
+    fn finish(self, shell: &mut crate::context::Shell) -> Result<(), Error> {
+        let Self::Variable { name, rendered } = self else {
+            return Ok(());
+        };
+        crate::variables::set_bytes(
+            shell,
+            BStr::new(name.as_slice()),
+            Some(BStr::new(rendered.as_slice())),
+            crate::variables::VariableAttributes::NONE,
+        )
     }
 }
 
@@ -604,21 +647,35 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 // [spec:dash:sem:printf.print-escape-str-fn]
 fn write_escaped_text(
     shell: &mut crate::context::Shell,
+    destination: &mut Destination,
     spec: &Spec,
     word: &BStr,
 ) -> Result<bool, Error> {
     let mut buffer = BString::default();
     let done = append_escape(word, &mut buffer);
-    emit_field(shell, spec.string(&buffer))?;
+    destination.emit_field(shell, spec.string(&buffer))?;
     Ok(done)
 }
 
 // [spec:dash:sem:printf.printfcmd-fn]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    /* `nextopt(nullstr)`: POSIX printf takes no options, so this exists
+     * to reject `-x` and to step over a `--`. Bash's `-v` is the one
+     * addition, and only in Bash mode. */
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
     let mut options = crate::options::Options::new(args);
-    /* `nextopt(nullstr)`: printf takes no options, so this exists to
-     * reject `-x` and to step over a `--`. */
-    while options.next(&mut shell.diagnostics(), b"")?.is_some() {}
+    let mut destination = Destination::Standard;
+    while let Some(option) =
+        options.next(&mut shell.diagnostics(), if bash { b"v:" } else { b"" })?
+    {
+        if option == b'v' {
+            destination = Destination::Variable {
+                name: options.arg().to_owned(),
+                rendered: Vec::new(),
+            };
+        }
+    }
 
     let Some((format, arguments)) = options.operands().split_first() else {
         return Err(shell
@@ -647,7 +704,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if character == b'\\' {
                 let converted = parse_escape(&format[at..], false);
                 at += converted.consumed;
-                emit(shell, converted.bytes())?;
+                destination.emit(shell, converted.bytes())?;
                 continue;
             }
             /* A `%%` is one `%`; a `%` at the very end of the format
@@ -656,7 +713,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 if character == b'%' {
                     at += 1;
                 }
-                emit(shell, &[character])?;
+                destination.emit(shell, &[character])?;
                 continue;
             }
 
@@ -725,32 +782,46 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             match conversion {
                 b'b' => {
                     /* escape if a \c was encountered */
-                    if write_escaped_text(shell, &spec, BStr::new(operands.next_string()))? {
+                    if write_escaped_text(
+                        shell,
+                        &mut destination,
+                        &spec,
+                        BStr::new(operands.next_string()),
+                    )? {
                         break 'format_arguments;
                     }
                 }
                 b'c' => {
                     let value = operands.next_character();
-                    emit_field(shell, spec.character(value))?;
+                    destination.emit_field(shell, spec.character(value))?;
+                }
+                /* `%q` renders its argument as the shell would have to
+                 * write it to mean the same bytes, which is quoting and
+                 * not formatting -- so the field layout applies to the
+                 * quoted text, as it does for `%s`. */
+                b'q' if bash => {
+                    let value = operands.next_string();
+                    let quoted = crate::escape::bash::requote(&shell.locale, BStr::new(value));
+                    destination.emit_field(shell, spec.string(&quoted))?;
                 }
                 b's' => {
                     let value = operands.next_string();
-                    emit_field(shell, spec.string(value))?;
+                    destination.emit_field(shell, spec.string(value))?;
                 }
                 /* `mklong` widened the specification to `PRIdMAX` so
                  * that C's printf would pull a whole `i64` off the
                  * varargs. The value arrives typed. */
                 b'd' | b'i' => {
                     let value = operands.next_unsigned(shell, true);
-                    emit_field(shell, spec.signed(value as i64))?;
+                    destination.emit_field(shell, spec.signed(value as i64))?;
                 }
                 b'o' | b'u' | b'x' | b'X' => {
                     let value = operands.next_unsigned(shell, false);
-                    emit_field(shell, spec.unsigned(value, conversion))?;
+                    destination.emit_field(shell, spec.unsigned(value, conversion))?;
                 }
                 b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
                     let value = operands.next_float(shell);
-                    emit_field(shell, spec.double(value, conversion))?;
+                    destination.emit_field(shell, spec.double(value, conversion))?;
                 }
                 _ => {
                     let mut message = format[start..at].to_vec();
@@ -766,6 +837,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     // out:
+    destination.finish(shell)?;
     Ok(Flow::Done(operands.status))
 }
 

@@ -44,6 +44,16 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     if let Some(verbose) = describe {
+        // [spec:nsh:req:compat.bash.builtins-special-variables]
+        if shell.options.dialect() == crate::options::Dialect::Bash && !use_default_path {
+            let names = &option_scan.operands()[..1.min(option_scan.operands().len())];
+            return crate::builtins::r#type::bash::run(
+                shell,
+                crate::builtins::r#type::bash::Requested::describing(verbose),
+                crate::output::OutputDestination::Stdout,
+                names,
+            );
+        }
         if let Some(command_name) = option_scan.operands().first() {
             let default_path = use_default_path.then(crate::variables::default_path);
             return describe_command(

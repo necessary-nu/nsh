@@ -339,6 +339,7 @@ fn zero_cism_gate_covers_boundary() {
         "crates/nsh-platform/src/signal_names.rs",
         "crates/nsh-platform/src/terminal.rs",
         "crates/nsh-platform/src/unix.rs",
+        "crates/nsh-platform/src/unix_facts.rs",
         "crates/nsh-platform/src/windows.rs",
     ];
 

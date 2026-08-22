@@ -41,6 +41,8 @@ enum Token {
     FileOwnedByGroup,
     StringEmpty,
     StringNonempty,
+    VariableSet,
+    ReferenceSet,
     StringEqual,
     StringNotEqual,
     StringLess,
@@ -121,7 +123,26 @@ static OPERATORS: [Operator; 39] = [
     op(b")", Token::RightParen, OperatorKind::Parenthesis),
 ];
 
-fn operator(word: &BStr) -> Option<&'static Operator> {
+/// The unary operators Bash adds, which POSIX's `test` does not have.
+///
+/// They are a separate table rather than rows in [`OPERATORS`] because
+/// a POSIX shell must still call `-v` an operand: `test -v` there is the
+/// one-argument form asking whether the string `-v` is non-empty, and
+/// admitting the operator would change that answer.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+static BASH_OPERATORS: [Operator; 2] = [
+    op(b"-v", Token::VariableSet, OperatorKind::Unary),
+    op(b"-R", Token::ReferenceSet, OperatorKind::Unary),
+];
+
+fn operator(word: &BStr, bash: bool) -> Option<&'static Operator> {
+    if bash
+        && let Some(found) = BASH_OPERATORS
+            .iter()
+            .find(|candidate| candidate.text == word)
+    {
+        return Some(found);
+    }
     OPERATORS.iter().find(|candidate| candidate.text == word)
 }
 
@@ -182,14 +203,17 @@ struct TestParser<'a> {
     words: &'a [&'a BStr],
     pos: usize,
     last_operator: Option<&'static Operator>,
+    /// Whether the Bash-only operator table is in scope for this scan.
+    bash: bool,
 }
 
 impl<'a> TestParser<'a> {
-    fn new(words: &'a [&'a BStr]) -> Self {
+    fn new(words: &'a [&'a BStr], bash: bool) -> Self {
         Self {
             words,
             pos: 0,
             last_operator: None,
+            bash,
         }
     }
 
@@ -199,7 +223,7 @@ impl<'a> TestParser<'a> {
 
     // [spec:dash:sem:test.getop-fn]
     fn operator_at(&self, pos: usize) -> Option<&'static Operator> {
-        self.word(pos).and_then(operator)
+        self.word(pos).and_then(|word| operator(word, self.bash))
     }
 
     // [spec:dash:sem:test.t-lex-fn]
@@ -208,7 +232,7 @@ impl<'a> TestParser<'a> {
             self.last_operator = None;
             return Token::End;
         };
-        let Some(candidate) = operator(word) else {
+        let Some(candidate) = operator(word, self.bash) else {
             self.last_operator = None;
             return Token::Operand;
         };
@@ -375,6 +399,8 @@ fn unary(shell: &mut Shell, token: Token, operand: &BStr) -> Result<bool, Error>
     Ok(match token {
         Token::StringEmpty => operand.is_empty(),
         Token::StringNonempty => !operand.is_empty(),
+        Token::VariableSet => crate::variables::special::is_assigned(shell, operand),
+        Token::ReferenceSet => crate::variables::nameref::is_reference(shell, operand),
         Token::FileTerminal => {
             let descriptor = parse_operand_integer(shell, operand)? as i32;
             LogicalDescriptor::new(descriptor)
@@ -400,7 +426,8 @@ pub(crate) fn unary_test(
     name: &BStr,
     operand: &BStr,
 ) -> Option<Result<bool, Error>> {
-    let found = operator(name).filter(|found| found.kind == OperatorKind::Unary)?;
+    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
+    let found = operator(name, bash).filter(|found| found.kind == OperatorKind::Unary)?;
     Some(unary(shell, found.token, operand))
 }
 
@@ -438,6 +465,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         expression = &expression[..expression.len() - 1];
     }
 
+    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
     let mut result = 1;
     loop {
         if expression.is_empty() {
@@ -445,7 +473,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
 
         let forced_operand = expression.len() == 3
-            && operator(expression[1]).is_some_and(|op| op.kind == OperatorKind::Binary);
+            && operator(expression[1], bash).is_some_and(|op| op.kind == OperatorKind::Binary);
         if !forced_operand && matches!(expression.len(), 3 | 4) {
             if expression.first() == Some(&BStr::new(b"("))
                 && expression.last() == Some(&BStr::new(b")"))
@@ -458,7 +486,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
         }
 
-        let mut parser = TestParser::new(expression);
+        let mut parser = TestParser::new(expression, bash);
         let first = if forced_operand {
             Token::Operand
         } else {

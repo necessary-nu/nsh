@@ -599,7 +599,14 @@ pub fn evaluate_tree(
             }
             Node::Command(command) => {
                 check_exit = true;
-                flow!(evaluate_command(shell, command, context))
+                /* A command with no `|` is a pipeline of one, and Bash's
+                 * `${PIPESTATUS[@]}` says so. The forked forms publish
+                 * from `wait_for_job`, which is the only place that can
+                 * still see every member. */
+                // [spec:nsh:req:compat.bash.builtins-special-variables]
+                let status = flow!(evaluate_command(shell, command, context));
+                crate::variables::special::set_pipeline_status(shell, &[status]);
+                status
             }
             Node::For(command) => flow!(evaluate_for(shell, command, context)),
             Node::While(command) => flow!(evaluate_loop(shell, command, false, context)),

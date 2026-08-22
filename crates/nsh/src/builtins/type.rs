@@ -17,6 +17,8 @@ use crate::output::OutputDestination;
 use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
+pub(crate) mod bash;
+
 // [spec:dash:sem:exec.typecmd-fn]
 // [spec:posix:syn:builtin.type.synopsis]
 // [spec:posix:req:builtin.type.indicate-interpretation]
@@ -30,6 +32,19 @@ use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 // [spec:posix:req:builtin.type.exit-status]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut failed = false;
+
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    if shell.options.dialect() == crate::options::Dialect::Bash {
+        return match bash::parse(args) {
+            Ok((requested, names)) => bash::run(shell, requested, OutputDestination::Stdout, names),
+            Err(letter) => {
+                let mut message = b"type: -".to_vec();
+                message.push(letter);
+                message.extend_from_slice(b": invalid option");
+                Err(shell.diagnostics().shell_error(&message))
+            }
+        };
+    }
 
     let mut option_scan = crate::options::Options::new(args);
     option_scan.next(&mut shell.diagnostics(), b"")?;

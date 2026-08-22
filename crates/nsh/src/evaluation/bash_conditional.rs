@@ -90,13 +90,10 @@ fn unary(shell: &mut Shell, operator: &BStr, word: &WordNode) -> Result<Truth, E
             ShellOption::from_name(value).is_some_and(|option| shell.options.enabled(option));
         return Ok(Truth::from(enabled));
     }
-    if bytes == b"-v" {
-        return Ok(Truth::from(is_set(shell, value)));
-    }
     match crate::builtins::test::unary_test(shell, operator, value) {
         Some(result) => Ok(Truth::from(result?)),
-        // `-N` and `-R` are recognised by the parser so that a script using
-        // them is not a syntax error; neither question has an answer yet.
+        // `-N` is recognised by the parser so that a script using it is
+        // not a syntax error; the question has no answer yet.
         None => Ok(Truth::False),
     }
 }
@@ -227,14 +224,6 @@ fn operand(shell: &mut Shell, word: &WordNode) -> Result<BString, Error> {
         .next()
         .map(|field| field.as_bstr().to_owned())
         .unwrap_or_default())
-}
-
-fn is_set(shell: &mut Shell, name: &BStr) -> bool {
-    let base = match name.iter().position(|byte| *byte == b'[') {
-        Some(open) if name.last() == Some(&b']') => BStr::new(&name[..open]),
-        _ => name,
-    };
-    crate::variables::lookup_bytes(shell, base).is_some()
 }
 
 fn invalid(shell: &mut Shell, message: &[u8]) -> Truth {

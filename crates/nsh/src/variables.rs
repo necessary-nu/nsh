@@ -28,6 +28,8 @@ pub(crate) mod nameref;
 
 pub(crate) mod call_stack;
 
+pub(crate) mod special;
+
 /// Persistent attributes of a shell variable.
 // [spec:nsh:def:idiom.variable-expansion-state]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -84,6 +86,9 @@ enum Callback {
     Getopts,
     History,
     Locale,
+    /// A name `special` recomputes on read and reacts to on assignment.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    Special,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -160,6 +165,9 @@ pub struct VariableTable {
     /// `caller` report.
     // [spec:nsh:req:compat.bash.traps-introspection]
     pub(crate) call_stack: call_stack::CallStack,
+    /// The generators, clocks and published facts of the Bash dialect.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    pub(crate) special: special::SpecialState,
 }
 
 impl VariableTable {
@@ -170,6 +178,7 @@ impl VariableTable {
             locals: Vec::new(),
             function_frames: Vec::new(),
             call_stack: call_stack::CallStack::new(),
+            special: special::SpecialState::new(),
         }
     }
 
@@ -184,18 +193,6 @@ impl VariableTable {
             .expect("mklocal runs inside a function")
             .entries
             .push(local);
-    }
-
-    fn refresh_lineno(&mut self, name: &BStr) {
-        if name == b"LINENO" {
-            if let Some(var) = self.entries.get_mut(name) {
-                if var.dynamic_lineno && matches!(&var.state, VariableState::Set(_)) {
-                    var.state = VariableState::Set(VariableValue::Scalar(BString::from(
-                        self.line_number.to_string().as_bytes(),
-                    )));
-                }
-            }
-        }
     }
 }
 
@@ -504,7 +501,7 @@ impl Shell {
 // [spec:dash:sem:var.changelocale-fn]
 // [spec:dash:sem:var.varfunc-fn]
 // [spec:nsh:sem:shell-locale.invalid-selection]
-fn run_callback(shell: &mut Shell, callback: Callback, value: Option<&BStr>) {
+fn run_callback(shell: &mut Shell, name: &BStr, callback: Callback, value: Option<&BStr>) {
     let effective = value.unwrap_or_else(|| BStr::new(b""));
     match callback {
         Callback::None => {}
@@ -524,6 +521,7 @@ fn run_callback(shell: &mut Shell, callback: Callback, value: Option<&BStr>) {
         ),
         Callback::Getopts => crate::options::reset_getopts(shell, effective),
         Callback::History => crate::editor::set_history_size(shell, effective),
+        Callback::Special => special::assigned(shell, name, value),
         Callback::Locale => {
             // Locale selection depends on the complete variable table, not
             // merely on the entry that triggered this callback.
@@ -580,7 +578,7 @@ fn set_entry(
             },
         );
         if callback_policy == CallbackPolicy::Run {
-            run_callback(shell, callback, value);
+            run_callback(shell, name, callback, value);
         }
         return Ok(());
     };
@@ -600,7 +598,7 @@ fn set_entry(
     } else {
         shell.variables.entries.remove(name);
         if old.callback == Callback::Locale {
-            run_callback(shell, old.callback, None);
+            run_callback(shell, name, old.callback, None);
         }
         return Ok(());
     }
@@ -632,6 +630,7 @@ fn set_entry(
     if callback_policy == CallbackPolicy::Run {
         run_callback(
             shell,
+            name,
             callback,
             callback_value
                 .as_ref()
@@ -644,7 +643,7 @@ fn set_entry(
 /// Read a variable through the owned-byte interface used throughout nsh.
 // [spec:dash:sem:var.lookupvar-fn]
 pub(crate) fn lookup_bytes(shell: &mut Shell, name: &BStr) -> Option<BString> {
-    shell.variables.refresh_lineno(name);
+    special::refresh(shell, name);
     shell
         .variables
         .entries
@@ -788,6 +787,8 @@ pub(crate) fn show_vars(
     prefix: &BStr,
     selection: VariableSelection,
 ) -> Result<(), Error> {
+    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
+    let locale = shell.locale.clone();
     let records: Vec<Vec<u8>> = shell
         .variables
         .entries
@@ -806,7 +807,15 @@ pub(crate) fn show_vars(
             record.extend_from_slice(name);
             if let Some(value) = var.scalar() {
                 record.push(b'=');
-                record.extend_from_slice(&crate::escape::shell_quote(value));
+                // Bash's listing reaches for `$'...'` where single quotes
+                // could not carry the bytes; POSIX's never does.
+                // [spec:nsh:req:compat.bash.builtins-special-variables]
+                let quoted = if bash {
+                    crate::escape::bash::readable_quote(&locale, value)
+                } else {
+                    crate::escape::shell_quote(value)
+                };
+                record.extend_from_slice(&quoted);
             }
             record.push(b'\n');
             record
@@ -890,7 +899,7 @@ fn pop_local_scope(shell: &mut Shell) {
                         .remove(&name)
                         .map_or(Callback::None, |var| var.callback);
                     if callback == Callback::Locale {
-                        run_callback(shell, callback, None);
+                        run_callback(shell, BStr::new(name.as_slice()), callback, None);
                     }
                 }
                 LocalVariable::Saved { name, previous } => {
@@ -899,6 +908,7 @@ fn pop_local_scope(shell: &mut Shell) {
                     shell.variables.entries.insert(name.clone(), previous);
                     run_callback(
                         shell,
+                        BStr::new(name.as_slice()),
                         callback,
                         value.as_ref().map(|value| BStr::new(value.as_slice())),
                     );
@@ -919,7 +929,7 @@ impl Shell {
     /// Read a shell variable. `$LINENO` is refreshed before the borrow is
     /// returned, which is why this method takes `&mut self`.
     pub fn var(&mut self, name: &BStr) -> Option<&BStr> {
-        self.variables.refresh_lineno(name);
+        special::refresh(self, name);
         self.variables.entries.get(name).and_then(Variable::scalar)
     }
 

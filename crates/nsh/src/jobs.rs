@@ -1085,6 +1085,12 @@ pub fn wait_for_job(
     };
 
     let status = job_exit_status(shell, job_id);
+    /* Read while the job is still live: the entry is removed below once
+     * it is done, and `${PIPESTATUS[@]}` is the only reader that wants
+     * every member rather than the last. */
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    let statuses = pipeline_statuses(shell, job_id);
+    crate::variables::special::set_pipeline_status(shell, &statuses);
     if shell.jobs[job_id].job_control {
         if shell.jobs[job_id].is_stopped() {
             let result = shell
@@ -1631,6 +1637,31 @@ fn set_terminal_process_group_on(
         return Err(shell.diagnostics().shell_error(&message));
     }
     Ok(())
+}
+
+/// Every process of a job, in pipeline order, as `${PIPESTATUS[@]}`
+/// reports them.
+///
+/// A process that has not been waited for has no status to report and
+/// answers 0, which is what Bash's array holds for a job it has not
+/// reaped.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub(crate) fn pipeline_statuses(
+    shell: &crate::context::Shell,
+    job_id: JobId,
+) -> Vec<crate::status::ExitStatus> {
+    shell.jobs[job_id]
+        .processes
+        .iter()
+        .map(|process| match process.status {
+            None => crate::status::ExitStatus::SUCCESS,
+            Some(ChildStatus::Exited(code)) => crate::status::ExitStatus::from(code),
+            Some(ChildStatus::Signaled { signal, .. } | ChildStatus::Stopped(signal)) => {
+                crate::status::ExitStatus::from_code(signal.number() + 128)
+            }
+            Some(ChildStatus::Continued) => crate::status::ExitStatus::SUCCESS,
+        })
+        .collect()
 }
 
 // [spec:dash:sem:jobs.getstatus-fn]

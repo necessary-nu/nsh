@@ -938,7 +938,7 @@ impl Locale {
 }
 
 #[derive(Clone, Copy)]
-pub struct TerminalSettings(u32);
+pub struct TerminalSettings(pub(crate) u32);
 
 impl TerminalSettings {
     pub fn capture(fd: &impl AsDescriptor) -> std::io::Result<Self> {

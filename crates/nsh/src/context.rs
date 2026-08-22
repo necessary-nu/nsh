@@ -172,6 +172,12 @@ pub struct Shell {
     /// a library shell is still a value afterwards, so the fact has to be
     /// somewhere, and [`Shell::has_exited`] is where an embedder reads it.
     pub(crate) exited: Option<crate::status::ExitStatus>,
+    /// The built-in names `enable -n` has switched off in this shell.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    pub(crate) disabled_builtins: crate::builtins::enable::DisabledBuiltins,
+    /// The directories below `$PWD` that `dirs`, `pushd` and `popd` walk.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    pub(crate) directory_stack: crate::builtins::dirs::DirectoryStack,
 }
 
 impl Shell {
@@ -224,6 +230,8 @@ impl Shell {
             background_process: None,
             root_pid,
             shell_level: 0,
+            disabled_builtins: crate::builtins::enable::DisabledBuiltins::new(),
+            directory_stack: crate::builtins::dirs::DirectoryStack::new(),
             interrupt_deferral: crate::error::InterruptDeferral::new(),
             commands: crate::execution::CommandTable::new(),
             evaluation: crate::evaluation::EvaluationState::new(),

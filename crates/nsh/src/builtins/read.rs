@@ -18,6 +18,9 @@ use crate::expand::ExpandedFields;
 use crate::output::OutputDestination;
 use crate::status::ExitStatus;
 
+pub(crate) mod bash;
+pub(crate) mod stream;
+
 struct ReadLine {
     bytes: BString,
     protected: Vec<bool>,
@@ -190,6 +193,12 @@ fn assign_read_fields(shell: &mut Shell, line: &ReadLine, names: &[&BStr]) -> Re
 // [spec:nsh:req:idiom.lexer-tokens]
 // [spec:nsh:def:idiom.logical-descriptors]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    // Bash's `read` is a different command wearing the same name; the
+    // dialect chooses between the two readers once, here.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    if shell.options.dialect() == crate::options::Dialect::Bash {
+        return bash::run(shell, args);
+    }
     let mut prompt: Option<BString>;
     let mut raw = false;
     let mut delimiter = b'\n';

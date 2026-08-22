@@ -101,6 +101,14 @@ pub(crate) enum BuiltinId {
     Wait,
     Shopt,
     Declare,
+    Builtin,
+    Enable,
+    Help,
+    Let,
+    Mapfile,
+    Dirs,
+    Pushd,
+    Popd,
 }
 
 /// Typed, independent properties of a built-in command.
@@ -199,12 +207,15 @@ pub fn args(fields: &[crate::expand::ExpandedField]) -> Vec<&BStr> {
 
 pub mod alias;
 pub mod r#break;
+pub mod builtin;
 pub mod caller;
 pub mod cd;
 pub mod command;
 pub mod declare;
+pub mod dirs;
 pub mod dot;
 pub mod echo;
+pub mod enable;
 pub mod eval;
 pub mod exec;
 pub mod exit;
@@ -214,10 +225,13 @@ pub mod fc;
 pub mod fg;
 pub mod getopts;
 pub mod hash;
+pub mod help;
 pub mod history;
 pub mod jobs;
 pub mod kill;
+pub mod r#let;
 pub mod local;
+pub mod mapfile;
 pub mod printf;
 pub mod pwd;
 pub mod read;
@@ -531,6 +545,12 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
 /// and permits a future Bash implementation to override a baseline entry.
 pub(crate) static BASH_BUILTINS: &[BuiltinSpec] = &[
     BuiltinSpec {
+        id: BuiltinId::Builtin,
+        name: b"builtin",
+        handler: BuiltinHandler::Standard(builtin::run),
+        attributes: BuiltinAttributes::SPECIAL,
+    },
+    BuiltinSpec {
         id: BuiltinId::Caller,
         name: b"caller",
         handler: BuiltinHandler::Standard(caller::run),
@@ -541,6 +561,54 @@ pub(crate) static BASH_BUILTINS: &[BuiltinSpec] = &[
         name: b"declare",
         handler: BuiltinHandler::Standard(declare::run),
         attributes: BuiltinAttributes::REGULAR_ASSIGNMENT,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Dirs,
+        name: b"dirs",
+        handler: BuiltinHandler::Standard(dirs::run_dirs),
+        attributes: BuiltinAttributes::REGULAR,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Enable,
+        name: b"enable",
+        handler: BuiltinHandler::Standard(enable::run),
+        attributes: BuiltinAttributes::REGULAR,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Help,
+        name: b"help",
+        handler: BuiltinHandler::Standard(help::run),
+        attributes: BuiltinAttributes::REGULAR,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Let,
+        name: b"let",
+        handler: BuiltinHandler::Standard(r#let::run),
+        attributes: BuiltinAttributes::REGULAR,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Mapfile,
+        name: b"mapfile",
+        handler: BuiltinHandler::Standard(mapfile::run),
+        attributes: BuiltinAttributes::REGULAR,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Popd,
+        name: b"popd",
+        handler: BuiltinHandler::Standard(dirs::run_popd),
+        attributes: BuiltinAttributes::REGULAR,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Pushd,
+        name: b"pushd",
+        handler: BuiltinHandler::Standard(dirs::run_pushd),
+        attributes: BuiltinAttributes::REGULAR,
+    },
+    BuiltinSpec {
+        id: BuiltinId::Mapfile,
+        name: b"readarray",
+        handler: BuiltinHandler::Standard(mapfile::run),
+        attributes: BuiltinAttributes::REGULAR,
     },
     BuiltinSpec {
         id: BuiltinId::Shopt,

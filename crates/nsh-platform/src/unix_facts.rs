@@ -1,0 +1,103 @@
+//! Host identity and descriptor readiness, for the shell's own
+//! variables and for a bounded `read`.
+//!
+//! Three questions that share nothing with each other except that they
+//! are the ones this platform answers for the Bash-compatibility
+//! surface, and that none of them belongs in a file already at its
+//! size and density caps.
+
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStringExt as _;
+
+use super::{AsDescriptor, UserId};
+
+/// The identity the process was started with, which `$UID` reports.
+#[inline]
+#[must_use]
+pub fn real_uid() -> UserId {
+    UserId(rustix::process::getuid().as_raw())
+}
+
+/// The host's own name, for `$HOSTNAME`.
+#[must_use]
+pub fn host_name() -> Option<OsString> {
+    let name = rustix::system::uname();
+    let bytes = name.nodename().to_bytes();
+    (!bytes.is_empty()).then(|| OsString::from_vec(bytes.to_vec()))
+}
+
+/// Whether a descriptor has input available, waiting at most `timeout`
+/// seconds for it.
+///
+/// A negative or zero timeout polls without blocking, which is what
+/// `read -t 0` asks. `None` waits indefinitely. End of file counts as
+/// available: the reader has something to observe, even if it is only
+/// the end.
+// [spec:nsh:req:idiom.platform-errors]
+pub fn wait_for_input(fd: &impl AsDescriptor, timeout: Option<f64>) -> std::io::Result<bool> {
+    let borrowed = fd.as_platform_descriptor().0;
+    let mut poll = [rustix::event::PollFd::new(
+        &borrowed,
+        rustix::event::PollFlags::IN,
+    )];
+    let wait = match timeout {
+        None => None,
+        Some(seconds) if seconds <= 0.0 => Some(rustix::event::Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        }),
+        Some(seconds) => {
+            let bounded = seconds.min(86_400.0);
+            Some(rustix::event::Timespec {
+                tv_sec: bounded as i64,
+                tv_nsec: ((bounded.fract()) * 1e9) as i64,
+            })
+        }
+    };
+    loop {
+        return match rustix::event::poll(&mut poll, wait.as_ref()) {
+            Ok(ready) => Ok(ready != 0),
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(error) => Err(std::io::Error::from(error)),
+        };
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The identities are the ones the kernel reports, and the host has
+    /// a name of some length.
+    #[test]
+    fn host_identity_comes_from_the_kernel() {
+        assert_eq!(real_uid().as_raw(), rustix::process::getuid().as_raw());
+        let name = host_name().expect("a host has a name");
+        assert!(!name.is_empty());
+    }
+
+    /// A descriptor with bytes waiting is ready at once; one that will
+    /// never produce any is not ready, and says so rather than blocking.
+    #[test]
+    fn readiness_is_answered_without_consuming() {
+        let (read, write) = super::super::pipe().expect("pipe");
+        assert!(!wait_for_input(&read, Some(0.0)).expect("poll empty"));
+        super::super::write_all(&write, b"x").expect("write");
+        assert!(wait_for_input(&read, Some(0.0)).expect("poll ready"));
+        // Asking did not take the byte.
+        let mut byte = [0_u8; 1];
+        assert_eq!(super::super::read_once(&read, &mut byte).expect("read"), 1);
+        assert_eq!(byte, *b"x");
+        assert!(!wait_for_input(&read, Some(0.01)).expect("poll drained"));
+    }
+
+    /// End of input counts as available: the reader has something to
+    /// observe, even if it is only the end.
+    #[test]
+    fn end_of_input_counts_as_available() {
+        let (read, write) = super::super::pipe().expect("pipe");
+        drop(write);
+        assert!(wait_for_input(&read, Some(0.0)).expect("poll at end"));
+    }
+}
