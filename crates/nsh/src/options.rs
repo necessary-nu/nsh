@@ -343,11 +343,33 @@ pub(crate) fn set_option_by_name(
     }
 }
 
+/// The Bash dialect's own reading of an option letter.
+///
+/// Bash spells `errtrace` `-E` and `functrace` `-T`, and `-E` is already
+/// `emacs` in the POSIX dialect. The letter therefore cannot live in
+/// [`OPTION_SPECS`], which both dialects read; it is resolved here, ahead
+/// of the table, and only while Bash Compatibility Mode is on.
+// [spec:nsh:req:compat.bash.traps-introspection]
+fn bash_option_letter(dialect: Dialect, flag: u8) -> Option<ShellOption> {
+    if dialect != Dialect::Bash {
+        return None;
+    }
+    match flag {
+        b'E' => Some(ShellOption::Errtrace),
+        b'T' => Some(ShellOption::Functrace),
+        _ => None,
+    }
+}
+
 fn set_option(
     shell: &mut crate::context::Shell,
     flag: u8,
     enabled: bool,
 ) -> Result<ShellOption, Error> {
+    if let Some(option) = bash_option_letter(shell.options.dialect(), flag) {
+        set_typed_option(shell, option, enabled);
+        return Ok(option);
+    }
     for spec in OPTION_SPECS {
         if spec.letter == Some(flag) {
             set_typed_option(shell, spec.option, enabled);

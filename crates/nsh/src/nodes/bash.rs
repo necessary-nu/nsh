@@ -27,6 +27,7 @@ pub(crate) enum BashNode {
 /// A `[[ expression ]]` command.
 #[derive(Clone)]
 pub(crate) struct BashConditional {
+    pub(crate) line: i32,
     pub(crate) expression: BashConditionalExpr,
 }
 
@@ -53,6 +54,7 @@ pub(crate) enum BashConditionalExpr {
 /// A `(( expression ))` command.
 #[derive(Clone)]
 pub(crate) struct BashArithmeticCommand {
+    pub(crate) line: i32,
     pub(crate) expression: NodeText,
 }
 

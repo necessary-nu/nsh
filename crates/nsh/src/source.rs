@@ -298,6 +298,11 @@ impl Shell {
                         BStr::new(&path),
                         crate::input::InputFileOptions::CURRENT,
                     )?;
+                    /* A named command file is the bottom of the call
+                     * stack Bash reports; `-c` and standard input have
+                     * no such frame and report empty arrays. */
+                    // [spec:nsh:req:compat.bash.traps-introspection]
+                    crate::variables::call_stack::set_script_file(shell, BStr::new(&path));
                 }
                 Kind::Stream => {}
             }

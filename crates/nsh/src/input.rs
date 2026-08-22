@@ -1116,6 +1116,20 @@ pub fn set_input_string(shell: &mut Shell, string: &BStr) {
     });
 }
 
+/// Push a byte source whose first line continues the caller's numbering.
+///
+/// A Bash trap action is not a script of its own: it is parsed as if it
+/// had been written where the condition was raised, which is what makes
+/// `trap 'echo $LINENO' ERR` report the line that failed rather than
+/// line 1 of the action.
+// [spec:nsh:req:compat.bash.traps-introspection]
+pub(crate) fn set_input_string_at_line(shell: &mut Shell, string: &BStr, line: i32) {
+    set_input_string(shell, string);
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        current_input_frame(&mut shell.input).line_number = line;
+    });
+}
+
 /*
  * To handle the "." command, a stack of input files is used.  Pushfile
  * adds a new entry to the stack and popfile restores the previous level.

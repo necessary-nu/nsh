@@ -48,11 +48,17 @@ pub enum ShellOption {
     NonLexicalControl,
     /// Enable Bash Compatibility Mode.
     Bash,
+    /// Let the Bash `ERR` trap reach functions, subshells, and command
+    /// substitutions.
+    Errtrace,
+    /// Let the Bash `DEBUG` and `RETURN` traps reach functions, subshells,
+    /// and command substitutions.
+    Functrace,
 }
 
 impl ShellOption {
     /// Every shell option, in the stable order used by `set -o` reports.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::Errexit,
         Self::NoGlob,
         Self::IgnoreEof,
@@ -74,6 +80,8 @@ impl ShellOption {
         Self::HashAll,
         Self::NonLexicalControl,
         Self::Bash,
+        Self::Errtrace,
+        Self::Functrace,
     ];
 
     pub(super) const fn mask(self) -> u32 {
@@ -138,7 +146,7 @@ pub(crate) struct OptionSpec {
     pub(crate) letter: Option<u8>,
 }
 
-pub(crate) const OPTION_SPECS: [OptionSpec; 21] = [
+pub(crate) const OPTION_SPECS: [OptionSpec; 23] = [
     OptionSpec {
         option: ShellOption::Errexit,
         name: b"errexit",
@@ -242,6 +250,20 @@ pub(crate) const OPTION_SPECS: [OptionSpec; 21] = [
     OptionSpec {
         option: ShellOption::Bash,
         name: b"bash",
+        letter: None,
+    },
+    /* `-E` and `-T` are Bash's letters for these and are claimed by the
+     * dialect-gated arm in `options::set_option`, not by this table: `-E`
+     * is already `emacs` in the POSIX dialect and the table is what that
+     * dialect reads. */
+    OptionSpec {
+        option: ShellOption::Errtrace,
+        name: b"errtrace",
+        letter: None,
+    },
+    OptionSpec {
+        option: ShellOption::Functrace,
+        name: b"functrace",
         letter: None,
     },
 ];

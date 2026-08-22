@@ -62,6 +62,7 @@ pub(crate) enum BuiltinId {
     Alias,
     Bg,
     Break,
+    Caller,
     Cd,
     Chdir,
     Command,
@@ -198,6 +199,7 @@ pub fn args(fields: &[crate::expand::ExpandedField]) -> Vec<&BStr> {
 
 pub mod alias;
 pub mod r#break;
+pub mod caller;
 pub mod cd;
 pub mod command;
 pub mod declare;
@@ -528,6 +530,12 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
 /// sorted table prevents profile-only names from leaking into default mode
 /// and permits a future Bash implementation to override a baseline entry.
 pub(crate) static BASH_BUILTINS: &[BuiltinSpec] = &[
+    BuiltinSpec {
+        id: BuiltinId::Caller,
+        name: b"caller",
+        handler: BuiltinHandler::Standard(caller::run),
+        attributes: BuiltinAttributes::REGULAR,
+    },
     BuiltinSpec {
         id: BuiltinId::Declare,
         name: b"declare",

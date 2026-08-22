@@ -323,7 +323,7 @@ fn reject_read_only(shell: &mut Shell, name: &BStr) -> Result<(), Error> {
 /// Write a whole structural value back, going through `set_entry` first
 /// so a brand-new name picks up export state, locale callbacks, and the
 /// `allexport` option exactly as a scalar assignment would.
-fn store(
+pub(super) fn store(
     shell: &mut Shell,
     name: &BStr,
     value: VariableValue,
