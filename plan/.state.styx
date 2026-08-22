@@ -5436,4 +5436,9 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
     )}
+    {id implement-bash-builtins-special-vars, covered_rules (
+        compat.bash.builtins-special-variables
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.builtins-special-variables}
+    )}
 )

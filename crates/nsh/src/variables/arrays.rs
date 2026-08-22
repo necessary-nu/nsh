@@ -302,6 +302,29 @@ pub(crate) fn unset_element(
     )
 }
 
+/// Replace a name's whole value with one the shell built itself.
+///
+/// `read -a` and `mapfile` do not assign element by element -- the array
+/// they produce is the record they read, entire -- so they land it in
+/// one write rather than as a compound assignment that would have to
+/// re-derive the subscripts it already knows.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub(crate) fn assign_value(
+    shell: &mut Shell,
+    name: &BStr,
+    value: VariableValue,
+) -> Result<(), Error> {
+    reject_bad_name(shell, name)?;
+    reject_read_only(shell, name, ReadOnlyGuard::Enforce)?;
+    store(
+        shell,
+        name,
+        value,
+        VariableAttributes::NONE,
+        ReadOnlyGuard::Enforce,
+    )
+}
+
 /// Every element in subscript order, for `${a[@]}` and friends.
 pub(crate) fn elements(value: &VariableValue) -> Vec<BString> {
     match value {

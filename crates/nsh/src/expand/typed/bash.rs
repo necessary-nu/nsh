@@ -374,13 +374,48 @@ fn map_case(character: &[u8], upper: bool) -> Vec<u8> {
 pub(super) fn transform(
     shell: &mut Shell,
     parameter: &ParameterExpansion,
+    name: &BStr,
     value: Value,
     context: Context,
 ) -> Result<Expansion, Error> {
     let operator = expand_units(shell, &operand_units(parameter), context.operand())?.bytes;
+    /* A name with no value has nothing to transform, and Bash says so by
+     * producing nothing at all -- not `''`, which is what quoting an
+     * empty value would give and what `${empty@Q}` does produce. */
+    if value.is_unset() {
+        return Ok(Expansion::one(Field::from_bytes(
+            b"",
+            context.protects(),
+            context.splits(),
+            context.quoted,
+        )));
+    }
     match operator.as_slice() {
-        b"Q" => map_value(shell, value, context, |_, text| {
-            crate::escape::shell_quote(BStr::new(text))
+        /* `@a` reads the variable's declaration rather than its bytes.
+         * It still maps over the value: every element shares the
+         * array's attributes, so `${a[@]@a}` is one `a` per element
+         * rather than one for the array. */
+        b"a" => {
+            let letters = attributes_of(shell, name);
+            map_value(shell, value, context, |_, _| letters.clone())
+        }
+        /* `@A` prints the assignment that would recreate the name, so
+         * unlike every other transform it needs the name itself. */
+        b"A" => {
+            let assignment = assignment_text(shell, name, &value, context);
+            Ok(Expansion::one(Field::from_bytes(
+                &assignment,
+                context.protects(),
+                context.splits(),
+                context.quoted,
+            )))
+        }
+        /* `@Q` quotes for a human to read back, and Bash always
+         * reaches for quotation marks: `${x@Q}` on `x` is `'x'`, where
+         * `printf %q` on the same bytes is a bare `x`. `@K` and `@k`
+         * differ from it only for arrays, whose keys they keep. */
+        b"Q" | b"K" | b"k" => map_value(shell, value, context, |locale, text| {
+            crate::escape::bash::readable_quote(locale, BStr::new(text))
         }),
         b"U" => map_value(shell, value, context, |locale, text| {
             recase(locale, text, &any_character(), true, true)
@@ -393,6 +428,46 @@ pub(super) fn transform(
         }),
         _ => Err(shell.diagnostics().shell_error(b"Bad substitution")),
     }
+}
+
+/// `${name@A}`: `name='value'`, the assignment that would put the value
+/// back.
+///
+/// An unset name has no assignment to print, which the caller has
+/// already handled; an empty one prints `name=''`.
+fn assignment_text(shell: &mut Shell, name: &BStr, value: &Value, context: Context) -> BString {
+    let base = match super::split_subscript(name) {
+        Some((base, _)) => base.to_owned(),
+        None => name.to_owned(),
+    };
+    let text = super::value_bytes(shell, value.clone(), context);
+    let mut assignment = base;
+    assignment.push(b'=');
+    assignment.extend_from_slice(&crate::escape::bash::readable_quote(
+        &shell.locale,
+        BStr::new(text.as_slice()),
+    ));
+    assignment
+}
+
+/// The attribute letters of the variable a parameter names.
+///
+/// The name may carry a subscript -- `${a[0]@a}` asks about `a` -- and
+/// may be a positional or special parameter, which has no declaration
+/// and therefore no letters.
+fn attributes_of(shell: &mut Shell, name: &BStr) -> BString {
+    let base = match super::split_subscript(name) {
+        Some((base, _)) => base.to_owned(),
+        None => name.to_owned(),
+    };
+    let base = BStr::new(base.as_slice());
+    let target =
+        crate::variables::nameref::read_name(shell, base).unwrap_or_else(|| base.to_owned());
+    let target = match super::split_subscript(BStr::new(target.as_slice())) {
+        Some((base, _)) => base.to_owned(),
+        None => target,
+    };
+    crate::variables::special::attribute_letters(shell, BStr::new(target.as_slice()))
 }
 
 fn any_character() -> Pattern {

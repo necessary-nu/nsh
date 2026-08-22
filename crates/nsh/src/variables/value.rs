@@ -182,7 +182,7 @@ pub(crate) fn variable_value<'a>(shell: &'a Shell, name: &BStr) -> Option<&'a Va
 }
 
 pub(crate) fn variable_value_owned(shell: &mut Shell, name: &BStr) -> Option<VariableValue> {
-    shell.variables.refresh_lineno(name);
+    super::special::refresh(shell, name);
     variable_value(shell, name).cloned()
 }
 

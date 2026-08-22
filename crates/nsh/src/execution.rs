@@ -170,6 +170,19 @@ impl CommandTable {
     pub(crate) fn resolved(&self, name: &BStr) -> Option<Command> {
         self.get(name).map(|entry| entry.command.clone())
     }
+
+    /// Whether a shell function of this name is defined.
+    ///
+    /// Function definitions share this table with the command hash, so a
+    /// caller that only wants to know about functions must not read a
+    /// cached external or built-in entry as an answer.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    pub(crate) fn is_function(&self, name: &BStr) -> bool {
+        matches!(
+            self.get(name).map(|entry| &entry.command),
+            Some(Command::Function(_))
+        )
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -688,6 +701,10 @@ fn native_string_error(
 
 // [spec:dash:sem:exec.find-builtin-fn]
 pub fn builtin(shell: &crate::context::Shell, name: &BStr) -> Option<&'static BuiltinSpec> {
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    if shell.disabled_builtins.contains(name) {
+        return None;
+    }
     if shell.options.dialect() == crate::options::Dialect::Bash
         && let Ok(index) =
             crate::builtins::BASH_BUILTINS.binary_search_by(|cmd| cmd.name().cmp(name))

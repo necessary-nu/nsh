@@ -36,6 +36,8 @@ impl Shell {
         self.evaluation.loop_depth = 0;
         self.evaluation.trap_default_exit_status = None;
         self.detach_parent_input();
+        // [spec:nsh:req:compat.bash.special-variables]
+        crate::variables::special::fork_child(self);
         self.discard_saved_redirections();
         self.prepare_traps_for_child(command);
     }

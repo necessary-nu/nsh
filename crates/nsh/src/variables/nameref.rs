@@ -151,6 +151,13 @@ pub(crate) fn read_name(shell: &Shell, name: &BStr) -> Option<BString> {
 
 /// Whether `name` is spelled the way a name reference must be.
 // [spec:nsh:req:compat.bash.functions-scoping]
+/// Whether `name` is a name reference, which `test -R` asks.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+pub(crate) fn is_reference(shell: &Shell, name: &BStr) -> bool {
+    super::value::bash_attributes(shell, name)
+        .is_some_and(|attributes| attributes.contains(BashAttribute::Nameref))
+}
+
 pub(crate) fn is_valid_target(shell: &Shell, text: &BStr) -> bool {
     match split_subscript(text) {
         Some((base, _)) => valid_name(&shell.locale, base),
@@ -364,7 +371,7 @@ pub(crate) fn make_local(shell: &mut Shell, name: &BStr, value: LocalValue) {
             Variable::unset(VariableAttributes::NONE, callback),
         );
         if value == LocalValue::Discard {
-            run_callback(shell, callback, None);
+            run_callback(shell, name, callback, None);
         }
     });
 }

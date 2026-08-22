@@ -160,6 +160,8 @@ impl ShellOptions {
 /// this function's callers is teardown. See `jobs::setjobctl`.
 pub fn apply_option_changes(shell: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     crate::execution::dispatch_changed(shell);
+    // [spec:nsh:req:compat.bash.special-variables]
+    crate::variables::special::dialect_changed(shell);
     crate::trap::set_interactive_signal_policy(
         shell,
         shell.options.enabled(ShellOption::Interactive),

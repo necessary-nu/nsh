@@ -489,7 +489,7 @@ enum Value {
 }
 
 impl Value {
-    fn is_unset(&self) -> bool {
+    pub(super) fn is_unset(&self) -> bool {
         matches!(self, Self::Unset)
     }
 
@@ -690,7 +690,9 @@ fn expand_parameter(
                 ParameterOperation::SubstituteFirst | ParameterOperation::SubstituteAll => {
                     bash::substitute(shell, parameter, name.as_bstr(), value, context)
                 }
-                ParameterOperation::Transform => bash::transform(shell, parameter, value, context),
+                ParameterOperation::Transform => {
+                    bash::transform(shell, parameter, name.as_bstr(), value, context)
+                }
                 _ => bash::change_case(shell, parameter, value, context),
             }
         }

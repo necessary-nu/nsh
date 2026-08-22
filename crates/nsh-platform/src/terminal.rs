@@ -21,6 +21,19 @@ impl TerminalSettings {
         }
     }
 
+    /// The same settings with terminal echo turned off, for `read -s`.
+    ///
+    /// A copy rather than a mutation, so the caller still holds the
+    /// snapshot it has to put back.
+    #[must_use]
+    pub fn without_echo(&self) -> Self {
+        let mut quiet = self.0.clone();
+        quiet
+            .local_modes
+            .remove(rustix::termios::LocalModes::ECHO);
+        Self(quiet)
+    }
+
     /// Apply this snapshot to `fd` immediately.
     pub fn apply(&self, fd: &impl AsDescriptor) -> std::io::Result<()> {
         let fd = fd.as_platform_descriptor().0;

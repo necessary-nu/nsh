@@ -44,6 +44,23 @@ struct Requested {
     functions: bool,
 }
 
+impl Requested {
+    /// Whether the invocation asked for nothing at all, which is the
+    /// listing form rather than a declaration.
+    fn is_bare(&self) -> bool {
+        self.kind.is_none()
+            && self.integer.is_none()
+            && self.lowercase.is_none()
+            && self.uppercase.is_none()
+            && self.nameref.is_none()
+            && self.trace.is_none()
+            && self.exported.is_none()
+            && !self.read_only
+            && !self.global
+            && !self.functions
+    }
+}
+
 // [spec:nsh:req:compat.bash.arrays-declarations]
 // [spec:nsh:req:compat.bash.functions-scoping]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
@@ -246,6 +263,18 @@ fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result
         return Ok(Flow::Done(ExitStatus::SUCCESS));
     }
 
+    /* A bare `declare` -- no options, no operands -- is Bash's own
+     * `set`: it lists `name=value`, not the `declare -- name="value"`
+     * line that `-p` prints. */
+    if !requested.print && operands.is_empty() && requested.is_bare() {
+        return crate::variables::show_vars(
+            shell,
+            BStr::new(b""),
+            crate::variables::VariableSelection::Set,
+        )
+        .map(|()| Flow::Done(ExitStatus::SUCCESS));
+    }
+
     let names: Vec<BString> = if operands.is_empty() {
         // A listing with no operands reports only the names the
         // requested attributes select, as `declare -pn` does.
@@ -303,21 +332,8 @@ fn selected(shell: &Shell, requested: &Requested, name: &BStr) -> bool {
     }
 }
 
-/// `declare -p` quotes with double quotes, escaping only what would
-/// otherwise be expanded when the line is read back.
-fn double_quote(value: &BStr) -> BString {
-    let mut quoted = BString::from("\"");
-    for byte in value.as_ref() as &[u8] {
-        if matches!(byte, b'"' | b'\\' | b'$' | b'`') {
-            quoted.push(b'\\');
-        }
-        quoted.push(*byte);
-    }
-    quoted.push(b'"');
-    quoted
-}
-
 fn render(shell: &Shell, name: &BStr) -> Option<BString> {
+    let double_quote = |value: &BStr| crate::escape::bash::declaration_quote(&shell.locale, value);
     // A name that was declared without a value still has a declaration
     // to print; only a name with no entry at all is missing.
     let attributes = crate::variables::variable_attributes(shell, name)?;

@@ -25,6 +25,8 @@ pub use editor_terminal::{
 };
 mod signal_names;
 pub use signal_names::{SIGNAL_COUNT, SIGNAL_NAMES};
+mod unix_facts;
+pub use unix_facts::{host_name, real_uid, wait_for_input};
 
 // Rust's runtime changes three pieces of inherited process state before
 // `main`: it ignores SIGPIPE, installs stack-overflow handlers, and opens
