@@ -218,7 +218,14 @@ fn assign(shell: &mut Shell, name: &BStr, base: &BStr, value: &BStr) -> Result<(
         Some(at) if bytes.last() == Some(&b']') => {
             let subscript = BStr::new(&bytes[at + 1..bytes.len() - 1]).to_owned();
             let selector = arrays::resolve_selector(shell, base, BStr::new(subscript.as_slice()))?;
-            arrays::assign_element(shell, base, &selector, value, false)
+            arrays::assign_element(
+                shell,
+                base,
+                &selector,
+                value,
+                false,
+                arrays::ReadOnlyGuard::Enforce,
+            )
         }
         _ => set_bytes(shell, base, Some(value), VariableAttributes::NONE),
     }
