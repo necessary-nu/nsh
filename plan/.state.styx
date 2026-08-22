@@ -5419,4 +5419,9 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
     )}
+    {id implement-bash-expansion-globbing, covered_rules (
+        compat.bash.expansion-globbing
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.expansion-globbing}
+    )}
 )

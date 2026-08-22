@@ -20,8 +20,11 @@ use crate::pattern::Pattern;
 use crate::variables::value::VariableValue;
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
 
+mod bash;
+mod brace;
 mod field;
 mod pathname;
+mod split;
 
 use field::Field;
 #[cfg(test)]
@@ -168,25 +171,48 @@ pub(super) fn expand_argument(
     mode: ExpansionMode,
 ) -> Result<(), Error> {
     let context = Context::top(mode);
-    let expanded = expand_parts(shell, word.parts(), context)?;
-
-    if let Some(output) = output {
-        let fields = if context.full {
-            let mut split = split_fields(shell, expanded.fields);
-            if !shell.options.enabled(ShellOption::NoGlob) {
-                split = pathname::expand(shell, split);
-            }
-            split
-        } else {
-            vec![expanded.collapse()]
-        };
-        output.fields.extend(fields.into_iter().map(into_field));
-    } else {
-        let field = expanded.collapse();
+    let Some(output) = output else {
+        let field = expand_parts(shell, word.parts(), context)?.collapse();
         shell.expand.buffer.clear();
         shell.expand.buffer.extend_from_slice(&field.bytes);
-    }
+        return Ok(());
+    };
 
+    // Brace expansion precedes every other expansion and is the only one
+    // that turns one word into several before they are expanded at all.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    let braced = if context.full {
+        brace::expand(shell, word)?
+    } else {
+        Vec::new()
+    };
+    if braced.is_empty() {
+        return expand_word(shell, word, output, context);
+    }
+    for word in &braced {
+        expand_word(shell, word, output, context)?;
+    }
+    Ok(())
+}
+
+fn expand_word(
+    shell: &mut Shell,
+    word: &ParsedWord,
+    output: &mut ExpandedFields,
+    context: Context,
+) -> Result<(), Error> {
+    let expanded = expand_parts(shell, word.parts(), context)?;
+    let fields = if context.full {
+        let mut split = split::fields(shell, expanded.fields);
+        if !shell.options.enabled(ShellOption::NoGlob) {
+            let settings = pathname::settings(shell);
+            split = pathname::expand(shell, split, &settings)?;
+        }
+        split
+    } else {
+        vec![expanded.collapse()]
+    };
+    output.fields.extend(fields.into_iter().map(into_field));
     Ok(())
 }
 
@@ -197,7 +223,21 @@ pub(super) fn expand_argument(
 /// the same bits to decide which bytes the shell already made literal.
 // [spec:nsh:sem:idiom.typed-expansion]
 // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+pub(super) fn conditional_pattern_of(
+    shell: &mut Shell,
+    word: &ParsedWord,
+) -> Result<Pattern, Error> {
+    let mut options = bash::match_options(shell);
+    options.extended = shell.options.dialect() == Dialect::Bash;
+    Ok(pattern_field(shell, word)?.pattern(options))
+}
+
 pub(super) fn pattern_of(shell: &mut Shell, word: &ParsedWord) -> Result<Pattern, Error> {
+    let options = bash::match_options(shell);
+    Ok(pattern_field(shell, word)?.pattern(options))
+}
+
+fn pattern_field(shell: &mut Shell, word: &ParsedWord) -> Result<Field, Error> {
     let context = Context {
         quoted: false,
         full: false,
@@ -207,9 +247,7 @@ pub(super) fn pattern_of(shell: &mut Shell, word: &ParsedWord) -> Result<Pattern
         tilde_after_equal: false,
         tilde_after_colon: false,
     };
-    Ok(expand_parts(shell, word.parts(), context)?
-        .collapse()
-        .pattern())
+    Ok(expand_parts(shell, word.parts(), context)?.collapse())
 }
 
 // Quote protection is metadata during expansion and is discarded only when
@@ -496,22 +534,19 @@ fn expand_parameter(
         return Err(shell.diagnostics().shell_error(b"Bad substitution"));
     }
 
-    let name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
-    // A Bash name reference reads the variable it points at; a circular
-    // chain has nothing to read and behaves as unset.
-    // [spec:nsh:req:compat.bash.functions-scoping]
-    let target = crate::variables::nameref::read_name(shell, name.as_bstr());
-    let value = match target.as_ref().map(|target| target.as_bstr()) {
-        None => Value::Unset,
-        Some(target) => match split_subscript(target) {
-            Some((base, subscript)) => {
-                let base = base.to_owned();
-                let subscript = subscript.to_owned();
-                subscripted_value(shell, base.as_bstr(), subscript.as_bstr())?
-            }
-            None => parameter_value(shell, target),
-        },
-    };
+    let mut name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
+    if parameter.indirect
+        && let Some(expansion) = bash::indirect_names(shell, name.as_bstr(), context)?
+    {
+        return Ok(expansion);
+    }
+    let mut value = read_value(shell, name.as_bstr())?;
+    if parameter.indirect {
+        // `${!ref}` reads the name out of `ref` and expands that.
+        // [spec:nsh:req:compat.bash.expansion-globbing]
+        name = value_bytes(shell, value, context);
+        value = read_value(shell, name.as_bstr())?;
+    }
     let unavailable = value.is_unset() || (parameter.colon && value.is_empty(shell, context));
 
     match parameter.operation {
@@ -637,7 +672,49 @@ fn expand_parameter(
                 context.quoted,
             )))
         }
+        ParameterOperation::Substring
+        | ParameterOperation::SubstituteFirst
+        | ParameterOperation::SubstituteAll
+        | ParameterOperation::UpperFirst
+        | ParameterOperation::UpperAll
+        | ParameterOperation::LowerFirst
+        | ParameterOperation::LowerAll
+        | ParameterOperation::Transform => {
+            if value.is_unset() && shell.options.enabled(ShellOption::Nounset) {
+                return Err(parameter_error(shell, name.as_bstr(), false, None));
+            }
+            match parameter.operation {
+                ParameterOperation::Substring => {
+                    bash::substring(shell, parameter, name.as_bstr(), value, context)
+                }
+                ParameterOperation::SubstituteFirst | ParameterOperation::SubstituteAll => {
+                    bash::substitute(shell, parameter, name.as_bstr(), value, context)
+                }
+                ParameterOperation::Transform => bash::transform(shell, parameter, value, context),
+                _ => bash::change_case(shell, parameter, value, context),
+            }
+        }
         ParameterOperation::Invalid => unreachable!(),
+    }
+}
+
+/// Read one parameter, following a Bash name reference and an array
+/// subscript where the name carries one.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn read_value(shell: &mut Shell, name: &BStr) -> Result<Value, Error> {
+    // A Bash name reference reads the variable it points at; a circular
+    // chain has nothing to read and behaves as unset.
+    let target = crate::variables::nameref::read_name(shell, name);
+    let Some(target) = target else {
+        return Ok(Value::Unset);
+    };
+    match split_subscript(target.as_bstr()) {
+        Some((base, subscript)) => {
+            let base = base.to_owned();
+            let subscript = subscript.to_owned();
+            subscripted_value(shell, base.as_bstr(), subscript.as_bstr())
+        }
+        None => Ok(parameter_value(shell, target.as_bstr())),
     }
 }
 
@@ -901,7 +978,7 @@ fn pattern_operand(
         Some(word) => expand_parts(shell, word.parts(), context.pattern_operand())?.collapse(),
         None => Field::default(),
     };
-    Ok(field.pattern())
+    Ok(field.pattern(bash::trim_options(shell)))
 }
 
 fn parameter_error(
@@ -1079,133 +1156,6 @@ fn effective_ifs(shell: &Shell) -> &[u8] {
     &shell.ifs.bytes
 }
 
-// Split eligibility lives beside each byte, so truncating a parallel linked
-// list of regions is no longer an operation the implementation can forget.
-// [spec:dash:sem:expand.removerecordregions-fn]
-fn split_fields(shell: &Shell, fields: Vec<Field>) -> Vec<Field> {
-    let ifs = ifs_characters(&shell.locale, effective_ifs(shell));
-    fields
-        .into_iter()
-        .flat_map(|field| split_field(&shell.locale, field, &ifs))
-        .collect()
-}
-
-struct IfsCharacter {
-    bytes: BString,
-    whitespace: bool,
-}
-
-fn ifs_characters(locale: &nsh_platform::Locale, ifs: &[u8]) -> Vec<IfsCharacter> {
-    let mut result = Vec::new();
-    let mut at = 0;
-    while at < ifs.len() {
-        let end = character_end(locale, ifs, at);
-        let bytes = BString::from(&ifs[at..end]);
-        let whitespace = locale
-            .decode_exact(&bytes, bytes.len())
-            .is_some_and(|wide| locale.wide_is_space(wide));
-        result.push(IfsCharacter { bytes, whitespace });
-        at = end;
-    }
-    result
-}
-
-fn separator_at<'a>(
-    locale: &nsh_platform::Locale,
-    field: &Field,
-    ifs: &'a [IfsCharacter],
-    at: usize,
-) -> Option<(&'a IfsCharacter, usize)> {
-    let end = character_end(locale, &field.bytes, at);
-    field
-        .range_is_splittable(at..end)
-        .then(|| {
-            ifs.iter()
-                .find(|separator| separator.bytes.as_slice() == &field.bytes[at..end])
-                .map(|separator| (separator, end))
-        })
-        .flatten()
-}
-
-fn split_field(locale: &nsh_platform::Locale, field: Field, ifs: &[IfsCharacter]) -> Vec<Field> {
-    if ifs.is_empty() || !field.any_splittable() {
-        return if field.bytes.is_empty() && !field.has_empty_anchor(0..=0) {
-            Vec::new()
-        } else {
-            vec![field]
-        };
-    }
-
-    let mut result = Vec::new();
-    let mut start = 0;
-    let mut at = 0;
-    while at < field.bytes.len() {
-        let Some((separator, mut next)) = separator_at(locale, &field, ifs, at) else {
-            at = character_end(locale, &field.bytes, at);
-            continue;
-        };
-
-        if separator.whitespace {
-            while next < field.bytes.len() {
-                let Some((following, end)) = separator_at(locale, &field, ifs, next) else {
-                    break;
-                };
-                if !following.whitespace {
-                    break;
-                }
-                next = end;
-            }
-            let following_nonwhite = (next < field.bytes.len())
-                .then(|| separator_at(locale, &field, ifs, next))
-                .flatten()
-                .filter(|(following, _)| !following.whitespace);
-            if let Some((_, end)) = following_nonwhite {
-                result.push(field.slice(start..at));
-                next = end;
-                while next < field.bytes.len() {
-                    let Some((following, end)) = separator_at(locale, &field, ifs, next) else {
-                        break;
-                    };
-                    if !following.whitespace {
-                        break;
-                    }
-                    next = end;
-                }
-                start = next;
-            } else if at > start || field.has_empty_anchor(start..=at) {
-                result.push(field.slice(start..at));
-                start = next;
-            } else {
-                start = next;
-            }
-            at = next;
-            continue;
-        }
-
-        result.push(field.slice(start..at));
-        while next < field.bytes.len() {
-            let Some((following, end)) = separator_at(locale, &field, ifs, next) else {
-                break;
-            };
-            if !following.whitespace {
-                break;
-            }
-            next = end;
-        }
-        start = next;
-        at = next;
-    }
-
-    if start < field.bytes.len() {
-        result.push(field.slice(start..field.bytes.len()));
-    } else if field.has_empty_anchor(start..=field.bytes.len()) {
-        let mut empty = Field::default();
-        empty.anchor_empty();
-        result.push(empty);
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1253,7 +1203,8 @@ mod tests {
     #[test]
     fn expanded_backslash_quotes_pattern_byte() {
         let locale = nsh_platform::Locale::c().unwrap();
-        let pattern = Field::from_bytes(b"\\*", false, false, false).pattern();
+        let pattern = Field::from_bytes(b"\\*", false, false, false)
+            .pattern(crate::pattern::PatternOptions::NONE);
 
         assert!(pattern.matches(&locale, b"*"));
         assert!(!pattern.matches(&locale, b"anything"));

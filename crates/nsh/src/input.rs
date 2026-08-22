@@ -200,6 +200,11 @@ pub struct InputStack {
     /// Bash's compound array assignment requires `name=` and `(` to be
     /// adjacent, so `a= (1 2)` stays a syntax error.
     pub(crate) last_token_after_blank: bool,
+    /// Whether a Bash `[[ ]]` expression is being parsed. Bash enables
+    /// extended globs inside one whether or not `shopt -s extglob` is on,
+    /// so the lexer has to know it is there.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub(crate) parsing_conditional: bool,
     /// `tokpushback` — one token of lookahead, pushed back.
     pub(crate) token_pushed_back: bool,
     /// The option-derived dialect captured at the current parser entry.
@@ -240,6 +245,7 @@ impl InputStack {
             last_token: crate::parser::TokenKind::Eof,
             last_token_quoted: false,
             last_token_after_blank: false,
+            parsing_conditional: false,
             token_pushed_back: false,
             parse_dialect: crate::options::Dialect::Posix,
             word: crate::word::ParsedWord::new(),

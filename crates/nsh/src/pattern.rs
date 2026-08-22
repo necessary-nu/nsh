@@ -9,24 +9,95 @@ use std::collections::HashMap;
 
 use bstr::BString;
 
+/// Matching behaviour a pattern inherits from shell options rather than
+/// from its own bytes.
+///
+/// The bits travel with the pattern because the matcher is reached from
+/// `case`, `[[ ]]`, parameter trimming, and pathname expansion alike, and
+/// each of those decides from shell state whether `shopt -s extglob` and
+/// the case-insensitive options are in force.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct PatternOptions {
+    /// `shopt -s extglob`: `?(…)`, `*(…)`, `+(…)`, `@(…)`, and `!(…)`.
+    pub(crate) extended: bool,
+    /// `shopt -s nocaseglob` / `nocasematch`.
+    pub(crate) ignore_case: bool,
+}
+
+impl PatternOptions {
+    pub(crate) const NONE: Self = Self {
+        extended: false,
+        ignore_case: false,
+    };
+}
+
 /// A quote-aware shell pattern.
 // [spec:nsh:sem:idiom.typed-expansion]
 #[derive(Clone, Debug)]
 pub(crate) struct Pattern {
     bytes: BString,
     quoted: Vec<bool>,
+    options: PatternOptions,
+}
+
+/// One `X(alternative|…)` extended-glob group and where the pattern
+/// continues after it.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+struct ExtendedGroup {
+    kind: u8,
+    alternatives: Vec<core::ops::Range<usize>>,
+    next: usize,
 }
 
 impl Pattern {
     pub(crate) fn new(bytes: BString, quoted: Vec<bool>) -> Self {
         debug_assert_eq!(bytes.len(), quoted.len());
-        Self { bytes, quoted }
+        Self {
+            bytes,
+            quoted,
+            options: PatternOptions::NONE,
+        }
     }
 
     pub(crate) fn unquoted(bytes: impl Into<BString>) -> Self {
         let bytes = bytes.into();
         let quoted = vec![false; bytes.len()];
-        Self { bytes, quoted }
+        Self {
+            bytes,
+            quoted,
+            options: PatternOptions::NONE,
+        }
+    }
+
+    /// Read a pattern written as ordinary shell text, where a backslash
+    /// protects the byte that follows it. `GLOBIGNORE` holds its patterns
+    /// this way: the value is already a string, so the quoting a word
+    /// carried during expansion is no longer available beside it.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub(crate) fn from_escaped_text(text: &[u8], options: PatternOptions) -> Self {
+        let mut bytes = Vec::with_capacity(text.len());
+        let mut quoted = Vec::with_capacity(text.len());
+        let mut at = 0;
+        while at < text.len() {
+            let escaped = text[at] == b'\\' && at + 1 < text.len();
+            if escaped {
+                at += 1;
+            }
+            bytes.push(text[at]);
+            quoted.push(escaped);
+            at += 1;
+        }
+        Self {
+            bytes: BString::from(bytes),
+            quoted,
+            options,
+        }
+    }
+
+    pub(crate) fn with_options(mut self, options: PatternOptions) -> Self {
+        self.options = options;
+        self
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8] {
@@ -41,10 +112,13 @@ impl Pattern {
     }
 
     pub(crate) fn has_meta(&self) -> bool {
-        self.bytes
-            .iter()
-            .enumerate()
-            .any(|(at, byte)| !self.quoted[at] && matches!(byte, b'*' | b'?' | b'['))
+        self.bytes.iter().enumerate().any(|(at, byte)| {
+            !self.quoted[at]
+                && (matches!(byte, b'*' | b'?' | b'[')
+                    || (self.options.extended
+                        && matches!(byte, b'+' | b'@' | b'!')
+                        && self.active(at + 1, b'(')))
+        })
     }
 
     pub(crate) fn starts_with_literal_dot(&self) -> bool {
@@ -55,16 +129,36 @@ impl Pattern {
         Self {
             bytes: BString::from(&self.bytes[range.clone()]),
             quoted: self.quoted[range].to_vec(),
+            options: self.options,
         }
     }
 
     // [spec:dash:sem:expand.pmatch-fn]
     pub(crate) fn matches(&self, locale: &nsh_platform::Locale, subject: &[u8]) -> bool {
+        // A pattern without extended groups is matched by a memoized
+        // walk whose work is bounded by pattern length times subject
+        // length, so it needs no budget and POSIX matching is unchanged
+        // by this argument existing.
+        let mut budget = if self.options.extended {
+            EXTENDED_MATCH_BUDGET
+        } else {
+            u64::MAX
+        };
+        self.matches_within(locale, subject, &mut budget)
+    }
+
+    fn matches_within(
+        &self,
+        locale: &nsh_platform::Locale,
+        subject: &[u8],
+        budget: &mut u64,
+    ) -> bool {
         Matcher {
             locale,
             pattern: self,
             subject,
             memo: HashMap::new(),
+            budget,
         }
         .matches_from(0, 0)
     }
@@ -74,11 +168,33 @@ impl Pattern {
     }
 }
 
+/// How many pattern positions one extended-glob match may visit.
+///
+/// `!(…)` asks whether *no* alternative matches at every subject offset,
+/// and a nested group repeats that question inside itself, so a pattern
+/// can demand enormous work while producing no output. The budget is
+/// charged for attempted work rather than for results, and running out
+/// answers "no match" instead of running on.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+const EXTENDED_MATCH_BUDGET: u64 = 4_000_000;
+
+/// One pattern matched against one subject.
+///
+/// `memo` is keyed on `(pattern_at, subject_at)` alone, and that key is
+/// complete because nothing else can vary between two visits to the same
+/// pair: `pattern` and `subject` are fixed for the matcher's life, and
+/// `PatternOptions` belongs to the pattern and is immutable. In
+/// particular `!(…)` does not put the matcher into a negated mode — its
+/// alternatives are matched by separate matchers over sliced patterns
+/// and sliced subjects, and `matches_from` is only ever asked the plain
+/// question "does the rest of the pattern match the rest of the subject".
+// [spec:nsh:req:compat.bash.expansion-globbing]
 struct Matcher<'a> {
     locale: &'a nsh_platform::Locale,
     pattern: &'a Pattern,
     subject: &'a [u8],
     memo: HashMap<(usize, usize), bool>,
+    budget: &'a mut u64,
 }
 
 impl Matcher<'_> {
@@ -99,6 +215,10 @@ impl Matcher<'_> {
         if let Some(result) = self.memo.get(&(pattern_at, subject_at)) {
             return *result;
         }
+        if *self.budget == 0 {
+            return false;
+        }
+        *self.budget -= 1;
         let result = self.match_uncached(pattern_at, subject_at);
         self.memo.insert((pattern_at, subject_at), result);
         result
@@ -108,6 +228,10 @@ impl Matcher<'_> {
         loop {
             if pattern_at == self.pattern.bytes.len() {
                 return subject_at == self.subject.len();
+            }
+
+            if let Some(group) = self.extended_group(pattern_at) {
+                return self.match_group(&group, subject_at);
             }
 
             if self.pattern.active(pattern_at, b'*') {
@@ -158,13 +282,171 @@ impl Matcher<'_> {
             }
             let pattern_end = character_end(self.locale, &self.pattern.bytes, pattern_at);
             let subject_end = character_end(self.locale, self.subject, subject_at);
-            if self.pattern.bytes[pattern_at..pattern_end] != self.subject[subject_at..subject_end]
-            {
+            if !self.same_character(
+                &self.pattern.bytes[pattern_at..pattern_end],
+                &self.subject[subject_at..subject_end],
+            ) {
                 return false;
             }
             pattern_at = pattern_end;
             subject_at = subject_end;
         }
+    }
+
+    /// Whether one pattern character stands for one subject character,
+    /// honouring the case-insensitive shell options.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn same_character(&self, pattern: &[u8], subject: &[u8]) -> bool {
+        pattern == subject
+            || (self.pattern.options.ignore_case && fold_case(pattern) == fold_case(subject))
+    }
+
+    /// Read the extended-glob group that starts at `at`, when the option
+    /// that gives `X(` its meaning is on and the group is well formed.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn extended_group(&self, at: usize) -> Option<ExtendedGroup> {
+        if !self.pattern.options.extended {
+            return None;
+        }
+        let kind = *self.pattern.bytes.get(at)?;
+        if !matches!(kind, b'?' | b'*' | b'+' | b'@' | b'!')
+            || self.pattern.quoted.get(at).copied().unwrap_or(true)
+            || !self.pattern.active(at + 1, b'(')
+        {
+            return None;
+        }
+
+        let mut alternatives = Vec::new();
+        let mut start = at + 2;
+        let mut depth = 1usize;
+        let mut cursor = start;
+        while cursor < self.pattern.bytes.len() {
+            if self.pattern.quoted[cursor] {
+                cursor += 1;
+                continue;
+            }
+            match self.pattern.bytes[cursor] {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        alternatives.push(start..cursor);
+                        return Some(ExtendedGroup {
+                            kind,
+                            alternatives,
+                            next: cursor + 1,
+                        });
+                    }
+                }
+                b'|' if depth == 1 => {
+                    alternatives.push(start..cursor);
+                    start = cursor + 1;
+                }
+                _ => {}
+            }
+            cursor += 1;
+        }
+        None
+    }
+
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn match_group(&mut self, group: &ExtendedGroup, subject_at: usize) -> bool {
+        match group.kind {
+            b'!' => self.match_group_excluded(group, subject_at),
+            b'?' => self.match_group_once(group, subject_at, true),
+            b'@' => self.match_group_once(group, subject_at, false),
+            b'*' => self.match_group_repeated(group, subject_at, true),
+            _ => self.match_group_repeated(group, subject_at, false),
+        }
+    }
+
+    /// Every subject position one alternative can reach from `from`.
+    ///
+    /// Each alternative is a pattern in its own right, matched against a
+    /// slice of the subject by its own matcher; the work budget is the
+    /// one thing they share, so a nested group cannot escape it.
+    fn alternative_ends(&mut self, group: &ExtendedGroup, from: usize) -> Vec<usize> {
+        let locale = self.locale;
+        let subject = self.subject;
+        let mut ends = Vec::new();
+        for range in &group.alternatives {
+            let alternative = self.pattern.slice(range.clone());
+            let mut end = from;
+            loop {
+                if !ends.contains(&end)
+                    && alternative.matches_within(locale, &subject[from..end], self.budget)
+                {
+                    ends.push(end);
+                }
+                if end == subject.len() {
+                    break;
+                }
+                end = character_end(locale, subject, end);
+            }
+        }
+        ends
+    }
+
+    fn match_group_once(
+        &mut self,
+        group: &ExtendedGroup,
+        subject_at: usize,
+        optional: bool,
+    ) -> bool {
+        let mut ends = self.alternative_ends(group, subject_at);
+        if optional && !ends.contains(&subject_at) {
+            ends.push(subject_at);
+        }
+        ends.into_iter()
+            .any(|end| self.matches_from(group.next, end))
+    }
+
+    fn match_group_repeated(
+        &mut self,
+        group: &ExtendedGroup,
+        subject_at: usize,
+        optional: bool,
+    ) -> bool {
+        let mut ends = Vec::new();
+        let mut pending = self.alternative_ends(group, subject_at);
+        while let Some(at) = pending.pop() {
+            if ends.contains(&at) {
+                continue;
+            }
+            ends.push(at);
+            if at > subject_at {
+                pending.extend(
+                    self.alternative_ends(group, at)
+                        .into_iter()
+                        .filter(|end| *end > at),
+                );
+            }
+        }
+        if optional && !ends.contains(&subject_at) {
+            ends.push(subject_at);
+        }
+        ends.into_iter()
+            .any(|end| self.matches_from(group.next, end))
+    }
+
+    /// `!(list)` consumes any run of subject characters that no
+    /// alternative matches, then the pattern continues after the group.
+    fn match_group_excluded(&mut self, group: &ExtendedGroup, subject_at: usize) -> bool {
+        let excluded = self.alternative_ends(group, subject_at);
+        let mut candidates = Vec::new();
+        let mut end = subject_at;
+        loop {
+            if !excluded.contains(&end) {
+                candidates.push(end);
+            }
+            if end == self.subject.len() {
+                break;
+            }
+            end = character_end(self.locale, self.subject, end);
+        }
+        candidates
+            .into_iter()
+            .any(|end| self.matches_from(group.next, end))
     }
 
     /// Return the continuation and every subject width matched by one
@@ -227,11 +509,17 @@ impl Matcher<'_> {
                     && range_end - range_end_start == 1
                     && width == 1
                 {
+                    let range =
+                        self.pattern.bytes[member_start]..=self.pattern.bytes[range_end_start];
                     let subject = self.subject[subject_at];
-                    if (self.pattern.bytes[member_start]..=self.pattern.bytes[range_end_start])
-                        .contains(&subject)
-                        && !matched_widths.contains(&1)
-                    {
+                    // A case-insensitive range accepts either case of the
+                    // subject byte, which is what folding one character
+                    // means where the member is a range rather than a
+                    // character.
+                    let folded = self.pattern.options.ignore_case
+                        && (range.contains(&subject.to_ascii_lowercase())
+                            || range.contains(&subject.to_ascii_uppercase()));
+                    if (range.contains(&subject) || folded) && !matched_widths.contains(&1) {
                         matched_widths.push(1);
                     }
                 }
@@ -240,8 +528,10 @@ impl Matcher<'_> {
             }
 
             if let Some(width) = subject_width
-                && self.pattern.bytes[member_start..member_end]
-                    == self.subject[subject_at..subject_at + width]
+                && self.same_character(
+                    &self.pattern.bytes[member_start..member_end],
+                    &self.subject[subject_at..subject_at + width],
+                )
                 && !matched_widths.contains(&width)
             {
                 matched_widths.push(width);
@@ -319,6 +609,21 @@ impl Matcher<'_> {
     }
 }
 
+/// Fold one character for the case-insensitive shell options.
+///
+/// A single byte folds by ASCII rules, which is all the C locale has; a
+/// complete UTF-8 character folds by Unicode's simple lowercase mapping.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn fold_case(bytes: &[u8]) -> Vec<u8> {
+    if bytes.len() == 1 {
+        return vec![bytes[0].to_ascii_lowercase()];
+    }
+    match core::str::from_utf8(bytes) {
+        Ok(text) => text.to_lowercase().into_bytes(),
+        Err(_) => bytes.to_vec(),
+    }
+}
+
 fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usize {
     if at >= bytes.len() {
         return at;
@@ -378,6 +683,83 @@ mod tests {
         let quoted_star = Pattern::new(BString::from("*"), vec![true]);
         assert!(quoted_star.matches(&locale, b"*"));
         assert!(!quoted_star.matches(&locale, b"anything"));
+    }
+
+    #[test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    fn extended_groups_repeat_and_negate() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let extended = PatternOptions {
+            extended: true,
+            ignore_case: false,
+        };
+        let matches = |pattern: &[u8], subject: &[u8]| {
+            Pattern::unquoted(BString::from(pattern))
+                .with_options(extended)
+                .matches(&locale, subject)
+        };
+
+        assert!(matches(b"@(foo|bar)", b"foo"));
+        assert!(!matches(b"@(foo|bar)", b"foobar"));
+        assert!(matches(b"?(foo)", b""));
+        assert!(matches(b"*(foo)", b"foofoofoo"));
+        assert!(!matches(b"+(foo)", b""));
+        assert!(matches(b"+(foo)bar", b"foofoobar"));
+        assert!(matches(b"!(foo)", b"bar"));
+        assert!(!matches(b"!(foo)", b"foo"));
+        assert!(matches(b"--@(help|verbose=@(1|2))", b"--verbose=2"));
+        // The same continuation is reached from inside and outside a
+        // negated group; the memo answers each with its own question.
+        assert!(!matches(b"!(a)x", b"ax"));
+        assert!(matches(b"!(a)x", b"aax"));
+        // Without the option the group is ordinary pattern text.
+        assert!(Pattern::unquoted(BString::from("@(foo|bar)")).matches(&locale, b"@(foo|bar)"));
+    }
+
+    #[test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    fn extended_matching_work_is_bounded() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        // Nested negation over a long subject can demand unbounded work
+        // while producing no output; the budget answers "no match"
+        // rather than running on.
+        let pattern =
+            Pattern::unquoted(BString::from("!(!(!(!(!(a*b))))))")).with_options(PatternOptions {
+                extended: true,
+                ignore_case: false,
+            });
+        let subject = vec![b'a'; 4096];
+        assert!(!pattern.matches(&locale, &subject));
+    }
+
+    #[test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    fn case_folding_is_a_pattern_option() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let folded = PatternOptions {
+            extended: false,
+            ignore_case: true,
+        };
+        assert!(
+            Pattern::unquoted(BString::from("A*C"))
+                .with_options(folded)
+                .matches(&locale, b"abc")
+        );
+        assert!(
+            Pattern::unquoted(BString::from("[a-c]"))
+                .with_options(folded)
+                .matches(&locale, b"B")
+        );
+        assert!(!Pattern::unquoted(BString::from("A*C")).matches(&locale, b"abc"));
+    }
+
+    #[test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    fn escaped_text_patterns_keep_their_backslashes() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let pattern = Pattern::from_escaped_text(b"escape\\*.txt", PatternOptions::NONE);
+        assert!(pattern.matches(&locale, b"escape*.txt"));
+        assert!(!pattern.matches(&locale, b"escape-10.txt"));
     }
 
     #[test]

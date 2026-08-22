@@ -18,6 +18,7 @@ pub use model::ShellOption;
 pub(crate) use model::{OPTION_SPECS, OptionSet};
 
 mod bash_options;
+pub(crate) use bash_options::BashShopt;
 pub(crate) use bash_options::NAMES as BASH_OPTION_NAMES;
 
 #[cfg(test)]
