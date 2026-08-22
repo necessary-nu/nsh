@@ -337,13 +337,32 @@ fn expand_parts(
                 tilde = TildePosition::None;
             }
             WordPart::Command(command) => {
-                let bytes = command_substitution(shell, command.as_deref())?;
-                result.append(Expansion::one(Field::from_bytes(
-                    &bytes,
-                    context.protects(),
-                    context.splits(),
-                    context.quoted,
-                )));
+                /* `$(list)` contributes the bytes the list wrote, and they
+                 * are the list's data: unquoted, they split and they glob.
+                 * Bash's `<(list)` and `>(list)` occupy the same lexical
+                 * position and the same word part, but contribute a name the
+                 * shell chose for a pipe the list is still using. That name
+                 * is not data, so an `IFS` containing `/` leaves it whole. */
+                // [spec:nsh:req:compat.bash.process-substitution]
+                let field = match command.as_deref() {
+                    Some(Node::Bash(crate::nodes::BashNode::ProcessSubstitution(substitution))) => {
+                        let name = crate::evaluation::bash_process_substitution::substitute(
+                            shell,
+                            substitution,
+                        )?;
+                        Field::from_bytes(&name, true, false, context.quoted)
+                    }
+                    command => {
+                        let bytes = command_substitution(shell, command)?;
+                        Field::from_bytes(
+                            &bytes,
+                            context.protects(),
+                            context.splits(),
+                            context.quoted,
+                        )
+                    }
+                };
+                result.append(Expansion::one(field));
                 tilde = TildePosition::None;
             }
             WordPart::Arithmetic(expression) => {

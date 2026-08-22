@@ -5436,4 +5436,9 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
     )}
+    {id implement-bash-process-substitution, covered_rules (
+        compat.bash.process-substitution
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.process-substitution}
+    )}
 )

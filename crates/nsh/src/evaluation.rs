@@ -27,6 +27,7 @@
 mod bash_arithmetic;
 mod bash_arrays;
 mod bash_conditional;
+pub(crate) mod bash_process_substitution;
 
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
@@ -552,6 +553,17 @@ pub fn evaluate_tree(
     node: Option<&Node>,
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
+    /* Every `<(list)` name this node's words open dies with the node. Bash
+     * keeps them until the outermost command finishes, which is why a loop
+     * body there opens one pipe per iteration and why an unrelated program
+     * run in between inherits a descriptor that is none of its business.
+     * `[dec:nsh:safety-trumps-compatibility]`: the narrower lifetime is the
+     * safe one, and it is still wide enough for the node that built the name
+     * -- a redirected group, a `for` list, a command -- to have finished
+     * using it. The guard owns the stack rather than borrowing the shell, so
+     * the body below still has the shell to itself. */
+    // [spec:nsh:req:compat.bash.process-substitution]
+    let _substitution_names = bash_process_substitution::scope(shell);
     let mut check_exit = false;
     let mut status = ExitStatus::SUCCESS;
 
@@ -719,10 +731,15 @@ pub fn evaluate_tree(
             Node::Bash(crate::nodes::BashNode::ArithmeticFor(loop_command)) => {
                 flow!(bash_arithmetic::for_loop(shell, loop_command, context))
             }
-            Node::Bash(_) => {
+            /* A process substitution is a word, not a command: it reaches
+             * the evaluator through the expansion of the word that carries
+             * it, in `expand::typed`. Arriving here means a tree the parser
+             * does not build, so it is a shell error rather than a gap. */
+            // [spec:nsh:req:compat.bash.process-substitution]
+            Node::Bash(crate::nodes::BashNode::ProcessSubstitution(_)) => {
                 return Err(shell
                     .diagnostics()
-                    .shell_error(b"Bash syntax is parsed but not executable yet"));
+                    .shell_error(b"process substitution is not a command"));
             }
             Node::Not(command) => {
                 let status = flow!(evaluate_tree(

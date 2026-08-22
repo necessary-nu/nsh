@@ -229,6 +229,14 @@ pub fn execute_external_command(
         Ok(arguments) => arguments,
         Err(error) => return native_exec_failure(shell, command, &error),
     };
+    /* The last fork this process will ever make is behind us, so a
+     * `<(list)` name may now stop being close-on-exec. Doing it here rather
+     * than when the name was built is what keeps the pipe out of every
+     * unrelated child the shell forked in between. */
+    // [spec:nsh:req:compat.bash.process-substitution]
+    if let Err(error) = crate::evaluation::bash_process_substitution::publish_before_exec(shell) {
+        return exec_failure(shell, command, error);
+    }
     if let Err(error) = shell.descriptors.materialize() {
         return exec_failure(shell, command, error);
     }

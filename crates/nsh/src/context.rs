@@ -89,6 +89,13 @@ pub struct Shell {
     /// The stack of logical descriptor values saved for restoration.
     /// `redir.rs` owns the shape; this owns the value.
     pub(crate) redirections: crate::redirection::RedirectionStack,
+    /// The `<(list)` and `>(list)` pipe ends whose substituted names are
+    /// still usable. `evaluation/bash_process_substitution.rs` owns the
+    /// shape; this owns the value, because the name is only as alive as the
+    /// descriptor and the descriptor belongs to this shell instance.
+    // [spec:nsh:req:compat.bash.process-substitution]
+    pub(crate) process_substitutions:
+        crate::evaluation::bash_process_substitution::SubstitutionStack,
     /// Every variable, the sixteen the shell is born with, the `LINENO`
     /// buffer and line, and the `local` save stack. `var.rs` owns the
     /// shape; this owns the value.
@@ -223,6 +230,8 @@ impl Shell {
             jobs: crate::jobs::JobTable::new(),
             options: crate::options::ShellOptions::new(),
             redirections: crate::redirection::RedirectionStack::new(),
+            process_substitutions:
+                crate::evaluation::bash_process_substitution::SubstitutionStack::default(),
             working_directory: crate::working_directory::WorkingDirectoryState::new(),
             mail: crate::mail::MailState::new(),
             ifs: crate::expand::IfsCache::new(),

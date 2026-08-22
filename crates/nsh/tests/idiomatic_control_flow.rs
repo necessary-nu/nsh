@@ -334,6 +334,7 @@ fn zero_cism_gate_covers_boundary() {
     ];
     const PRIVATE_PLATFORM_ALLOWLIST: &[&str] = &[
         "crates/nsh-platform/src/descriptor.rs",
+        "crates/nsh-platform/src/descriptor_name.rs",
         "crates/nsh-platform/src/locale.rs",
         "crates/nsh-platform/src/signal_names.rs",
         "crates/nsh-platform/src/terminal.rs",

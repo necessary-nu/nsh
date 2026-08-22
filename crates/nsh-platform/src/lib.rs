@@ -220,6 +220,11 @@ impl ProgramImage {
     }
 }
 
+mod descriptor_name;
+pub use descriptor_name::{
+    descriptor_name, descriptor_name_directory, publish_descriptor_across_exec,
+};
+
 #[cfg(unix)]
 include!("unix.rs");
 
