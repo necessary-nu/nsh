@@ -636,7 +636,11 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
 }
 
 /// Compatibility entry for callers whose pattern contains no quoted bytes.
+///
+/// Only the editor's history search reaches this outside the tests below;
+/// every other caller has a `Pattern` already.
 // [spec:dash:sem:expand.patmatch-fn]
+#[cfg(any(feature = "edit", test))]
 pub(crate) fn pattern_matches(
     locale: &nsh_platform::Locale,
     pattern: &[u8],

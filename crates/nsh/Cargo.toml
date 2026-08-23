@@ -10,11 +10,18 @@ description = "A POSIX shell as a library"
 name = "nsh"
 path = "src/lib.rs"
 
+[features]
+# Interactive line editing: the `nshedit` session and the `nshterm`
+# terminfo lookup that decides whether the declared terminal can host one.
+# Off by default so embedding the shell does not link a line editor;
+# `nsh-cli` turns it on, because a shell frontend is exactly what needs it.
+edit = ["dep:nshedit", "dep:nshterm", "nsh-platform/edit"]
+
 [dependencies]
 bstr = "1"
 nsh-platform = { path = "../nsh-platform" }
-nshedit = "0.1.1"
-nshterm = "0.1.1"
+nshedit = { version = "0.1.1", optional = true }
+nshterm = { version = "0.1.1", optional = true }
 
 [[example]]
 name = "embed"

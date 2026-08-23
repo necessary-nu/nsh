@@ -70,6 +70,10 @@ fn nonlexical_continue_crosses_function() {
 }
 
 // [spec:nsh:req:compat.smoosh.history-builtin/test]
+/* `history` reports the retained history list, and retaining one is what
+ * the `edit` feature builds. Without it the list is empty by construction
+ * -- see `editor_absent.rs` -- so this asserts nothing there. */
+#[cfg(feature = "edit")]
 #[test]
 fn history_clear_and_nolog() {
     let script = "history | grep history >/dev/null || exit 1\n\

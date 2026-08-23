@@ -12,5 +12,5 @@ path = "src/main.rs"
 
 [dependencies]
 bstr = "1"
-nsh = { path = "../nsh" }
+nsh = { path = "../nsh", features = ["edit"] }
 nsh-platform = { path = "../nsh-platform" }

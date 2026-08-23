@@ -6,9 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 description = "Safe operating-system boundary for nsh"
 
+[features]
+# The terminal-attribute and screen-size boundary an `nshedit` session
+# needs. Enabled through `nsh/edit`; nothing else in the crate reads it.
+edit = ["dep:nshedit-plat"]
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-nshedit-plat = "0.1.1"
+nshedit-plat = { version = "0.1.1", optional = true }
 rustix = { version = "1", features = ["event", "fs", "param", "process", "system", "termios", "pipe", "pty", "stdio", "runtime"] }
 
 [target.'cfg(windows)'.dependencies]

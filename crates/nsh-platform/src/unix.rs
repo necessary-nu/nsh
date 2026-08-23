@@ -17,7 +17,11 @@ mod descriptor;
 pub use descriptor::{AsDescriptor, BorrowedDescriptor, Descriptor, move_fd_cloexec};
 mod terminal;
 pub use terminal::TerminalSettings;
+/* The only user of `nshedit-plat`, and so the only part of the boundary
+ * the `edit` feature gates. */
+#[cfg(feature = "edit")]
 mod editor_terminal;
+#[cfg(feature = "edit")]
 pub use editor_terminal::{
     EditorTerminalAttributes, TerminalApply, TerminalControlCharacter,
     apply_editor_terminal_attributes, editor_terminal_attributes, editor_terminal_size,

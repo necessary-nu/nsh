@@ -172,4 +172,11 @@ pub(crate) mod jobs;
 pub(crate) mod runtime;
 
 // ---- interactive editor ----------------------------------------------
+/* One name, two modules. `edit` links `nshedit` and `nshterm`; without it
+ * the shell keeps the same internal API and answers that it cannot edit,
+ * so no call site reads a `cfg`. See `editor_absent.rs`. */
+#[cfg(feature = "edit")]
+pub(crate) mod editor;
+#[cfg(not(feature = "edit"))]
+#[path = "editor_absent.rs"]
 pub(crate) mod editor;

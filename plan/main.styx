@@ -5338,6 +5338,20 @@ children (
                     }
                 )
             }
+
+            {
+                id optional-line-editor
+                title "Make the line editor an optional `edit` feature the frontend enables"
+                kind @build
+                log (
+                    {
+                        at 2026-08-23T23:35:12.415170204Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
+            }
         )
         log (
             {
