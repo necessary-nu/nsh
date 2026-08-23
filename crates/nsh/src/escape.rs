@@ -19,7 +19,7 @@ fn octal_digit_value(byte: u8) -> u32 {
 /// The bytes written and input bytes consumed by one escape conversion.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EscapeChunk {
-    bytes: [u8; 4],
+    bytes: [u8; 6],
     length: u8,
     pub consumed: usize,
 }
@@ -27,16 +27,8 @@ pub struct EscapeChunk {
 impl EscapeChunk {
     const fn one(byte: u8, consumed: usize) -> Self {
         Self {
-            bytes: [byte, 0, 0, 0],
+            bytes: [byte, 0, 0, 0, 0, 0],
             length: 1,
-            consumed,
-        }
-    }
-
-    const fn empty(consumed: usize) -> Self {
-        Self {
-            bytes: [0; 4],
-            length: 0,
             consumed,
         }
     }
@@ -72,35 +64,39 @@ fn unicode_bytes(value: u32, consumed: usize) -> EscapeChunk {
     if value < 0x80 {
         return EscapeChunk::one(value as u8, consumed);
     }
-    /* Bash encodes whatever the escape names, so `\U00110000` yields four
-     * bytes that are not UTF-8 for any character -- because no such
-     * character exists. Nothing is produced instead of manufacturing bytes
-     * no decoder will accept. Recorded in docs/divergences.md. */
-    // [spec:nsh:req:compat.bash.expansion-globbing]
-    if value >= 0x11_0000 {
-        return EscapeChunk::empty(consumed);
-    }
 
-    let mut bytes = [0u8; 4];
-    let length = if value < 0x800 {
-        bytes[0] = 0xc0 | (value >> 6) as u8;
-        bytes[1] = 0x80 | (value & 0x3f) as u8;
-        2
-    } else if value < 0x1_0000 {
-        bytes[0] = 0xe0 | (value >> 12) as u8;
-        bytes[1] = 0x80 | ((value >> 6) & 0x3f) as u8;
-        bytes[2] = 0x80 | (value & 0x3f) as u8;
-        3
-    } else {
-        bytes[0] = 0xf0 | (value >> 18) as u8;
-        bytes[1] = 0x80 | ((value >> 12) & 0x3f) as u8;
-        bytes[2] = 0x80 | ((value >> 6) & 0x3f) as u8;
-        bytes[3] = 0x80 | (value & 0x3f) as u8;
-        4
+    /* Bash encodes whatever the escape names, using UTF-8's original
+     * form rather than the range Unicode later settled on: `\U00110000`
+     * is four bytes and `\U7FFFFFFF` is six, neither of which decodes to
+     * a character. That is the right answer for a shell whose values are
+     * byte strings and not text ([dec:nsh:bytes-not-text]) -- the escape
+     * names a number, the shell writes it, and what it means is the
+     * reader's question. Refusing to encode it would drop bytes a script
+     * asked for.
+     *
+     * The encoding is the plain continuation of the pattern: a leading
+     * byte with `n` high bits set for `n` total bytes, then six payload
+     * bits each. */
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    // [dec:nsh:bytes-not-text]
+    let length: usize = match value {
+        0x80..=0x7ff => 2,
+        0x800..=0xffff => 3,
+        0x1_0000..=0x1f_ffff => 4,
+        0x20_0000..=0x3ff_ffff => 5,
+        _ => 6,
     };
+
+    let mut bytes = [0u8; 6];
+    for index in (1..length).rev() {
+        bytes[index] = 0x80 | (value >> (6 * (length - 1 - index))) as u8 & 0x3f;
+    }
+    let lead_mask = !0u8 << (8 - length);
+    bytes[0] = lead_mask | (value >> (6 * (length - 1))) as u8;
+
     EscapeChunk {
         bytes,
-        length,
+        length: length as u8,
         consumed,
     }
 }

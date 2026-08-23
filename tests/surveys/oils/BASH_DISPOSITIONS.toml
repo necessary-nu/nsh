@@ -116,16 +116,6 @@ disposition = "not-implemented"
 reason = "`{name}<word` is not implemented: Bash allocates a descriptor above 9 and stores its number in `name`, and this shell has no redirection that names a variable. Here-strings themselves work."
 
 [[case]]
-id = "unicode.test.sh:3"
-disposition = "sanctioned-divergence"
-reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes the value anyway, yielding a byte sequence that is not UTF-8 for any character. Refusing to manufacture it is deliberate (`crates/nsh/src/escape.rs::unicode_bytes`); the refusal is silent, which is a wart the entry records rather than hides."
-
-[[case]]
-id = "unicode.test.sh:5"
-disposition = "sanctioned-divergence"
-reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes the value anyway, yielding a byte sequence that is not UTF-8 for any character. Refusing to manufacture it is deliberate (`crates/nsh/src/escape.rs::unicode_bytes`); the refusal is silent, which is a wart the entry records rather than hides."
-
-[[case]]
 id = "var-op-bash.test.sh:24"
 disposition = "sanctioned-divergence"
 reason = "An associative array iterates in sorted key order where Bash iterates in its hash order, so `${A[@]}` and `${A[*]}` list the same elements in a different order. The operator order this case also tests is implemented -- `@Q` applies per element and joins afterwards -- and only the ordering differs. Matching Bash would mean reproducing its hash function, which is not a claim about what a script means; a deterministic order is. Recorded in docs/divergences.md."
