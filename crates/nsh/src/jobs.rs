@@ -1587,6 +1587,11 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
                 }
             }
             Redirection::HereDocument(_) => push_command_text(b"<<...", text),
+            Redirection::HereString(here) => {
+                push_command_text(&[here.descriptor.as_digit()], text);
+                push_command_text(b"<<<", text);
+                here.word.word.render(text);
+            }
         }
     }
 }

@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice as _};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 use super::Field;
@@ -56,8 +56,8 @@ pub(super) fn settings(shell: &mut Shell) -> GlobSettings {
     let ignored = crate::variables::lookup_bytes(shell, BStr::new(b"GLOBIGNORE"))
         .filter(|value| !value.is_empty())
         .map(|value| {
-            value
-                .split(|byte| *byte == b':')
+            ignore_patterns(value.as_bstr())
+                .into_iter()
                 .map(|text| Pattern::from_escaped_text(text, options))
                 .collect::<Vec<_>>()
         })
@@ -70,6 +70,74 @@ pub(super) fn settings(shell: &mut Shell) -> GlobSettings {
         failglob: shell.options.shopt(BashShopt::FailGlob),
         ignored,
     }
+}
+
+/// Split `GLOBIGNORE` into its patterns.
+///
+/// The separator is a colon, but a colon inside a bracket expression is
+/// part of the pattern: that is what makes `GLOBIGNORE=[[:alnum:]]*` one
+/// pattern rather than the three that a plain split would produce. A
+/// backslash protects the byte after it, as it does everywhere else in
+/// the value.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn ignore_patterns(value: &BStr) -> Vec<&[u8]> {
+    let bytes: &[u8] = value.as_ref();
+    let mut patterns = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' => at += 2,
+            b'[' => at = bracket_end(bytes, at).unwrap_or(at + 1),
+            b':' => {
+                patterns.push(&bytes[start..at]);
+                at += 1;
+                start = at;
+            }
+            _ => at += 1,
+        }
+    }
+    patterns.push(&bytes[start..]);
+    patterns
+}
+
+/// Where a bracket expression that opens at `at` ends, or `None` when it
+/// never closes and the `[` is therefore ordinary text.
+// [spec:posix:syn:pattern.bracket-expression]
+fn bracket_end(bytes: &[u8], at: usize) -> Option<usize> {
+    let mut cursor = at + 1;
+    if matches!(bytes.get(cursor), Some(b'!' | b'^')) {
+        cursor += 1;
+    }
+    /* A `]` in the first member position is the character itself. */
+    if bytes.get(cursor) == Some(&b']') {
+        cursor += 1;
+    }
+    while cursor < bytes.len() {
+        if bytes[cursor] == b']' {
+            return Some(cursor + 1);
+        }
+        cursor = match bytes.get(cursor + 1) {
+            Some(&delimiter @ (b':' | b'.' | b'=')) if bytes[cursor] == b'[' => {
+                inner_member_end(bytes, cursor + 2, delimiter)?
+            }
+            _ => cursor + 1,
+        };
+    }
+    None
+}
+
+/// Where a `[:class:]`, `[.collating.]` or `[=equivalence=]` member that
+/// starts at `from` ends.
+fn inner_member_end(bytes: &[u8], from: usize, delimiter: u8) -> Option<usize> {
+    let mut cursor = from;
+    while cursor + 1 < bytes.len() {
+        if bytes[cursor] == delimiter && bytes[cursor + 1] == b']' {
+            return Some(cursor + 2);
+        }
+        cursor += 1;
+    }
+    None
 }
 
 // Quote protection is part of `Pattern`, candidates are owned paths, and

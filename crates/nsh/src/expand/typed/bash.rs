@@ -8,7 +8,9 @@ use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{Context, Expansion, Field, Value, character_end, expand_parts, value_expansion};
 use crate::context::Shell;
+use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
+use crate::nodes::{FileRedirectionOperator, Node, Redirection, WordNode};
 use crate::options::{BashShopt, Dialect};
 use crate::pattern::{Pattern, PatternOptions};
 use crate::word::{
@@ -40,6 +42,63 @@ pub(super) fn trim_options(shell: &Shell) -> PatternOptions {
     }
 }
 
+/// Bash's `$(<file)`: a command substitution whose body is nothing but an
+/// input redirection reads the file rather than running a command.
+///
+/// The bytes become word data and nothing here parses them, which is what
+/// keeps this an expansion rather than a second way into the evaluator.
+// [dec:nsh:safety-trumps-compatibility]
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn file_substitution(
+    shell: &mut Shell,
+    command: Option<&Node>,
+) -> Result<Option<BString>, Error> {
+    let Some(target) = read_only_redirection(shell, command) else {
+        return Ok(None);
+    };
+    let mut fields = crate::expand::ExpandedFields::new();
+    let target = Node::Word(target);
+    crate::expand::expand_argument(
+        shell,
+        &target,
+        Some(&mut fields),
+        crate::expand::ExpansionMode::TILDE,
+    )?;
+    debug_assert_eq!(fields.fields.len(), 1, "an unsplit expansion is one field");
+    let pathname = fields.fields.remove(0).text;
+    /* The open diagnostic is written by the redirection layer, so a
+     * failure here needs no second one: the substitution answers with no
+     * bytes and the status the shell would have taken from the command. */
+    let Ok(Some(descriptor)) =
+        crate::redirection::open_file_for_reading(shell, pathname.as_bstr(), false)
+    else {
+        shell.evaluation.command_substitution_status = crate::status::ExitStatus::FAILURE;
+        return Ok(Some(BString::from(Vec::new())));
+    };
+    let content = nsh_platform::read_to_end(&descriptor).unwrap_or_default();
+    shell.evaluation.command_substitution_status = crate::status::ExitStatus::SUCCESS;
+    Ok(Some(BString::from(content)))
+}
+
+/// The redirection word of a `< word` body with nothing else in it.
+fn read_only_redirection(shell: &Shell, command: Option<&Node>) -> Option<WordNode> {
+    if shell.options.dialect() != Dialect::Bash {
+        return None;
+    }
+    let Some(Node::Command(command)) = command else {
+        return None;
+    };
+    if !command.arguments.is_empty() || !command.assignments.is_empty() {
+        return None;
+    }
+    let [Redirection::File(redirection)] = command.redirections.as_slice() else {
+        return None;
+    };
+    (redirection.operator == FileRedirectionOperator::Read
+        && redirection.descriptor == LogicalDescriptor::STDIN)
+        .then(|| redirection.target.clone())
+}
+
 /// The `${!…}` forms that name variables rather than read one.
 ///
 /// `${!prefix@}` and `${!prefix*}` list every variable whose name starts
@@ -49,10 +108,17 @@ pub(super) fn trim_options(shell: &Shell) -> PatternOptions {
 pub(super) fn indirect_names(
     shell: &mut Shell,
     name: &BStr,
+    operation: ParameterOperation,
     context: Context,
 ) -> Result<Option<Expansion>, Error> {
+    /* `${!a[@]}` lists subscripts, but `${!a[@]:2}` does not: an operator
+     * turns the whole thing back into an indirection through `${a[@]}`.
+     * Bash draws the line at the presence of an operator, so this does
+     * too. */
+    // [spec:nsh:req:compat.bash.expansion-globbing]
     if let Some((base, subscript)) = super::split_subscript(name)
         && matches!(subscript.as_ref() as &[u8], b"@" | b"*")
+        && operation == ParameterOperation::Value
     {
         let base = base.to_owned();
         let keys = crate::variables::value::variable_value(shell, base.as_bstr())
@@ -65,10 +131,12 @@ pub(super) fn indirect_names(
         return Ok(None);
     }
     let prefix = name[..name.len() - 1].to_vec();
-    let mut names = shell
-        .variables()
+    /* Every name that holds a value, not only those with a scalar to
+     * read: a name declared as an empty array is set, and Bash lists
+     * it. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    let mut names = crate::variables::value::declared_names(shell)
         .into_iter()
-        .map(|(name, _)| name)
         .filter(|name| name.starts_with(&prefix))
         .collect::<Vec<_>>();
     names.sort();
@@ -88,6 +156,139 @@ fn words(
         Value::Star(words)
     };
     value_expansion(shell, name, value, context)
+}
+
+/// Whether the value has bytes a transform can rewrite.
+///
+/// A name that holds an array has none without a subscript: `$A` reads
+/// no element of an associative array, so `${A@Q}` has nothing to quote
+/// and answers with nothing rather than with `''`.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn has_transformable_bytes(value: &Value) -> bool {
+    match value {
+        Value::Unset => false,
+        Value::Variable(value) => value.scalar_ref().is_some(),
+        Value::At(_) | Value::Star(_) => true,
+    }
+}
+
+/// Resolve `${!ref…}` to the name the operators then apply to.
+///
+/// The reference's value is read as a string and has to spell a parameter
+/// -- a name, a name with a subscript, or a special parameter. Bash
+/// refuses anything else rather than inventing a variable, and so does
+/// this: the step is name-to-value, never data-to-syntax.
+// [dec:nsh:safety-trumps-compatibility]
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(super) fn indirect_target(
+    shell: &mut Shell,
+    reference: &BStr,
+    value: Value,
+) -> Result<BString, Error> {
+    let target = match value {
+        /* A name with no value at all is not a reference to anything, and
+         * Bash says so rather than expanding to the empty name. */
+        Value::Unset => {
+            let mut message = BString::from(reference);
+            message.extend_from_slice(b": invalid indirect expansion");
+            return Err(shell.diagnostics().expansion_error_value(&message));
+        }
+        /* A name that holds an array has no scalar to read -- `$A` reads
+         * no element of an associative array -- and there Bash yields
+         * nothing quietly instead of reporting. */
+        Value::Variable(value) => match value.scalar_owned() {
+            Some(text) => text,
+            None => return Ok(BString::default()),
+        },
+        Value::At(words) | Value::Star(words) => super::join_parameters(shell, &words),
+    };
+    if names_a_parameter(&shell.locale, target.as_bstr()) {
+        return Ok(target);
+    }
+    let mut message = BString::from(reference);
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(&target);
+    message.extend_from_slice(b": invalid variable name");
+    Err(shell.diagnostics().expansion_error_value(&message))
+}
+
+/// Whether this text spells a parameter an expansion may read.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn names_a_parameter(locale: &nsh_platform::Locale, text: &BStr) -> bool {
+    let bytes: &[u8] = text.as_ref();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    if bytes.len() == 1 && (crate::syntax::is_special(first) || first == b'_') {
+        return true;
+    }
+    if bytes.iter().all(u8::is_ascii_digit) {
+        return true;
+    }
+    match subscript_reference(bytes) {
+        Some(base) => is_plain_name(locale, base),
+        None => is_plain_name(locale, bytes),
+    }
+}
+
+fn is_plain_name(locale: &nsh_platform::Locale, bytes: &[u8]) -> bool {
+    bytes
+        .first()
+        .is_some_and(|byte| crate::syntax::is_name(locale, *byte))
+        && bytes[1..]
+            .iter()
+            .all(|byte| crate::syntax::is_in_name(locale, *byte))
+}
+
+/// The name in front of a well-formed `name[subscript]`.
+///
+/// The subscript has to be non-empty and to close on the last byte, with
+/// its brackets nested and its quotes balanced -- an unterminated quote
+/// runs past the `]` and leaves no subscript at all, which is how
+/// `a[1"]` stops being a variable name.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn subscript_reference(bytes: &[u8]) -> Option<&[u8]> {
+    let open = bytes.iter().position(|byte| *byte == b'[')?;
+    if open == 0 {
+        return None;
+    }
+    let close = subscript_end(bytes, open + 1)?;
+    (close == bytes.len() - 1 && close > open + 1).then(|| &bytes[..open])
+}
+
+/// Where the `]` that closes a subscript opened before `from` sits.
+fn subscript_end(bytes: &[u8], from: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut at = from;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' => at += 1,
+            quote @ (b'\'' | b'"') => {
+                at = closing_quote(bytes, at + 1, quote)?;
+            }
+            b'[' => depth += 1,
+            b']' if depth == 0 => return Some(at),
+            b']' => depth -= 1,
+            _ => {}
+        }
+        at += 1;
+    }
+    None
+}
+
+fn closing_quote(bytes: &[u8], from: usize, quote: u8) -> Option<usize> {
+    let mut at = from;
+    while at < bytes.len() {
+        if bytes[at] == b'\\' && quote == b'"' {
+            at += 2;
+            continue;
+        }
+        if bytes[at] == quote {
+            return Some(at);
+        }
+        at += 1;
+    }
+    None
 }
 
 /// `${name:offset:length}` over a string, the positional parameters, or
@@ -381,8 +582,16 @@ pub(super) fn transform(
     let operator = expand_units(shell, &operand_units(parameter), context.operand())?.bytes;
     /* A name with no value has nothing to transform, and Bash says so by
      * producing nothing at all -- not `''`, which is what quoting an
-     * empty value would give and what `${empty@Q}` does produce. */
-    if value.is_unset() {
+     * empty value would give and what `${empty@Q}` does produce. The two
+     * transforms that read the declaration rather than the value are the
+     * exceptions: `@a` answers for a name that holds nothing at all, and
+     * `@A` answers for one that is set but has no scalar to read. */
+    let available = match operator.as_slice() {
+        b"a" => true,
+        b"A" => !value.is_unset(),
+        _ => has_transformable_bytes(&value),
+    };
+    if !available {
         return Ok(Expansion::one(Field::from_bytes(
             b"",
             context.protects(),
@@ -488,7 +697,8 @@ fn any_character() -> Pattern {
 
 /// Apply one byte transformation to a value, element by element where
 /// the value is a word list.
-fn map_value(
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(super) fn map_value(
     shell: &mut Shell,
     value: Value,
     context: Context,
@@ -509,6 +719,26 @@ fn map_value(
                 })
                 .collect(),
         });
+    }
+    /* Bash runs the operator over each element and joins afterwards, so
+     * `"${a[*]@Q}"` quotes nine words rather than quoting one joined
+     * string. The POSIX dialect has no `[*]`, and dash joins `$*` before
+     * the operator runs, so the order stays the other way round there. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    if shell.options.dialect() == Dialect::Bash
+        && let Value::At(words) | Value::Star(words) = &value
+    {
+        let mapped = words
+            .iter()
+            .map(|word| transform(&shell.locale, word))
+            .collect::<Vec<_>>();
+        let joined = super::join_parameters(shell, &mapped);
+        return Ok(Expansion::one(Field::from_bytes(
+            &joined,
+            context.protects(),
+            context.splits(),
+            context.quoted,
+        )));
     }
     let text = super::value_bytes(shell, value, context);
     let mapped = transform(&shell.locale, &text);

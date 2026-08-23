@@ -169,3 +169,38 @@ fn posix_arithmetic_rejects_the_bash_operators() {
         assert_ne!(outcome, 0, "{:?} must fail", BStr::new(script));
     }
 }
+
+/// `nocasematch` governs the regular-expression operand as well as the
+/// pattern one, in the literal, the bracket expression, and the anchors.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic/test]
+#[test]
+fn nocasematch_folds_the_regex_operand() {
+    let mut bash = shell(true);
+    assert_eq!(run(&mut bash, b"[[ a =~ A ]]").0, 1);
+    assert_eq!(run(&mut bash, b"shopt -s nocasematch; [[ a =~ A ]]").0, 0);
+    assert_eq!(run(&mut bash, b"[[ A =~ a ]]").0, 0);
+    assert_eq!(run(&mut bash, b"[[ a =~ [A] ]]").0, 0);
+    assert_eq!(run(&mut bash, b"[[ A =~ [a] ]]").0, 0);
+    assert_eq!(run(&mut bash, b"[[ ABC =~ ^a.c$ ]]").0, 0);
+    assert_eq!(run(&mut bash, b"[[ A =~ [[:lower:]] ]]").0, 0);
+    // Turning it off restores the byte comparison.
+    assert_eq!(run(&mut bash, b"shopt -u nocasematch; [[ a =~ A ]]").0, 1);
+}
+
+/// `extglob` decides what `!(` means inside `[[ ]]`: with the option off
+/// it is a negated group, with it on it is an extended-glob word. The
+/// pattern operand of `==` reads extended globs either way.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic/test]
+#[test]
+fn extglob_decides_what_bang_paren_means() {
+    let mut bash = shell(true);
+    // `!(x)` with the option off negates a group, so a non-empty word
+    // inside it is true and the negation is false.
+    assert_eq!(run(&mut bash, b"[[ !(x) ]]").0, 1);
+    assert_eq!(run(&mut bash, b"empty=''; [[ !($empty) ]]").0, 0);
+    // The pattern operand keeps extended globs without the option.
+    assert_eq!(run(&mut bash, b"[[ abc == @(abc|x) ]]").0, 0);
+    assert_eq!(run(&mut bash, b"[[ abc == !(x) ]]").0, 0);
+    // With the option on, `!(x)` is a word, and a word is true.
+    assert_eq!(run(&mut bash, b"shopt -s extglob\n[[ !(x) ]]").0, 0);
+}

@@ -83,7 +83,7 @@ reason = "A declaration built-in does not accept a name built by expansion with 
 [[case]]
 id = "arith-context.test.sh:15"
 disposition = "not-implemented"
-reason = "An empty subscript `a[]=v` is accepted and assigns index 0; Bash rejects it as a bad substitution. Nothing validates that a subscript has an expression in it."
+reason = "An empty subscript `a[]=v` is accepted and assigns index 0, and `${a[]}` reads it; Bash rejects both as a bad substitution. Nothing validates that a subscript has an expression in it, and the rejection also needs Bash's error boundary: Bash reports each line and carries on with status 1."
 
 [[case]]
 id = "array-assign.test.sh:1"
@@ -134,11 +134,6 @@ reason = "`printf -v` refuses a subscripted name: `printf -v 'a[k]' ...` reports
 id = "array-compat.test.sh:1"
 disposition = "defect"
 reason = "`\"$@\"` embedded in a larger word joins its fields with the first byte of `IFS`; every shell joins with a space there, and this reproduces with the dialect off."
-
-[[case]]
-id = "array-compat.test.sh:9"
-disposition = "not-implemented"
-reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
 
 [[case]]
 id = "array-compat.test.sh:10"
@@ -194,11 +189,6 @@ reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscript
 id = "array-sparse.test.sh:20"
 disposition = "not-implemented"
 reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
-
-[[case]]
-id = "array-sparse.test.sh:25"
-disposition = "not-implemented"
-reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
 
 [[case]]
 id = "array-sparse.test.sh:27"
@@ -311,11 +301,6 @@ disposition = "not-implemented"
 reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
 
 [[case]]
-id = "builtin-bash.test.sh:9"
-disposition = "not-implemented"
-reason = "Here-strings (`<<<`) are not implemented at all: `cat <<< text` is a syntax error. This is a plain gap in the Bash redirection grammar."
-
-[[case]]
 id = "builtin-bash.test.sh:12"
 disposition = "not-implemented"
 reason = "`shopt -s lastpipe` is not implemented, so the last stage of a pipeline always runs in a subshell and `seq 2 | mapfile m` leaves the array unset in the parent."
@@ -363,37 +348,27 @@ reason = "`builtin nosuchname` reports status 127 rather than Bash's 1."
 [[case]]
 id = "extglob-files.test.sh:22"
 disposition = "not-implemented"
-reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
-
-[[case]]
-id = "extglob-match.test.sh:21"
-disposition = "not-implemented"
-reason = "With `extglob` on, `!(pattern)` inside `[[ ]]` is still read as negation of a parenthesised expression rather than as an extended-glob pattern."
+reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "glob-bash.test.sh:1"
 disposition = "not-implemented"
-reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "glob-bash.test.sh:2"
 disposition = "not-implemented"
-reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "glob-bash.test.sh:3"
 disposition = "not-implemented"
-reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "glob-bash.test.sh:6"
 disposition = "not-implemented"
-reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
-
-[[case]]
-id = "globignore.test.sh:8"
-disposition = "not-implemented"
-reason = "`GLOBIGNORE` does not apply bracket expressions such as `[[:alnum:]]*`, so no name is filtered."
+reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "nameref.test.sh:6"
@@ -416,11 +391,6 @@ disposition = "not-implemented"
 reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
 
 [[case]]
-id = "nocasematch-match.test.sh:1"
-disposition = "not-implemented"
-reason = "`shopt -s nocasematch` applies to `==` pattern operands but not to the `=~` regular-expression operand."
-
-[[case]]
 id = "print-source-code.test.sh:0"
 disposition = "not-implemented"
 reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
@@ -441,54 +411,14 @@ disposition = "not-implemented"
 reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
 
 [[case]]
-id = "process-sub.test.sh:4"
-disposition = "not-implemented"
-reason = "The `$(<file)` command-substitution shorthand is not implemented; it runs a command with no words and yields nothing instead of the file's contents."
-
-[[case]]
-id = "redirect-multi.test.sh:0"
-disposition = "not-implemented"
-reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
-
-[[case]]
 id = "redirect-multi.test.sh:3"
 disposition = "not-implemented"
-reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
-
-[[case]]
-id = "redirect-multi.test.sh:5"
-disposition = "not-implemented"
-reason = "A redirection to an empty pathname reports status 2 where Bash reports 1. A status mapping, not the fatal-error boundary: both shells continue."
-
-[[case]]
-id = "redirect-multi.test.sh:6"
-disposition = "not-implemented"
-reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
-
-[[case]]
-id = "redirect-multi.test.sh:7"
-disposition = "not-implemented"
-reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
-
-[[case]]
-id = "redirect-multi.test.sh:8"
-disposition = "not-implemented"
-reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "redirect-multi.test.sh:9"
 disposition = "not-implemented"
-reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
-
-[[case]]
-id = "redirect-multi.test.sh:11"
-disposition = "not-implemented"
-reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
-
-[[case]]
-id = "redirect-multi.test.sh:12"
-disposition = "not-implemented"
-reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "sh-options-bash.test.sh:4"
@@ -501,14 +431,9 @@ disposition = "not-implemented"
 reason = "`SHELLOPTS` is not read back from the environment at startup, so exporting it does not carry `set -x` into a child shell. The second case also shows the exported value being rejected by a real Bash, so the published spelling is wrong as well."
 
 [[case]]
-id = "toysh.test.sh:0"
-disposition = "not-implemented"
-reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
-
-[[case]]
 id = "toysh.test.sh:6"
 disposition = "not-implemented"
-reason = "Here-strings (`<<<`) are not implemented at all: `cat <<< text` is a syntax error. This is a plain gap in the Bash redirection grammar."
+reason = "`{name}<word` is not implemented: Bash allocates a descriptor above 9 and stores its number in `name`, and this shell has no redirection that names a variable. Here-strings themselves work."
 
 [[case]]
 id = "type-compat.test.sh:1"
@@ -531,27 +456,12 @@ disposition = "sanctioned-divergence"
 reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes the value anyway, yielding a byte sequence that is not UTF-8 for any character. Refusing to manufacture it is deliberate (`crates/nsh/src/escape.rs::unicode_bytes`); the refusal is silent, which is a wart the entry records rather than hides."
 
 [[case]]
-id = "var-op-bash.test.sh:11"
-disposition = "not-implemented"
-reason = "`${!prefix@}` lists only names with a scalar value, so a name declared as an empty array is missing from the list."
-
-[[case]]
-id = "var-op-bash.test.sh:16"
-disposition = "not-implemented"
-reason = "`${A@Q}` on an associative array yields `''`; Bash yields nothing, because `$A` alone reads no element of one."
-
-[[case]]
 id = "var-op-bash.test.sh:24"
 disposition = "not-implemented"
 reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
 
 [[case]]
 id = "var-op-bash.test.sh:25"
-disposition = "not-implemented"
-reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
-
-[[case]]
-id = "var-op-bash.test.sh:26"
 disposition = "not-implemented"
 reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
 
@@ -568,50 +478,25 @@ reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscript
 [[case]]
 id = "var-ref.test.sh:2"
 disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
-
-[[case]]
-id = "var-ref.test.sh:4"
-disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
 
 [[case]]
 id = "var-ref.test.sh:12"
-disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
-
-[[case]]
-id = "var-ref.test.sh:19"
-disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+disposition = "out-of-contract"
+reason = "`${x@P}` yields the value it was given rather than decoding the prompt escapes in it, so `${!p@P}` on `\\$ ` keeps the backslash. Prompt rendering is retired from the profile by [dec:nsh:bash-compatibility-is-scripts], and the refusal is written at the point of divergence (`crates/nsh/src/expand/typed/bash.rs::transform`). Everything else the case checks -- indirection through a subscript, then a suffix operator, and the prefix forms it rejects -- passes."
 
 [[case]]
 id = "var-ref.test.sh:21"
 disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
 
 [[case]]
 id = "var-ref.test.sh:22"
 disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
 
 [[case]]
 id = "var-ref.test.sh:23"
 disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
-
-[[case]]
-id = "var-ref.test.sh:28"
-disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
-
-[[case]]
-id = "var-ref.test.sh:29"
-disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
-
-[[case]]
-id = "var-ref.test.sh:30"
-disposition = "not-implemented"
-reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
 

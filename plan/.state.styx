@@ -1287,6 +1287,8 @@ derived_priorities (
 )
 
 assertions (
+    {id bash-expansion-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:51.231881628Z}
+    {id bash-mode-error-boundary, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:50.377440971Z}
     {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}
     {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}
     {id crate-rename, kind @complete, author "brendan@necessary.nu", at 2026-08-08T02:12:48.664729127Z}
@@ -1336,7 +1338,6 @@ assertions (
     {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
     {id unsafe-is-a-crate, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:13:01.501479926Z}
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
-    {id bash-mode-error-boundary, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:50.377440971Z}
 )
 
 impl_evidence (

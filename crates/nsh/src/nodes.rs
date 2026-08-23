@@ -187,6 +187,7 @@ pub enum Redirection {
     File(FileRedirection),
     Descriptor(DescriptorRedirection),
     HereDocument(HereDocument),
+    HereString(HereString),
 }
 
 /// A redirection whose operand names a file.
@@ -227,6 +228,18 @@ pub struct HereDocument {
     pub descriptor: LogicalDescriptor,
     pub expand: bool,
     pub body: WordNode,
+}
+
+/// A Bash here-string redirection.
+///
+/// `<<< word` is a here-document whose body is one ordinary word rather
+/// than lines of input: the word is expanded once, a newline is appended,
+/// and the result is read from the descriptor.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+#[derive(Clone)]
+pub struct HereString {
+    pub descriptor: LogicalDescriptor,
+    pub word: WordNode,
 }
 
 /// A negated command.
