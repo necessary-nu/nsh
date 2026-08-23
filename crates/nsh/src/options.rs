@@ -264,6 +264,29 @@ pub(crate) fn options(
 // [spec:posix:sem:builtin.set.opt-o-pipefail]
 // [spec:posix:def:builtin.set.opt-o-verbose]
 // [spec:posix:req:builtin.set.opt-o-vi]
+
+/// How one option is named and valued in a listing, which depends on the
+/// dialect doing the listing.
+///
+/// The dialect switch is one boolean with two names. A script running in
+/// Bash mode asks `set -o` and must see Bash's vocabulary: `posix`, and
+/// off, because Bash has no option called `bash` and a listing that
+/// invented one would be answering a question nobody asked. Outside the
+/// dialect the same boolean is `nsh`'s own `bash` option, and off.
+// [spec:nsh:req:compat.bash.posix-option]
+pub(crate) fn presented_option(
+    spec: model::OptionSpec,
+    dialect: Dialect,
+    options: &ShellOptions,
+) -> (&'static [u8], bool) {
+    let on = options.enabled(spec.option);
+    if spec.option == ShellOption::Bash && dialect == Dialect::Bash {
+        (b"posix", !on)
+    } else {
+        (spec.name, on)
+    }
+}
+
 // [spec:posix:def:builtin.set.opt-o-xtrace]
 fn minus_o(
     shell: &mut crate::context::Shell,
@@ -275,33 +298,45 @@ fn minus_o(
             if enabled {
                 let heading = b"Current option settings\n";
                 shell.write_output(OutputDestination::Stdout, heading)?;
+                let dialect = shell.options.dialect();
                 for spec in OPTION_SPECS {
-                    let mut line = spec.name.to_vec();
+                    let (name, on) = presented_option(spec, dialect, &shell.options);
+                    let mut line = name.to_vec();
                     if line.len() < 16 {
                         line.resize(16, b' ');
                     }
-                    line.extend_from_slice(if shell.options.enabled(spec.option) {
-                        b"on\n"
-                    } else {
-                        b"off\n"
-                    });
+                    line.extend_from_slice(if on { b"on\n" } else { b"off\n" });
                     shell.write_output(OutputDestination::Stdout, &line)?;
                 }
             } else {
+                let dialect = shell.options.dialect();
                 for spec in OPTION_SPECS {
+                    let (name, on) = presented_option(spec, dialect, &shell.options);
                     let mut line = b"set ".to_vec();
-                    line.extend_from_slice(if shell.options.enabled(spec.option) {
-                        b"-o "
-                    } else {
-                        b"+o "
-                    });
-                    line.extend_from_slice(spec.name);
+                    line.extend_from_slice(if on { b"-o " } else { b"+o " });
+                    line.extend_from_slice(name);
                     line.push(b'\n');
                     shell.write_output(OutputDestination::Stdout, &line)?;
                 }
             }
         }
         Some(name) => {
+            // [spec:nsh:req:compat.bash.posix-option]
+            if name == b"posix".as_slice() {
+                /* `posix` is the `bash` dialect option read the other way
+                 * round, and it is deliberately not Bash's own reading.
+                 * Bash's POSIX mode corrects about fifty behaviours where
+                 * its default contradicts the standard while keeping its
+                 * extensions, because POSIX permits extensions. This shell
+                 * starts from the standard instead: the dialect *is* the
+                 * departure, so asking for POSIX means ending it. A script
+                 * that reaches for `set -o posix` after finding
+                 * `$BASH_VERSION` gets a shell that conforms, not one that
+                 * conforms except where it felt like not to.
+                 * [dec:nsh:we-own-the-defects] */
+                set_typed_option(shell, ShellOption::Bash, !enabled);
+                return Ok(Some(ShellOption::Bash));
+            }
             for spec in OPTION_SPECS {
                 if name == spec.name {
                     set_typed_option(shell, spec.option, enabled);

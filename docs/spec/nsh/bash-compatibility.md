@@ -22,6 +22,19 @@ implementation source is not an implementation input.
 > independently documented `nsh` extensions remain the contract when it is
 > disabled.
 
+> [spec:nsh:req:compat.bash.posix-option]
+> The `posix` shell option MUST be the `bash` dialect option read inversely:
+> `set -o posix` MUST disable Bash Compatibility Mode and `set +o posix` MUST
+> enable it, subject to the same parse boundary as `[spec:nsh:req:compat.bash.parse-boundary]`.
+> It MUST NOT reproduce GNU Bash's own POSIX mode, which corrects a fixed list
+> of behaviours where Bash's default contradicts the standard while retaining
+> Bash's extensions. This shell's default is the standard, so the dialect is
+> the departure and a request for POSIX ends it. A script that sets `posix`
+> after detecting `$BASH_VERSION` therefore gets a conforming shell rather
+> than a Bash that conforms selectively.
+>
+> Source: `[dec:nsh:we-own-the-defects]`
+
 > [spec:nsh:req:compat.bash.reference-profile]
 > The repository MUST carry a machine-readable Bash Reference Profile that
 > identifies the GNU Bash 5.3 release and patch level, source archive digest,

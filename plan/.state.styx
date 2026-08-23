@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-22T15:28:32.155403151Z
+last_sync_at 2026-08-23T17:54:16.248502645Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -601,7 +601,6 @@ rule_versions (
     {id compat.bash.default-isolation, version 0}
     {id compat.bash.expansion-globbing, version 0}
     {id compat.bash.functions-scoping, version 0}
-    {id compat.bash.interactive, version 0}
     {id compat.bash.mode, version 0}
     {id compat.bash.options-builtins-dispatch, version 0}
     {id compat.bash.parse-boundary, version 0}
@@ -1262,7 +1261,6 @@ derived_priorities (
     {id implement-bash-conditionals-arithmetic, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id implement-bash-expansion-globbing, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id implement-bash-functions-scoping, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
-    {id implement-bash-interactive-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id implement-bash-mode-selection, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id implement-bash-process-substitution, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id implement-bash-traps-introspection, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
@@ -1399,6 +1397,8 @@ impl_evidence (
         compat.bash.safe-core
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.safe-core}
+    ), rule_versions_seen (
+        {id compat.bash.safe-core, version 0}
     )}
     {id enforce-zero-cism-gates, covered_rules (
         idiom.regression-gates
@@ -5443,6 +5443,7 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.variable-expansion-state, version 0}
     )}
+    {id verify-bash-compatibility-profile}
     {id verify-idiomatic-core-conformance, covered_rules (
         idiom.conformance-closure
     ), covered_claims (
