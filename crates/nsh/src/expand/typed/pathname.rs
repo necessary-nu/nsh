@@ -203,7 +203,12 @@ pub(super) fn expand(
 fn no_match_error(shell: &mut Shell, pattern: &Pattern) -> Error {
     let mut message = b"no match: ".to_vec();
     message.extend_from_slice(pattern.as_bytes());
-    shell.diagnostics().expansion_error_value(&message)
+    /* `failglob` is a Bash option, so its refusal takes the Bash boundary:
+     * the command the pattern belongs to does not run, and the shell moves
+     * to the next record rather than ending. Reaching for the expansion
+     * error here instead would make one unmatched glob fatal, which is the
+     * behaviour `[spec:nsh:req:compat.bash.error-boundary]` exists to end. */
+    shell.diagnostics().dialect_error(&message)
 }
 
 // [spec:posix:req:pattern.leading-period]

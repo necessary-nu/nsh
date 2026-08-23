@@ -346,31 +346,6 @@ disposition = "not-implemented"
 reason = "`builtin nosuchname` reports status 127 rather than Bash's 1."
 
 [[case]]
-id = "extglob-files.test.sh:22"
-disposition = "not-implemented"
-reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
-
-[[case]]
-id = "glob-bash.test.sh:1"
-disposition = "not-implemented"
-reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
-
-[[case]]
-id = "glob-bash.test.sh:2"
-disposition = "not-implemented"
-reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
-
-[[case]]
-id = "glob-bash.test.sh:3"
-disposition = "not-implemented"
-reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
-
-[[case]]
-id = "glob-bash.test.sh:6"
-disposition = "not-implemented"
-reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
-
-[[case]]
 id = "nameref.test.sh:6"
 disposition = "not-implemented"
 reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
@@ -409,16 +384,6 @@ reason = "A function definition does not retain the text or a printable form of 
 id = "print-source-code.test.sh:3"
 disposition = "not-implemented"
 reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "redirect-multi.test.sh:3"
-disposition = "not-implemented"
-reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
-
-[[case]]
-id = "redirect-multi.test.sh:9"
-disposition = "not-implemented"
-reason = "`shopt -s failglob` detects the failure and reports `no match: PATTERN`, but the diagnostic ends a non-interactive shell where Bash abandons the rest of the current command list and carries on with status 1. Detection and diagnostic are here (`crates/nsh/src/expand/typed/pathname.rs::no_match_error`); the recovery is the Bash-mode error boundary, which is not."
 
 [[case]]
 id = "sh-options-bash.test.sh:4"
