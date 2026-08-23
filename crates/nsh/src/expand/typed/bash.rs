@@ -426,6 +426,17 @@ pub(super) fn transform(
         b"u" => map_value(shell, value, context, |locale, text| {
             recase(locale, text, &any_character(), true, false)
         }),
+        /* `@P` asks for the value rendered the way a prompt would be.
+         * Prompt rendering is not part of this shell's Bash contract --
+         * the dialect covers script and syntax compatibility, not the
+         * interactive surface -- so there are no escapes to decode and
+         * nothing re-reads the bytes. The transform is recognised, and
+         * yields the value it was given. A value that happens to contain
+         * `\w` or `$(...)` keeps those bytes rather than becoming a
+         * directory name or a command, which is also the safer reading:
+         * `@P` is otherwise a data-to-syntax path over a variable's
+         * contents. */
+        b"P" => map_value(shell, value, context, |_, text| BString::from(text)),
         _ => Err(shell.diagnostics().shell_error(b"Bad substitution")),
     }
 }

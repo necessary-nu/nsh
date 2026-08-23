@@ -1175,15 +1175,14 @@ fn descriptors_cross_the_boundary_owned() {
 
     let facts =
         std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix_facts.rs")).unwrap();
-    for required in [
-        "pub fn terminal_name(fd: &impl AsDescriptor)",
-        "pub fn wait_for_input(fd: &impl AsDescriptor",
-    ] {
-        assert!(
-            facts.contains(required),
-            "missing borrowed signature: {required}"
-        );
-    }
+    /* The terminal entry point that stood beside this one arrived with the
+     * interactive surface and left with it; `wait_for_input` stayed because
+     * `read -t` is a script-visible builtin. */
+    let required = "pub fn wait_for_input(fd: &impl AsDescriptor";
+    assert!(
+        facts.contains(required),
+        "missing borrowed signature: {required}"
+    );
 
     assert!(
         violations.is_empty(),
@@ -1339,21 +1338,37 @@ fn no_gnu_bash_code_was_copied() {
         }
     }
 
-    let tables =
-        std::fs::read_to_string(workspace.join("crates/nsh/src/builtins/bind/tables.rs")).unwrap();
-    for required in [
-        "# Provenance",
-        "Observed, not transcribed from source",
-        "is `bind -l`",
-        "is `bind -v`",
-        "is `bind -p`",
-        "GNU bash 5.2.37(1)-release",
-        "No GNU source file is an input",
+    /* Readline is a separate GPL-3 project that Bash links, not Bash, and
+     * this shell edits with `nshedit`. Reproducing Readline's function,
+     * variable and key-map inventory therefore described a library that is
+     * not here and advertised commands the editor cannot run. The tables
+     * were removed rather than relicensed; this keeps them from returning
+     * under any name. */
+    assert!(
+        !workspace
+            .join("crates/nsh/src/builtins/bind/tables.rs")
+            .exists(),
+        "the Readline reference tables came back"
+    );
+    for name in [
+        "accept-line",
+        "blink-matching-paren",
+        "vi-subst",
+        "menu-complete",
     ] {
-        assert!(
-            tables.contains(required),
-            "the Readline reference tables lost their provenance record: {required:?}"
-        );
+        for path in ["crates/nsh/src", "crates/nsh-cli/src"] {
+            let mut found = Vec::new();
+            rust_sources_below(&workspace.join(path), &mut found);
+            for source_path in found {
+                let text = std::fs::read_to_string(&source_path).expect("Rust source is UTF-8");
+                if text.contains(name) {
+                    violations.push(format!(
+                        "{} names the Readline command {name}",
+                        relative_to_workspace(&source_path, &workspace)
+                    ));
+                }
+            }
+        }
     }
 
     assert!(
