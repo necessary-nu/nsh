@@ -193,9 +193,9 @@ dependencies = [
 
 [[package]]
 name = "nshedit"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af6498295cfd9e72bc897f9823b2728b5cabc9db9114baf37e1646562b51aee6"
+checksum = "f2fe5a36be8953cc84d8589dace9adb6ba7b01b900a0608cf2b04d13cbc3b621"
 dependencies = [
  "bstr",
  "nshedit-plat",
@@ -206,9 +206,9 @@ dependencies = [
 
 [[package]]
 name = "nshedit-plat"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7aa9583e3967df0f83302d462299c8bd09abf46ffa46da5fb8d16ee28f3d3fdc"
+checksum = "4457e41e8170e78ab66c19069067e55b7b9a43ba7652df81957455bbdb48802b"
 dependencies = [
  "rustix",
  "windows-sys",
@@ -216,9 +216,9 @@ dependencies = [
 
 [[package]]
 name = "nshterm"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47ca0204dc2f009e20a96121bef12c28796da20a09a3830ee95d37e158d24789"
+checksum = "755c2816492af43bf4ea8616687af0b7b6ba1722e8cd2fd499e7bf28f60f9b07"
 dependencies = [
  "nshedit-plat",
 ]

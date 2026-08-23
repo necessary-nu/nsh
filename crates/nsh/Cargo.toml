@@ -13,8 +13,8 @@ path = "src/lib.rs"
 [dependencies]
 bstr = "1"
 nsh-platform = { path = "../nsh-platform" }
-nshedit = "0.1.0"
-nshterm = "0.1.0"
+nshedit = "0.1.1"
+nshterm = "0.1.1"
 
 [[example]]
 name = "embed"

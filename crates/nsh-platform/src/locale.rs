@@ -12,13 +12,16 @@ use std::sync::{Arc, Mutex};
 
 use crate::Signal;
 
-#[cfg(not(target_vendor = "apple"))]
+#[cfg(not(any(target_vendor = "apple", target_env = "musl")))]
 type MbState = libc::mbstate_t;
 
-// Darwin's libc keeps `mbstate_t` opaque and its Rust libc bindings do not
-// export the typedef. The system ABI defines it as a 128-byte union aligned
-// for a 64-bit integer.
-#[cfg(target_vendor = "apple")]
+// Two libcs keep `mbstate_t` opaque, so the Rust bindings do not export the
+// typedef and the state has to be carried as storage instead. Darwin's ABI
+// defines a 128-byte union aligned for a 64-bit integer; musl's is a pair of
+// `unsigned`, which is far smaller. One buffer covers both: the C side writes
+// at most its own `sizeof`, so over-allocating is safe where under-allocating
+// would not be, and the alignment here is at least either ABI's.
+#[cfg(any(target_vendor = "apple", target_env = "musl"))]
 #[repr(C, align(8))]
 pub(crate) struct MbState([u8; 128]);
 
@@ -67,6 +70,24 @@ pub enum LocaleCategory {
     Numeric,
     Time,
 }
+
+/// Every category this shell manages, as one mask.
+///
+/// glibc and Darwin export `LC_ALL_MASK`; musl's Rust bindings do not. It is
+/// derived here from the per-category masks rather than transcribed, so the
+/// value cannot disagree with the categories actually used below -- and musl
+/// defines no locale category outside this set, so the derived mask is its
+/// `LC_ALL_MASK`.
+#[cfg(target_env = "musl")]
+const LC_ALL_MASK: core::ffi::c_int = libc::LC_COLLATE_MASK
+    | libc::LC_CTYPE_MASK
+    | libc::LC_MESSAGES_MASK
+    | libc::LC_MONETARY_MASK
+    | libc::LC_NUMERIC_MASK
+    | libc::LC_TIME_MASK;
+
+#[cfg(not(target_env = "musl"))]
+const LC_ALL_MASK: core::ffi::c_int = libc::LC_ALL_MASK;
 
 impl LocaleCategory {
     fn mask(self) -> core::ffi::c_int {
@@ -152,7 +173,7 @@ impl Locale {
         // SAFETY: the name is live and terminated, the mask is supplied by
         // libc, and a null base requests a new independently owned object.
         let mut raw =
-            unsafe { libc::newlocale(libc::LC_ALL_MASK, base.as_ptr(), std::ptr::null_mut()) };
+            unsafe { libc::newlocale(LC_ALL_MASK, base.as_ptr(), std::ptr::null_mut()) };
         if raw.is_null() {
             return Err(std::io::Error::last_os_error());
         }
