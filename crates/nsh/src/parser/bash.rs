@@ -107,12 +107,15 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
     })))
 }
 
-/// Bash enables extended globs inside `[[ ]]` regardless of `shopt`, so
-/// the lexer has to keep `@(`-style groups in one word here even when
-/// `extglob` is off. The flag is saved and restored rather than cleared,
-/// because a conditional can nest inside a command substitution.
+/// Bash enables extended globs inside `[[ ]]` regardless of `shopt`, but
+/// only for the pattern operand of `==` and `!=`. Everywhere else in the
+/// conditional the option decides, which is what leaves `[[ !(word) ]]`
+/// a negated group until `extglob` is on. The flag is saved and restored
+/// rather than cleared, because a conditional can nest inside a command
+/// substitution that appears in such a pattern.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
 pub(super) fn conditional(shell: &mut Shell, line: i32) -> Result<Node, Error> {
-    let enclosing = mem::replace(&mut shell.input.parsing_conditional, true);
+    let enclosing = mem::replace(&mut shell.input.parsing_conditional, false);
     let parsed = conditional_expression(shell, line);
     shell.input.parsing_conditional = enclosing;
     parsed
@@ -605,7 +608,16 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
     } else {
         TokenContext::NONE
     };
-    let right_token = read_token(shell, context)?;
+    /* The operand of a pattern-matching operator is the one place a
+     * conditional reads extended-glob syntax without the option. */
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    let enclosing = mem::replace(
+        &mut shell.input.parsing_conditional,
+        matches_a_pattern(operator.as_bstr()),
+    );
+    let right_token = read_token(shell, context);
+    shell.input.parsing_conditional = enclosing;
+    let right_token = right_token?;
     if right_token.kind != TokenKind::Word
         || closes_conditional(shell, right_token.kind, right_token.quoted)
     {
@@ -616,6 +628,13 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
         operator,
         right: take_word(shell, right_token.quoted).arg,
     })
+}
+
+/// Whether this operator takes a pattern on its right, which is where a
+/// conditional reads extended globs without the option.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+fn matches_a_pattern(operator: &BStr) -> bool {
+    matches!(operator.as_ref() as &[u8], b"=" | b"==" | b"!=")
 }
 
 fn closes_conditional(shell: &Shell, kind: TokenKind, quoted: bool) -> bool {
@@ -829,17 +848,42 @@ pub(super) fn parameter_indirection(
     shell: &mut Shell,
     lexer: &mut WordLexer<'_>,
     braced: bool,
-) -> Result<bool, Error> {
+) -> Result<Indirection, Error> {
     if !braced || !active(shell) || !lexer.input.is(b'!') {
-        return Ok(false);
+        return Ok(Indirection::Absent);
     }
     let next = read_unit_skipping_line_continuations(shell)?;
     if next.begins_name(&shell.locale) || next.is_digit() || next.is(b'@') || next.is(b'*') {
         lexer.input = next;
-        return Ok(true);
+        return Ok(Indirection::Present);
+    }
+    /* `${!}` is the special parameter and `${!-word}` applies an
+     * operator to it, but `${!#word}` is neither: after `!` a `#` can
+     * only be the whole target, so anything following it makes the
+     * substitution one Bash refuses rather than a length operator. */
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    if next.is(b'#') {
+        let following = read_unit_skipping_line_continuations(shell)?;
+        unread_input_unit(shell);
+        if !following.is(b'}') {
+            lexer.input = next;
+            return Ok(Indirection::Invalid);
+        }
     }
     unread_input_unit(shell);
-    Ok(false)
+    Ok(Indirection::Absent)
+}
+
+/// What `${!` turned out to introduce.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Indirection {
+    /// The `!` is the special parameter, not an indirection marker.
+    Absent,
+    /// An indirection whose target the name lexer reads next.
+    Present,
+    /// An indirection whose target cannot be a parameter at all.
+    Invalid,
 }
 
 /// `${!prefix*}` and `${!prefix@}` name every variable whose name starts

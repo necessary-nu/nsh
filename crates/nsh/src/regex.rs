@@ -42,6 +42,10 @@ const MAX_REPEAT: u32 = 1000;
 pub(crate) struct Regex {
     root: Expr,
     group_count: usize,
+    /// `shopt -s nocasematch`, which Bash applies to `=~` exactly as it
+    /// applies it to `==`.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    ignore_case: bool,
 }
 
 /// Byte offsets of the whole match and each capturing group.
@@ -87,7 +91,11 @@ enum Member {
 impl Regex {
     /// Compile one operand. `quoted[i]` marks a byte that shell quoting
     /// already made literal, so it never carries regular-expression syntax.
-    pub(crate) fn compile(bytes: &[u8], quoted: &[bool]) -> Result<Self, BString> {
+    pub(crate) fn compile(
+        bytes: &[u8],
+        quoted: &[bool],
+        ignore_case: bool,
+    ) -> Result<Self, BString> {
         let mut parser = Parser {
             bytes,
             quoted,
@@ -101,6 +109,7 @@ impl Regex {
         Ok(Self {
             root,
             group_count: parser.groups,
+            ignore_case,
         })
     }
 
@@ -136,6 +145,7 @@ impl Regex {
             groups: vec![None; self.group_count + 1],
             steps,
             depth: 0,
+            ignore_case: self.ignore_case,
         };
         let mut longest: Option<Vec<Option<(usize, usize)>>> = None;
         let mut best_end = 0;
@@ -421,6 +431,17 @@ fn utf8_width(bytes: &[u8], at: usize) -> usize {
     }
 }
 
+/// Lowercase one character for a case-folded comparison.
+fn fold_case(bytes: &[u8]) -> Vec<u8> {
+    if bytes.len() == 1 {
+        return vec![bytes[0].to_ascii_lowercase()];
+    }
+    match core::str::from_utf8(bytes) {
+        Ok(text) => text.to_lowercase().into_bytes(),
+        Err(_) => bytes.to_vec(),
+    }
+}
+
 fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usize {
     if at >= bytes.len() {
         return at;
@@ -440,6 +461,7 @@ struct Matcher<'a> {
     groups: Vec<Option<(usize, usize)>>,
     steps: &'a mut u64,
     depth: u32,
+    ignore_case: bool,
 }
 
 type Continue<'a> = dyn FnMut(&mut Matcher<'_>, usize) -> bool + 'a;
@@ -465,7 +487,7 @@ impl Matcher<'_> {
         match expr {
             Expr::Empty => next(self, pos),
             Expr::Literal(bytes) => match self.subject.get(pos..pos + bytes.len()) {
-                Some(found) if found == bytes.as_slice() => next(self, pos + bytes.len()),
+                Some(found) if self.same_text(found, bytes) => next(self, pos + bytes.len()),
                 _ => false,
             },
             Expr::AnyCharacter | Expr::Bracket(_) => match self.single(expr, pos) {
@@ -594,9 +616,11 @@ impl Matcher<'_> {
         let end = character_end(self.locale, self.subject, pos);
         match expr {
             Expr::AnyCharacter => Some(end),
-            Expr::Literal(bytes) => (self.subject.get(pos..pos + bytes.len())
-                == Some(bytes.as_slice()))
-            .then_some(pos + bytes.len()),
+            Expr::Literal(bytes) => self
+                .subject
+                .get(pos..pos + bytes.len())
+                .is_some_and(|found| self.same_text(found, bytes))
+                .then_some(pos + bytes.len()),
             Expr::Bracket(bracket) => self.bracket_matches(bracket, pos, end).then_some(end),
             _ => None,
         }
@@ -607,14 +631,22 @@ impl Matcher<'_> {
         let mut found = false;
         for member in &bracket.members {
             found |= match member {
-                Member::Character(bytes) => bytes.as_slice() == character,
+                Member::Character(bytes) => self.same_text(bytes, character),
                 Member::Range(low, high) => {
-                    character.len() == 1 && (*low..=*high).contains(&character[0])
+                    character.len() == 1
+                        && self
+                            .folded_forms(character)
+                            .iter()
+                            .any(|form| (*low..=*high).contains(&form[0]))
                 }
                 Member::Class(name) => {
                     self.locale
                         .wide_class_matches(name, &self.subject[pos..], end - pos)
                         == Some(true)
+                        || (self.ignore_case
+                            && self.folded_forms(character).iter().any(|form| {
+                                self.locale.wide_class_matches(name, form, form.len()) == Some(true)
+                            }))
                 }
                 Member::Collating(body) => self.collating_matches(body, character),
             };
@@ -623,6 +655,29 @@ impl Matcher<'_> {
             }
         }
         found != bracket.negated
+    }
+
+    /// Compare two characters, folding case when `nocasematch` is on.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn same_text(&self, left: &[u8], right: &[u8]) -> bool {
+        left == right || (self.ignore_case && fold_case(left) == fold_case(right))
+    }
+
+    /// The forms one character takes when case is folded: itself, and both
+    /// ASCII cases when `nocasematch` is on.
+    fn folded_forms(&self, character: &[u8]) -> Vec<Vec<u8>> {
+        let mut forms = vec![character.to_vec()];
+        if self.ignore_case {
+            for folded in [
+                character.to_ascii_lowercase(),
+                character.to_ascii_uppercase(),
+            ] {
+                if !forms.contains(&folded) {
+                    forms.push(folded);
+                }
+            }
+        }
+        forms
     }
 
     fn collating_matches(&self, body: &BString, character: &[u8]) -> bool {
@@ -640,7 +695,7 @@ mod tests {
     use super::*;
 
     fn compile(pattern: &[u8]) -> Regex {
-        Regex::compile(pattern, &vec![false; pattern.len()]).expect("pattern compiles")
+        Regex::compile(pattern, &vec![false; pattern.len()], false).expect("pattern compiles")
     }
 
     fn find(pattern: &[u8], subject: &[u8]) -> Option<Vec<Option<(usize, usize)>>> {
@@ -679,7 +734,7 @@ mod tests {
 
     #[test]
     fn quoted_bytes_lose_their_syntax() {
-        let regex = Regex::compile(b"a|b", &[false, true, false]).expect("pattern compiles");
+        let regex = Regex::compile(b"a|b", &[false, true, false], false).expect("pattern compiles");
         let locale = nsh_platform::Locale::c().expect("the C locale exists");
         assert!(regex.search(&locale, b"a|b").is_some());
         assert!(regex.search(&locale, b"a").is_none());
@@ -689,7 +744,7 @@ mod tests {
     fn malformed_expressions_are_rejected() {
         for pattern in [b"*".as_slice(), b"{", b")a(", b"[abc", b"a{2,1}"] {
             let quoted = vec![false; pattern.len()];
-            assert!(Regex::compile(pattern, &quoted).is_err());
+            assert!(Regex::compile(pattern, &quoted, false).is_err());
         }
     }
 
@@ -705,7 +760,7 @@ mod tests {
     fn a_bracket_expression_ignores_shell_quoting() {
         let pattern = b"[a-z]";
         let quoted = vec![false, true, true, true, false];
-        let regex = Regex::compile(pattern, &quoted).expect("pattern compiles");
+        let regex = Regex::compile(pattern, &quoted, false).expect("pattern compiles");
         let locale = nsh_platform::Locale::c().expect("the C locale exists");
         assert!(regex.search(&locale, b"b").is_some());
         assert!(regex.search(&locale, b"-").is_none());

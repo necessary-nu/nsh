@@ -1111,22 +1111,7 @@ fn expand_redirections<'a>(
         let mut fnl = ExpandedFields::new();
         match redirection {
             Redirection::File(redirection) => {
-                let target = Node::Word(redirection.target.clone());
-                crate::expand::expand_argument(
-                    shell,
-                    &target,
-                    Some(&mut fnl),
-                    ExpansionMode::TILDE | ExpansionMode::REDIRECTION,
-                )?;
-                /* `fn.list->text` with no null check: no EXP_FULL means
-                 * `expandarg` took its single-field arm. */
-                debug_assert_eq!(fnl.fields.len(), 1, "an unsplit expansion is one field");
-                let target = fnl.fields.remove(0).text;
-                expanded.push(ExpandedRedirection::File {
-                    operator: redirection.operator,
-                    descriptor: redirection.descriptor,
-                    target,
-                });
+                expanded.push(crate::redirection::expand_file_target(shell, redirection)?);
             }
             Redirection::Descriptor(redirection) => {
                 let source = match &redirection.target {
@@ -1151,6 +1136,21 @@ fn expand_redirections<'a>(
             }
             Redirection::HereDocument(document) => {
                 expanded.push(ExpandedRedirection::HereDocument(document));
+            }
+            /* `<<< word` expands once, without splitting or pathname
+             * expansion, and the descriptor reads the result plus one
+             * newline. */
+            // [spec:nsh:req:compat.bash.expansion-globbing]
+            Redirection::HereString(here) => {
+                let word = Node::Word(here.word.clone());
+                crate::expand::expand_argument(shell, &word, Some(&mut fnl), ExpansionMode::TILDE)?;
+                debug_assert_eq!(fnl.fields.len(), 1, "an unsplit expansion is one field");
+                let mut content = fnl.fields.remove(0).text;
+                content.push(b'\n');
+                expanded.push(ExpandedRedirection::HereString {
+                    descriptor: here.descriptor,
+                    content,
+                });
             }
         }
     }

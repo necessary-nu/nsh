@@ -283,3 +283,185 @@ fn glob_options_are_absent_from_the_default_mode() {
         );
     }
 }
+
+/// A here-string feeds one expanded word, plus a newline, to the
+/// descriptor. The operator exists only in Bash mode.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn here_strings_feed_one_expanded_word() {
+    let mut bash = shell(true);
+    assert_eq!(run(&mut bash, b"cat <<< hello").1, b"hello\n".to_vec());
+    assert_eq!(run(&mut bash, b"x='a b'; cat <<< $x").1, b"a b\n".to_vec());
+    assert_eq!(
+        run(&mut bash, b"cat <<< \"$(echo sub)\"").1,
+        b"sub\n".to_vec()
+    );
+    // No splitting and no pathname expansion: one field, quotes removed.
+    assert_eq!(run(&mut bash, b"cat <<< '*'").1, b"*\n".to_vec());
+    assert_eq!(
+        run(&mut bash, b"read a b <<< 'x y'; echo \"$a-$b\"").1,
+        b"x-y\n".to_vec()
+    );
+    // The third `<` is only an operator in Bash mode.
+    let mut posix = shell(false);
+    assert_ne!(run(&mut posix, b"cat <<< hello").0, 0);
+}
+
+/// `$(<file)` reads the file into the word. Nothing runs, and nothing
+/// re-reads the bytes as shell syntax.
+// [dec:nsh:safety-trumps-compatibility]
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn dollar_paren_reads_a_file() {
+    let mut bash = shell(true);
+    assert_eq!(
+        run(&mut bash, b"echo \"[$(</dev/null)]\"").1,
+        b"[]\n".to_vec()
+    );
+    // A file that cannot be opened yields nothing rather than failing
+    // the shell.
+    assert_eq!(
+        run(&mut bash, b"echo \"[$(<no/such/file)]\"").1,
+        b"[]\n".to_vec()
+    );
+    // The shorthand is Bash's; elsewhere it runs a command with no words.
+    let mut posix = shell(false);
+    assert_eq!(
+        run(&mut posix, b"echo \"[$(</dev/null)]\"").1,
+        b"[]\n".to_vec()
+    );
+}
+
+/// Bash expands a redirection operand as an ordinary word and refuses
+/// the redirect unless exactly one field survives.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn redirection_operands_must_name_one_file() {
+    let mut bash = shell(true);
+    // Splitting, brace expansion and an expansion that yields nothing
+    // all leave a count Bash will not accept.
+    assert_eq!(run(&mut bash, b"f='a b'; echo hi > $f").0, 1);
+    assert_eq!(run(&mut bash, b"echo hi > a-{one,two}").0, 1);
+    assert_eq!(run(&mut bash, b"echo hi > $unset_name").0, 1);
+    // An empty operand is one field, so it reaches the open and fails
+    // there -- with Bash's status rather than dash's.
+    assert_eq!(run(&mut bash, b"echo hi > ''").0, 1);
+    assert_eq!(run(&mut bash, b"echo hi > /no/such/directory/f").0, 1);
+    // The POSIX dialect neither splits the word nor takes status 1.
+    let mut posix = shell(false);
+    assert_eq!(run(&mut posix, b"echo hi > /no/such/directory/f").0, 2);
+}
+
+/// Indirect expansion resolves a name and then keeps going: a subscript,
+/// a suffix operator and an `@`-transform all apply to the resolved
+/// name, and a resolution that is not a name is refused.
+// [dec:nsh:safety-trumps-compatibility]
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn indirection_reaches_past_the_name() {
+    let mut bash = shell(true);
+    assert_eq!(
+        run(&mut bash, b"x=xx; xx=aaabcc; xd=x; echo ${!xd}").1,
+        b"xx\n".to_vec()
+    );
+    // A subscript binds to the reference, not to the resolved name.
+    assert_eq!(
+        run(&mut bash, b"x=xx; a=(asdf x); echo ${!a[1]}").1,
+        b"xx\n".to_vec()
+    );
+    // Suffix operators and transforms apply after the name resolves.
+    assert_eq!(
+        run(&mut bash, b"x=xx; xx=aaabcc; echo ${!x:2}").1,
+        b"abcc\n".to_vec()
+    );
+    assert_eq!(
+        run(&mut bash, b"x=xx; xx=aaabcc; echo ${!x#*a}").1,
+        b"aabcc\n".to_vec()
+    );
+    assert_eq!(
+        run(&mut bash, b"y=yy; yy=; echo ${!y:-foo}").1,
+        b"foo\n".to_vec()
+    );
+    // `${!a[@]}` still lists subscripts, but an operator makes the same
+    // spelling an indirection through `${a[@]}`.
+    assert_eq!(
+        run(&mut bash, b"v=val; declare -A r=([k]=v); echo ${!r[@]}").1,
+        b"k\n".to_vec()
+    );
+    assert_eq!(
+        run(&mut bash, b"v=val; declare -A r=([k]=v); echo ${!r[@]:1}").1,
+        b"al\n".to_vec()
+    );
+    // A resolution that is not a name is refused with status 1.
+    assert_eq!(run(&mut bash, b"a='bad var name'; echo ${!a}").0, 1);
+    assert_eq!(run(&mut bash, b"b='/'; echo ${!b}").0, 1);
+    assert_eq!(run(&mut bash, b"echo ${!never_set}").0, 1);
+    // A name that holds an array has no scalar to read, and that is not
+    // an error: it resolves to nothing.
+    assert_eq!(
+        run(&mut bash, b"declare -A m=([k]=v); echo \"[${!m}]\"").1,
+        b"[]\n".to_vec()
+    );
+    // After `!`, a `#` can only be the whole target.
+    assert_ne!(run(&mut bash, b"echo ${!#x}").0, 0);
+}
+
+/// `GLOBIGNORE` is colon-separated, but a colon inside a bracket
+/// expression belongs to the pattern.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn globignore_keeps_bracket_expressions_whole() {
+    let mut bash = shell(true);
+    // Split on the inner colons, `[[:alpha:]]` would become three
+    // patterns, none of which hides the name; hiding every match leaves
+    // the pattern literal.
+    assert_eq!(
+        run(&mut bash, b"GLOBIGNORE='/dev/[[:alpha:]]*'; echo /dev/nul*").1,
+        b"/dev/nul*\n".to_vec()
+    );
+    assert_eq!(
+        run(&mut bash, b"GLOBIGNORE='/dev/[[:digit:]]*'; echo /dev/nul*").1,
+        b"/dev/null\n".to_vec()
+    );
+    // The plain separator still separates.
+    assert_eq!(
+        run(&mut bash, b"GLOBIGNORE='/dev/zz:/dev/null'; echo /dev/nul*").1,
+        b"/dev/nul*\n".to_vec()
+    );
+    // A bracket that never closes is ordinary text, so its colon splits.
+    assert_eq!(
+        run(&mut bash, b"GLOBIGNORE='/dev/[[:alpha:'; echo /dev/nul*").1,
+        b"/dev/null\n".to_vec()
+    );
+}
+
+/// A suffix operator or an `@`-transform reaches each element and the
+/// join happens afterwards.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn star_operators_map_before_they_join() {
+    let mut bash = shell(true);
+    assert_eq!(
+        run(&mut bash, b"a=('-x-' 'y-y' '-z-'); echo \"${a[*]#-}\"").1,
+        b"x- y-y z-\n".to_vec()
+    );
+    assert_eq!(
+        run(&mut bash, b"a=(a b); echo \"${a[*]@Q}\"").1,
+        b"'a' 'b'\n".to_vec()
+    );
+    // `@Q` on a name that holds no readable element answers with nothing
+    // rather than with an empty quotation.
+    assert_eq!(
+        run(&mut bash, b"declare -A A=([k]=v); echo \"[${A@Q}]\"").1,
+        b"[]\n".to_vec()
+    );
+    assert_eq!(
+        run(&mut bash, b"e=''; echo \"[${e@Q}]\"").1,
+        b"['']\n".to_vec()
+    );
+    // `${!prefix@}` lists a name declared as an empty array.
+    assert_eq!(
+        run(&mut bash, b"hello1=1 hello2=2; hello=(); echo ${!hello@}").1,
+        b"hello hello1 hello2\n".to_vec()
+    );
+}

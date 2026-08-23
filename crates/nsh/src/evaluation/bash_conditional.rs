@@ -178,7 +178,11 @@ fn number(shell: &mut Shell, text: &BStr) -> Result<Option<i64>, Error> {
 
 fn regex_match(shell: &mut Shell, subject: &BStr, word: &WordNode) -> Result<Truth, Error> {
     let pattern = crate::expand::conditional_pattern(shell, word)?;
-    let regex = match Regex::compile(pattern.as_bytes(), pattern.quote_bits()) {
+    // `nocasematch` governs `=~` as well as `==`.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    let ignore_case = shell.options.dialect() == crate::options::Dialect::Bash
+        && shell.options.shopt(crate::options::BashShopt::NoCaseMatch);
+    let regex = match Regex::compile(pattern.as_bytes(), pattern.quote_bits(), ignore_case) {
         Ok(regex) => regex,
         Err(message) => {
             let mut text = BString::from(&b"[["[..]);

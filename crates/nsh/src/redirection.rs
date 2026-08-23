@@ -57,6 +57,21 @@ pub(crate) enum ExpandedRedirection<'a> {
         source: Option<LogicalDescriptor>,
     },
     HereDocument(&'a HereDocument),
+    /// Bash's `<<< word`, already expanded to the bytes the descriptor
+    /// reads. The trailing newline is part of the content.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    HereString {
+        descriptor: LogicalDescriptor,
+        content: BString,
+    },
+    /// A redirection whose operand did not expand to exactly one
+    /// pathname. Bash refuses it, reports the word, and gives the
+    /// command status 1.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    Ambiguous {
+        descriptor: LogicalDescriptor,
+        word: BString,
+    },
 }
 
 impl ExpandedRedirection<'_> {
@@ -64,6 +79,7 @@ impl ExpandedRedirection<'_> {
         match self {
             Self::File { descriptor, .. } | Self::Descriptor { descriptor, .. } => *descriptor,
             Self::HereDocument(document) => document.descriptor,
+            Self::HereString { descriptor, .. } | Self::Ambiguous { descriptor, .. } => *descriptor,
         }
     }
 }
@@ -217,7 +233,7 @@ fn open_error_with_context(
         error,
         operation,
     ));
-    let status = context.status(error);
+    let status = context.status(shell.options.dialect(), error);
     let line = shell.evaluation.diagnostic_line;
     shell
         .diagnostics()
@@ -233,11 +249,20 @@ enum OpenFailureContext {
 impl OpenFailureContext {
     // [spec:posix:req:sh.exit-status-values]
     // [spec:posix:req:xcu.exit-status.listed-values-binding]
-    fn status(self, error: &std::io::Error) -> crate::status::ExitStatus {
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn status(
+        self,
+        dialect: crate::options::Dialect,
+        error: &std::io::Error,
+    ) -> crate::status::ExitStatus {
         if matches!(self, OpenFailureContext::CommandFile)
             && nsh_platform::is_path_error(error, nsh_platform::PathErrorKind::NotFound)
         {
             crate::status::ExitStatus::NOT_FOUND
+        } else if dialect == crate::options::Dialect::Bash {
+            /* Bash takes 1 from a redirection it could not open, where
+             * dash takes 2. Both report and carry on. */
+            crate::status::ExitStatus::FAILURE
         } else {
             crate::status::ExitStatus::from_code(2)
         }
@@ -307,6 +332,49 @@ fn open_file_with_context(
     }
 }
 
+/// Expand a file redirection's operand into the pathname it names.
+///
+/// Bash expands it the way it expands any other word -- brace expansion,
+/// field splitting and pathname expansion included -- and refuses the
+/// redirect unless exactly one field survives. POSIX expands the word
+/// without splitting and uses whatever comes out, so the two dialects
+/// differ in the *number* of results they will accept, not in the
+/// expansions they run.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+// [spec:posix:req:redir.word-expansion]
+// [spec:posix:req:redir.word-pathname-expansion]
+pub(crate) fn expand_file_target<'a>(
+    shell: &mut Shell,
+    redirection: &crate::nodes::FileRedirection,
+) -> Result<ExpandedRedirection<'a>, Error> {
+    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
+    let mut fields = crate::expand::ExpandedFields::new();
+    let target = Node::Word(redirection.target.clone());
+    let mut mode = crate::expand::ExpansionMode::TILDE | crate::expand::ExpansionMode::REDIRECTION;
+    if bash {
+        mode = mode | crate::expand::ExpansionMode::SPLIT;
+    }
+    crate::expand::expand_argument(shell, &target, Some(&mut fields), mode)?;
+    if !bash {
+        /* `fn.list->text` with no null check: no EXP_FULL means
+         * `expandarg` took its single-field arm. */
+        debug_assert_eq!(fields.fields.len(), 1, "an unsplit expansion is one field");
+    }
+    if bash && fields.fields.len() != 1 {
+        let mut word = BString::default();
+        redirection.target.word.render(&mut word);
+        return Ok(ExpandedRedirection::Ambiguous {
+            descriptor: redirection.descriptor,
+            word,
+        });
+    }
+    Ok(ExpandedRedirection::File {
+        operator: redirection.operator,
+        descriptor: redirection.descriptor,
+        target: fields.fields.remove(0).text,
+    })
+}
+
 /// Open a path for input without exposing the platform's numeric open flags
 /// to callers outside the redirection subsystem.
 pub fn open_file_for_reading(
@@ -359,6 +427,16 @@ fn open_redirection(
         }
         ExpandedRedirection::HereDocument(document) => {
             RedirectSource::Owned(open_here_document(shell, document)?)
+        }
+        ExpandedRedirection::HereString { content, .. } => {
+            let content = content.clone();
+            RedirectSource::Owned(open_here_content(shell, &content)?)
+        }
+        ExpandedRedirection::Ambiguous { word, .. } => {
+            let mut message = word.to_vec();
+            message.extend_from_slice(b": ambiguous redirect");
+            let line = shell.evaluation.diagnostic_line;
+            return Err(shell.diagnostics().report(Error::other(line, 1, &message)));
         }
     };
 
@@ -597,6 +675,14 @@ fn open_here_document(shell: &mut Shell, document: &HereDocument) -> Result<Desc
         document.body.word.as_bstr()
     };
 
+    open_here_content(shell, content)
+}
+
+/// Publish a here-document or here-string body on a readable descriptor.
+///
+/// A short body is stuffed into the pipe or a memory file; a long one is
+/// written by a forked writer, because the pipe would otherwise fill.
+fn open_here_content(shell: &mut Shell, content: &[u8]) -> Result<Descriptor, Error> {
     let content_length = content.len();
     let (pipe, memory_backed) = create_pipe(shell, content_length > PIPE_BUFFER_SIZE)?;
 
@@ -798,12 +884,28 @@ mod tests {
         let denied =
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
 
+        let posix = crate::options::Dialect::Posix;
         assert_eq!(
-            OpenFailureContext::CommandFile.status(&missing),
+            OpenFailureContext::CommandFile.status(posix, &missing),
             crate::status::ExitStatus::NOT_FOUND,
         );
-        assert_eq!(OpenFailureContext::Ordinary.status(&missing).code(), 2,);
-        assert_eq!(OpenFailureContext::CommandFile.status(&denied).code(), 2,);
+        assert_eq!(
+            OpenFailureContext::Ordinary.status(posix, &missing).code(),
+            2,
+        );
+        assert_eq!(
+            OpenFailureContext::CommandFile
+                .status(posix, &denied)
+                .code(),
+            2,
+        );
+        // Bash takes 1 from a redirection it could not open.
+        // [spec:nsh:req:compat.bash.expansion-globbing/test]
+        let bash = crate::options::Dialect::Bash;
+        assert_eq!(
+            OpenFailureContext::Ordinary.status(bash, &missing).code(),
+            1,
+        );
     }
 
     /// Opening directly into the target means the target was closed before

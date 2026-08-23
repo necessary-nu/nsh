@@ -560,15 +560,18 @@ fn expand_parameter(
 
     let mut name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
     if parameter.indirect
-        && let Some(expansion) = bash::indirect_names(shell, name.as_bstr(), context)?
+        && let Some(expansion) =
+            bash::indirect_names(shell, name.as_bstr(), parameter.operation, context)?
     {
         return Ok(expansion);
     }
     let mut value = read_value(shell, name.as_bstr())?;
     if parameter.indirect {
-        // `${!ref}` reads the name out of `ref` and expands that.
+        // `${!ref}` reads the name out of `ref` and expands that. The
+        // text has to spell a parameter, and Bash refuses it when it
+        // does not.
         // [spec:nsh:req:compat.bash.expansion-globbing]
-        name = value_bytes(shell, value, context);
+        name = bash::indirect_target(shell, name.as_bstr(), value)?;
         value = read_value(shell, name.as_bstr())?;
     }
     /* An array with no elements answers `-`, `=`, `?` and `+` as an unset
@@ -674,35 +677,10 @@ fn expand_parameter(
                 return Ok(empty_value(context));
             }
             let pattern = pattern_operand(shell, parameter, context)?;
-            let positional_words = match &value {
-                Value::At(words) if context.full => Some(words),
-                Value::Star(words) if context.full && !context.quoted => Some(words),
-                _ => None,
-            };
-            if let Some(words) = positional_words {
-                return Ok(Expansion {
-                    fields: words
-                        .iter()
-                        .map(|word| {
-                            let trimmed = trim(&shell.locale, word, &pattern, parameter.operation);
-                            Field::from_bytes(
-                                &trimmed,
-                                context.protects(),
-                                !context.quoted,
-                                context.quoted,
-                            )
-                        })
-                        .collect(),
-                });
-            }
-            let bytes = value_bytes(shell, value, context);
-            let trimmed = trim(&shell.locale, &bytes, &pattern, parameter.operation);
-            Ok(Expansion::one(Field::from_bytes(
-                &trimmed,
-                context.protects(),
-                context.splits(),
-                context.quoted,
-            )))
+            let operation = parameter.operation;
+            bash::map_value(shell, value, context, |locale, text| {
+                trim(locale, text, &pattern, operation)
+            })
         }
         ParameterOperation::Substring
         | ParameterOperation::SubstituteFirst
@@ -1158,11 +1136,25 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
 // [spec:posix:req:expand.cmdsub-no-reexpansion]
 // [spec:dash:sem:expand.expbackq-fn]
 fn command_substitution(shell: &mut Shell, command: Option<&Node>) -> Result<BString, Error> {
+    // `$(<file)` never reaches a child: it is a file read wearing command
+    // syntax.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    let mut output = match bash::file_substitution(shell, command)? {
+        Some(content) => content,
+        None => run_command_substitution(shell, command)?,
+    };
+    while output.last() == Some(&b'\n') {
+        output.pop();
+    }
+    Ok(output)
+}
+
+fn run_command_substitution(shell: &mut Shell, command: Option<&Node>) -> Result<BString, Error> {
     let mut result = crate::evaluation::CommandSubstitution {
         descriptor: None,
         job_id: None,
     };
-    let mut output = crate::error::with_interrupts_deferred(shell, |shell| {
+    let output = crate::error::with_interrupts_deferred(shell, |shell| {
         let mut output = BString::new(Vec::new());
         let mut buffer = [0u8; 128];
 
@@ -1189,10 +1181,6 @@ fn command_substitution(shell: &mut Shell, command: Option<&Node>) -> Result<BSt
 
     if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
         return Err(error);
-    }
-
-    while output.last() == Some(&b'\n') {
-        output.pop();
     }
     Ok(output)
 }

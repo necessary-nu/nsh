@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-named-diagnostic"
 group_label = "Named *-bash diagnostic slice"
 shell = "target/bash-mode/bash"
-shell_sha256 = "823288764f93beb1401bd34e2b8203c757d6bac5bf57e12a529140cfdfde3206"
+shell_sha256 = "877b0a58d9a33e07fd45cffcfe42f8311aba01fd46f51b69650474185a290902"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -13,25 +13,13 @@ timeout_ms = 5000
 [totals]
 selected = 112
 executed = 112
-pass = 89
-fail = 21
+pass = 93
+fail = 16
 skip = 0
 unsupported = 0
-known_bug = 2
+known_bug = 3
 timeout = 0
 error = 0
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 9
-line = 147
-description = "mapfile -t bugs (ble.sh)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
 
 [[nonpassing]]
 spec = "builtin-bash.test.sh"
@@ -189,31 +177,13 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
-index = 11
-line = 237
-description = "${!prefix@} matches var name (regression)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 16
-line = 303
-description = "assoc array and @P @Q @a"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
 index = 19
 line = 358
 description = "${!A@a} and ${!A[@]@a}"
-outcome = "fail"
+outcome = "known-bug"
 status = 0
 qualifier = "BUG"
-difference_fields = ["stdout"]
+difference_fields = []
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
@@ -233,15 +203,6 @@ description = "Array expansion with nullary var op @P"
 outcome = "fail"
 status = 0
 qualifier = "OK"
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 26
-line = 518
-description = "Array expansion with nullary var op @a"
-outcome = "fail"
-status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]

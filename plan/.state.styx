@@ -1336,6 +1336,7 @@ assertions (
     {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
     {id unsafe-is-a-crate, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:13:01.501479926Z}
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
+    {id bash-expansion-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:51.231881628Z}
 )
 
 impl_evidence (

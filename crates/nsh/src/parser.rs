@@ -20,8 +20,8 @@ use crate::input::{
 use crate::nodes::{
     BinaryCommand, CaseClause, CaseCommand, CompoundCommand, DescriptorRedirection,
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
-    ForCommand, FunctionDefinition, HereDocument, IfCommand, NegatedCommand, Node, NodeText,
-    Pipeline, Redirection, SimpleCommand, WordNode,
+    ForCommand, FunctionDefinition, HereDocument, HereString, IfCommand, NegatedCommand, Node,
+    NodeText, Pipeline, Redirection, SimpleCommand, WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
 use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, WordToken};
@@ -376,6 +376,12 @@ pub(crate) enum PendingRedirection {
         descriptor: LogicalDescriptor,
     },
     HereDocument {
+        descriptor: LogicalDescriptor,
+    },
+    /// Bash's `<<< word`. The operand is an ordinary word, so nothing is
+    /// deferred to a grammar newline the way a here-document body is.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    HereString {
         descriptor: LogicalDescriptor,
     },
 }
@@ -1067,6 +1073,12 @@ fn parse_redirection_target(
                 },
             })
         }
+        PendingRedirection::HereString { descriptor } => Redirection::HereString(HereString {
+            descriptor,
+            word: WordNode {
+                word: mem::take(&mut shell.input.word),
+            },
+        }),
         PendingRedirection::Descriptor {
             operator,
             descriptor,
@@ -1911,6 +1923,7 @@ fn parse_redirection(
         File(FileRedirectionOperator),
         Descriptor(DescriptorRedirectionOperator),
         HereDocument,
+        HereString,
     }
 
     /* The C carves one `struct nfile` and then decides what it is by
@@ -1943,14 +1956,22 @@ fn parse_redirection(
                 delimiter: BString::new(Vec::new()),
                 strip_tabs: false,
             };
-            redirection = ParsedRedirection::HereDocument;
             lexer.input = read_unit_skipping_line_continuations(shell)?;
-            if lexer.input.is(b'-') {
-                here.strip_tabs = true;
+            if lexer.input.is(b'<') && bash::active(shell) {
+                /* `<<<` is a here-string; the third `<` is only an
+                 * operator in Bash mode, so POSIX still reads `<< <word`
+                 * as a here-document with a delimiter that starts `<`. */
+                // [spec:nsh:req:compat.bash.expansion-globbing]
+                redirection = ParsedRedirection::HereString;
             } else {
-                unread_input_unit(shell);
+                redirection = ParsedRedirection::HereDocument;
+                if lexer.input.is(b'-') {
+                    here.strip_tabs = true;
+                } else {
+                    unread_input_unit(shell);
+                }
+                shell.input.pending_here_document = Some(here);
             }
-            shell.input.pending_here_document = Some(here);
         } else if lexer.input.is(b'&') {
             redirection = ParsedRedirection::Descriptor(DescriptorRedirectionOperator::Input);
         } else if lexer.input.is(b'>') {
@@ -1970,6 +1991,7 @@ fn parse_redirection(
             descriptor,
         },
         ParsedRedirection::HereDocument => PendingRedirection::HereDocument { descriptor },
+        ParsedRedirection::HereString => PendingRedirection::HereString { descriptor },
         ParsedRedirection::File(operator) => PendingRedirection::File {
             operator,
             descriptor,
@@ -2097,7 +2119,6 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         || lexer.input.begins_name(&shell.locale)
         || lexer.input.is_special_parameter()
     {
-        let mut bad_substitution = false;
         let mut parameter_syntax = ParameterSyntax::unbraced();
         if lexer.input.is(b'{') {
             if lexer.check_here_document_end {
@@ -2106,9 +2127,14 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             lexer.input = read_unit_skipping_line_continuations(shell)?;
             parameter_syntax = ParameterSyntax::braced();
         }
-        let indirect = bash::parameter_indirection(shell, lexer, parameter_syntax.braced)?;
+        let indirection = bash::parameter_indirection(shell, lexer, parameter_syntax.braced)?;
+        let indirect = indirection == bash::Indirection::Present;
+        let mut bad_substitution = indirection == bash::Indirection::Invalid;
         let name_start = lexer.output.len();
         'assignment_name: loop {
+            if bad_substitution {
+                break 'assignment_name;
+            }
             if lexer.input.begins_name(&shell.locale) {
                 loop {
                     lexer.push_literal(lexer.input.expect_byte());
