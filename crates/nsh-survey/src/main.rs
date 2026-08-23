@@ -9,6 +9,7 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+mod bash_gate;
 mod bash_reference;
 mod oils_runner;
 mod process;
@@ -98,6 +99,13 @@ fn run() -> Result<()> {
                 std::process::exit(1)
             }
         }
+        Some(command) if command == OsStr::new("gate-bash") => {
+            if bash_gate::command(args, survey_root())? {
+                Ok(())
+            } else {
+                std::process::exit(1)
+            }
+        }
         Some(command) if command == OsStr::new("build-bash-reference") => {
             bash_reference::build_command(args)
         }
@@ -144,7 +152,8 @@ fn run() -> Result<()> {
 }
 
 fn usage() -> &'static str {
-    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]\n       nsh-survey run-oils [OPTIONS] [ROOT]\n       nsh-survey build-bash-reference SOURCES OUTPUT\n       nsh-survey calibrate-bash-reference --shell PATH --sources SOURCES [ROOT]\n       nsh-survey verify-bash-reference [--shell PATH] [--sources SOURCES] [ROOT]\n       nsh-survey import-smoosh SMOOSH_CHECKOUT [OUTPUT]\n       nsh-survey verify-smoosh [ROOT]\n       nsh-survey generate-smoosh-manifest [ROOT]\n       nsh-survey run-smoosh [OPTIONS] [ROOT]"
+    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]\n       nsh-survey run-oils [OPTIONS] [ROOT]\n       nsh-survey gate-bash --shell PATH [ROOT]\n\
+       nsh-survey build-bash-reference SOURCES OUTPUT\n       nsh-survey calibrate-bash-reference --shell PATH --sources SOURCES [ROOT]\n       nsh-survey verify-bash-reference [--shell PATH] [--sources SOURCES] [ROOT]\n       nsh-survey import-smoosh SMOOSH_CHECKOUT [OUTPUT]\n       nsh-survey verify-smoosh [ROOT]\n       nsh-survey generate-smoosh-manifest [ROOT]\n       nsh-survey run-smoosh [OPTIONS] [ROOT]"
 }
 
 fn required_path(value: Option<std::ffi::OsString>, name: &str) -> Result<PathBuf> {

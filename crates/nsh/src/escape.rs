@@ -72,6 +72,11 @@ fn unicode_bytes(value: u32, consumed: usize) -> EscapeChunk {
     if value < 0x80 {
         return EscapeChunk::one(value as u8, consumed);
     }
+    /* Bash encodes whatever the escape names, so `\U00110000` yields four
+     * bytes that are not UTF-8 for any character -- because no such
+     * character exists. Nothing is produced instead of manufacturing bytes
+     * no decoder will accept. Recorded in docs/divergences.md. */
+    // [spec:nsh:req:compat.bash.expansion-globbing]
     if value >= 0x11_0000 {
         return EscapeChunk::empty(consumed);
     }

@@ -18,6 +18,7 @@ MANIFEST.toml               generated survey groups and case counts
 spec/                       imported specs and their fixture data
 BASH_REFERENCE.toml         pinned GNU Bash 5.3 reference profile
 BASH_REFERENCE_CASES.json   Bash case eligibility and exclusions
+BASH_DISPOSITIONS.toml      why each eligible case nsh does not pass is expected
 results/                    recorded nsh results for Bash-selected groups
 ```
 
@@ -127,6 +128,44 @@ failures, 52 unsupported expectations, 94 known upstream bugs, and 34
 expectations for another Bash version. There were no timeouts or runner errors.
 Two clean builds produced SHA-256
 `5aca12bd46aaef0d8183df3d9ba1de80cd36d2d52f179ec448d3b007a297d173`.
+
+## The Bash closure gate
+
+`[spec:nsh:req:compat.bash.survey-closure]` asks for zero *unexpected*
+failures. `BASH_DISPOSITIONS.toml` is what makes "unexpected" decidable: one
+entry per eligible `bash-extension` case that `nsh` does not pass, with a
+category and a reason, plus the whole files that
+`[dec:nsh:bash-compatibility-is-scripts]` places outside the contract.
+
+```sh
+scripts/sandboxed -- cargo build --release --bin nsh --bin nsh-survey
+mkdir -p target/bash-mode && cp target/release/nsh target/bash-mode/bash
+scripts/sandboxed -- target/release/nsh-survey gate-bash \
+  --shell target/bash-mode/bash
+```
+
+The basename must be exactly `bash`: `argv[0]` selects the dialect, so a name
+like `bash-pre` silently measures the profile with the profile turned off, and
+the gate refuses to run under one.
+
+Categories:
+
+| Category | Meaning |
+|---|---|
+| `not-implemented` | Nobody has built it. The honest backlog. |
+| `defect` | A bug here, with a known reproduction. |
+| `sanctioned-divergence` | Bash's behaviour is refused on purpose; see `docs/divergences.md`. |
+| `harness-artifact` | Cannot pass for any shell under this runner. |
+| `out-of-contract` | Outside the profile per the scope decision. |
+
+Bash's own defects are not in this file: the corpus qualifies them with
+`## BUG bash` and the runner reports them as `known-bug`, and every case the
+pinned Bash 5.3 build does not itself pass already carries a disposition in
+`BASH_REFERENCE_CASES.json`.
+
+The gate is symmetric. A registered case that starts passing fails it, exactly
+as an unregistered case that stops passing does: a stale excuse is how a real
+regression eventually gets waved through. When a fix lands, delete the entry.
 
 ## Updating the Oils pin
 

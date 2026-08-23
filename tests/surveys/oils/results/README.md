@@ -7,14 +7,19 @@ Timing data is omitted so reruns produce stable diffs.
 
 ## Current baseline
 
-Shell SHA-256:
-`b8289d9e6f0ec3ecbab6f568ede78ecc36bdeeb25adedab19281be31fed910c2`
+Recorded with the release shell installed as `target/bash-mode/bash`; the
+basename selects the dialect, so a shell under any other name measures the
+profile with the profile turned off.
 
 | Group | Selected | Pass | Fail | Unsupported | Known bug | Timeout | Error |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `bash-comparison` | 2,735 | 1,100 | 1,596 | 26 | 13 | 0 | 0 |
-| `bash-extension` | 1,121 | 74 | 1,039 | 6 | 2 | 0 | 0 |
-| `bash-named-diagnostic` | 112 | 4 | 107 | 0 | 1 | 0 | 0 |
+| `bash-comparison` | 2,735 | 1,967 | 689 | 40 | 39 | 0 | 0 |
+| `bash-extension` | 1,121 | 761 | 322 | 17 | 21 | 0 | 0 |
+| `bash-named-diagnostic` | 112 | 89 | 21 | 0 | 2 | 0 | 0 |
+
+These are whole-group numbers. The closure gate judges the `bash-extension`
+group after the scope decision and the reference calibration have been
+applied; see `../README.md` and `nsh-survey gate-bash`.
 
 ## Regenerating
 
@@ -22,19 +27,24 @@ Build the release shell and `nsh-survey`, then run each group through the
 top-level sandbox:
 
 ```sh
+mkdir -p target/bash-mode && cp target/release/nsh target/bash-mode/bash
+
 scripts/sandboxed --writable tests/surveys/oils/results -- \
   target/release/nsh-survey run-oils \
   --group bash-comparison --expect-shell bash \
+  --shell target/bash-mode/bash \
   --summary tests/surveys/oils/results/bash-comparison.toml
 
 scripts/sandboxed --writable tests/surveys/oils/results -- \
   target/release/nsh-survey run-oils \
   --group bash-extension --expect-shell bash \
+  --shell target/bash-mode/bash \
   --summary tests/surveys/oils/results/bash-extension.toml
 
 scripts/sandboxed --writable tests/surveys/oils/results -- \
   target/release/nsh-survey run-oils \
   --group bash-named-diagnostic --expect-shell bash \
+  --shell target/bash-mode/bash \
   --summary tests/surveys/oils/results/bash-named-diagnostic.toml
 ```
 

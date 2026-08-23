@@ -32,9 +32,25 @@ pub(crate) fn evaluate_arguments(
      * `setinputstring` reads through the pointer rather than copying. */
     let mut concat: BString = BString::new(Vec::new());
 
-    if args.len() > 1 {
-        let text: &BStr = if args.len() > 2 {
-            for (i, word) in args[1..].iter().enumerate() {
+    /* Bash's `eval` ends its (empty) option list at `--`, and `ble.sh` and
+     * other Bash code write `eval -- "$script"` for exactly that reason.
+     * POSIX gives `eval` no options, so with the dialect off `--` stays an
+     * ordinary word and joins the text, which is what dash does. */
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    let words = match args {
+        [_, separator, rest @ ..]
+            if shell.options.dialect() == crate::options::Dialect::Bash
+                && separator.as_bytes() == b"--" =>
+        {
+            rest
+        }
+        [_, rest @ ..] => rest,
+        [] => &[],
+    };
+
+    if !words.is_empty() {
+        let text: &BStr = if words.len() > 1 {
+            for (i, word) in words.iter().enumerate() {
                 if i > 0 {
                     concat.push(b' ');
                 }
@@ -42,7 +58,7 @@ pub(crate) fn evaluate_arguments(
             }
             concat.as_bstr()
         } else {
-            args[1]
+            words[0]
         };
         return evaluate_string(shell, text, context.tested_only());
     }

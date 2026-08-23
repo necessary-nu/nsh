@@ -34,7 +34,13 @@ use crate::status::ExitStatus;
 
 /// What `$BASH_VERSION` answers, and the fields `$BASH_VERSINFO` splits
 /// it into. The two must agree, so they are one table.
-const VERSION_FIELDS: [&str; 5] = ["5", "2", "21", "1", "release"];
+///
+/// The value is the pinned Bash Reference Profile's own version, because
+/// that is the contract this dialect implements: a script that narrows
+/// itself on `$BASH_VERSION` must be told the release whose behaviour it
+/// is about to observe. See `tests/surveys/oils/BASH_REFERENCE.toml`.
+// [spec:nsh:req:compat.bash.reference-profile]
+const VERSION_FIELDS: [&str; 5] = ["5", "3", "15", "1", "release"];
 
 /// Facts about the host that an inherited environment may already
 /// answer, and which the shell therefore must not overwrite.
@@ -416,7 +422,7 @@ pub(crate) fn is_assigned(shell: &mut Shell, name: &BStr) -> bool {
     let base = BString::from(&bytes[..open]);
     let subscript = BString::from(&bytes[open + 1..bytes.len() - 1]);
     let base = BStr::new(base.as_slice());
-    let Ok(selector) = arrays::resolve_selector(shell, base, BStr::new(subscript.as_slice()))
+    let Ok(selector) = arrays::resolve_text_selector(shell, base, BStr::new(subscript.as_slice()))
     else {
         return false;
     };

@@ -36,9 +36,17 @@ struct Expansion {
 }
 
 impl Expansion {
-    fn builder() -> Self {
+    /// One empty field that survives field splitting.
+    ///
+    /// `""` writes a field the shell must keep even though it has no
+    /// bytes. An expansion that produces *no* fields is a different
+    /// thing and must stay distinguishable from this one.
+    // [spec:posix:req:expand.quote-removal]
+    fn anchored_empty() -> Self {
+        let mut field = Field::default();
+        field.anchor_empty();
         Self {
-            fields: vec![Field::default()],
+            fields: vec![field],
         }
     }
 
@@ -78,9 +86,10 @@ impl Expansion {
     }
 
     fn collapse(mut self) -> Field {
-        let Some(mut first) = self.fields.drain(..1).next() else {
+        if self.fields.is_empty() {
             return Field::default();
-        };
+        }
+        let mut first = self.fields.remove(0);
         for field in self.fields {
             first.append(field);
         }
@@ -276,7 +285,12 @@ fn expand_parts(
     parts: &[WordPart],
     context: Context,
 ) -> Result<Expansion, Error> {
-    let mut result = Expansion::builder();
+    /* No field is seeded. A part that expands to nothing -- `"$@"` with
+     * no positional parameters, `"${a[@]}"` over an empty array -- has to
+     * be able to leave the word with no fields at all, and a seeded field
+     * would silently turn that into one empty field. */
+    // [spec:posix:req:param.special-at-no-positional]
+    let mut result = Expansion::none();
     let mut at = 0;
     let mut tilde = if context.tilde_at_start && !context.quoted {
         if context.operand && context.tilde_after_colon {
@@ -323,11 +337,16 @@ fn expand_parts(
             WordPart::Quote(QuoteBoundary::Open) => {
                 let close = matching_quote(parts, at);
                 let inner = &parts[at + 1..close];
-                if !is_empty_quoted_at(shell, inner, context) {
-                    let mut quoted = expand_parts(shell, inner, context.quoted())?;
-                    quoted.preserve_empty();
-                    result.append(quoted);
-                }
+                /* `""` is written text and keeps its empty field; a pair of
+                 * quotes around an expansion that yielded nothing is not. */
+                let quoted = if inner.is_empty() {
+                    Expansion::anchored_empty()
+                } else {
+                    let mut expanded = expand_parts(shell, inner, context.quoted())?;
+                    expanded.preserve_empty();
+                    expanded
+                };
+                result.append(quoted);
                 at = close;
                 tilde = TildePosition::None;
             }
@@ -417,20 +436,6 @@ fn matching_quote(parts: &[WordPart], open: usize) -> usize {
         }
     }
     parts.len()
-}
-
-// [spec:posix:req:param.special-at-no-positional]
-fn is_empty_quoted_at(shell: &Shell, parts: &[WordPart], context: Context) -> bool {
-    context.full
-        && shell.options.positional_parameters.parameter_count == 0
-        && matches!(
-            parts,
-            [WordPart::Parameter(ParameterExpansion {
-                name,
-                operation: ParameterOperation::Value,
-                ..
-            })] if name.as_slice() == b"@"
-        )
 }
 
 // [spec:posix:sem:expand.tilde-no-further-expansion]
@@ -566,7 +571,15 @@ fn expand_parameter(
         name = value_bytes(shell, value, context);
         value = read_value(shell, name.as_bstr())?;
     }
-    let unavailable = value.is_unset() || (parameter.colon && value.is_empty(shell, context));
+    /* An array with no elements answers `-`, `=`, `?` and `+` as an unset
+     * name does, without the colon. `$@` and `$*` keep the POSIX answer;
+     * only a written `[@]` or `[*]` subscript takes this one. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    let empty_array = split_subscript(name.as_bstr())
+        .is_some_and(|(_, subscript)| subscript == "@" || subscript == "*")
+        && matches!(&value, Value::At(words) | Value::Star(words) if words.is_empty());
+    let unavailable =
+        value.is_unset() || empty_array || (parameter.colon && value.is_empty(shell, context));
 
     match parameter.operation {
         ParameterOperation::Value => value_expansion(shell, name.as_bstr(), value, context),
@@ -763,22 +776,25 @@ fn split_subscript(name: &BStr) -> Option<(&BStr, &BStr)> {
 fn subscripted_value(shell: &mut Shell, base: &BStr, subscript: &BStr) -> Result<Value, Error> {
     use crate::variables::arrays::{self, ArraySelector};
 
-    /* A read keeps its subscript as text, so an expansion written inside
-     * one is resolved here; the assignment side already carries a word. */
+    /* A read keeps its subscript as text, so its quoting and any expansion
+     * written inside it are resolved here; the assignment side already
+     * carries a word the expander has been through. */
     // [spec:nsh:req:compat.bash.functions-scoping]
-    let expanded;
-    let subscript = if shell.options.dialect() == Dialect::Bash
-        && subscript.iter().any(|byte| matches!(byte, b'$' | b'`'))
-    {
-        expanded = crate::parser::expand_string(shell, subscript)?;
-        BStr::new(expanded.as_slice())
+    let selector = if shell.options.dialect() == Dialect::Bash {
+        arrays::resolve_text_selector(shell, base, subscript)?
     } else {
-        subscript
+        arrays::resolve_selector(shell, base, subscript)?
     };
-
-    let selector = arrays::resolve_selector(shell, base, subscript)?;
     let Some(stored) = crate::variables::value::variable_value(shell, base).cloned() else {
-        return Ok(Value::Unset);
+        /* A whole-array read of a name that holds nothing is an array of no
+         * elements, not an unset scalar: it contributes no fields and `set
+         * -u` has nothing to complain about. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        return Ok(match selector {
+            ArraySelector::All => Value::At(Vec::new()),
+            ArraySelector::Joined => Value::Star(Vec::new()),
+            ArraySelector::Index(_) | ArraySelector::Key(_) => Value::Unset,
+        });
     };
     Ok(match selector {
         ArraySelector::All => Value::At(arrays::elements(&stored)),
@@ -984,10 +1000,18 @@ fn operand_expansion(
     parameter: &ParameterExpansion,
     context: Context,
 ) -> Result<Expansion, Error> {
-    match parameter.operand.as_deref() {
-        Some(word) => expand_parts(shell, word.parts(), context.operand()),
-        None => Ok(empty_value(context)),
+    let Some(word) = parameter.operand.as_deref() else {
+        return Ok(empty_value(context));
+    };
+    let expanded = expand_parts(shell, word.parts(), context.operand())?;
+    /* `${x-}` and `${x:-}` name the empty string, which is a value; only a
+     * `[@]` or `[*]` expansion of nothing is *no* field. An operand made
+     * of no parts at all must therefore still produce one. */
+    // [spec:posix:req:expand.param-use-default]
+    if expanded.fields.is_empty() {
+        return Ok(empty_value(context));
     }
+    Ok(expanded)
 }
 
 fn pattern_operand(

@@ -160,6 +160,39 @@ pub(crate) fn verify_command(mut args: env::ArgsOs, default_root: PathBuf) -> Re
     Ok(())
 }
 
+/// The pinned eligibility calibration, as the closure gate needs it: the
+/// eligible case ids, and the disposition recorded for every case the
+/// reference build does not itself pass.
+// [spec:nsh:req:compat.bash.reference-profile]
+pub(crate) fn calibration(
+    root: &Path,
+) -> Result<(BTreeSet<String>, std::collections::BTreeMap<String, String>)> {
+    let cases: CaseManifest = serde_json::from_str(&fs::read_to_string(root.join(CASES_FILE))?)?;
+    if cases.schema != 1 {
+        return Err(format!("{CASES_FILE} has unsupported schema").into());
+    }
+    let eligible = cases.eligible.iter().cloned().collect::<BTreeSet<_>>();
+    let mut excluded = std::collections::BTreeMap::new();
+    for case in &cases.excluded {
+        excluded.insert(
+            case.id.clone(),
+            disposition_label(case.disposition).to_owned(),
+        );
+    }
+    Ok((eligible, excluded))
+}
+
+const fn disposition_label(disposition: Disposition) -> &'static str {
+    match disposition {
+        Disposition::ReferenceFailure => "reference-failure",
+        Disposition::Unsupported => "unsupported",
+        Disposition::KnownUpstreamBug => "known-upstream-bug",
+        Disposition::Timeout => "timeout",
+        Disposition::HarnessError => "harness-error",
+        Disposition::VersionInapplicable => "version-inapplicable",
+    }
+}
+
 fn required_path(value: Option<OsString>, name: &str) -> Result<PathBuf> {
     value
         .map(PathBuf::from)
