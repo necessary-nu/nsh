@@ -555,7 +555,8 @@ fn expand_parameter(
     context: Context,
 ) -> Result<Expansion, Error> {
     if parameter.operation == ParameterOperation::Invalid {
-        return Err(shell.diagnostics().shell_error(b"Bad substitution"));
+        // [spec:nsh:req:compat.bash.error-boundary]
+        return Err(shell.diagnostics().dialect_error(b"Bad substitution"));
     }
 
     let mut name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
@@ -793,7 +794,9 @@ fn subscripted_value(shell: &mut Shell, base: &BStr, subscript: &BStr) -> Result
         return Ok(match selector {
             ArraySelector::All => Value::At(Vec::new()),
             ArraySelector::Joined => Value::Star(Vec::new()),
-            ArraySelector::Index(_) | ArraySelector::Key(_) => Value::Unset,
+            ArraySelector::Missing | ArraySelector::Index(_) | ArraySelector::Key(_) => {
+                Value::Unset
+            }
         });
     };
     Ok(match selector {
@@ -812,6 +815,11 @@ fn subscripted_value(shell: &mut Shell, base: &BStr, subscript: &BStr) -> Result
             Some(element) => Value::Variable(VariableValue::Scalar(element.to_owned())),
             None => Value::Unset,
         },
+        /* Reported by the resolver and expanded to nothing. The command
+         * the subscript was written in still runs, with one fewer field
+         * than it asked for. */
+        // [spec:nsh:req:compat.bash.error-boundary]
+        ArraySelector::Missing => Value::Unset,
     })
 }
 

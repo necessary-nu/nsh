@@ -121,11 +121,6 @@ disposition = "not-implemented"
 reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
 
 [[case]]
-id = "array-assoc.test.sh:27"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
-
-[[case]]
 id = "array-assoc.test.sh:28"
 disposition = "not-implemented"
 reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
@@ -216,16 +211,6 @@ disposition = "out-of-contract"
 reason = "`compgen` is part of the programmable-completion surface retired by [dec:nsh:bash-compatibility-is-scripts]; there is no `complete`/`compgen`/`compopt` and reporting one would advertise a facility that is not here."
 
 [[case]]
-id = "array.test.sh:9"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
-
-[[case]]
-id = "array.test.sh:10"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
-
-[[case]]
 id = "array.test.sh:25"
 disposition = "not-implemented"
 reason = "`export` does not refuse an array: an exported name later assigned a compound value exports its first element, and `export a[7]=8` is accepted. Bash exports nothing for the array and refuses the subscripted operand with status 1."
@@ -244,16 +229,6 @@ reason = "A compound value in an environment prefix (`B=(b b) cmd`) is dropped f
 id = "array.test.sh:35"
 disposition = "not-implemented"
 reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
-
-[[case]]
-id = "array.test.sh:46"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
-
-[[case]]
-id = "array.test.sh:47"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
 
 [[case]]
 id = "array.test.sh:59"
@@ -301,16 +276,6 @@ disposition = "not-implemented"
 reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
 
 [[case]]
-id = "assign-extended.test.sh:24"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
-
-[[case]]
-id = "assign-extended.test.sh:25"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
-
-[[case]]
 id = "assign-extended.test.sh:31"
 disposition = "not-implemented"
 reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
@@ -319,11 +284,6 @@ reason = "The declaration built-ins do not re-parse an operand that arrived as o
 id = "assign-extended.test.sh:32"
 disposition = "not-implemented"
 reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
-
-[[case]]
-id = "assign-extended.test.sh:35"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
 
 [[case]]
 id = "assign-extended.test.sh:36"
@@ -441,11 +401,6 @@ disposition = "not-implemented"
 reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
 
 [[case]]
-id = "nameref.test.sh:18"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
-
-[[case]]
 id = "nameref.test.sh:27"
 disposition = "not-implemented"
 reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
@@ -536,11 +491,6 @@ disposition = "not-implemented"
 reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
 
 [[case]]
-id = "sh-options-bash.test.sh:1"
-disposition = "sanctioned-divergence"
-reason = "`SHELLOPTS` is published but not marked read-only, so assigning to it succeeds where Bash refuses with status 1. Marking it read-only would turn a line Bash tolerates into an aborted script under the error boundary above. Recorded in docs/divergences.md."
-
-[[case]]
 id = "sh-options-bash.test.sh:4"
 disposition = "not-implemented"
 reason = "`SHELLOPTS` is not read back from the environment at startup, so exporting it does not carry `set -x` into a child shell. The second case also shows the exported value being rejected by a real Bash, so the published spelling is wrong as well."
@@ -611,11 +561,6 @@ disposition = "defect"
 reason = "A bracket expression whose first member is `]` (`[^]]`) is parsed as an empty set followed by literal text, so the pattern matches everything. POSIX requires `]` first in a bracket expression to be literal, and this reproduces with the dialect off."
 
 [[case]]
-id = "var-op-slice.test.sh:1"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
-
-[[case]]
 id = "var-op-slice.test.sh:20"
 disposition = "not-implemented"
 reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
@@ -639,11 +584,6 @@ reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not 
 id = "var-ref.test.sh:19"
 disposition = "not-implemented"
 reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
-
-[[case]]
-id = "var-ref.test.sh:20"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
 
 [[case]]
 id = "var-ref.test.sh:21"
@@ -675,7 +615,3 @@ id = "var-ref.test.sh:30"
 disposition = "not-implemented"
 reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
 
-[[case]]
-id = "zsh-idioms.test.sh:2"
-disposition = "sanctioned-divergence"
-reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."

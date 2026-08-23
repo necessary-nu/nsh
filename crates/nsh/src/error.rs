@@ -327,6 +327,26 @@ pub enum Error {
         /// The diagnostic without a shell or command prefix.
         message: BString,
     },
+    /// A failure the Bash dialect reports and then recovers from.
+    ///
+    /// Bash reports a read-only assignment, a bad substitution, a bad
+    /// array subscript and an arithmetic error, abandons the input record
+    /// the failure was raised in, and reads the next one --
+    /// `exp_jump_to_top_level(DISCARD)`. Status is 1 and the shell lives.
+    ///
+    /// The POSIX dialect never builds one. There the same failures are
+    /// [`Diagnostics::shell_error`], which takes status 2 and ends a
+    /// non-interactive shell as XCU 2.8.1 requires, and that is why the
+    /// frames which recover from this variant need no dialect test of
+    /// their own: the variant cannot exist outside Bash mode.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    Abandoned {
+        /// `errlinno` as it stood when the failure was reported.
+        line: i32,
+        /// The diagnostic, already written, or empty where the site that
+        /// found the fault wrote its own.
+        message: BString,
+    },
     /// A diagnostic with no more specific variant.
     Other {
         /// `errlinno` as it stood when the diagnostic was produced.
@@ -379,6 +399,23 @@ impl Error {
         }
     }
 
+    /// A Bash-dialect failure whose diagnostic has **already been
+    /// written**, with no text of its own.
+    ///
+    /// [`Error::reported`] with the Bash error boundary rather than the
+    /// POSIX one. The one site that needs it is an assignment through a
+    /// subscript that named no element: the subscript resolver reported
+    /// the fault where it found it, because a *read* through the same
+    /// subscript is reported and then carries on, and only the assignment
+    /// has an error to raise afterwards.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    pub fn abandoned(line: i32) -> Error {
+        Error::Abandoned {
+            line,
+            message: BString::default(),
+        }
+    }
+
     /// Build a command-input read error, retaining the special-builtin
     /// treatment required for the file operand of `.`.
     pub fn unrecoverable_read(line: i32, msg: &[u8], dot_operand: bool) -> Error {
@@ -413,6 +450,19 @@ impl Error {
         matches!(self, Error::Expansion { .. })
     }
 
+    /// Whether the Bash dialect recovers from this failure at the input
+    /// record that raised it.
+    ///
+    /// The question the two frames that resume from one have to ask:
+    /// [`crate::evaluation::evaluate_record`], which abandons the rest of
+    /// the record and reads the next, and `evalcommand`'s special
+    /// built-in arm, which must not escalate a failure the dialect has
+    /// already decided is survivable.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    pub fn is_abandoned(&self) -> bool {
+        matches!(self, Error::Abandoned { .. })
+    }
+
     /// The exit status the shell takes from this error.
     pub fn status(&self) -> crate::status::ExitStatus {
         match self {
@@ -421,7 +471,7 @@ impl Error {
             Error::Interrupted { signal } => signal.as_status(),
             // [spec:posix:req:sh.exit-status-values]
             Error::UnrecoverableRead { .. } => crate::status::ExitStatus::UNRECOVERABLE_READ,
-            Error::Expansion { .. } => crate::status::ExitStatus::FAILURE,
+            Error::Expansion { .. } | Error::Abandoned { .. } => crate::status::ExitStatus::FAILURE,
             Error::Other { status, .. } => *status,
         }
     }
@@ -440,6 +490,7 @@ impl Error {
             Error::Interrupted { .. } => BStr::new(b""),
             Error::UnrecoverableRead { message, .. }
             | Error::Expansion { message, .. }
+            | Error::Abandoned { message, .. }
             | Error::Other { message, .. } => message.as_bstr(),
         }
     }
@@ -453,6 +504,7 @@ impl Error {
             Error::Interrupted { .. } => 0,
             Error::UnrecoverableRead { line, .. }
             | Error::Expansion { line, .. }
+            | Error::Abandoned { line, .. }
             | Error::Other { line, .. } => *line,
         }
     }
@@ -489,6 +541,11 @@ pub(crate) struct Diagnostics<'a> {
     invocation_name: Option<&'a BString>,
     command_name: Option<&'a BString>,
     line: i32,
+    /// Which error boundary the shell reporting is under. A diagnostic is
+    /// the point at which the two dialects part company, so the sink that
+    /// writes one is the narrowest place the dialect can be read from.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    dialect: crate::options::Dialect,
     io: &'a mut crate::output::ShellIo,
 }
 
@@ -499,6 +556,7 @@ impl crate::context::Shell {
             invocation_name: self.options.invocation_name.as_ref(),
             command_name: self.evaluation.command_name.as_ref(),
             line: self.evaluation.diagnostic_line,
+            dialect: self.options.dialect(),
             io: &mut self.io,
         }
     }
@@ -565,6 +623,49 @@ impl Diagnostics<'_> {
          * receiver even before this method had one. */
         let error = Error::other(self.line, 2, msg);
         self.report(error)
+    }
+
+    /// [`Self::shell_error`] where the dialect decides the boundary.
+    ///
+    /// The text, the prefix and the three writes are the same either way;
+    /// what the dialect chooses is what happens *after* the write. In the
+    /// POSIX dialect this is `sh_error` unchanged -- status 2, and a
+    /// non-interactive shell ends, which is XCU 2.8.1 and what the
+    /// conformance harness is built on. In Bash mode it is status 1 and
+    /// the shell abandons the input record rather than itself, which is
+    /// what a Bash script that assigns to a read-only name and keeps
+    /// going expects. `set -o posix` leaves the dialect, so it restores
+    /// the fatal boundary with no further test here.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    pub fn dialect_error(&mut self, msg: &[u8]) -> Error {
+        if self.dialect != crate::options::Dialect::Bash {
+            return self.shell_error(msg);
+        }
+        let error = Error::Abandoned {
+            line: self.line,
+            message: BString::from(msg),
+        };
+        self.report(error)
+    }
+
+    /// [`Self::builtin_error_value`] where the dialect decides the boundary.
+    ///
+    /// A built-in's refusal of a read-only name is the same rule as an
+    /// assignment's, so it takes the same boundary: `unset`, `export` and
+    /// `readonly` are special built-ins, and a special built-in's failure
+    /// ends a non-interactive POSIX shell. Bash ends nothing -- it reports
+    /// the refusal, answers 1 and runs the next command of the same list,
+    /// which is one frame short of what a raise elsewhere in the record
+    /// does. `readonly` shares `export`'s implementation, so the two call
+    /// sites are `export.rs` and `unset.rs`.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    pub fn dialect_builtin_error(&mut self, status: u8, msg: &[u8]) -> Error {
+        let error = self.builtin_error_value(status, msg);
+        if self.dialect != crate::options::Dialect::Bash {
+            return error;
+        }
+        drop(error);
+        Error::abandoned(self.line)
     }
 
     /// Report a parameter-expansion error without the implementation's

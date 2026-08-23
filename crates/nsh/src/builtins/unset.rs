@@ -42,7 +42,8 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if variable_attributes(shell, name).is_some_and(|attributes| attributes.read_only) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" is read-only");
-                return Err(shell.diagnostics().builtin_error_value(1, &message));
+                // [spec:nsh:req:compat.bash.error-boundary]
+                return Err(shell.diagnostics().dialect_builtin_error(1, &message));
             }
             // `unset a[i]` removes one element; the whole-array forms
             // clear the elements but keep the declaration.

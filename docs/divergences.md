@@ -567,51 +567,62 @@ pipe it has no use for. The descriptor is still owned and still released
 on time; what it is not is private to one image.
 
 
-### One error boundary for both dialects
+### The POSIX dialect ends the shell where Bash carries on
 
-**Status:** deliberate, with a stated cost. Registered in
-`tests/surveys/oils/BASH_DISPOSITIONS.toml` as `sanctioned-divergence`.
+**Status:** deliberate, and now the default dialect's alone. Not a
+sanctioned divergence: Bash mode takes Bash's boundary.
+`crates/nsh/src/error.rs`, `crates/nsh/src/evaluation.rs`.
 
 POSIX XCU 2.8.1 requires a non-interactive shell to exit when a variable
-assignment fails or an expansion is in error. This shell does that in
-both dialects: `readonly r=1; r=2` ends the script with status 2, and so
-do `${#v:1:3}`, `${(m)x}` and `${a[-5]}` on a two-element array. Bash
-reports each of them, yields nothing for the expansion, and carries on
-with status 1.
+assignment fails or an expansion is in error. The default dialect does
+that: `readonly r=1; r=2` ends the script with status 2, and so do
+`${#v:1:3}`, `${(m)x}`, `$((1+))` and `${a[-5]}` on a two-element array.
+It is the stronger of the two boundaries and it is the one the
+conformance harness is built on, so it does not move.
 
-The cost is real and is the reason this is recorded rather than assumed:
-a Bash script that assigns to a read-only name and expects to keep going
-stops here instead. It is the one place where "a Bash script means the
-same thing" is knowingly not delivered.
+Bash reports each of them and carries on, and **Bash mode now does the
+same**. The failure leaves status 1 and abandons the *input record* it
+was raised in -- the unit `parse_and_execute` reads, which is why
+`readonly r=1; r=2; echo x` prints nothing while the same three commands
+on three lines print `x`. A subshell or a command substitution contains
+the recovery; a function call and a loop do not. A special built-in's
+refusal of a read-only name becomes that command's status instead of
+ending the shell, so `unset r; echo same` still prints `same`. A
+subscript that names no element is the one asymmetric case: it is
+reported and expands to nothing, and the command it was written in runs
+with one fewer field, exactly as `argv.py "${a[-5]}"` does under Bash.
 
-It is recorded rather than fixed because the fix is not local. Making the
-boundary depend on the dialect means every fatal diagnostic has to carry
-"fatal in POSIX, status 1 in Bash", and the same script then stops at a
-different place depending on a flag it may never have set -- while the
-POSIX-mode guarantee is the stronger of the two and the one the
-conformance harness is built on. The third mode this really wants is
-`set -o posix`: Bash's own POSIX mode keeps arrays and `[[ ]]` while
-tightening exactly this boundary, and it is a state neither `-o bash` nor
-`+o bash` can express. That mode is not implemented, and the choice
-belongs with it rather than with a gate.
+`set -e` overrides the recovery: Bash's `report_error` ends the shell
+where it stands when the option is on, so a script that asked to stop at
+the first error still stops at this one, in both dialects.
 
-Costs, in the pinned Bash survey: `array-assoc.test.sh:27`,
-`assign-extended.test.sh:24`, `:25`, `:35`, `nameref.test.sh:18`,
-`array.test.sh:9`, `:10`, `:46`, `:47`, `var-op-slice.test.sh:1`,
-`var-ref.test.sh:20`, `zsh-idioms.test.sh:2`.
+`set -o posix` leaves the dialect (`[spec:nsh:req:compat.bash.posix-option]`),
+so it restores the fatal boundary with no separate switch. That option is
+what made this fixable: the earlier entry here said the boundary could
+not depend on a dialect flag because the same script would then stop in
+different places, and the answer is that there is now a named state in
+which the fatal boundary is the contract, and a script that wants it asks
+for it in the same three words Bash uses.
 
-### `SHELLOPTS` and `BASHOPTS` are not read-only
+**What is still not Bash's.** An assignment *prefix* on a command --
+`readonly r=1; r=2 cmd` -- makes Bash report the refusal and then run
+`cmd` anyway, with the prefix unapplied and status 0. Reproducing that
+would mean running a command whose environment is not the one the script
+asked for and calling it success, which is the error boundary weakened
+rather than relocated. Here the command does not run, the record is
+abandoned, and the status is 1. `(( 1+ ))` and `let 1+` are the same
+shape at a smaller scale: Bash treats the arithmetic failure of those two
+*commands* as an ordinary built-in failure and stays in the list, while
+this abandons the record. Both were previously fatal, so both moved
+towards Bash rather than away from it.
 
-**Status:** deliberate, and a consequence of the entry above.
-`crates/nsh/src/variables/special.rs`.
-
-Bash marks both names read-only. Importing the mark would turn
-`SHELLOPTS=x` -- a line Bash tolerates with status 1 -- into an aborted
-script under this shell's error boundary. Both listings still answer for
-the option table, because the next read recomputes them and discards
-whatever was assigned.
-
-Costs `sh-options-bash.test.sh:1` ("SHELLOPTS is readonly").
+The remaining one goes the other way and is left there deliberately.
+Under `set -e`, Bash ends the script at every failure in this class
+*except* an arithmetic one written inside a word: `echo $((1+))` reports,
+answers 1 and carries on, where `echo "${a[0][0]}"` and `${a[-5]}` do
+not. That is an inconsistency in which of Bash's reporting functions each
+site calls, not a rule, and reproducing it would mean `set -e` skipping
+one reported failure. This ends the script for all of them.
 
 ### `\u` and `\U` above U+10FFFF produce no bytes
 

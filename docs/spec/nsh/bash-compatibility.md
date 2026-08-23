@@ -162,6 +162,28 @@ implementation source is not an implementation input.
 > `Shell` and its children rather than fabricated constants or host-global
 > state. `SHELLOPTS` and `BASHOPTS` MUST agree with the effective option sets.
 
+> [spec:nsh:req:compat.bash.error-boundary]
+> Bash mode MUST take Bash's boundary for a failed variable assignment and a
+> failed expansion instead of the POSIX one. A refused assignment to a
+> read-only name, a bad substitution, a subscript that will not evaluate and
+> any other arithmetic failure MUST be reported, MUST leave exit status 1, and
+> MUST abandon the input record they were raised in rather than the shell,
+> which resumes at the next record. A subscript that names no element MUST be
+> reported and MUST expand to nothing, leaving the command it was written in
+> to run; only an assignment or an `unset` through that subscript refuses. A
+> special built-in's refusal of a read-only name MUST become that command's
+> status rather than ending the shell. A subshell or a command substitution
+> MUST contain the recovery, so the enclosing shell sees only a status. With
+> `errexit` enabled the failure MUST remain fatal, because a script that asked
+> to stop at the first error must not be carried past a reported one.
+>
+> The default dialect MUST retain the fatal boundary unchanged: status 2 and a
+> non-interactive shell that exits, as POSIX.1-2024 XCU 2.8.1 requires and as
+> the conformance harness observes. `set -o posix` leaves Bash mode per
+> `[spec:nsh:req:compat.bash.posix-option]` and therefore restores it.
+>
+> Source: `[dec:nsh:we-own-the-defects]`
+
 ## Interactive profile
 
 Interactive behaviour is deliberately outside this profile. Bash mode is a

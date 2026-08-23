@@ -29,6 +29,17 @@ pub(crate) enum ArraySelector {
     All,
     /// `a[*]` -- every element, joined by the first `IFS` byte.
     Joined,
+    /// A subscript that names no element: `a[-5]` counted back past the
+    /// start of the array.
+    ///
+    /// Bash reports it and the two sides then part company, which is why
+    /// this is a selector rather than an error. A read yields nothing and
+    /// the command it was written in still runs -- `argv.py "${a[-5]}"`
+    /// prints an empty argument -- while an assignment or an `unset`
+    /// through the same subscript refuses and answers 1. Only Bash mode
+    /// produces one; the POSIX dialect raises where this is built.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    Missing,
 }
 
 /// Whether an existing read-only attribute refuses an assignment.
@@ -71,7 +82,7 @@ pub(crate) fn resolve_selector(
     }
 
     let index = crate::arithmetic::evaluate(shell, subscript)?;
-    normalize_index(shell, name, index).map(ArraySelector::Index)
+    normalize_index(shell, name, index)
 }
 
 /// Resolve a subscript that reached the shell as *text* rather than as a
@@ -146,9 +157,16 @@ fn expand_run(shell: &mut Shell, run: &mut BString, resolved: &mut BString) -> R
 
 /// Bash counts a negative subscript back from the highest set index, so
 /// `a[-1]` is the last element rather than an error.
-fn normalize_index(shell: &mut Shell, name: &BStr, index: i64) -> Result<u64, Error> {
+///
+/// Counting back past the start is reported by both dialects and answered
+/// differently. POSIX raises, because an expansion in error ends a
+/// non-interactive shell. Bash writes the same diagnostic and hands back
+/// [`ArraySelector::Missing`], because there the failure belongs to the
+/// subscript and not to the command: the read carries on with nothing.
+// [spec:nsh:req:compat.bash.error-boundary]
+fn normalize_index(shell: &mut Shell, name: &BStr, index: i64) -> Result<ArraySelector, Error> {
     if index >= 0 {
-        return Ok(index.unsigned_abs());
+        return Ok(ArraySelector::Index(index.unsigned_abs()));
     }
     let highest = super::value::variable_value(shell, name)
         .and_then(|value| value.indexed_keys())
@@ -158,9 +176,19 @@ fn normalize_index(shell: &mut Shell, name: &BStr, index: i64) -> Result<u64, Er
     if resolved < 0 {
         let mut message = name.to_vec();
         message.extend_from_slice(b": bad array subscript");
+        if shell.options.dialect() == crate::options::Dialect::Bash {
+            shell.diagnostics().shell_warning(&message);
+            /* `set -e` ends a Bash script at a reported failure even where
+             * the command it was reported in would have succeeded, so the
+             * one place that reports without raising has to raise there. */
+            if shell.options.enabled(crate::options::ShellOption::Errexit) {
+                return Err(Error::abandoned(shell.evaluation.diagnostic_line));
+            }
+            return Ok(ArraySelector::Missing);
+        }
         return Err(shell.diagnostics().shell_error(&message));
     }
-    Ok(u64::try_from(resolved).unwrap_or(0))
+    Ok(ArraySelector::Index(u64::try_from(resolved).unwrap_or(0)))
 }
 
 /// Give `name` an array kind without disturbing a value it already holds.
@@ -245,6 +273,10 @@ pub(crate) fn assign_element(
         ArraySelector::Key(key) => {
             current.set_associative(BStr::new(key.as_slice()), element);
         }
+        /* Already reported by `normalize_index`, which cannot raise: a
+         * read through the same subscript is reported there and then
+         * carries on. Only the write has an error left to take. */
+        ArraySelector::Missing => return Err(Error::abandoned(shell.evaluation.diagnostic_line)),
         ArraySelector::All | ArraySelector::Joined => {
             let mut message = name.to_vec();
             message.extend_from_slice(b": cannot assign to a whole-array subscript");
@@ -260,7 +292,7 @@ fn existing_element(value: &VariableValue, selector: &ArraySelector) -> Option<B
         ArraySelector::Key(key) => value
             .associative(BStr::new(key.as_slice()))
             .map(BStr::to_owned),
-        ArraySelector::All | ArraySelector::Joined => None,
+        ArraySelector::Missing | ArraySelector::All | ArraySelector::Joined => None,
     }
 }
 
@@ -331,6 +363,12 @@ pub(crate) fn assign_compound(
             ArraySelector::Key(key) => {
                 current.set_associative(BStr::new(key.as_slice()), value);
             }
+            /* Already reported by `normalize_index`, which cannot raise: a
+             * read through the same subscript is reported there and then
+             * carries on. Only the write has an error left to take. */
+            ArraySelector::Missing => {
+                return Err(Error::abandoned(shell.evaluation.diagnostic_line));
+            }
             ArraySelector::All | ArraySelector::Joined => {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b": cannot assign to a whole-array subscript");
@@ -358,6 +396,10 @@ pub(crate) fn unset_element(
         ArraySelector::Key(key) => {
             current.unset_associative(BStr::new(key.as_slice()));
         }
+        /* Already reported by `normalize_index`, which cannot raise: a
+         * read through the same subscript is reported there and then
+         * carries on. Only the write has an error left to take. */
+        ArraySelector::Missing => return Err(Error::abandoned(shell.evaluation.diagnostic_line)),
         // `unset a[@]` clears every element but keeps the declaration.
         ArraySelector::All | ArraySelector::Joined => {
             current = VariableValue::empty(current.kind());
@@ -437,7 +479,8 @@ fn reject_read_only(shell: &mut Shell, name: &BStr, guard: ReadOnlyGuard) -> Res
     }
     let mut message = name.to_vec();
     message.extend_from_slice(b": is read only");
-    Err(shell.diagnostics().shell_error(&message))
+    // [spec:nsh:req:compat.bash.error-boundary]
+    Err(shell.diagnostics().dialect_error(&message))
 }
 
 /// Write a whole structural value back, going through `set_entry` first

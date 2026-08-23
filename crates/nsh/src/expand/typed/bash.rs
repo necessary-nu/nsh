@@ -437,7 +437,8 @@ pub(super) fn transform(
          * `@P` is otherwise a data-to-syntax path over a variable's
          * contents. */
         b"P" => map_value(shell, value, context, |_, text| BString::from(text)),
-        _ => Err(shell.diagnostics().shell_error(b"Bad substitution")),
+        // [spec:nsh:req:compat.bash.error-boundary]
+        _ => Err(shell.diagnostics().dialect_error(b"Bad substitution")),
     }
 }
 
