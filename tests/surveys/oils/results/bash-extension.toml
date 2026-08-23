@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-extension"
 group_label = "Bash extension survey"
 shell = "target/bash-mode/bash"
-shell_sha256 = "877b0a58d9a33e07fd45cffcfe42f8311aba01fd46f51b69650474185a290902"
+shell_sha256 = "7a4443256478d9eb54939254111b2772ea5014eb23bd19e1abdbbac391e3c6c5"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -14,10 +14,10 @@ timeout_ms = 5000
 selected = 1121
 executed = 1121
 pass = 784
-fail = 298
+fail = 299
 skip = 0
 unsupported = 17
-known_bug = 22
+known_bug = 21
 timeout = 0
 error = 0
 
@@ -290,6 +290,15 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "array-compat.test.sh"
+index = 9
+line = 94
+description = "Apply vectorized operations on ${a[*]}"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "array-compat.test.sh"
 index = 10
 line = 105
 description = "value.BashArray internal representation - Indexed"
@@ -554,6 +563,16 @@ description = "${a[@]:BigInt}"
 outcome = "fail"
 status = 0
 qualifier = "BUG"
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "array-sparse.test.sh"
+index = 25
+line = 915
+description = "${a[@]@P}, ${a[@]@Q}, and ${a[@]@a}"
+outcome = "fail"
+status = 0
+qualifier = "OK"
 difference_fields = ["stdout"]
 
 [[nonpassing]]
@@ -882,42 +901,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "assign-extended.test.sh"
-index = 2
-line = 28
-description = "declare -f exit code indicates function existence"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 3
-line = 51
-description = "declare -F prints function names"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 4
-line = 69
-description = "declare -F with shopt -s extdebug prints more info"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 5
-line = 95
-description = "declare -F with shopt -s extdebug and main file"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
 index = 7
 line = 132
 description = "declare"
@@ -988,15 +971,6 @@ difference_fields = []
 
 [[nonpassing]]
 spec = "assign-extended.test.sh"
-index = 22
-line = 672
-description = "typeset -f"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
 index = 24
 line = 714
 description = "typeset -r makes a string readonly"
@@ -1061,39 +1035,6 @@ description = "typeset +r removes read-only attribute (TODO: documented in bash 
 outcome = "fail"
 status = 2
 qualifier = "OK"
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 36
-line = 946
-description = "function name with /"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 38
-line = 964
-description = "unset and shell funcs"
-outcome = "fail"
-status = 0
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "ble-idioms.test.sh"
-index = 5
-line = 80
-description = "recursive arith: recursion"
-outcome = "fail"
-status = 2
 difference_fields = [
     "stdout",
     "status",
@@ -1225,12 +1166,15 @@ difference_fields = [
 
 [[nonpassing]]
 spec = "builtin-bash.test.sh"
-index = 12
-line = 205
-description = "mapfile / readarray stdin  TODO: Fix me."
+index = 9
+line = 147
+description = "mapfile -t bugs (ble.sh)"
 outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
+status = 2
+difference_fields = [
+    "stdout",
+    "status",
+]
 
 [[nonpassing]]
 spec = "builtin-bind.test.sh"
@@ -2122,24 +2066,6 @@ difference_fields = []
 
 [[nonpassing]]
 spec = "builtin-read.test.sh"
-index = 46
-line = 777
-description = "read from redirected directory is non-fatal error"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-read.test.sh"
-index = 47
-line = 794
-description = "read -n from directory"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-read.test.sh"
 index = 48
 line = 810
 description = "mapfile from directory (bash doesn't handle errors)"
@@ -2233,24 +2159,6 @@ qualifier = "BUG"
 difference_fields = []
 
 [[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 17
-line = 179
-description = "type prints function source code"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 27
-line = 275
-description = "type -a -> builtin and file and shell function"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
 spec = "dbracket.test.sh"
 index = 28
 line = 234
@@ -2269,15 +2177,6 @@ outcome = "known-bug"
 status = 0
 qualifier = "BUG"
 difference_fields = []
-
-[[nonpassing]]
-spec = "extglob-files.test.sh"
-index = 18
-line = 293
-description = "No extended glob with simple_word_eval (YSH evaluation)"
-outcome = "fail"
-status = 127
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "extglob-files.test.sh"
@@ -2300,6 +2199,15 @@ difference_fields = [
     "stdout",
     "status",
 ]
+
+[[nonpassing]]
+spec = "extglob-match.test.sh"
+index = 21
+line = 266
+description = "Turning extglob on changes the meaning of [[ !(str) ]] in bash"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "for-expr.test.sh"
@@ -2360,6 +2268,15 @@ difference_fields = [
     "stdout",
     "status",
 ]
+
+[[nonpassing]]
+spec = "globignore.test.sh"
+index = 8
+line = 90
+description = "Ignore globs with char classes like [[:alnum:]]"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "globignore.test.sh"
@@ -2696,58 +2613,19 @@ difference_fields = [
 ]
 
 [[nonpassing]]
-spec = "print-source-code.test.sh"
-index = 0
-line = 4
-description = "typeset -f prints function source code"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "print-source-code.test.sh"
+spec = "nocasematch-match.test.sh"
 index = 1
-line = 15
-description = "typeset -f with function keyword (ksh style)"
+line = 19
+description = "[[ regex matching"
 outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "print-source-code.test.sh"
-index = 2
-line = 28
-description = "typeset -f prints function source code - nested functions"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "print-source-code.test.sh"
-index = 3
-line = 51
-description = "non-{ } function bodies can be serialized (rare)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "process-sub.test.sh"
-index = 2
-line = 24
-description = "Process sub from shell to stdin"
+index = 4
+line = 58
+description = "$(<file) idiom with process sub"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
@@ -3051,6 +2929,15 @@ difference_fields = [
 
 [[nonpassing]]
 spec = "redirect-multi.test.sh"
+index = 0
+line = 3
+description = "File redirects with glob args (bash and zsh only)"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "redirect-multi.test.sh"
 index = 2
 line = 39
 description = "ysh behavior when glob doesn't match"
@@ -3065,7 +2952,25 @@ index = 3
 line = 58
 description = "File redirect without matching any file, with failglob"
 outcome = "fail"
-status = 1
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "redirect-multi.test.sh"
+index = 5
+line = 94
+description = "Redirect to ''"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "redirect-multi.test.sh"
+index = 6
+line = 103
+description = "File redirect to $var with glob char"
+outcome = "fail"
+status = 0
 difference_fields = [
     "stdout",
     "status",
@@ -3073,15 +2978,30 @@ difference_fields = [
 
 [[nonpassing]]
 spec = "redirect-multi.test.sh"
+index = 7
+line = 132
+description = "File redirect that globs to more than one file (bash and zsh only)"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "redirect-multi.test.sh"
+index = 8
+line = 165
+description = "File redirect with extended glob"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "redirect-multi.test.sh"
 index = 9
 line = 193
 description = "Extended glob that doesn't match anything"
 outcome = "fail"
-status = 1
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "redirect-multi.test.sh"
@@ -3095,6 +3015,24 @@ difference_fields = [
     "stdout",
     "status",
 ]
+
+[[nonpassing]]
+spec = "redirect-multi.test.sh"
+index = 11
+line = 258
+description = "Redirect with brace expansion isn't allowed"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "redirect-multi.test.sh"
+index = 12
+line = 289
+description = "File redirects have word splitting too!"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "regex.test.sh"
@@ -3120,38 +3058,10 @@ difference_fields = [
 ]
 
 [[nonpassing]]
-spec = "serialize.test.sh"
-index = 9
-line = 213
-description = "xtrace"
-outcome = "fail"
-status = 0
-qualifier = "OK"
-difference_fields = ["stderr"]
-
-[[nonpassing]]
 spec = "sh-options-bash.test.sh"
 index = 1
 line = 24
 description = "SHELLOPTS is readonly"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 4
-line = 66
-description = "export SHELLOPTS does cross-process tracing"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 5
-line = 83
-description = "export SHELLOPTS does cross-process tracing with bash"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
@@ -3164,6 +3074,15 @@ description = "If shopt --set xtrace is allowed, it should update SHELLOPTS, not
 outcome = "fail"
 status = 0
 qualifier = "N-I"
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "toysh.test.sh"
+index = 0
+line = 6
+description = "@Q"
+outcome = "fail"
+status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]
@@ -3235,13 +3154,22 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
+index = 16
+line = 303
+description = "assoc array and @P @Q @a"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-op-bash.test.sh"
 index = 19
 line = 358
 description = "${!A@a} and ${!A[@]@a}"
-outcome = "known-bug"
+outcome = "fail"
 status = 0
 qualifier = "BUG"
-difference_fields = []
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
@@ -3261,6 +3189,15 @@ description = "Array expansion with nullary var op @P"
 outcome = "fail"
 status = 0
 qualifier = "OK"
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-op-bash.test.sh"
+index = 26
+line = 518
+description = "Array expansion with nullary var op @a"
+outcome = "fail"
+status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]
@@ -3331,6 +3268,15 @@ difference_fields = []
 
 [[nonpassing]]
 spec = "var-ref.test.sh"
+index = 4
+line = 98
+description = "${!a[@]-'default'} is legal but fails with more than one element"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-ref.test.sh"
 index = 12
 line = 200
 description = "Indirect expansion, THEN suffix operators"
@@ -3350,6 +3296,15 @@ difference_fields = []
 
 [[nonpassing]]
 spec = "var-ref.test.sh"
+index = 19
+line = 361
+description = "var ref TO array with arbitrary subscripts"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-ref.test.sh"
 index = 20
 line = 409
 description = "Bizarre tilde expansion in array index"
@@ -3363,11 +3318,8 @@ index = 21
 line = 423
 description = "Indirect expansion TO fancy expansion features bash disallows"
 outcome = "fail"
-status = 1
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-ref.test.sh"
@@ -3375,11 +3327,8 @@ index = 22
 line = 458
 description = "Bad var ref"
 outcome = "fail"
-status = 1
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-ref.test.sh"
@@ -3387,11 +3336,8 @@ index = 23
 line = 467
 description = "Bad var ref 2"
 outcome = "fail"
-status = 1
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-ref.test.sh"
@@ -3402,6 +3348,34 @@ outcome = "known-bug"
 status = 0
 qualifier = "BUG"
 difference_fields = []
+
+[[nonpassing]]
+spec = "var-ref.test.sh"
+index = 28
+line = 566
+description = "Array indirect expansion with suffix operators"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-ref.test.sh"
+index = 29
+line = 637
+description = "Array indirect expansion with replacements"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-ref.test.sh"
+index = 30
+line = 692
+description = "Array indirect expansion with @? conversion"
+outcome = "fail"
+status = 0
+qualifier = "OK"
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "zsh-idioms.test.sh"

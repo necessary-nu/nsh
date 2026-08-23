@@ -39,6 +39,7 @@ use crate::descriptors::LogicalDescriptor;
 use crate::word::ParsedWord;
 
 mod bash;
+pub(crate) mod source;
 
 pub(crate) use bash::{
     BashArithmeticCommand, BashArithmeticFor, BashArrayAssignment, BashArrayElement,

@@ -45,6 +45,22 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 // [spec:nsh:req:compat.bash.error-boundary]
                 return Err(shell.diagnostics().dialect_builtin_error(1, &message));
             }
+            /* Bash lets one `unset` reach either table: a name with no
+             * variable behind it unsets the function of that name.
+             * POSIX leaves that case unspecified and dash never looks,
+             * so the fallthrough is the dialect's and not the port's. */
+            // [spec:nsh:req:compat.bash.functions-scoping]
+            if shell.options.dialect() == crate::options::Dialect::Bash
+                && variable_attributes(shell, name).is_none()
+                && shell.commands.is_function(name)
+            {
+                crate::execution::unset_function(
+                    &mut shell.interrupt_deferral,
+                    &mut shell.commands,
+                    name,
+                );
+                continue;
+            }
             // `unset a[i]` removes one element; the whole-array forms
             // clear the elements but keep the declaration.
             if let Some((base, subscript)) = subscripted(name) {

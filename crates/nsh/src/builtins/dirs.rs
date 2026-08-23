@@ -30,6 +30,11 @@ impl DirectoryStack {
     pub(crate) const fn new() -> Self {
         Self { below: Vec::new() }
     }
+
+    /// The entries under the current directory, for `$DIRSTACK`.
+    pub(crate) fn below(&self) -> &[BString] {
+        &self.below
+    }
 }
 
 /// What `dirs` was asked to print.
@@ -62,6 +67,7 @@ pub fn run_dirs(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     if format.clear {
         shell.directory_stack.below.clear();
+        crate::variables::special::publish_directory_stack(shell);
         return Ok(Flow::Done(ExitStatus::SUCCESS));
     }
     write_stack(shell, format)?;
@@ -92,6 +98,7 @@ pub fn run_pushd(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return Ok(Flow::Done(ExitStatus::FAILURE));
         }
         shell.directory_stack.below[0] = here;
+        crate::variables::special::publish_directory_stack(shell);
         write_stack(shell, Format::default())?;
         return Ok(Flow::Done(ExitStatus::SUCCESS));
     };
@@ -101,6 +108,7 @@ pub fn run_pushd(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done(ExitStatus::FAILURE));
     }
     shell.directory_stack.below.insert(0, here);
+    crate::variables::special::publish_directory_stack(shell);
     write_stack(shell, Format::default())?;
     Ok(Flow::Done(ExitStatus::SUCCESS))
 }
@@ -122,6 +130,7 @@ pub fn run_popd(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !change_to(shell, BStr::new(target.as_slice()))? {
         return Ok(Flow::Done(ExitStatus::FAILURE));
     }
+    crate::variables::special::publish_directory_stack(shell);
     write_stack(shell, Format::default())?;
     Ok(Flow::Done(ExitStatus::SUCCESS))
 }

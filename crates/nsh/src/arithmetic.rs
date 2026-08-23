@@ -18,11 +18,20 @@ use crate::variables::{
     CallbackPolicy, VariableAttributes, lookup_bytes, lookup_integer_bytes, set_integer_bytes,
 };
 
-/// How deep one variable's value may be re-read as an expression.
+/// How deep an expression may nest before the evaluator refuses it.
 ///
-/// Bash evaluates a name's *value* as an expression, so `a=b; b=a` is a
-/// cycle rather than a number. The limit turns that into a diagnostic.
-const MAX_NAME_DEPTH: u32 = 32;
+/// Two things spend this budget and they spend the same stack, so they
+/// share one counter: a parenthesis, and a name whose *value* is read
+/// back as an expression. Bash evaluates a name's value that way, which
+/// makes `a=b; b=a` a cycle rather than a number and
+/// `loop='i<=100&&(s+=i,i++,loop)'` a way to count to a hundred.
+///
+/// Counting both is what keeps the ceiling meaningful.
+/// `[dec:nsh:safety-trumps-compatibility]` does not allow the
+/// alternative: Bash bounds only the name recursion, so sixty
+/// parentheses inside a self-referring name crash it, and a shell that
+/// matched it there would crash too.
+const MAX_NAME_DEPTH: u32 = 1024;
 
 /// The value carried by an arithmetic token.
 ///
@@ -624,7 +633,13 @@ impl<'a, 'shell> Parser<'a, 'shell> {
             Token::Increment => self.step(1, evaluate),
             Token::Decrement => self.step(-1, evaluate),
             Token::LParen => {
-                let value = self.comma(evaluate)?;
+                if self.depth >= MAX_NAME_DEPTH {
+                    return Err(self.error(b"expression recursion level exceeded"));
+                }
+                self.depth += 1;
+                let value = self.comma(evaluate);
+                self.depth -= 1;
+                let value = value?;
                 if self.current() != Token::RParen {
                     return Err(self.error(b"expecting ')'"));
                 }

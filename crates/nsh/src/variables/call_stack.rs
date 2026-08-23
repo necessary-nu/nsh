@@ -167,6 +167,23 @@ pub(crate) fn record_definition(shell: &mut Shell, name: &BStr) {
         .insert(name.to_owned(), source);
 }
 
+/// The file a function's body was read from, as `declare -F` reports
+/// it under `shopt -s extdebug`.
+///
+/// A function the shell read before any file was named -- from `-c`, or
+/// from standard input -- belongs to the frame Bash calls `main`, which
+/// is the same fallback a call to it pushes.
+// [spec:nsh:req:compat.bash.traps-introspection]
+pub(crate) fn definition_source(shell: &Shell, name: &BStr) -> BString {
+    shell
+        .variables
+        .call_stack
+        .definitions
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| BString::from(MAIN))
+}
+
 /// Enter a function call, at `line` of the caller's file.
 // [spec:nsh:req:compat.bash.traps-introspection]
 pub(crate) fn push_function(shell: &mut Shell, name: &BStr, line: i32) {

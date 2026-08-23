@@ -120,6 +120,10 @@ pub(crate) fn update_current_directory(
         Some(BStr::new(&dir)),
         VariableAttributes::EXPORTED,
     )?;
+    /* `$DIRSTACK`'s first entry is the current directory, so a `cd`
+     * moves the stack even though it never touches `pushd`'s half. */
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    crate::variables::special::publish_directory_stack(shell);
     Ok(())
 }
 

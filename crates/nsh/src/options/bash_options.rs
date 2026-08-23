@@ -64,7 +64,7 @@ pub(crate) const NAMES: [&[u8]; 40] = [
 /// exists. A name only belongs here while doing nothing is *safe* --
 /// `xpg_echo` is absent for that reason, because silently ignoring it
 /// would change what `echo` prints without saying so.
-const INERT: [&[u8]; 32] = [
+const INERT: [&[u8]; 30] = [
     b"autocd",
     b"cdable_vars",
     b"cdspell",
@@ -76,7 +76,6 @@ const INERT: [&[u8]; 32] = [
     b"direxpand",
     b"dirspell",
     b"execfail",
-    b"extdebug",
     b"extquote",
     b"force_fignore",
     b"globasciiranges",
@@ -87,7 +86,6 @@ const INERT: [&[u8]; 32] = [
     b"hostcomplete",
     b"huponexit",
     b"interactive_comments",
-    b"lastpipe",
     b"lithist",
     b"localvar_inherit",
     b"localvar_unset",
@@ -116,12 +114,16 @@ fn inert_index(name: &BStr) -> Option<u32> {
 pub(crate) enum BashShopt {
     /// Include names beginning with `.` in pathname expansion.
     DotGlob,
+    /// Report a function's definition line and file from `declare -F`.
+    ExtDebug,
     /// Recognise `?(…) *(…) +(…) @(…) !(…)` in patterns.
     ExtGlob,
     /// Fail the command when a pattern matches nothing.
     FailGlob,
     /// Let `**` cross directory boundaries.
     GlobStar,
+    /// Run a pipeline's last stage in this shell rather than a child.
+    LastPipe,
     /// Match pathnames without regard to case.
     NoCaseGlob,
     /// Match `case` and `[[ ]]` patterns without regard to case.
@@ -131,11 +133,13 @@ pub(crate) enum BashShopt {
 }
 
 impl BashShopt {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 9] = [
         Self::DotGlob,
+        Self::ExtDebug,
         Self::ExtGlob,
         Self::FailGlob,
         Self::GlobStar,
+        Self::LastPipe,
         Self::NoCaseGlob,
         Self::NoCaseMatch,
         Self::NullGlob,
@@ -144,9 +148,11 @@ impl BashShopt {
     const fn name(self) -> &'static [u8] {
         match self {
             Self::DotGlob => b"dotglob",
+            Self::ExtDebug => b"extdebug",
             Self::ExtGlob => b"extglob",
             Self::FailGlob => b"failglob",
             Self::GlobStar => b"globstar",
+            Self::LastPipe => b"lastpipe",
             Self::NoCaseGlob => b"nocaseglob",
             Self::NoCaseMatch => b"nocasematch",
             Self::NullGlob => b"nullglob",
@@ -302,9 +308,17 @@ impl ShellOptions {
     }
 
     /// `$SHELLOPTS`: the `set -o` names currently on, in table order.
+    ///
+    /// The names are the ones `set -o` itself presents, which is what
+    /// makes the value one a real Bash can read back: the dialect switch
+    /// is spelled `posix` there and is off in Bash mode, so it never
+    /// reaches a child as an option name Bash has never heard of.
     // [spec:nsh:req:compat.bash.builtins-special-variables]
     pub(crate) fn enabled_shell_options(&self) -> Vec<&'static [u8]> {
-        self.shell_options()
+        let dialect = self.dialect();
+        OPTION_SPECS
+            .iter()
+            .map(|spec| super::presented_option(*spec, dialect, self))
             .filter_map(|(name, on)| on.then_some(name))
             .collect()
     }

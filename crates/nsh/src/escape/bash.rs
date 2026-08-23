@@ -164,9 +164,62 @@ pub(crate) fn readable_quote(locale: &nsh_platform::Locale, value: &BStr) -> BSt
     super::shell_quote(value)
 }
 
+/// `set -x`: the spelling Bash traces one word with.
+///
+/// Bash quotes a traced word only when it would not read back as itself,
+/// which is what keeps `+ echo hi` unquoted while `+ sh -c 'echo 2'`
+/// shows where the argument's boundaries are. Its own order is tested
+/// here too: a word with a shell metacharacter takes single quotes even
+/// when it also holds a byte that would otherwise ask for `$'...'`.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub(crate) fn trace_quote(locale: &nsh_platform::Locale, value: &BStr) -> BString {
+    if value.is_empty() {
+        return BString::from("''");
+    }
+    if contains_shell_metacharacter(value) {
+        return super::shell_quote(value);
+    }
+    if needs_ansi_c(locale, value) {
+        return ansi_c_quote(locale, value);
+    }
+    value.to_owned()
+}
+
+/// Whether a word holds a byte that changes meaning when it is not
+/// quoted, in the set Bash's `sh_contains_shell_metas` uses.
+fn contains_shell_metacharacter(value: &BStr) -> bool {
+    let bytes: &[u8] = value.as_ref();
+    bytes.iter().enumerate().any(|(at, byte)| match byte {
+        b' ' | b'\t' | b'\n' | b'*' | b'?' | b'[' | b']' | b'{' | b'}' | b'(' | b')' | b'$'
+        | b'`' | b'\\' | b'"' | b'\'' | b'|' | b'&' | b';' | b'<' | b'>' | b'!' | b'^' => true,
+        b'~' => at == 0 || matches!(bytes[at - 1], b':' | b'='),
+        b'#' => at == 0,
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
+    #[test]
+    fn a_traced_word_is_quoted_only_when_needed() {
+        let locale = locale();
+        assert_eq!(
+            trace_quote(&locale, BStr::new(b"echo")),
+            BString::from("echo")
+        );
+        assert_eq!(
+            trace_quote(&locale, BStr::new(b"echo 2")),
+            BString::from("'echo 2'")
+        );
+        assert_eq!(trace_quote(&locale, BStr::new(b"")), BString::from("''"));
+        assert_eq!(
+            trace_quote(&locale, BStr::new(&[0xff])),
+            BString::from("$'\\377'")
+        );
+    }
 
     fn locale() -> nsh_platform::Locale {
         nsh_platform::Locale::c().expect("the C locale exists")

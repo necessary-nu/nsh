@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-named-diagnostic"
 group_label = "Named *-bash diagnostic slice"
 shell = "target/bash-mode/bash"
-shell_sha256 = "877b0a58d9a33e07fd45cffcfe42f8311aba01fd46f51b69650474185a290902"
+shell_sha256 = "7a4443256478d9eb54939254111b2772ea5014eb23bd19e1abdbbac391e3c6c5"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -13,22 +13,25 @@ timeout_ms = 5000
 [totals]
 selected = 112
 executed = 112
-pass = 93
-fail = 16
+pass = 95
+fail = 15
 skip = 0
 unsupported = 0
-known_bug = 3
+known_bug = 2
 timeout = 0
 error = 0
 
 [[nonpassing]]
 spec = "builtin-bash.test.sh"
-index = 12
-line = 205
-description = "mapfile / readarray stdin  TODO: Fix me."
+index = 9
+line = 147
+description = "mapfile -t bugs (ble.sh)"
 outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
+status = 2
+difference_fields = [
+    "stdout",
+    "status",
+]
 
 [[nonpassing]]
 spec = "builtin-trap-bash.test.sh"
@@ -61,24 +64,6 @@ outcome = "known-bug"
 status = 0
 qualifier = "BUG"
 difference_fields = []
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 17
-line = 179
-description = "type prints function source code"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 27
-line = 275
-description = "type -a -> builtin and file and shell function"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "glob-bash.test.sh"
@@ -139,24 +124,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "sh-options-bash.test.sh"
-index = 4
-line = 66
-description = "export SHELLOPTS does cross-process tracing"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 5
-line = 83
-description = "export SHELLOPTS does cross-process tracing with bash"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
 index = 7
 line = 124
 description = "If shopt --set xtrace is allowed, it should update SHELLOPTS, not BASHOPTS"
@@ -177,13 +144,22 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
+index = 16
+line = 303
+description = "assoc array and @P @Q @a"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-op-bash.test.sh"
 index = 19
 line = 358
 description = "${!A@a} and ${!A[@]@a}"
-outcome = "known-bug"
+outcome = "fail"
 status = 0
 qualifier = "BUG"
-difference_fields = []
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
@@ -203,6 +179,15 @@ description = "Array expansion with nullary var op @P"
 outcome = "fail"
 status = 0
 qualifier = "OK"
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "var-op-bash.test.sh"
+index = 26
+line = 518
+description = "Array expansion with nullary var op @a"
+outcome = "fail"
+status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]

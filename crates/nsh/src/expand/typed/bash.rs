@@ -131,9 +131,9 @@ pub(super) fn indirect_names(
         return Ok(None);
     }
     let prefix = name[..name.len() - 1].to_vec();
-    /* Every name that holds a value, not only those with a scalar to
-     * read: a name declared as an empty array is set, and Bash lists
-     * it. */
+    /* Every name that has an entry, not only every name with a scalar
+     * in it: `hello=()` declares `hello` and Bash lists it here even
+     * though there is no element to read. */
     // [spec:nsh:req:compat.bash.arrays-declarations]
     let mut names = crate::variables::value::declared_names(shell)
         .into_iter()

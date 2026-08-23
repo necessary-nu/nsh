@@ -58,6 +58,10 @@ fn dialect_change_invalidates_cache() {
 fn restorable_option_state() {
     let mut shell = shell(true);
 
+    /* The dialect switch is presented as Bash's own `posix` here, and
+     * inverted with it: a Bash-mode shell is one where `posix` is off.
+     * `[fc28c27]` made the listing say so; this expectation was written
+     * before it and had gone stale. */
     let (status, set_state, _) = run(&mut shell, b"set +o");
     assert_eq!(status, 0);
     /* In Bash mode the dialect switch is reported as `posix`, off --

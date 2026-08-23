@@ -1288,6 +1288,7 @@ derived_priorities (
 
 assertions (
     {id bash-expansion-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:51.231881628Z}
+    {id bash-introspection-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:51.603665937Z}
     {id bash-mode-error-boundary, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:50.377440971Z}
     {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}
     {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}

@@ -231,3 +231,85 @@ fn the_dialect_selects_the_declaration_language() {
     assert_eq!(run(&mut bash, b"echo $n").1, b"2\n");
     assert_eq!(run(&mut bash, b"declare -i m").0, 127);
 }
+
+/// `declare -f` prints a body in Bash's canonical layout, and `type`
+/// prints the same text under its own sentence.
+// [spec:nsh:req:compat.bash.functions-scoping/test]
+#[test]
+fn a_definition_prints_in_bash_layout() {
+    expect(
+        b"f () { echo; }\ndeclare -f f\n",
+        b"f () \n{ \n    echo\n}\n",
+    );
+    expect(
+        b"f () { echo; }\ntype -a f\n",
+        b"f is a function\nf () \n{ \n    echo\n}\n",
+    );
+    expect(
+        b"outer() { echo a; if x; then echo b; fi; }\ndeclare -f outer\n",
+        b"outer () \n{ \n    echo a;\n    if x; then\n        echo b;\n    fi\n}\n",
+    );
+}
+
+/// The printed text is source: re-reading it defines the same function,
+/// and printing that one again gives the same bytes.
+// [spec:nsh:req:compat.bash.functions-scoping/test]
+#[test]
+fn a_printed_definition_reads_back_as_itself() {
+    let script: &[u8] = b"f() { echo 'a  b' \"$1\" un*q; case $x in p|q) echo m;; esac; }\n\
+                          code=$(declare -f f)\n\
+                          unset -f f\n\
+                          eval \"$code\"\n\
+                          f one\n\
+                          test \"$code\" = \"$(declare -f f)\" && echo stable\n";
+    expect(script, b"a  b one un*q\nstable\n");
+}
+
+/// A body that is not a brace group is still printed as one, which is
+/// what Bash does and what makes every definition re-readable.
+// [spec:nsh:req:compat.bash.functions-scoping/test]
+#[test]
+fn a_subshell_body_prints_inside_braces() {
+    expect(
+        b"f() ( echo sub )\ndeclare -f f\n",
+        b"f () \n{ \n    ( echo sub )\n}\n",
+    );
+}
+
+/// `-F` answers with names, and adds the definition's line and file once
+/// `extdebug` asks for them. Neither form declares anything: `declare -f
+/// x` must not bring an `x` into being.
+// [spec:nsh:req:compat.bash.functions-scoping/test]
+#[test]
+fn the_name_listing_reports_a_definitions_origin() {
+    expect(
+        b"b() { :; }\na() { :; }\ndeclare -F\n",
+        b"declare -f a\ndeclare -f b\n",
+    );
+    expect(b"ble/foo() { :; }\ndeclare -F ble/foo\n", b"ble/foo\n");
+    expect(
+        b"shopt -s extdebug\nf() { :; }\ndeclare -F f\n",
+        b"f 2 main\n",
+    );
+
+    let mut shell = shell(true);
+    assert_eq!(run(&mut shell, b"declare -f nosuch").0, 1);
+    assert_eq!(run(&mut shell, b"declare -F nosuch").0, 1);
+    assert_eq!(run(&mut shell, b"declare -p nosuch 2>/dev/null").0, 1);
+}
+
+/// Bash lets one `unset` reach either table, so a name with no variable
+/// behind it unsets the function.
+// [spec:nsh:req:compat.bash.functions-scoping/test]
+#[test]
+fn unset_reaches_the_function_table() {
+    expect(
+        b"foo() { echo bar; }\nfoo\nunset foo\ndeclare -F\necho gone\n",
+        b"bar\ngone\n",
+    );
+    // A variable of the same name is what `unset` takes first.
+    expect(
+        b"foo=v\nfoo() { echo fn; }\nunset foo\necho \"[$foo]\"\nfoo\n",
+        b"[]\nfn\n",
+    );
+}

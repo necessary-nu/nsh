@@ -160,7 +160,18 @@ pub(super) fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if let Some(echo) = &echo {
         restore(shell, &requested, echo);
     }
-    let (record, complete) = outcome?;
+    /* Bash reports a descriptor it could not read -- a directory, most
+     * often -- as a plain failure of `read`, where the shell's own input
+     * stack calls an unreadable source unrecoverable because it is
+     * normally the script itself. The diagnostic has already been
+     * written; only the status is decided here. */
+    let (record, complete) = match outcome {
+        Ok(record) => record,
+        Err(error) if error.is_unrecoverable_read() => {
+            return Ok(Flow::Done(ExitStatus::FAILURE));
+        }
+        Err(error) => return Err(error),
+    };
 
     assign(shell, &requested, &record, names)?;
     Ok(Flow::Done(if complete {
