@@ -293,7 +293,11 @@ fn expand_parts(
     let mut result = Expansion::none();
     let mut at = 0;
     let mut tilde = if context.tilde_at_start && !context.quoted {
-        if context.operand && context.tilde_after_colon {
+        /* Where `:` separates tilde prefixes, it ends the first one too:
+         * an assignment operand -- `${x-~:~}` inside one, or the value of
+         * a `[k]=~:~` element, whose `name[k]=` the parser already took
+         * off -- expands every colon-separated segment. */
+        if context.tilde_after_colon {
             TildePosition::Assignment
         } else {
             TildePosition::WordStart
@@ -566,18 +570,36 @@ fn expand_parameter(
     }
     let mut value = read_value(shell, name.as_bstr())?;
     if parameter.indirect {
+        /* A `declare -n` reference already reads through itself, so
+         * Bash inverts `${!ref}` there: it answers with the *name* the
+         * reference holds rather than dereferencing a second time. */
+        // [spec:nsh:req:compat.bash.functions-scoping]
+        if let Some(target) = crate::variables::nameref::reference_name(shell, name.as_bstr()) {
+            return value_expansion(
+                shell,
+                name.as_bstr(),
+                Value::Variable(VariableValue::Scalar(target)),
+                context,
+            );
+        }
         // `${!ref}` reads the name out of `ref` and expands that.
         // [spec:nsh:req:compat.bash.expansion-globbing]
         name = value_bytes(shell, value, context);
         value = read_value(shell, name.as_bstr())?;
     }
     /* An array with no elements answers `-`, `=`, `?` and `+` as an unset
-     * name does, without the colon. `$@` and `$*` keep the POSIX answer;
-     * only a written `[@]` or `[*]` subscript takes this one. */
+     * name does, without the colon -- through a written `[@]` or `[*]`
+     * subscript and through the bare name alike, since `$a` reads an
+     * element that is not there either. `$@` and `$*` keep the POSIX
+     * answer. */
     // [spec:nsh:req:compat.bash.arrays-declarations]
-    let empty_array = split_subscript(name.as_bstr())
-        .is_some_and(|(_, subscript)| subscript == "@" || subscript == "*")
-        && matches!(&value, Value::At(words) | Value::Star(words) if words.is_empty());
+    let subscripted = split_subscript(name.as_bstr())
+        .is_some_and(|(_, subscript)| subscript == "@" || subscript == "*");
+    let empty_array = (subscripted
+        && matches!(&value, Value::At(words) | Value::Star(words) if words.is_empty()))
+        || matches!(&value, Value::Variable(stored)
+            if stored.kind() != crate::variables::value::VariableKind::Scalar
+                && crate::variables::arrays::elements(stored).is_empty());
     let unavailable =
         value.is_unset() || empty_array || (parameter.colon && value.is_empty(shell, context));
 
@@ -674,35 +696,12 @@ fn expand_parameter(
                 return Ok(empty_value(context));
             }
             let pattern = pattern_operand(shell, parameter, context)?;
-            let positional_words = match &value {
-                Value::At(words) if context.full => Some(words),
-                Value::Star(words) if context.full && !context.quoted => Some(words),
-                _ => None,
-            };
-            if let Some(words) = positional_words {
-                return Ok(Expansion {
-                    fields: words
-                        .iter()
-                        .map(|word| {
-                            let trimmed = trim(&shell.locale, word, &pattern, parameter.operation);
-                            Field::from_bytes(
-                                &trimmed,
-                                context.protects(),
-                                !context.quoted,
-                                context.quoted,
-                            )
-                        })
-                        .collect(),
-                });
-            }
-            let bytes = value_bytes(shell, value, context);
-            let trimmed = trim(&shell.locale, &bytes, &pattern, parameter.operation);
-            Ok(Expansion::one(Field::from_bytes(
-                &trimmed,
-                context.protects(),
-                context.splits(),
-                context.quoted,
-            )))
+            /* A word list is trimmed element by element; in Bash a
+             * quoted `"${a[*]}"` is one too, and joins afterwards. */
+            let operation = parameter.operation;
+            bash::map_value(shell, value, context, |locale, text| {
+                trim(locale, text, &pattern, operation)
+            })
         }
         ParameterOperation::Substring
         | ParameterOperation::SubstituteFirst
@@ -740,7 +739,14 @@ fn read_value(shell: &mut Shell, name: &BStr) -> Result<Value, Error> {
     // chain has nothing to read and behaves as unset.
     let target = crate::variables::nameref::read_name(shell, name);
     let Some(target) = target else {
-        return Ok(Value::Unset);
+        /* A whole-array subscript that resolves to nothing has no
+         * elements, which is not the same as one empty field: quoted,
+         * `"${ref[@]}"` contributes no argument at all. */
+        return Ok(match split_subscript(name) {
+            Some((_, subscript)) if subscript == "@" => Value::At(Vec::new()),
+            Some((_, subscript)) if subscript == "*" => Value::Star(Vec::new()),
+            _ => Value::Unset,
+        });
     };
     match split_subscript(target.as_bstr()) {
         Some((base, subscript)) => {

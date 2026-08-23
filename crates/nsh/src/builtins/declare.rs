@@ -17,7 +17,9 @@ use crate::status::ExitStatus;
 use crate::variables::arrays;
 use crate::variables::nameref::{self, LocalValue};
 use crate::variables::value::{BashAttribute, VariableKind, VariableValue};
-use crate::variables::{VariableAttributes, add_attributes, set_bytes};
+use crate::variables::{VariableAttributes, add_attributes};
+
+mod compound;
 
 /// Which entry a declaration operand creates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,9 +93,18 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     let mut status = ExitStatus::SUCCESS;
     for operand in operands {
-        if !apply(shell, &requested, operand, scope)? || !valid_operand(shell, operand) {
-            status = ExitStatus::FAILURE;
+        let name = operand_name(operand);
+        if apply(shell, &requested, operand, scope)?
+            && crate::parser::is_valid_name(&shell.locale, name)
+        {
+            continue;
         }
+        status = ExitStatus::FAILURE;
+        /* One refused operand does not refuse the others, and a
+         * structural value waiting for this command's attributes has to
+         * be told which name was refused. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        shell.evaluation.refused_declarations.push(name.to_owned());
     }
     Ok(Flow::Done(status))
 }
@@ -114,8 +125,11 @@ fn parse<'a>(args: &'a [&'a BStr]) -> Result<(Requested, &'a [&'a BStr]), u8> {
         }
         for letter in letters {
             match letter {
-                b'a' => requested.kind = Some(VariableKind::Indexed),
-                b'A' => requested.kind = Some(VariableKind::Associative),
+                /* `+a` asks for the attribute to go rather than for an
+                 * array; it does not make the operand a compound one. */
+                b'a' if enable => requested.kind = Some(VariableKind::Indexed),
+                b'A' if enable => requested.kind = Some(VariableKind::Associative),
+                b'a' | b'A' => {}
                 b'i' => requested.integer = Some(enable),
                 b'l' => requested.lowercase = Some(enable),
                 b'u' => requested.uppercase = Some(enable),
@@ -157,11 +171,17 @@ fn apply(
         None => (operand.to_owned(), None),
     };
     // A subscripted operand keeps its brackets out of the stored name.
-    let base = match name.find_byte(b'[') {
-        Some(at) if name.last() == Some(&b']') => BStr::new(&name[..at]).to_owned(),
-        _ => name.clone(),
-    };
+    let base = operand_name(BStr::new(name.as_slice())).to_owned();
     let base = BStr::new(base.as_slice());
+    /* An operand that does not name a variable is reported and skipped;
+     * the operands beside it are unaffected, as they are in Bash. */
+    if !crate::parser::is_valid_name(&shell.locale, base) {
+        let mut message = b"declare: `".to_vec();
+        message.extend_from_slice(operand.as_ref());
+        message.extend_from_slice(b"': not a valid identifier\n");
+        shell.write_output(OutputDestination::Stderr, &message)?;
+        return Ok(false);
+    }
 
     // A reference may only be given the name of something to refer to.
     if requested.nameref == Some(true)
@@ -184,6 +204,10 @@ fn apply(
     nameref::ensure_entry(shell, base);
 
     if let Some(kind) = requested.kind {
+        if !arrays::convertible(shell, base, kind) {
+            reject_conversion(shell, base, kind)?;
+            return Ok(false);
+        }
         arrays::ensure_kind(shell, base, kind, VariableAttributes::NONE)?;
     }
 
@@ -202,12 +226,14 @@ fn apply(
     }
 
     if let Some(value) = value {
-        assign(
-            shell,
-            BStr::new(name.as_slice()),
-            base,
-            BStr::new(value.as_slice()),
-        )?;
+        let value = BStr::new(value.as_slice());
+        /* An operand that arrived as one word still spells a compound
+         * value, and a name that is an array takes it as one. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        match compound::parenthesised(value).filter(|_| is_array(shell, base)) {
+            Some(inner) => compound::assign(shell, base, inner)?,
+            None => arrays::assign_text_target(shell, BStr::new(name.as_slice()), value)?,
+        }
     }
 
     if requested.nameref == Some(true) {
@@ -229,31 +255,44 @@ fn apply(
     Ok(true)
 }
 
-fn assign(shell: &mut Shell, name: &BStr, base: &BStr, value: &BStr) -> Result<(), Error> {
-    let bytes: &[u8] = name.as_ref();
-    match bytes.find_byte(b'[') {
-        Some(at) if bytes.last() == Some(&b']') => {
-            let subscript = BStr::new(&bytes[at + 1..bytes.len() - 1]).to_owned();
-            let selector =
-                arrays::resolve_text_selector(shell, base, BStr::new(subscript.as_slice()))?;
-            arrays::assign_element(
-                shell,
-                base,
-                &selector,
-                value,
-                false,
-                arrays::ReadOnlyGuard::Enforce,
-            )
-        }
-        _ => set_bytes(shell, base, Some(value), VariableAttributes::NONE),
-    }
+/// Report the array kind a name may not be given.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn reject_conversion(shell: &mut Shell, base: &BStr, kind: VariableKind) -> Result<(), Error> {
+    let word = |kind| match kind {
+        VariableKind::Associative => b"associative".as_slice(),
+        VariableKind::Indexed | VariableKind::Scalar => b"indexed".as_slice(),
+    };
+    let existing = crate::variables::value::variable_kind(shell, base).unwrap_or(kind);
+    let mut message = b"declare: ".to_vec();
+    message.extend_from_slice(base.as_ref());
+    message.extend_from_slice(b": cannot convert ");
+    message.extend_from_slice(word(existing));
+    message.extend_from_slice(b" to ");
+    message.extend_from_slice(word(kind));
+    message.extend_from_slice(b" array\n");
+    shell.write_output(OutputDestination::Stderr, &message)
 }
 
-fn valid_operand(shell: &mut Shell, operand: &BStr) -> bool {
+/// Whether `name` holds an array, which decides how `(…)` is read.
+fn is_array(shell: &Shell, name: &BStr) -> bool {
+    matches!(
+        crate::variables::value::variable_kind(shell, name),
+        Some(VariableKind::Indexed | VariableKind::Associative)
+    )
+}
+
+/// The name an operand declares, without its subscript or its value.
+///
+/// A subscript comes off only when it is closed: `a[2]=3` declares `a`,
+/// where `a[` declares nothing and keeps its bracket, so the two are
+/// never mistaken for one another when a refusal is recorded by name.
+fn operand_name(operand: &BStr) -> &BStr {
     let bytes: &[u8] = operand.as_ref();
     let name = bytes.find_byte(b'=').map_or(bytes, |at| &bytes[..at]);
-    let name = name.find_byte(b'[').map_or(name, |at| &name[..at]);
-    crate::parser::is_valid_name(&shell.locale, BStr::new(name))
+    if name.last() != Some(&b']') {
+        return BStr::new(name);
+    }
+    BStr::new(name.find_byte(b'[').map_or(name, |at| &name[..at]))
 }
 
 /// `declare -p`, and the bare `declare` listing.

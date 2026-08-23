@@ -243,7 +243,24 @@ fn append_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode> {
     })))
 }
 
-pub(super) fn declaration_context(args: &[Node]) -> bool {
+/// Whether this command's assignment-shaped operands are assignments.
+///
+/// Bash decides that while parsing, so an operand of a declaration
+/// built-in reached through an expansion -- `cmd=typeset; $cmd x=$y` --
+/// is an ordinary word and splits. POSIX mode keeps deciding it from
+/// the built-in that ran.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn declaration_operands(shell: &Shell, args: &[Node]) -> bool {
+    shell.options.dialect() != Dialect::Bash || declaration_context(args)
+}
+
+/// Whether a simple command's own word names a declaration built-in.
+///
+/// The name has to be written out: Bash decides this while parsing, so
+/// `declare x=$y` expands its operand as an assignment while
+/// `cmd=declare; $cmd x=$y` splits the operand like any other word.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn declaration_context(args: &[Node]) -> bool {
     let Some(Node::Word(command)) = args.first() else {
         return false;
     };
@@ -944,6 +961,43 @@ pub(super) fn arithmetic_bracket(
     lexer.output.truncate(substitution_start);
     lexer.output.push(WordToken::ArithmeticStart);
     true
+}
+
+/// Track the `[...]` of an assignment word, where blanks and shell
+/// operators are the subscript's own bytes.
+///
+/// Bash's lexer, at a position where an assignment word may begin,
+/// consumes a balanced bracket pair after a name: `a[1 + 1]=x` is one
+/// word and one assignment, where the ordinary rules would end the word
+/// at the blank and leave three. The subscript is an arithmetic
+/// expression, so what is inside it is data -- including `&`, `|` and
+/// `;` -- and only the matching `]` ends it.
+///
+/// A word that is not in that position is untouched, which is what
+/// keeps `argv.py a[1 + 2]=` three arguments.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(super) fn track_assignment_subscript(shell: &Shell, lexer: &mut WordLexer<'_>) {
+    if !lexer.assignment_position || lexer.current_syntax().syntax != SyntaxContext::Base {
+        return;
+    }
+    if lexer.input.is(b'[') {
+        if lexer.subscript_depth > 0 {
+            lexer.subscript_depth += 1;
+            return;
+        }
+        /* The bytes before the bracket have to spell a name; anything
+         * else -- a glob, a quoted run, an expansion -- is an ordinary
+         * word that happens to contain a bracket. */
+        let name = lexer.literal_bytes(0..lexer.output.len());
+        if name.is_some_and(|name| !name.is_empty() && is_valid_name(&shell.locale, name.as_bstr()))
+        {
+            lexer.subscript_depth = 1;
+        }
+        return;
+    }
+    if lexer.input.is(b']') && lexer.subscript_depth > 0 {
+        lexer.subscript_depth -= 1;
+    }
 }
 
 /// Close a `$[…]` expression, counting the brackets a subscript inside

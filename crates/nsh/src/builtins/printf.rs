@@ -95,11 +95,13 @@ impl Destination {
         let Self::Variable { name, rendered } = self else {
             return Ok(());
         };
-        crate::variables::set_bytes(
+        /* `-v` names a variable the way an assignment does, so a
+         * subscript in it selects an element rather than being part of
+         * the name: `printf -v 'a[k]'` writes that element. */
+        crate::variables::arrays::assign_text_target(
             shell,
             BStr::new(name.as_slice()),
-            Some(BStr::new(rendered.as_slice())),
-            crate::variables::VariableAttributes::NONE,
+            BStr::new(rendered.as_slice()),
         )
     }
 }

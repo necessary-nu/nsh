@@ -87,13 +87,17 @@ pub(crate) fn resolve_text_selector(
     name: &BStr,
     subscript: &BStr,
 ) -> Result<ArraySelector, Error> {
-    let resolved = subscript_word(shell, subscript)?;
+    let resolved = text_word(shell, subscript)?;
     resolve_selector(shell, name, BStr::new(resolved.as_slice()))
 }
 
-/// Apply a subscript's quoting and expansion, yielding the bytes that
-/// select an element.
-fn subscript_word(shell: &mut Shell, subscript: &BStr) -> Result<BString, Error> {
+/// Apply a word's quoting and expansion to text the parser never saw.
+///
+/// A subscript, and the value of an element in an operand a declaration
+/// built-in was handed as one word, both arrive as bytes: quotes come
+/// off, text outside single quotes expands, and a blank is data.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn text_word(shell: &mut Shell, subscript: &BStr) -> Result<BString, Error> {
     const ACTIVE: &[u8] = b"'\"\\$`";
     if !subscript.iter().any(|byte| ACTIVE.contains(byte)) {
         return Ok(subscript.to_owned());
@@ -163,6 +167,21 @@ fn normalize_index(shell: &mut Shell, name: &BStr, index: i64) -> Result<u64, Er
     Ok(u64::try_from(resolved).unwrap_or(0))
 }
 
+/// Whether `name` may be given `kind`.
+///
+/// Bash reshapes a scalar into either array kind -- that is what
+/// `x=v; declare -a x` relies on -- but refuses to turn an indexed array
+/// into an associative one or the reverse: the elements mean something
+/// different under the other kind, so `declare -A` on an indexed name
+/// fails and leaves the value it already holds alone.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn convertible(shell: &Shell, name: &BStr, kind: VariableKind) -> bool {
+    match super::value::variable_kind(shell, name) {
+        Some(current) => current == kind || current == VariableKind::Scalar,
+        None => true,
+    }
+}
+
 /// Give `name` an array kind without disturbing a value it already holds.
 ///
 /// Converting a scalar keeps its bytes as element zero, matching Bash's
@@ -230,9 +249,8 @@ pub(crate) fn assign_element(
     // value is never re-read as a scalar here.
     let appended;
     let element = if append {
-        let mut combined = existing_element(&current, selector).unwrap_or_default();
-        combined.extend_from_slice(value);
-        appended = combined;
+        let existing = existing_element(&current, selector).unwrap_or_default();
+        appended = append_element(shell, name, BStr::new(existing.as_slice()), value)?;
         BStr::new(appended.as_slice())
     } else {
         value
@@ -252,6 +270,37 @@ pub(crate) fn assign_element(
         }
     }
     store(shell, name, current, VariableAttributes::NONE, guard)
+}
+
+/// Combine an element's bytes with what `+=` appends to them.
+///
+/// `declare -i` makes the two numbers rather than strings, so `i=1;
+/// i+=' 2 '` is 3 where the same line without the attribute is `1 2 `.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn append_element(
+    shell: &mut Shell,
+    name: &BStr,
+    existing: &BStr,
+    value: &BStr,
+) -> Result<BString, Error> {
+    if super::value::bash_attributes(shell, name)
+        .is_some_and(|declared| declared.contains(super::value::BashAttribute::Integer))
+    {
+        let left = arithmetic_value(shell, existing)?;
+        let right = arithmetic_value(shell, value)?;
+        return Ok(BString::from(left.wrapping_add(right).to_string()));
+    }
+    let mut combined = existing.to_owned();
+    combined.extend_from_slice(value);
+    Ok(combined)
+}
+
+/// An integer variable reads empty text as zero rather than refusing it.
+fn arithmetic_value(shell: &mut Shell, text: &BStr) -> Result<i64, Error> {
+    if text.iter().all(u8::is_ascii_whitespace) {
+        return Ok(0);
+    }
+    crate::arithmetic::evaluate(shell, text)
 }
 
 fn existing_element(value: &VariableValue, selector: &ArraySelector) -> Option<BString> {
@@ -310,7 +359,21 @@ pub(crate) fn assign_compound(
 
     for element in elements {
         let selector = match &element.subscript {
-            Some(subscript) => resolve_selector(shell, name, BStr::new(subscript.as_slice()))?,
+            // A subscript is an expression, and Bash evaluates it
+            // against the array the preceding elements have already
+            // built: in `a=([0]=1 [a[0]]=x)` the second subscript reads
+            // the element the first one wrote. Publishing what the loop
+            // holds so far is what makes it visible.
+            Some(subscript) => {
+                store(
+                    shell,
+                    name,
+                    current.clone(),
+                    VariableAttributes::NONE,
+                    guard,
+                )?;
+                resolve_selector(shell, name, BStr::new(subscript.as_slice()))?
+            }
             None => ArraySelector::Index(next),
         };
         let value = BStr::new(element.value.as_slice());
@@ -339,6 +402,33 @@ pub(crate) fn assign_compound(
         }
     }
     store(shell, name, current, VariableAttributes::NONE, guard)
+}
+
+/// Assign to a target named by text, which may carry a subscript.
+///
+/// `printf -v 'a[k]'` and `declare 'a[k]=v'` both name an element with
+/// bytes no parser split into a name and a subscript, so the brackets
+/// are read here rather than by each caller.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn assign_text_target(
+    shell: &mut Shell,
+    name: &BStr,
+    value: &BStr,
+) -> Result<(), Error> {
+    let bytes: &[u8] = name.as_ref();
+    let subscript = match bytes.iter().position(|byte| *byte == b'[') {
+        Some(open) if bytes.last() == Some(&b']') => {
+            Some((open, &bytes[open + 1..bytes.len() - 1]))
+        }
+        _ => None,
+    };
+    let Some((open, subscript)) = subscript else {
+        return super::set_bytes(shell, name, Some(value), VariableAttributes::NONE);
+    };
+    let base = BString::from(&bytes[..open]);
+    let base = BStr::new(base.as_slice());
+    let selector = resolve_text_selector(shell, base, BStr::new(subscript))?;
+    assign_element(shell, base, &selector, value, false, ReadOnlyGuard::Enforce)
 }
 
 /// `unset a[i]` removes one element; `unset a` is the ordinary path.

@@ -142,8 +142,10 @@ pub(crate) fn read_name(shell: &Shell, name: &BStr) -> Option<BString> {
                 .text(),
             ),
             // A reference that already selects an element cannot take a
-            // second subscript; Bash rejects it, this reads the element.
-            element => Some(element.text()),
+            // second subscript: `${ref[@]}` where `ref` is `a[@]` names
+            // nothing, and Bash reads it as unset rather than as the
+            // element the reference points at.
+            Target::Element { .. } => None,
         };
     }
     follow(shell, name).map(|target| target.text())
@@ -179,6 +181,31 @@ fn holds_a_broken_reference(shell: &Shell, name: &BStr) -> bool {
     value
         .scalar_ref()
         .is_some_and(|text| !text.is_empty() && !is_valid_target(shell, text))
+}
+
+/// The name a `declare -n` reference holds, for `${!ref}`.
+///
+/// Bash inverts the indirection there: an ordinary `${!x}` reads the
+/// name out of `x` and expands it, but a reference is already read
+/// through, so `${!ref}` answers with the name it points at instead.
+/// `None` is every name that is not a reference.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(crate) fn reference_name(shell: &Shell, name: &BStr) -> Option<BString> {
+    reference_target(shell, name).map(|target| target.text())
+}
+
+/// The element a reference selects, where that refuses an array write.
+///
+/// `declare -n ref='a[0]'` and `declare -n ref='a[@]'` both name
+/// something that is not an identifier, so Bash refuses `ref[0]=v` and
+/// `ref=(...)` through one and reports the text it was pointed at. A
+/// reference to a whole variable takes neither refusal.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(crate) fn refused_element_write(shell: &Shell, name: &BStr) -> Option<BString> {
+    match follow(shell, name)? {
+        Target::Element { base, subscript } => Some(Target::Element { base, subscript }.text()),
+        Target::Name(_) => None,
+    }
 }
 
 /// The variable an array assignment to `name` should reach.
