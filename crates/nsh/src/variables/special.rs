@@ -556,8 +556,14 @@ pub(crate) fn attribute_letters(shell: &Shell, name: &BStr) -> BString {
 pub(crate) fn is_assigned(shell: &mut Shell, name: &BStr) -> bool {
     let bytes: &[u8] = name.as_ref();
     let Some(open) = bytes.iter().position(|byte| *byte == b'[') else {
-        return super::lookup_bytes(shell, name).is_some()
-            || super::value::variable_value(shell, name).is_some();
+        // A name declared with `-a` or `-A` holds nothing until an
+        // element exists: `typeset -a a; test -v a` is false in Bash and
+        // stays false until an element is written.
+        if let Some(value) = super::value::variable_value(shell, name) {
+            return value.kind() == super::value::VariableKind::Scalar
+                || !arrays::elements(value).is_empty();
+        }
+        return super::lookup_bytes(shell, name).is_some();
     };
     if bytes.last() != Some(&b']') {
         return false;

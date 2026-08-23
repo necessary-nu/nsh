@@ -155,6 +155,10 @@ pub(crate) struct TokenContext {
     skip_newlines: bool,
     check_here_document_end: bool,
     regex_operand: bool,
+    /// Whether an assignment word may begin here, which is where Bash's
+    /// lexer reads a balanced `[...]` after a name as part of the word.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    assignment_position: bool,
 }
 
 impl TokenContext {
@@ -164,6 +168,7 @@ impl TokenContext {
         skip_newlines: false,
         check_here_document_end: false,
         regex_operand: false,
+        assignment_position: false,
     };
     /// Read the next word as the operand of Bash's `=~`.
     // [spec:nsh:req:compat.bash.conditionals-arithmetic]
@@ -173,6 +178,7 @@ impl TokenContext {
     };
     const ALIASES: Self = Self {
         aliases: true,
+        assignment_position: true,
         ..Self::NONE
     };
     const RESERVED_WORDS: Self = Self {
@@ -190,12 +196,14 @@ impl TokenContext {
     const COMMAND_START: Self = Self {
         aliases: true,
         reserved_words: true,
+        assignment_position: true,
         ..Self::NONE
     };
     const COMMAND_START_AFTER_NEWLINES: Self = Self {
         aliases: true,
         reserved_words: true,
         skip_newlines: true,
+        assignment_position: true,
         ..Self::NONE
     };
     const RESERVED_WORDS_AFTER_NEWLINES: Self = Self {
@@ -211,6 +219,7 @@ impl TokenContext {
             skip_newlines: self.skip_newlines || other.skip_newlines,
             check_here_document_end: self.check_here_document_end || other.check_here_document_end,
             regex_operand: self.regex_operand || other.regex_operand,
+            assignment_position: self.assignment_position || other.assignment_position,
         }
     }
 }
@@ -1147,6 +1156,7 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
                 mark,
                 here.strip_tabs,
                 false,
+                false,
             )?;
         } else {
             let firstc = read_unit_skipping_line_continuations(shell)?;
@@ -1156,6 +1166,7 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
                 SyntaxContext::DoubleQuoted,
                 mark,
                 here.strip_tabs,
+                false,
                 false,
             )?;
         }
@@ -1184,11 +1195,7 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
     let mut token: Token;
 
     loop {
-        token = read_next_token(
-            shell,
-            context.check_here_document_end,
-            context.regex_operand,
-        )?;
+        token = read_next_token(shell, &context)?;
 
         /*
          * eat newlines
@@ -1199,11 +1206,7 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
                 /* The alias bit is dropped with the rest: dash clears the
                  * whole of `checkkwd` here, and the bit lived in it. */
                 shell.input.clear_alias_boundary();
-                token = read_next_token(
-                    shell,
-                    context.check_here_document_end,
-                    context.regex_operand,
-                )?;
+                token = read_next_token(shell, &context)?;
             }
         }
 
@@ -1285,11 +1288,9 @@ fn consume_newline_without_prompt(shell: &mut Shell) {
 // [spec:posix:syn:token.unquoted-blank-delimits]
 // [spec:posix:syn:token.comment]
 // [spec:posix:syn:token.start-new-word]
-fn read_next_token(
-    shell: &mut Shell,
-    check_here_document_end: bool,
-    regex_operand: bool,
-) -> Result<Token, Error> {
+fn read_next_token(shell: &mut Shell, context: &TokenContext) -> Result<Token, Error> {
+    let check_here_document_end = context.check_here_document_end;
+    let regex_operand = context.regex_operand;
     let mut input: InputUnit;
 
     if shell.input.token_pushed_back {
@@ -1338,6 +1339,7 @@ fn read_next_token(
                 EofMark::None,
                 false,
                 check_here_document_end,
+                false,
             )?;
             if token.kind != TokenKind::Blank {
                 return Ok(token);
@@ -1401,6 +1403,7 @@ fn read_next_token(
             EofMark::None,
             false,
             check_here_document_end,
+            context.assignment_position,
         )?;
         if token.kind != TokenKind::Blank {
             return Ok(token);
@@ -1599,6 +1602,15 @@ struct WordLexer<'a> {
     /// one is, `(`, `)`, `|`, and blanks are the pattern's own bytes.
     // [spec:nsh:req:compat.bash.expansion-globbing]
     extglob_depth: usize,
+    /// Whether this word could be an assignment: only at the start of a
+    /// simple command, where Bash's lexer reads `name[` as the opening
+    /// of a subscript rather than as the end of a name.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    assignment_position: bool,
+    /// How many `[` of an assignment word's subscript are open. While
+    /// one is, blanks and shell operators are the subscript's own bytes.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    subscript_depth: usize,
     /// Typed lexer events for the word being built.
     output: Vec<WordToken>,
     delimiter: EofMark<'a>,
@@ -1637,6 +1649,7 @@ fn read_word_token(
     delimiter: EofMark<'_>,
     strip_tabs: bool,
     check_here_document_end: bool,
+    assignment_position: bool,
 ) -> Result<Token, Error> {
     let mut lexer = WordLexer {
         syntax_frames: vec![SyntaxFrame {
@@ -1661,6 +1674,8 @@ fn read_word_token(
         input: first_input,
         quoted: false,
         extglob_depth: 0,
+        assignment_position: assignment_position && bash::active(shell) && delimiter.is_none(),
+        subscript_depth: 0,
         output: Vec::new(),
         delimiter,
         strip_tabs,
@@ -1671,7 +1686,8 @@ fn read_word_token(
         /* Until end of line or end of word */
         loop {
             let position = WordPosition::of(lexer.current_syntax());
-            let field_splitting = position.field_splitting && lexer.extglob_depth == 0;
+            let field_splitting =
+                position.field_splitting && lexer.extglob_depth == 0 && lexer.subscript_depth == 0;
             bash::process_substitutions(shell, &mut lexer, field_splitting)?;
             if bash::open_extended_glob(shell, &mut lexer)? {
                 continue;
@@ -1711,6 +1727,7 @@ fn read_word_token(
                     continue 'word;
                 }
                 SyntaxClass::Word => {
+                    bash::track_assignment_subscript(shell, &mut lexer);
                     if !bash::close_arithmetic_bracket(&mut lexer) {
                         lexer.push_literal(lexer.input.expect_byte());
                     }
@@ -1804,6 +1821,13 @@ fn finish_word_token(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<Tok
     if lexer.current_syntax().variable_depth != 0 {
         /* { */
         return Err(syntax_error(shell, b"Missing '}'"));
+    }
+    /* An assignment word's subscript swallowed the blanks and operators
+     * inside it, so one that never closed has swallowed the rest of the
+     * input. Bash reports the same unterminated construct. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    if lexer.subscript_depth != 0 {
+        return Err(syntax_error(shell, b"Missing ']'"));
     }
     let descriptor_digit = match lexer.output.as_slice() {
         [] => Some(0),
@@ -2496,6 +2520,7 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
                 EofMark::Fake,
                 false,
                 false,
+                false,
             )?;
 
             let node = Node::Word(WordNode {
@@ -2631,7 +2656,7 @@ pub fn parser_eof(shell: &Shell) -> bool {
     shell.input.token_pushed_back && shell.input.last_token == TokenKind::Eof
 }
 
-mod bash;
+pub(crate) mod bash;
 
 mod finalize;
 

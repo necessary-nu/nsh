@@ -768,13 +768,23 @@ pub(crate) fn variable_attributes(shell: &Shell, name: &BStr) -> Option<Variable
 }
 
 /// Build the exported environment as owned native name/value pairs.
+///
+/// An array has no environment spelling, so an exported name that holds
+/// one contributes nothing -- not even its first element, which is what
+/// Bash's `export PYTHONPATH; PYTHONPATH=(x)` shows. Only the Bash
+/// dialect can produce such a value at all.
 // [spec:dash:sem:var.listvars-fn]
+// [spec:nsh:req:compat.bash.arrays-declarations]
 pub fn environment(shell: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
     shell
         .variables
         .entries
         .iter()
-        .filter(|(_, var)| var.attributes.exported && matches!(&var.state, VariableState::Set(_)))
+        .filter(|(_, var)| {
+            var.attributes.exported
+                && matches!(&var.state, VariableState::Set(value)
+                    if value.kind() == value::VariableKind::Scalar)
+        })
         .map(|(name, var)| {
             let value = var.scalar().unwrap_or_else(|| BStr::new(b""));
             Ok((name.try_to_os_string()?, value.try_to_os_string()?))

@@ -57,16 +57,19 @@ refuses() { # NAME EXPECTED-SUBSTRING
 }
 
 # A dispositioned case loses its entry: it becomes an unexpected failure.
+# The case named here is a divergence taken on purpose rather than a gap,
+# so it stays non-passing and the mutation stays meaningful as the
+# not-implemented backlog shrinks.
 python3 - "$REGISTER" <<'PY'
 import re, sys
 path = sys.argv[1]
 text = open(path).read()
 text = re.sub(
-    r'\[\[case\]\]\nid = "array-assign\.test\.sh:1"\ndisposition = [^\n]*\nreason = [^\n]*\n\n',
+    r'\[\[case\]\]\nid = "unicode\.test\.sh:3"\ndisposition = [^\n]*\nreason = [^\n]*\n\n',
     '', text, count=1)
 open(path, 'w').write(text)
 PY
-refuses "dropped entry" "array-assign.test.sh:1 is an unexpected"
+refuses "dropped entry" "unicode.test.sh:3 is an unexpected"
 
 # An entry survives the fix it was written to excuse.
 printf '\n[[case]]\nid = "append.test.sh:0"\ndisposition = "not-implemented"\nreason = "stale"\n' >>"$REGISTER"

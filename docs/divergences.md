@@ -691,3 +691,25 @@ Nothing re-enters the parser to produce this text, which is the half of
 `[dec:nsh:safety-trumps-compatibility]` that matters here: an
 introspection call must not be a way to have the shell re-read whatever a
 stored definition happened to contain.
+
+### An associative array iterates in sorted key order
+
+**Status:** deliberate. `crates/nsh/src/variables/value.rs`.
+
+Bash stores an associative array in a hash table and lists it in bucket
+order, so `declare -A A=([a]=hello [b]=world [c]=osh [d]=ysh)` expands
+`"${A[@]}"` as `ysh osh world hello`. The order is an artefact of the
+hash function over the table size, not a property of the script.
+
+The value model here is a `BTreeMap`, so the same array lists as
+`hello world osh ysh`: sorted by key, and the same on every run and
+every platform. Reproducing Bash's order would mean reproducing Bash's
+hash function and its growth policy, which says nothing about what a
+script means and would make the output depend on an implementation
+detail of another shell.
+
+Every operator that maps over the elements is applied per element and
+joined afterwards, as Bash does -- `"${A[*]@Q}"` quotes each element
+before joining -- so only the order differs.
+
+Costs `var-op-bash.test.sh:24` and `var-op-bash.test.sh:25`.

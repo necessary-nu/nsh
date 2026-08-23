@@ -307,6 +307,14 @@ pub(super) fn substring(
         Some(at) => (&units[..at], Some(&units[at + 1..])),
         None => (units.as_slice(), None),
     };
+    /* `${x:}` has no expression to evaluate and Bash rejects it, where
+     * `${x: }` is the expression ` `, which is zero, and `${x::}` is a
+     * slice whose two empty expressions are both zero. */
+    if cut.is_none() && offset_units.is_empty() {
+        return Err(shell
+            .diagnostics()
+            .expansion_error_value(b"bad substitution"));
+    }
     let offset = arithmetic_operand(shell, offset_units, context)?;
     let length = match length_units {
         Some(units) => Some(arithmetic_operand(shell, units, context)?),
@@ -327,7 +335,12 @@ pub(super) fn substring(
                 );
             }
             all.extend(elements);
-            let selected = select(all, offset, length);
+            let subscripts = if positional {
+                None
+            } else {
+                array_subscripts(shell, name)
+            };
+            let selected = select(shell, all, subscripts.as_deref(), offset, length)?;
             let star = name.last() == Some(&b'*') || matches!(name.as_ref() as &[u8], b"*");
             words(shell, name, selected, !star, context)
         }
@@ -344,26 +357,74 @@ pub(super) fn substring(
     }
 }
 
-/// Clamp one offset/length pair onto a list of elements. A negative
-/// offset counts from the end, and a negative length is an end position
-/// rather than a count.
-fn select(elements: Vec<BString>, offset: i64, length: Option<i64>) -> Vec<BString> {
+/// The subscripts an indexed array's elements are stored under.
+///
+/// A slice of one counts subscripts rather than surviving elements, so
+/// the holes an `unset` left still take up room. An associative array
+/// has no order to count with, and neither have the positional
+/// parameters, so both answer `None` and are sliced by position.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn array_subscripts(shell: &mut Shell, name: &BStr) -> Option<Vec<u64>> {
+    let base = super::split_subscript(name).map_or(name, |(base, _)| base);
+    let target =
+        crate::variables::nameref::read_name(shell, base).unwrap_or_else(|| base.to_owned());
+    let target = BStr::new(target.as_slice());
+    let target = super::split_subscript(target).map_or(target, |(base, _)| base);
+    crate::variables::value::variable_value(shell, target)?.indexed_keys()
+}
+
+/// Cut one offset/length pair out of a list of elements.
+///
+/// `subscripts` is what the elements are stored under where they are
+/// stored sparsely: the offset is measured in subscripts, so
+/// `${a[@]:5}` starts at the first element whose subscript is at least
+/// 5, while the length that follows counts elements. A negative offset
+/// counts back from one past the highest subscript, and one that
+/// reaches past the start selects nothing rather than clamping. Bash
+/// refuses a negative length here, where the same spelling on a string
+/// would name an end position.
+fn select(
+    shell: &mut Shell,
+    elements: Vec<BString>,
+    subscripts: Option<&[u64]>,
+    offset: i64,
+    length: Option<i64>,
+) -> Result<Vec<BString>, Error> {
     let total = elements.len() as i64;
-    let start = if offset < 0 {
-        (total + offset).max(0)
-    } else {
-        offset.min(total)
-    };
-    let end = match length {
+    let bound = match subscripts {
+        Some(keys) => keys.last().map_or(0, |last| *last as i64 + 1),
         None => total,
-        Some(length) if length < 0 => (total + length).max(start),
-        Some(length) => (start + length).min(total),
     };
-    elements
+    let first_subscript = if offset < 0 {
+        let start = bound + offset;
+        if start < 0 {
+            return Ok(Vec::new());
+        }
+        start
+    } else {
+        offset
+    };
+    let start = match subscripts {
+        Some(keys) => keys
+            .iter()
+            .position(|key| *key as i64 >= first_subscript)
+            .map_or(total, |position| position as i64),
+        None => first_subscript.min(total),
+    };
+    let count = match length {
+        None => total - start,
+        Some(length) if length < 0 => {
+            let mut message = length.to_string().into_bytes();
+            message.extend_from_slice(b": substring expression < 0");
+            return Err(shell.diagnostics().expansion_error_value(&message));
+        }
+        Some(length) => length.min(total - start),
+    };
+    Ok(elements
         .into_iter()
         .skip(start as usize)
-        .take((end - start).max(0) as usize)
-        .collect()
+        .take(count.max(0) as usize)
+        .collect())
 }
 
 fn slice_characters(
@@ -697,7 +758,13 @@ fn any_character() -> Pattern {
 
 /// Apply one byte transformation to a value, element by element where
 /// the value is a word list.
+///
+/// A quoted `"${a[*]}"` is a word list too, and Bash applies the
+/// operator to each element *before* joining them: `"${a[*]#-}"` strips
+/// one prefix per element rather than one from the joined string. The
+/// join is the last step, so the operator never sees a separator.
 // [spec:nsh:req:compat.bash.arrays-declarations]
+// [spec:nsh:req:compat.bash.expansion-globbing]
 pub(super) fn map_value(
     shell: &mut Shell,
     value: Value,
@@ -720,11 +787,8 @@ pub(super) fn map_value(
                 .collect(),
         });
     }
-    /* Bash runs the operator over each element and joins afterwards, so
-     * `"${a[*]@Q}"` quotes nine words rather than quoting one joined
-     * string. The POSIX dialect has no `[*]`, and dash joins `$*` before
-     * the operator runs, so the order stays the other way round there. */
-    // [spec:nsh:req:compat.bash.arrays-declarations]
+    /* The POSIX dialect has no `[*]`, and dash joins `$*` before the
+     * operator runs, so the order stays the other way round there. */
     if shell.options.dialect() == Dialect::Bash
         && let Value::At(words) | Value::Star(words) = &value
     {
@@ -732,9 +796,8 @@ pub(super) fn map_value(
             .iter()
             .map(|word| transform(&shell.locale, word))
             .collect::<Vec<_>>();
-        let joined = super::join_parameters(shell, &mapped);
         return Ok(Expansion::one(Field::from_bytes(
-            &joined,
+            &super::join_parameters(shell, &mapped),
             context.protects(),
             context.splits(),
             context.quoted,

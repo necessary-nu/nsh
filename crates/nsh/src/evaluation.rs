@@ -29,6 +29,7 @@ mod bash_arrays;
 mod bash_conditional;
 pub(crate) mod bash_process_substitution;
 mod last_pipe;
+mod trace;
 
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
@@ -170,6 +171,14 @@ pub struct EvaluationState {
     /// beside `commandname` because they are written by the same frames
     /// and read by the same one function.
     pub(crate) diagnostic_line: i32,
+    /// Names a declaration built-in refused in the command now running.
+    ///
+    /// `declare` applies each operand on its own: `declare a[ a[2]=3 ]=Y`
+    /// stores the middle one and reports the other two. The structural
+    /// operands land after the built-in returns, so which of them it
+    /// refused has to survive the return.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    pub(crate) refused_declarations: Vec<BString>,
     /// The name the running builtin was invoked by, for the error prefix.
     ///
     /// dash points this at `argv[0]` and relies on the word outliving the
@@ -195,6 +204,7 @@ impl EvaluationState {
             signal_trap_depth: 0,
             trap_default_exit_status: None,
             diagnostic_line: 0,
+            refused_declarations: Vec::new(),
             command_name: None,
         }
     }
@@ -1466,13 +1476,7 @@ fn append_expanded_arguments<'a>(
     let initial_field_count = expanded_fields.fields.len();
 
     while let Some((argument, rest)) = remaining_argument_nodes.split_first() {
-        bash_arrays::expand_command_argument(
-            shell,
-            argument,
-            expanded_fields,
-            ExpansionMode::SPLIT | ExpansionMode::TILDE,
-            held,
-        )?;
+        bash_arrays::expand_command_argument(shell, argument, expanded_fields, false, held)?;
         *remaining_argument_nodes = rest;
         if expanded_fields.fields.len() != initial_field_count {
             break;
@@ -1610,6 +1614,10 @@ fn evaluate_command_in_scope(
      * attributes the built-in has yet to apply. The name goes into the
      * argument list and the assignment waits here. */
     let mut held_declarations = Vec::new();
+    /* Which built-in the held operands are for: `export` refuses a
+     * subscripted one where `declare` accepts it. */
+    let mut subscripted_operands = bash_arrays::SubscriptedOperand::Accepted;
+    shell.evaluation.refused_declarations.clear();
     let mut expanded_fields = ExpandedFields::new();
     let mut assignment_fields = ExpandedFields::new();
     let mut argument_count: usize;
@@ -1700,6 +1708,12 @@ fn evaluate_command_in_scope(
                 use_local_variables = !special;
             }
             is_exec_builtin = builtin.id() == BuiltinId::Exec;
+            /* `export` names variables, not elements: Bash refuses
+             * `export a[7]=8` rather than assigning the element. */
+            // [spec:nsh:req:compat.bash.arrays-declarations]
+            if builtin.id() == BuiltinId::Export {
+                subscripted_operands = bash_arrays::SubscriptedOperand::Refused;
+            }
             if builtin.id() != BuiltinId::Command {
                 break;
             }
@@ -1719,21 +1733,14 @@ fn evaluate_command_in_scope(
             command_search = next_search;
         }
 
+        let assignment_operands = assignments_are_arguments
+            && crate::parser::bash::declaration_operands(shell, &command.arguments);
         for argument in remaining_arguments {
-            let mode = if assignments_are_arguments
-                && matches!(
-                    argument,
-                    Node::Word(word) if word.word.is_assignment(&shell.locale)
-                ) {
-                ExpansionMode::ASSIGNMENT_TILDE
-            } else {
-                ExpansionMode::SPLIT | ExpansionMode::TILDE
-            };
             bash_arrays::expand_command_argument(
                 shell,
                 argument,
                 &mut expanded_fields,
-                mode,
+                assignment_operands,
                 &mut held_declarations,
             )?;
         }
@@ -1786,13 +1793,20 @@ fn evaluate_command_in_scope(
 
             for assignment in &command.assignments {
                 // A structural array assignment is applied whole; it has
-                // no single expanded field to hand the scalar path.
+                // no single expanded field to hand the scalar path. Its
+                // written text still joins the ones `set -x` traces.
                 if let Node::Bash(crate::nodes::BashNode::ArrayAssignment(array)) = assignment {
-                    bash_arrays::assign(
-                        shell,
-                        array,
-                        crate::variables::arrays::ReadOnlyGuard::Enforce,
-                    )?;
+                    assignment_fields.fields.push(ExpandedField::from_bytes(
+                        &bash_arrays::assignment_text(array),
+                    ));
+                    /* A refusal Bash reports rather than raises -- a
+                     * list assigned to one element, a write through a
+                     * reference that names one -- abandons the command
+                     * with its status rather than the shell. */
+                    if !bash_arrays::assign_prefix(shell, array, use_local_variables)? {
+                        status = ExitStatus::FAILURE;
+                        break 'abort_command;
+                    }
                     continue;
                 }
                 let assignment_index = assignment_fields.fields.len();
@@ -1848,13 +1862,22 @@ fn evaluate_command_in_scope(
                 shell.write_output(dest, &prompt)?;
                 shell.evaluation.expanding_trace_prompt = false;
                 already_printed = false;
-                already_printed =
-                    write_trace_fields(shell, dest, &assignment_fields.fields, already_printed)?;
+                /* An assignment is traced as it was *written*, not as a
+                 * word that has to read back: Bash prints `sp1+=(2)`
+                 * bare, where quoting it as data would give
+                 * `'sp1+=(2)'`. The words after it are expansion
+                 * results and do take Bash's trace quoting. */
+                already_printed = trace::write_assignments(
+                    shell,
+                    dest,
+                    &assignment_fields.fields,
+                    already_printed,
+                )?;
                 /* `eprintlist(sh, out, osp, sep)` prints from the *original*
                  * head, so `command -p foo` traces as it was written and not
                  * as `parse_command_args` left it.  A NULL `osp` prints
                  * nothing, which is the empty slice. */
-                write_trace_fields(
+                trace::write_fields(
                     shell,
                     dest,
                     &expanded_fields.fields
@@ -2016,9 +2039,12 @@ fn evaluate_command_in_scope(
              * declaration was written with can finally land. A
              * declaration that failed -- an unknown option, a name it
              * may not touch -- stores nothing, and has already said so. */
-            if shell.status.success() {
-                bash_arrays::apply_declarations(shell, &held_declarations)?;
-            }
+            bash_arrays::apply_declarations(
+                shell,
+                &held_declarations,
+                subscripted_operands,
+                shell.status.success(),
+            )?;
             status = crate::jobs::wait_for_job(shell, job_id)?;
             crate::error::clear_interrupt_deferral(&mut shell.interrupt_deferral);
             break 'command_done;
@@ -2328,36 +2354,6 @@ fn prehash_tree(shell: &mut Shell, node: Option<&Node>) -> Result<Flow, Error> {
 /*
  * The return command.
  */
-
-// [spec:dash:sem:eval.eprintlist-fn]
-fn write_trace_fields(
-    shell: &mut Shell,
-    dest: OutputDestination,
-    list: &[ExpandedField],
-    mut already_printed: bool,
-) -> Result<bool, Error> {
-    /* Bash quotes a traced word that would not read back as itself, so
-     * `sh -c 'echo 2'` shows one argument rather than two words. dash
-     * writes the field as it stands and POSIX mode keeps doing so. */
-    // [spec:nsh:req:compat.bash.builtins-special-variables]
-    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
-    let locale = shell.locale.clone();
-    for field in list {
-        let mut record = Vec::new();
-        if already_printed {
-            record.push(b' ');
-        }
-        if bash {
-            record.extend_from_slice(&crate::escape::bash::trace_quote(&locale, field.as_bstr()));
-        } else {
-            record.extend_from_slice(field.as_bstr());
-        }
-        already_printed = true;
-        shell.write_output(dest, &record)?;
-    }
-
-    Ok(already_printed)
-}
 
 #[cfg(test)]
 mod tests {

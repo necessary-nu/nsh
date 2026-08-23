@@ -71,11 +71,6 @@ reason = "`bind` key bindings. Retired from the profile by [dec:nsh:bash-compati
 # One entry per eligible in-scope case that does not pass.
 
 [[case]]
-id = "append.test.sh:11"
-disposition = "not-implemented"
-reason = "`a[i]+=(list)` is accepted and appends the list's fields to the array; Bash refuses to assign a compound value to one element."
-
-[[case]]
 id = "append.test.sh:14"
 disposition = "not-implemented"
 reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
@@ -86,184 +81,14 @@ disposition = "not-implemented"
 reason = "An empty subscript `a[]=v` is accepted and assigns index 0, and `${a[]}` reads it; Bash rejects both as a bad substitution. Nothing validates that a subscript has an expression in it, and the rejection also needs Bash's error boundary: Bash reports each line and carries on with status 1."
 
 [[case]]
-id = "array-assign.test.sh:1"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "array-assign.test.sh:2"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "array-assign.test.sh:3"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "array-assign.test.sh:5"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "array-assign.test.sh:8"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "array-assign.test.sh:9"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "array-assign.test.sh:10"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "array-assoc.test.sh:28"
-disposition = "not-implemented"
-reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
-
-[[case]]
-id = "array-assoc.test.sh:33"
-disposition = "not-implemented"
-reason = "`printf -v` refuses a subscripted name: `printf -v 'a[k]' ...` reports `bad variable name` instead of writing that element."
-
-[[case]]
 id = "array-compat.test.sh:1"
 disposition = "defect"
 reason = "`\"$@\"` embedded in a larger word joins its fields with the first byte of `IFS`; every shell joins with a space there, and this reproduces with the dialect off."
 
 [[case]]
-id = "array-compat.test.sh:10"
-disposition = "not-implemented"
-reason = "`declare -a` on an existing associative array, and `declare -A` on an existing indexed array, silently convert it. Bash refuses with status 1 and leaves the value alone."
-
-[[case]]
-id = "array-literal.test.sh:0"
-disposition = "not-implemented"
-reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
-
-[[case]]
-id = "array-literal.test.sh:3"
-disposition = "not-implemented"
-reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
-
-[[case]]
-id = "array-literal.test.sh:4"
-disposition = "not-implemented"
-reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
-
-[[case]]
-id = "array-literal.test.sh:9"
-disposition = "not-implemented"
-reason = "A compound assignment resolves every element's subscript against the array as it was before the assignment; Bash makes each element's effect visible to the next element's subscript."
-
-[[case]]
-id = "array-literal.test.sh:10"
-disposition = "not-implemented"
-reason = "A compound assignment resolves every element's subscript against the array as it was before the assignment; Bash makes each element's effect visible to the next element's subscript."
-
-[[case]]
-id = "array-literal.test.sh:13"
-disposition = "not-implemented"
-reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
-
-[[case]]
-id = "array-literal.test.sh:15"
-disposition = "not-implemented"
-reason = "`declare -a` on an existing associative array, and `declare -A` on an existing indexed array, silently convert it. Bash refuses with status 1 and leaves the value alone."
-
-[[case]]
-id = "array-sparse.test.sh:9"
-disposition = "not-implemented"
-reason = "`set -x` renders a Bash array assignment as an empty command word; the trace has no text for `a+=(2)`."
-
-[[case]]
-id = "array-sparse.test.sh:19"
-disposition = "not-implemented"
-reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
-
-[[case]]
-id = "array-sparse.test.sh:20"
-disposition = "not-implemented"
-reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
-
-[[case]]
-id = "array-sparse.test.sh:27"
-disposition = "not-implemented"
-reason = "A plain read of a name that holds an array with no elements is treated as set-and-empty; Bash treats it as unset, so `${a-word}` uses the default."
-
-[[case]]
 id = "array-sparse.test.sh:31"
 disposition = "out-of-contract"
 reason = "`compgen` is part of the programmable-completion surface retired by [dec:nsh:bash-compatibility-is-scripts]; there is no `complete`/`compgen`/`compopt` and reporting one would advertise a facility that is not here."
-
-[[case]]
-id = "array.test.sh:25"
-disposition = "not-implemented"
-reason = "`export` does not refuse an array: an exported name later assigned a compound value exports its first element, and `export a[7]=8` is accepted. Bash exports nothing for the array and refuses the subscripted operand with status 1."
-
-[[case]]
-id = "array.test.sh:27"
-disposition = "not-implemented"
-reason = "A compound value in an environment prefix (`B=(b b) cmd`) is dropped from the child's environment. Bash passes the literal text `(b b)` instead."
-
-[[case]]
-id = "array.test.sh:28"
-disposition = "not-implemented"
-reason = "A compound value in an environment prefix (`B=(b b) cmd`) is dropped from the child's environment. Bash passes the literal text `(b b)` instead."
-
-[[case]]
-id = "array.test.sh:35"
-disposition = "not-implemented"
-reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
-
-[[case]]
-id = "array.test.sh:59"
-disposition = "not-implemented"
-reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
-
-[[case]]
-id = "array.test.sh:74"
-disposition = "not-implemented"
-reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
-
-[[case]]
-id = "assign-deferred.test.sh:4"
-disposition = "not-implemented"
-reason = "`export` does not refuse an array: an exported name later assigned a compound value exports its first element, and `export a[7]=8` is accepted. Bash exports nothing for the array and refuses the subscripted operand with status 1."
-
-[[case]]
-id = "assign-dialects.test.sh:2"
-disposition = "not-implemented"
-reason = "`test -v name` reports true for a name that was declared with `typeset -a`/`-A` but holds no element; Bash reports false until an element exists."
-
-[[case]]
-id = "assign-dialects.test.sh:3"
-disposition = "not-implemented"
-reason = "`test -v name` reports true for a name that was declared with `typeset -a`/`-A` but holds no element; Bash reports false until an element exists."
-
-[[case]]
-id = "assign-extended.test.sh:31"
-disposition = "not-implemented"
-reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
-
-[[case]]
-id = "assign-extended.test.sh:32"
-disposition = "not-implemented"
-reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
-
-[[case]]
-id = "ble-idioms.test.sh:19"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
-
-[[case]]
-id = "ble-idioms.test.sh:20"
-disposition = "not-implemented"
-reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
 
 [[case]]
 id = "builtin-read.test.sh:26"
@@ -281,21 +106,6 @@ disposition = "not-implemented"
 reason = "`time` is not in the grammar, so `type -t time` reports nothing. Naming it a keyword while `time echo hi` is a command that is not found would advertise a grammar this shell does not have, so the gap is the reserved word rather than the classification. `select` is absent for the same reason and this case does not reach it."
 
 [[case]]
-id = "nameref.test.sh:6"
-disposition = "not-implemented"
-reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
-
-[[case]]
-id = "nameref.test.sh:27"
-disposition = "not-implemented"
-reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
-
-[[case]]
-id = "nameref.test.sh:29"
-disposition = "not-implemented"
-reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
-
-[[case]]
 id = "nix-idioms.test.sh:4"
 disposition = "not-implemented"
 reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
@@ -304,16 +114,6 @@ reason = "A declaration built-in does not accept a name built by expansion with 
 id = "toysh.test.sh:6"
 disposition = "not-implemented"
 reason = "`{name}<word` is not implemented: Bash allocates a descriptor above 9 and stores its number in `name`, and this shell has no redirection that names a variable. Here-strings themselves work."
-
-[[case]]
-id = "type-compat.test.sh:1"
-disposition = "not-implemented"
-reason = "`declare -i` evaluates a plain assignment but not an append: `i+=' 2 '` concatenates the text where Bash adds arithmetically."
-
-[[case]]
-id = "type-compat.test.sh:4"
-disposition = "not-implemented"
-reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
 
 [[case]]
 id = "unicode.test.sh:3"
@@ -327,23 +127,18 @@ reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes 
 
 [[case]]
 id = "var-op-bash.test.sh:24"
-disposition = "not-implemented"
-reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+disposition = "sanctioned-divergence"
+reason = "An associative array iterates in sorted key order where Bash iterates in its hash order, so `${A[@]}` and `${A[*]}` list the same elements in a different order. The operator order this case also tests is implemented -- `@Q` applies per element and joins afterwards -- and only the ordering differs. Matching Bash would mean reproducing its hash function, which is not a claim about what a script means; a deterministic order is. Recorded in docs/divergences.md."
 
 [[case]]
 id = "var-op-bash.test.sh:25"
-disposition = "not-implemented"
-reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+disposition = "sanctioned-divergence"
+reason = "An associative array iterates in sorted key order where Bash iterates in its hash order, so `${A[@]}` and `${A[*]}` list the same elements in a different order. The operator order this case also tests is implemented -- `@Q` applies per element and joins afterwards -- and only the ordering differs. Matching Bash would mean reproducing its hash function, which is not a claim about what a script means; a deterministic order is. Recorded in docs/divergences.md."
 
 [[case]]
 id = "var-op-patsub.test.sh:23"
 disposition = "defect"
 reason = "A bracket expression whose first member is `]` (`[^]]`) is parsed as an empty set followed by literal text, so the pattern matches everything. POSIX requires `]` first in a bracket expression to be literal, and this reproduces with the dialect off."
-
-[[case]]
-id = "var-op-slice.test.sh:20"
-disposition = "not-implemented"
-reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
 
 [[case]]
 id = "var-ref.test.sh:2"

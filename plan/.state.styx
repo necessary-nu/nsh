@@ -1287,6 +1287,7 @@ derived_priorities (
 )
 
 assertions (
+    {id bash-array-assignment-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:50.828945161Z}
     {id bash-expansion-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:51.231881628Z}
     {id bash-introspection-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:51.603665937Z}
     {id bash-mode-error-boundary, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:50.377440971Z}
