@@ -648,6 +648,36 @@ impl Diagnostics<'_> {
         self.report(error)
     }
 
+    /// [`Self::expansion_error_value`] where the dialect decides the
+    /// boundary.
+    ///
+    /// The diagnostic is the same either way, and deliberately keeps the
+    /// prefix-less shape `[spec:nsh:req:compat.smoosh.error-contracts]`
+    /// asks for -- what the dialect chooses is only what happens after it
+    /// is written. Bash mode abandons the record, which is what a script
+    /// that expands `${!bad}` and reads on expects.
+    ///
+    /// This belongs only where the refusal is genuinely terminal for the
+    /// expansion. `Error::Expansion` is not merely a status class: the
+    /// expander raises and *catches* it to decide `${x+word}` under
+    /// `set -u`, `${!z:=foo}` and slice arithmetic, so widening this to
+    /// every parameter refusal replaces those recoveries with an
+    /// abandoned record and loses three cases that pass today.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    pub fn dialect_expansion_error(&mut self, msg: &[u8]) -> Error {
+        if self.dialect != crate::options::Dialect::Bash {
+            return self.expansion_error_value(msg);
+        }
+        let mut record = BString::from(msg);
+        record.push(b'\n');
+        self.write_diagnostic(&record);
+        self.flush_after_diagnostic();
+        Error::Abandoned {
+            line: self.line,
+            message: BString::new(Vec::new()),
+        }
+    }
+
     /// [`Self::builtin_error_value`] where the dialect decides the boundary.
     ///
     /// A built-in's refusal of a read-only name is the same rule as an

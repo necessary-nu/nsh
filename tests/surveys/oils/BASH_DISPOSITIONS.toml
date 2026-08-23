@@ -140,18 +140,3 @@ id = "var-ref.test.sh:12"
 disposition = "out-of-contract"
 reason = "`${x@P}` yields the value it was given rather than decoding the prompt escapes in it, so `${!p@P}` on `\\$ ` keeps the backslash. Prompt rendering is retired from the profile by [dec:nsh:bash-compatibility-is-scripts], and the refusal is written at the point of divergence (`crates/nsh/src/expand/typed/bash.rs::transform`). Everything else the case checks -- indirection through a subscript, then a suffix operator, and the prefix forms it rejects -- passes."
 
-[[case]]
-id = "var-ref.test.sh:21"
-disposition = "not-implemented"
-reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
-
-[[case]]
-id = "var-ref.test.sh:22"
-disposition = "not-implemented"
-reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
-
-[[case]]
-id = "var-ref.test.sh:23"
-disposition = "not-implemented"
-reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
-

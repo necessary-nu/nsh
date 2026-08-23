@@ -209,7 +209,11 @@ pub(super) fn indirect_target(
     message.extend_from_slice(b": ");
     message.extend_from_slice(&target);
     message.extend_from_slice(b": invalid variable name");
-    Err(shell.diagnostics().expansion_error_value(&message))
+    /* Bash reports the refusal, abandons the command and reads on; the
+     * POSIX dialect has no `${!ref}` to reach this, so the boundary is
+     * the dialect's either way. */
+    // [spec:nsh:req:compat.bash.error-boundary]
+    Err(shell.diagnostics().dialect_expansion_error(&message))
 }
 
 /// Whether this text spells a parameter an expansion may read.
