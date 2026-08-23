@@ -138,6 +138,22 @@ fn conditional_expression(shell: &mut Shell, line: i32) -> Result<Node, Error> {
     })))
 }
 
+/// Whether `name()` may introduce a function definition.
+///
+/// POSIX names a function with a `name`, and dash enforces exactly that.
+/// Bash names one with any word the tokenizer already produced, which is
+/// why `ble/array#push`, `py-repr` and `1+1` are ordinary function names
+/// in Bash scripts, and why refusing them is a parse failure rather than
+/// a missing feature. The `function name { ... }` form below is already
+/// this permissive in both dialects.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(super) fn accepts_function_name(shell: &mut Shell, name: &BStr) -> bool {
+    if active(shell) {
+        return !name.is_empty();
+    }
+    is_valid_name(&shell.locale, name)
+}
+
 // [spec:nsh:req:idiom.structural-ast]
 pub(super) fn function(shell: &mut Shell, line: i32) -> Result<Node, Error> {
     let name_token = read_token(shell, TokenContext::NONE)?;

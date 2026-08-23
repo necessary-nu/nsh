@@ -193,3 +193,64 @@ pub(crate) fn bash_case_catalog(
     }
     Ok(catalog)
 }
+
+/// One case as the closure gate sees it: identity and outcome, with the
+/// difference detail dropped -- the gate decides on the category, not on
+/// the bytes.
+#[derive(Debug)]
+pub(crate) struct GateCase {
+    pub(crate) id: String,
+    pub(crate) spec: String,
+    pub(crate) outcome: GateOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GateOutcome {
+    Pass,
+    Fail,
+    Unsupported,
+    KnownBug,
+    Timeout,
+    Error,
+}
+
+impl GateOutcome {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "failure",
+            Self::Unsupported => "unsupported result",
+            Self::KnownBug => "known Bash defect",
+            Self::Timeout => "timeout",
+            Self::Error => "harness error",
+        }
+    }
+}
+
+/// Run one group for the gate, with the same containment and the same
+/// fixed environment the reference calibration used.
+// [spec:nsh:req:compat.bash.survey-closure]
+pub(crate) fn run_gate_group(
+    root: &Path,
+    manifest: &crate::OilsManifest,
+    shell: &Path,
+    group: &str,
+) -> Result<Vec<GateCase>> {
+    let report = run_reference_group(root, manifest, shell, group)?;
+    Ok(report
+        .cases
+        .into_iter()
+        .map(|case| GateCase {
+            id: case.id,
+            spec: case.spec,
+            outcome: match case.outcome {
+                ReferenceOutcome::Pass => GateOutcome::Pass,
+                ReferenceOutcome::Fail => GateOutcome::Fail,
+                ReferenceOutcome::Unsupported => GateOutcome::Unsupported,
+                ReferenceOutcome::KnownBug => GateOutcome::KnownBug,
+                ReferenceOutcome::Timeout => GateOutcome::Timeout,
+                ReferenceOutcome::Error => GateOutcome::Error,
+            },
+        })
+        .collect())
+}

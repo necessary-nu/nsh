@@ -246,7 +246,8 @@ pub(crate) fn assign_through(
         }
         Target::Element { base, subscript } => {
             let base = BStr::new(base.as_slice());
-            let selector = arrays::resolve_selector(shell, base, BStr::new(subscript.as_slice()))?;
+            let selector =
+                arrays::resolve_text_selector(shell, base, BStr::new(subscript.as_slice()))?;
             arrays::assign_element(
                 shell,
                 base,

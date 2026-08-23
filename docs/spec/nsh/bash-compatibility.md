@@ -194,3 +194,33 @@ property in its own right, documented outside this profile, and is unaffected.
 > mode did not acquire Bash-only behavior. Every executable build, test, or
 > survey used as closure evidence MUST run through the repository's process-tree
 > containment wrapper.
+
+### What "unexpected" means
+
+"Zero unexpected failures" is a claim about a register, not about a score.
+Three checked-in files decide it, and `nsh-survey gate-bash` is the executable
+that reads all three:
+
+  * `tests/surveys/oils/MANIFEST.toml` fixes which cases the group contains.
+  * `tests/surveys/oils/BASH_REFERENCE_CASES.json` fixes which of them the
+    pinned Bash 5.3 build itself passes -- the eligible manifest -- and carries
+    a disposition for every case it does not.
+  * `tests/surveys/oils/BASH_DISPOSITIONS.toml` carries one entry, with a
+    category and a reason, for every eligible case this shell does not pass,
+    and names the whole files that `[dec:nsh:bash-compatibility-is-scripts]`
+    puts outside the contract.
+
+The categories exist to keep two different things apart. `sanctioned-divergence`
+means Bash's behaviour is refused on purpose, with the reason at the point of
+divergence and, where the difference is observable outside the survey, an entry
+in `docs/divergences.md`. `not-implemented` means nobody has built it, and is an
+honest backlog entry. `defect` means a bug here with a known reproduction. A
+gate that let the second read as the first would be worse than no gate, so the
+register keeps them as separate categories and the gate reports their counts
+separately.
+
+The gate is symmetric: a registered case that starts passing fails it, exactly
+as an unregistered case that stops passing does. A stale excuse is how a real
+regression eventually gets waved through. The gate also refuses to run a shell
+whose basename is not exactly `bash`, because `argv[0]` selects the dialect and
+any other name would measure the profile with the profile turned off.

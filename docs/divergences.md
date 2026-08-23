@@ -566,3 +566,65 @@ of a loop redirected from a substitution, inherits the shell's end of a
 pipe it has no use for. The descriptor is still owned and still released
 on time; what it is not is private to one image.
 
+
+### One error boundary for both dialects
+
+**Status:** deliberate, with a stated cost. Registered in
+`tests/surveys/oils/BASH_DISPOSITIONS.toml` as `sanctioned-divergence`.
+
+POSIX XCU 2.8.1 requires a non-interactive shell to exit when a variable
+assignment fails or an expansion is in error. This shell does that in
+both dialects: `readonly r=1; r=2` ends the script with status 2, and so
+do `${#v:1:3}`, `${(m)x}` and `${a[-5]}` on a two-element array. Bash
+reports each of them, yields nothing for the expansion, and carries on
+with status 1.
+
+The cost is real and is the reason this is recorded rather than assumed:
+a Bash script that assigns to a read-only name and expects to keep going
+stops here instead. It is the one place where "a Bash script means the
+same thing" is knowingly not delivered.
+
+It is recorded rather than fixed because the fix is not local. Making the
+boundary depend on the dialect means every fatal diagnostic has to carry
+"fatal in POSIX, status 1 in Bash", and the same script then stops at a
+different place depending on a flag it may never have set -- while the
+POSIX-mode guarantee is the stronger of the two and the one the
+conformance harness is built on. The third mode this really wants is
+`set -o posix`: Bash's own POSIX mode keeps arrays and `[[ ]]` while
+tightening exactly this boundary, and it is a state neither `-o bash` nor
+`+o bash` can express. That mode is not implemented, and the choice
+belongs with it rather than with a gate.
+
+Costs, in the pinned Bash survey: `array-assoc.test.sh:27`,
+`assign-extended.test.sh:24`, `:25`, `:35`, `nameref.test.sh:18`,
+`array.test.sh:9`, `:10`, `:46`, `:47`, `var-op-slice.test.sh:1`,
+`var-ref.test.sh:20`, `zsh-idioms.test.sh:2`.
+
+### `SHELLOPTS` and `BASHOPTS` are not read-only
+
+**Status:** deliberate, and a consequence of the entry above.
+`crates/nsh/src/variables/special.rs`.
+
+Bash marks both names read-only. Importing the mark would turn
+`SHELLOPTS=x` -- a line Bash tolerates with status 1 -- into an aborted
+script under this shell's error boundary. Both listings still answer for
+the option table, because the next read recomputes them and discards
+whatever was assigned.
+
+Costs `sh-options-bash.test.sh:1` ("SHELLOPTS is readonly").
+
+### `\u` and `\U` above U+10FFFF produce no bytes
+
+**Status:** deliberate. `crates/nsh/src/escape.rs`.
+
+Bash encodes any value the escape names, so `$'\U00110000'` yields
+`f4 90 80 80` -- a four-byte sequence that is not UTF-8 for any
+character, because no such character exists. This shell produces nothing
+for a value at or above `0x11_0000`, in `$'...'`, `printf` and `echo -e`
+alike, rather than manufacturing bytes that no decoder will accept.
+
+The refusal is currently silent, which is the wart in it: a script gets a
+shorter string with no diagnostic. Diagnosing it would be better, and is
+not what Bash does either.
+
+Costs `unicode.test.sh:3` and `unicode.test.sh:5`.

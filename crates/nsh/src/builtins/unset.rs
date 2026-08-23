@@ -49,7 +49,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if let Some((base, subscript)) = subscripted(name) {
                 let base = base.to_owned();
                 let subscript = subscript.to_owned();
-                let selector = crate::variables::arrays::resolve_selector(
+                let selector = crate::variables::arrays::resolve_text_selector(
                     shell,
                     BStr::new(base.as_slice()),
                     BStr::new(subscript.as_slice()),

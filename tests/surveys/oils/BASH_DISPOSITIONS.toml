@@ -1,0 +1,681 @@
+# Bash-mode disposition register.
+#
+# The survey can express Bash's defects -- `## BUG bash` in the corpus,
+# `known_bug` in the runner -- but has no counterpart for ours. Without one,
+# a case refused on purpose reports as a plain FAIL, indistinguishable from
+# one nobody has implemented. This file is that counterpart, and
+# `nsh-survey gate-bash` reads it.
+#
+# Categories, in the order they matter:
+#
+#   not-implemented       Nobody has built it. An honest backlog entry, and
+#                         the only category that may grow by accident. It is
+#                         deliberately not a synonym for the next one.
+#   defect                A bug in this shell with a known reproduction, as
+#                         opposed to a feature that was never written.
+#   sanctioned-divergence We refuse Bash's behaviour on purpose. Every entry
+#                         names the reason and, where the difference is
+#                         observable outside the survey, has a prose entry in
+#                         docs/divergences.md.
+#   harness-artifact      The case cannot pass for any shell under this
+#                         runner, so it says nothing about the shell.
+#   out-of-contract       Outside the profile per
+#                         [dec:nsh:bash-compatibility-is-scripts].
+#
+# Bash's own defects are not recorded here: the corpus qualifies them and the
+# runner reports them as `known-bug`, and the reference calibration in
+# BASH_REFERENCE_CASES.json carries a disposition for every case the pinned
+# Bash 5.3 build does not itself pass.
+#
+# The gate is symmetric. A registered case that starts passing is a stale
+# entry and fails the gate, exactly as an unregistered case that stops
+# passing does.
+
+schema = 1
+group = "bash-extension"
+oils_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
+
+# Whole files the scope decision removes from the contract. Excluded is not
+# ignored: the reason is recorded here and the gate reports the count.
+
+[[scope]]
+spec = "prompt.test.sh"
+disposition = "out-of-contract"
+reason = "Prompt rendering. Retired from the profile by [dec:nsh:bash-compatibility-is-scripts]; Bash mode is a contract about what a Bash script means, not about what the shell looks like to a person."
+
+[[scope]]
+spec = "builtin-completion.test.sh"
+disposition = "out-of-contract"
+reason = "Programmable completion (`complete`, `compgen`, `compopt`). Retired from the profile by [dec:nsh:bash-compatibility-is-scripts]; Bash mode is a contract about what a Bash script means, not about what the shell looks like to a person."
+
+[[scope]]
+spec = "interactive.test.sh"
+disposition = "out-of-contract"
+reason = "Interactive shell behaviour at a terminal. Retired from the profile by [dec:nsh:bash-compatibility-is-scripts]; Bash mode is a contract about what a Bash script means, not about what the shell looks like to a person."
+
+[[scope]]
+spec = "builtin-history.test.sh"
+disposition = "out-of-contract"
+reason = "History controls. Retired from the profile by [dec:nsh:bash-compatibility-is-scripts]; Bash mode is a contract about what a Bash script means, not about what the shell looks like to a person."
+
+[[scope]]
+spec = "builtin-fc.test.sh"
+disposition = "out-of-contract"
+reason = "`fc` history editing. Retired from the profile by [dec:nsh:bash-compatibility-is-scripts]; Bash mode is a contract about what a Bash script means, not about what the shell looks like to a person."
+
+[[scope]]
+spec = "builtin-bind.test.sh"
+disposition = "out-of-contract"
+reason = "`bind` key bindings. Retired from the profile by [dec:nsh:bash-compatibility-is-scripts]; Bash mode is a contract about what a Bash script means, not about what the shell looks like to a person."
+
+# One entry per eligible in-scope case that does not pass.
+
+[[case]]
+id = "append.test.sh:11"
+disposition = "not-implemented"
+reason = "`a[i]+=(list)` is accepted and appends the list's fields to the array; Bash refuses to assign a compound value to one element."
+
+[[case]]
+id = "append.test.sh:14"
+disposition = "not-implemented"
+reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
+
+[[case]]
+id = "arith-context.test.sh:15"
+disposition = "not-implemented"
+reason = "An empty subscript `a[]=v` is accepted and assigns index 0; Bash rejects it as a bad substitution. Nothing validates that a subscript has an expression in it."
+
+[[case]]
+id = "array-assign.test.sh:1"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "array-assign.test.sh:2"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "array-assign.test.sh:3"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "array-assign.test.sh:5"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "array-assign.test.sh:8"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "array-assign.test.sh:9"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "array-assign.test.sh:10"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "array-assoc.test.sh:27"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
+
+[[case]]
+id = "array-assoc.test.sh:28"
+disposition = "not-implemented"
+reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
+
+[[case]]
+id = "array-assoc.test.sh:33"
+disposition = "not-implemented"
+reason = "`printf -v` refuses a subscripted name: `printf -v 'a[k]' ...` reports `bad variable name` instead of writing that element."
+
+[[case]]
+id = "array-compat.test.sh:1"
+disposition = "defect"
+reason = "`\"$@\"` embedded in a larger word joins its fields with the first byte of `IFS`; every shell joins with a space there, and this reproduces with the dialect off."
+
+[[case]]
+id = "array-compat.test.sh:9"
+disposition = "not-implemented"
+reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+
+[[case]]
+id = "array-compat.test.sh:10"
+disposition = "not-implemented"
+reason = "`declare -a` on an existing associative array, and `declare -A` on an existing indexed array, silently convert it. Bash refuses with status 1 and leaves the value alone."
+
+[[case]]
+id = "array-literal.test.sh:0"
+disposition = "not-implemented"
+reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
+
+[[case]]
+id = "array-literal.test.sh:3"
+disposition = "not-implemented"
+reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
+
+[[case]]
+id = "array-literal.test.sh:4"
+disposition = "not-implemented"
+reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
+
+[[case]]
+id = "array-literal.test.sh:9"
+disposition = "not-implemented"
+reason = "A compound assignment resolves every element's subscript against the array as it was before the assignment; Bash makes each element's effect visible to the next element's subscript."
+
+[[case]]
+id = "array-literal.test.sh:10"
+disposition = "not-implemented"
+reason = "A compound assignment resolves every element's subscript against the array as it was before the assignment; Bash makes each element's effect visible to the next element's subscript."
+
+[[case]]
+id = "array-literal.test.sh:13"
+disposition = "not-implemented"
+reason = "Inside a compound assignment, the value of `[k]=v` is expanded as an ordinary word: it is brace-expanded, field-split, and tilde expansion stops after the first `~`. Bash treats it as an assignment-context word, so `[k]=-{a,b}-` stays literal and `[k]=$v` is one element."
+
+[[case]]
+id = "array-literal.test.sh:15"
+disposition = "not-implemented"
+reason = "`declare -a` on an existing associative array, and `declare -A` on an existing indexed array, silently convert it. Bash refuses with status 1 and leaves the value alone."
+
+[[case]]
+id = "array-sparse.test.sh:9"
+disposition = "not-implemented"
+reason = "`set -x` renders a Bash array assignment as an empty command word; the trace has no text for `a+=(2)`."
+
+[[case]]
+id = "array-sparse.test.sh:19"
+disposition = "not-implemented"
+reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
+
+[[case]]
+id = "array-sparse.test.sh:20"
+disposition = "not-implemented"
+reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
+
+[[case]]
+id = "array-sparse.test.sh:25"
+disposition = "not-implemented"
+reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+
+[[case]]
+id = "array-sparse.test.sh:27"
+disposition = "not-implemented"
+reason = "A plain read of a name that holds an array with no elements is treated as set-and-empty; Bash treats it as unset, so `${a-word}` uses the default."
+
+[[case]]
+id = "array-sparse.test.sh:31"
+disposition = "out-of-contract"
+reason = "`compgen` is part of the programmable-completion surface retired by [dec:nsh:bash-compatibility-is-scripts]; there is no `complete`/`compgen`/`compopt` and reporting one would advertise a facility that is not here."
+
+[[case]]
+id = "array.test.sh:9"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
+
+[[case]]
+id = "array.test.sh:10"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
+
+[[case]]
+id = "array.test.sh:25"
+disposition = "not-implemented"
+reason = "`export` does not refuse an array: an exported name later assigned a compound value exports its first element, and `export a[7]=8` is accepted. Bash exports nothing for the array and refuses the subscripted operand with status 1."
+
+[[case]]
+id = "array.test.sh:27"
+disposition = "not-implemented"
+reason = "A compound value in an environment prefix (`B=(b b) cmd`) is dropped from the child's environment. Bash passes the literal text `(b b)` instead."
+
+[[case]]
+id = "array.test.sh:28"
+disposition = "not-implemented"
+reason = "A compound value in an environment prefix (`B=(b b) cmd`) is dropped from the child's environment. Bash passes the literal text `(b b)` instead."
+
+[[case]]
+id = "array.test.sh:35"
+disposition = "not-implemented"
+reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
+
+[[case]]
+id = "array.test.sh:46"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
+
+[[case]]
+id = "array.test.sh:47"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
+
+[[case]]
+id = "array.test.sh:59"
+disposition = "not-implemented"
+reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
+
+[[case]]
+id = "array.test.sh:74"
+disposition = "not-implemented"
+reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
+
+[[case]]
+id = "assign-deferred.test.sh:4"
+disposition = "not-implemented"
+reason = "`export` does not refuse an array: an exported name later assigned a compound value exports its first element, and `export a[7]=8` is accepted. Bash exports nothing for the array and refuses the subscripted operand with status 1."
+
+[[case]]
+id = "assign-dialects.test.sh:2"
+disposition = "not-implemented"
+reason = "`test -v name` reports true for a name that was declared with `typeset -a`/`-A` but holds no element; Bash reports false until an element exists."
+
+[[case]]
+id = "assign-dialects.test.sh:3"
+disposition = "not-implemented"
+reason = "`test -v name` reports true for a name that was declared with `typeset -a`/`-A` but holds no element; Bash reports false until an element exists."
+
+[[case]]
+id = "assign-extended.test.sh:2"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "assign-extended.test.sh:3"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "assign-extended.test.sh:5"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "assign-extended.test.sh:22"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "assign-extended.test.sh:24"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
+
+[[case]]
+id = "assign-extended.test.sh:25"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
+
+[[case]]
+id = "assign-extended.test.sh:31"
+disposition = "not-implemented"
+reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
+
+[[case]]
+id = "assign-extended.test.sh:32"
+disposition = "not-implemented"
+reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
+
+[[case]]
+id = "assign-extended.test.sh:35"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
+
+[[case]]
+id = "assign-extended.test.sh:36"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "assign-extended.test.sh:38"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "ble-idioms.test.sh:5"
+disposition = "not-implemented"
+reason = "Arithmetic evaluation does not re-evaluate a variable's text as an expression, so the recursive `((loop))` idiom yields nothing."
+
+[[case]]
+id = "ble-idioms.test.sh:19"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "ble-idioms.test.sh:20"
+disposition = "not-implemented"
+reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
+
+[[case]]
+id = "builtin-bash.test.sh:9"
+disposition = "not-implemented"
+reason = "Here-strings (`<<<`) are not implemented at all: `cat <<< text` is a syntax error. This is a plain gap in the Bash redirection grammar."
+
+[[case]]
+id = "builtin-bash.test.sh:12"
+disposition = "not-implemented"
+reason = "`shopt -s lastpipe` is not implemented, so the last stage of a pipeline always runs in a subshell and `seq 2 | mapfile m` leaves the array unset in the parent."
+
+[[case]]
+id = "builtin-read.test.sh:26"
+disposition = "defect"
+reason = "Field splitting drops the text after a backslash-protected run: `printf '\\a \\b\\n' | read line` yields `a` where every shell yields the whole line. Reproduces with the dialect off, so this is a POSIX-mode defect rather than a Bash gap. Filed on this node on 2026-08-22."
+
+[[case]]
+id = "builtin-read.test.sh:46"
+disposition = "not-implemented"
+reason = "A `read` that fails because the descriptor is a directory reports status 128 rather than 1."
+
+[[case]]
+id = "builtin-read.test.sh:47"
+disposition = "not-implemented"
+reason = "A `read` that fails because the descriptor is a directory reports status 128 rather than 1."
+
+[[case]]
+id = "builtin-trap-err.test.sh:12"
+disposition = "not-implemented"
+reason = "`set -o errtrace` runs the ERR trap for a failing command inside an asynchronous list where Bash does not."
+
+[[case]]
+id = "builtin-type-bash.test.sh:3"
+disposition = "not-implemented"
+reason = "`type -t` does not classify `{` as a keyword."
+
+[[case]]
+id = "builtin-type-bash.test.sh:17"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "builtin-type-bash.test.sh:27"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "extglob-files.test.sh:18"
+disposition = "not-implemented"
+reason = "`builtin nosuchname` reports status 127 rather than Bash's 1."
+
+[[case]]
+id = "extglob-files.test.sh:22"
+disposition = "not-implemented"
+reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+
+[[case]]
+id = "extglob-match.test.sh:21"
+disposition = "not-implemented"
+reason = "With `extglob` on, `!(pattern)` inside `[[ ]]` is still read as negation of a parenthesised expression rather than as an extended-glob pattern."
+
+[[case]]
+id = "glob-bash.test.sh:1"
+disposition = "not-implemented"
+reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+
+[[case]]
+id = "glob-bash.test.sh:2"
+disposition = "not-implemented"
+reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+
+[[case]]
+id = "glob-bash.test.sh:3"
+disposition = "not-implemented"
+reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+
+[[case]]
+id = "glob-bash.test.sh:6"
+disposition = "not-implemented"
+reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+
+[[case]]
+id = "globignore.test.sh:8"
+disposition = "not-implemented"
+reason = "`GLOBIGNORE` does not apply bracket expressions such as `[[:alnum:]]*`, so no name is filtered."
+
+[[case]]
+id = "nameref.test.sh:6"
+disposition = "not-implemented"
+reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
+
+[[case]]
+id = "nameref.test.sh:18"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
+
+[[case]]
+id = "nameref.test.sh:27"
+disposition = "not-implemented"
+reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
+
+[[case]]
+id = "nameref.test.sh:29"
+disposition = "not-implemented"
+reason = "A name reference does not invert `${!ref}` (Bash makes it yield the referenced name), does not refuse a write through a whole-array reference, and does not refuse a subscripted write through a reference that already names an element."
+
+[[case]]
+id = "nix-idioms.test.sh:4"
+disposition = "not-implemented"
+reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
+
+[[case]]
+id = "nocasematch-match.test.sh:1"
+disposition = "not-implemented"
+reason = "`shopt -s nocasematch` applies to `==` pattern operands but not to the `=~` regular-expression operand."
+
+[[case]]
+id = "print-source-code.test.sh:0"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "print-source-code.test.sh:1"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "print-source-code.test.sh:2"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "print-source-code.test.sh:3"
+disposition = "not-implemented"
+reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
+
+[[case]]
+id = "process-sub.test.sh:4"
+disposition = "not-implemented"
+reason = "The `$(<file)` command-substitution shorthand is not implemented; it runs a command with no words and yields nothing instead of the file's contents."
+
+[[case]]
+id = "redirect-multi.test.sh:0"
+disposition = "not-implemented"
+reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+
+[[case]]
+id = "redirect-multi.test.sh:3"
+disposition = "not-implemented"
+reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+
+[[case]]
+id = "redirect-multi.test.sh:5"
+disposition = "not-implemented"
+reason = "A redirection to an empty pathname reports status 2 where Bash reports 1. A status mapping, not the fatal-error boundary: both shells continue."
+
+[[case]]
+id = "redirect-multi.test.sh:6"
+disposition = "not-implemented"
+reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+
+[[case]]
+id = "redirect-multi.test.sh:7"
+disposition = "not-implemented"
+reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+
+[[case]]
+id = "redirect-multi.test.sh:8"
+disposition = "not-implemented"
+reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+
+[[case]]
+id = "redirect-multi.test.sh:9"
+disposition = "not-implemented"
+reason = "`shopt -s failglob` is recognised but does nothing: a pattern that matches no file is left literal instead of failing the command with status 1."
+
+[[case]]
+id = "redirect-multi.test.sh:11"
+disposition = "not-implemented"
+reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+
+[[case]]
+id = "redirect-multi.test.sh:12"
+disposition = "not-implemented"
+reason = "Bash expands a redirection word as a pathname pattern and refuses the redirect when it matches more than one name, when it came from an unquoted brace expansion, or when word splitting produced more than one field. None of those rules is implemented: the word is used literally and the redirect succeeds."
+
+[[case]]
+id = "sh-options-bash.test.sh:1"
+disposition = "sanctioned-divergence"
+reason = "`SHELLOPTS` is published but not marked read-only, so assigning to it succeeds where Bash refuses with status 1. Marking it read-only would turn a line Bash tolerates into an aborted script under the error boundary above. Recorded in docs/divergences.md."
+
+[[case]]
+id = "sh-options-bash.test.sh:4"
+disposition = "not-implemented"
+reason = "`SHELLOPTS` is not read back from the environment at startup, so exporting it does not carry `set -x` into a child shell. The second case also shows the exported value being rejected by a real Bash, so the published spelling is wrong as well."
+
+[[case]]
+id = "sh-options-bash.test.sh:5"
+disposition = "not-implemented"
+reason = "`SHELLOPTS` is not read back from the environment at startup, so exporting it does not carry `set -x` into a child shell. The second case also shows the exported value being rejected by a real Bash, so the published spelling is wrong as well."
+
+[[case]]
+id = "toysh.test.sh:0"
+disposition = "not-implemented"
+reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+
+[[case]]
+id = "toysh.test.sh:6"
+disposition = "not-implemented"
+reason = "Here-strings (`<<<`) are not implemented at all: `cat <<< text` is a syntax error. This is a plain gap in the Bash redirection grammar."
+
+[[case]]
+id = "type-compat.test.sh:1"
+disposition = "not-implemented"
+reason = "`declare -i` evaluates a plain assignment but not an append: `i+=' 2 '` concatenates the text where Bash adds arithmetically."
+
+[[case]]
+id = "type-compat.test.sh:4"
+disposition = "not-implemented"
+reason = "The declaration built-ins do not re-parse an operand that arrived as one word, so `declare -a 'x=(1 2)'`, `typeset -a \"$code\"` and `$myvar x=$x` store the text rather than the assignment it spells."
+
+[[case]]
+id = "unicode.test.sh:3"
+disposition = "sanctioned-divergence"
+reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes the value anyway, yielding a byte sequence that is not UTF-8 for any character. Refusing to manufacture it is deliberate (`crates/nsh/src/escape.rs::unicode_bytes`); the refusal is silent, which is a wart the entry records rather than hides."
+
+[[case]]
+id = "unicode.test.sh:5"
+disposition = "sanctioned-divergence"
+reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes the value anyway, yielding a byte sequence that is not UTF-8 for any character. Refusing to manufacture it is deliberate (`crates/nsh/src/escape.rs::unicode_bytes`); the refusal is silent, which is a wart the entry records rather than hides."
+
+[[case]]
+id = "var-op-bash.test.sh:11"
+disposition = "not-implemented"
+reason = "`${!prefix@}` lists only names with a scalar value, so a name declared as an empty array is missing from the list."
+
+[[case]]
+id = "var-op-bash.test.sh:16"
+disposition = "not-implemented"
+reason = "`${A@Q}` on an associative array yields `''`; Bash yields nothing, because `$A` alone reads no element of one."
+
+[[case]]
+id = "var-op-bash.test.sh:24"
+disposition = "not-implemented"
+reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+
+[[case]]
+id = "var-op-bash.test.sh:25"
+disposition = "not-implemented"
+reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+
+[[case]]
+id = "var-op-bash.test.sh:26"
+disposition = "not-implemented"
+reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
+
+[[case]]
+id = "var-op-patsub.test.sh:23"
+disposition = "defect"
+reason = "A bracket expression whose first member is `]` (`[^]]`) is parsed as an empty set followed by literal text, so the pattern matches everything. POSIX requires `]` first in a bracket expression to be literal, and this reproduces with the dialect off."
+
+[[case]]
+id = "var-op-slice.test.sh:1"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
+
+[[case]]
+id = "var-op-slice.test.sh:20"
+disposition = "not-implemented"
+reason = "`${a[@]:offset}` counts surviving elements where Bash counts subscripts, so a sparse array is sliced from the wrong place, and an out-of-range negative offset is clamped to the whole array instead of yielding nothing."
+
+[[case]]
+id = "var-ref.test.sh:2"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:4"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:12"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:19"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:20"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."
+
+[[case]]
+id = "var-ref.test.sh:21"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:22"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:23"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:28"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:29"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "var-ref.test.sh:30"
+disposition = "not-implemented"
+reason = "Indirect expansion `${!ref}` resolves the name and stops: it does not accept a subscript, a suffix operator, an `@`-transform or a nested indirection through the resolved name, and it does not reject a resolved name that is not a valid name."
+
+[[case]]
+id = "zsh-idioms.test.sh:2"
+disposition = "sanctioned-divergence"
+reason = "Error boundary: a bad substitution or a bad array subscript ends a non-interactive shell here (status 2), where Bash reports it, yields nothing for the expansion and carries on with status 1. Same boundary as the read-only case above; recorded in docs/divergences.md."

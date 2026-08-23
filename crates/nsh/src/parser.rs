@@ -990,7 +990,7 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
                     return Err(syntax_error(shell, b"Bad function name"));
                 };
                 let builtin_spec = crate::execution::builtin(shell, word.word.as_bstr());
-                if !is_valid_name(&shell.locale, word.word.as_bstr())
+                if !bash::accepts_function_name(shell, word.word.as_bstr())
                     || builtin_spec.is_some_and(|cmd| cmd.attributes().is_special())
                 {
                     return Err(syntax_error(shell, b"Bad function name"));

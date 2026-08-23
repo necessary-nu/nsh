@@ -3,8 +3,8 @@ survey = "oils-shell-spec"
 source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-named-diagnostic"
 group_label = "Named *-bash diagnostic slice"
-shell = "target/release/nsh"
-shell_sha256 = "b8289d9e6f0ec3ecbab6f568ede78ecc36bdeeb25adedab19281be31fed910c2"
+shell = "target/bash-mode/bash"
+shell_sha256 = "823288764f93beb1401bd34e2b8203c757d6bac5bf57e12a529140cfdfde3206"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -13,94 +13,13 @@ timeout_ms = 5000
 [totals]
 selected = 112
 executed = 112
-pass = 4
-fail = 107
+pass = 89
+fail = 21
 skip = 0
 unsupported = 0
-known_bug = 1
+known_bug = 2
 timeout = 0
 error = 0
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 0
-line = 5
-description = "help"
-outcome = "fail"
-status = 0
-difference_fields = ["stderr"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 1
-line = 18
-description = "bad help topic"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 2
-line = 28
-description = "mapfile"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 3
-line = 47
-description = "readarray (synonym for mapfile)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 4
-line = 66
-description = "mapfile (array name): arr"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 5
-line = 85
-description = "mapfile (delimiter): -d delim"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 6
-line = 102
-description = "mapfile (delimiter): -d '' (null-separated)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 7
-line = 119
-description = "mapfile (truncate delim): -t"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 8
-line = 135
-description = '''mapfile -t doesn't remove \r'''
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-bash.test.sh"
@@ -116,42 +35,12 @@ difference_fields = [
 
 [[nonpassing]]
 spec = "builtin-bash.test.sh"
-index = 10
-line = 170
-description = "mapfile (store position): -O start"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 11
-line = 189
-description = "mapfile (input range): -s start -n count"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
 index = 12
 line = 205
 description = "mapfile / readarray stdin  TODO: Fix me."
 outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 0
-line = 15
-description = "trap -l"
-outcome = "fail"
-status = 1
-difference_fields = ["status"]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-trap-bash.test.sh"
@@ -164,261 +53,12 @@ qualifier = "BUG"
 difference_fields = []
 
 [[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 3
-line = 62
-description = "trap DEBUG ignores $?"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 4
-line = 89
-description = "but trap DEBUG respects errexit"
-outcome = "fail"
-status = 1
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 5
-line = 110
-description = "trap DEBUG with 'return'"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 6
-line = 146
-description = "trap DEBUG with 'exit'"
-outcome = "fail"
-status = 0
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 7
-line = 166
-description = "trap DEBUG with non-compound commands"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 8
-line = 206
-description = "trap DEBUG and control flow"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 9
-line = 231
-description = "trap DEBUG and command sub / subshell"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 10
-line = 255
-description = "trap DEBUG not run in forked interpreter for first pipeline part"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 11
-line = 276
-description = "One 'echo' in first pipeline part - why does bash behave differently from case above?"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 12
-line = 310
-description = "trap DEBUG and pipeline (lastpipe difference)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 13
-line = 362
-description = "trap DEBUG function call"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 14
-line = 396
-description = "trap DEBUG case"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 15
-line = 423
-description = "trap DEBUG for each"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 16
-line = 462
-description = "trap DEBUG for expr"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 17
-line = 497
-description = "trap DEBUG if while"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 18
-line = 519
-description = "trap RETURN"
-outcome = "fail"
-status = 42
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 19
-line = 552
-description = "Compare trap DEBUG vs. trap ERR"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 20
-line = 594
-description = "Combine DEBUG trap and USR1 trap"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 21
-line = 616
-description = "Combine ERR trap and USR1 trap"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-trap-bash.test.sh"
-index = 22
-line = 635
-description = "Combine DEBUG trap and ERR trap"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 0
-line = 5
-description = "type -t -> function"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 1
-line = 10
-description = "type -t -> alias"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 2
-line = 16
-description = "type -t -> builtin"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
 spec = "builtin-type-bash.test.sh"
 index = 3
 line = 27
 description = "type -t -> keyword"
 outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 4
-line = 38
-description = "type -t control flow"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 5
-line = 60
-description = "type -t -> file"
-outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -429,118 +69,10 @@ spec = "builtin-type-bash.test.sh"
 index = 6
 line = 67
 description = "type -t doesn't find non-executable (like command -v)"
-outcome = "fail"
-status = 2
-qualifier = "BUG"
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 7
-line = 79
-description = "type -t -> not found"
-outcome = "fail"
+outcome = "known-bug"
 status = 0
-difference_fields = [
-    "stdout",
-    "stderr",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 8
-line = 90
-description = "type -p and -P builtin -> file"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 9
-line = 108
-description = "type -a -P gives multiple files"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 10
-line = 121
-description = "type -p builtin -> not found"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 11
-line = 127
-description = "type -p builtin -> not a file"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 12
-line = 132
-description = "type -P builtin -> not found"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 13
-line = 138
-description = "type -P builtin -> not a file"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 14
-line = 144
-description = "type -P builtin -> not a file but file found"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 15
-line = 160
-description = "type -f builtin -> not found"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 16
-line = 164
-description = "type -f builtin -> function and file exists"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
+qualifier = "BUG"
+difference_fields = []
 
 [[nonpassing]]
 spec = "builtin-type-bash.test.sh"
@@ -553,151 +85,9 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-type-bash.test.sh"
-index = 18
-line = 207
-description = "type -ap -> function"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 19
-line = 213
-description = "type -a -> alias; prints alias definition"
-outcome = "fail"
-status = 2
-qualifier = "OK"
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 20
-line = 220
-description = "type -ap -> alias"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 21
-line = 227
-description = "type -a -> builtin"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 22
-line = 231
-description = "type -ap -> builtin"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 23
-line = 236
-description = "type -a -> keyword"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 24
-line = 240
-description = "type -a -> file"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 25
-line = 252
-description = "type -ap -> file; abbreviated"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 26
-line = 263
-description = "type -a -> builtin and file"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
 index = 27
 line = 275
 description = "type -a -> builtin and file and shell function"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 28
-line = 316
-description = "type -ap -> builtin and file; doesn't print builtin or function"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 29
-line = 335
-description = "type -a -> executable not in PATH"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 30
-line = 341
-description = "type -P does not find directories (regression)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "glob-bash.test.sh"
-index = 0
-line = 3
-description = "shopt -s nullglob"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
@@ -708,25 +98,7 @@ index = 1
 line = 16
 description = "shopt -s failglob in command context"
 outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "glob-bash.test.sh"
-index = 2
-line = 31
-description = "shopt -s failglob in loop context"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "glob-bash.test.sh"
-index = 3
-line = 49
-description = "shopt -s failglob in array literal context"
-outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -734,21 +106,27 @@ difference_fields = [
 
 [[nonpassing]]
 spec = "glob-bash.test.sh"
-index = 4
-line = 66
-description = "shopt -s failglob exits properly in command context with set -e"
+index = 2
+line = 31
+description = "shopt -s failglob in loop context"
 outcome = "fail"
-status = 127
-difference_fields = ["status"]
+status = 1
+difference_fields = [
+    "stdout",
+    "status",
+]
 
 [[nonpassing]]
 spec = "glob-bash.test.sh"
-index = 5
-line = 81
-description = "shopt -s failglob exits properly in loop context with set -e"
+index = 3
+line = 49
+description = "shopt -s failglob in array literal context"
 outcome = "fail"
-status = 127
-difference_fields = ["status"]
+status = 1
+difference_fields = [
+    "stdout",
+    "status",
+]
 
 [[nonpassing]]
 spec = "glob-bash.test.sh"
@@ -756,26 +134,11 @@ index = 6
 line = 102
 description = "shopt -s failglob behavior on single line with semicolon"
 outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "glob-bash.test.sh"
-index = 7
-line = 128
-description = "dotglob (bash option that no_dash_glob is roughly consistent with)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 0
-line = 4
-description = "SHELLOPTS is updated when options are changed"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
+status = 1
+difference_fields = [
+    "stdout",
+    "status",
+]
 
 [[nonpassing]]
 spec = "sh-options-bash.test.sh"
@@ -785,30 +148,6 @@ description = "SHELLOPTS is readonly"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 2
-line = 34
-description = "SHELLOPTS and BASHOPTS are non-empty"
-outcome = "fail"
-status = 1
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 3
-line = 58
-description = "SHELLOPTS reflects flags like sh -x"
-outcome = "fail"
-status = 1
-difference_fields = [
-    "stdout",
-    "status",
-]
 
 [[nonpassing]]
 spec = "sh-options-bash.test.sh"
@@ -839,198 +178,20 @@ qualifier = "N-I"
 difference_fields = ["stdout"]
 
 [[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 8
-line = 142
-description = "shopt -s progcomp hostcomplete are stubs (bash-completion)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 0
-line = 4
-description = "Lower Case with , and ,,"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 1
-line = 17
-description = "Upper Case with ^ and ^^"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 2
-line = 30
-description = "Case folding - Unicode characters"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
 spec = "var-op-bash.test.sh"
 index = 3
 line = 60
 description = "Case folding - multi code point"
 outcome = "fail"
-status = 2
+status = 0
 qualifier = "BUG"
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 4
-line = 118
-description = "Case folding that depends on locale (not enabled, requires Turkish locale)"
-outcome = "fail"
-status = 2
-qualifier = "OK"
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 5
-line = 141
-description = "Lower Case with constant string (VERY WEIRD)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 6
-line = 150
-description = "Lower Case glob"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 7
-line = 163
-description = "${x@u} U L - upper / lower case (bash 5.1 feature)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 8
-line = 182
-description = "${x@Q}"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 9
-line = 190
-description = "${array@Q} and ${array[@]@Q}"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 10
-line = 206
-description = "${!prefix@} ${!prefix*} yields sorted array of var names"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
 index = 11
 line = 237
 description = "${!prefix@} matches var name (regression)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 12
-line = 247
-description = "${var@a} for attributes"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 13
-line = 264
-description = "${var@a} error conditions"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 14
-line = 270
-description = "undef and @P @Q @a"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 15
-line = 287
-description = "argv array and @P @Q @a"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
@@ -1050,57 +211,9 @@ index = 19
 line = 358
 description = "${!A@a} and ${!A[@]@a}"
 outcome = "fail"
-status = 2
-qualifier = "BUG"
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 20
-line = 381
-description = "undef vs. empty string in var ops"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 21
-line = 410
-description = "-o nounset with var ops"
-outcome = "fail"
 status = 0
+qualifier = "BUG"
 difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 22
-line = 424
-description = "${a[0]@a} and ${a@a}"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 23
-line = 436
-description = "${!r@a} with r='a[0]' (attribute for indirect expansion of an array element)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
@@ -1108,12 +221,9 @@ index = 24
 line = 458
 description = "Array expansion with nullary var op @Q"
 outcome = "fail"
-status = 2
+status = 0
 qualifier = "OK"
-difference_fields = [
-    "stdout",
-    "status",
-]
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
@@ -1121,12 +231,9 @@ index = 25
 line = 488
 description = "Array expansion with nullary var op @P"
 outcome = "fail"
-status = 2
+status = 0
 qualifier = "OK"
-difference_fields = [
-    "stdout",
-    "status",
-]
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-bash.test.sh"
@@ -1134,11 +241,8 @@ index = 26
 line = 518
 description = "Array expansion with nullary var op @a"
 outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "vars-bash.test.sh"

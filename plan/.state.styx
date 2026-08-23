@@ -5443,7 +5443,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.variable-expansion-state, version 0}
     )}
-    {id verify-bash-compatibility-profile}
+    {id verify-bash-compatibility-profile, covered_rules (
+        compat.bash.survey-closure
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.survey-closure}
+    )}
     {id verify-idiomatic-core-conformance, covered_rules (
         idiom.conformance-closure
     ), covered_claims (

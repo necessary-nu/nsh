@@ -462,8 +462,7 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         let Some(subscript) = name.subscript else {
             return self.scalar(name.base);
         };
-        let subscript = unquote(subscript);
-        let selector = arrays::resolve_selector(self.shell, name.base, subscript.as_bstr())?;
+        let selector = arrays::resolve_text_selector(self.shell, name.base, subscript)?;
         let text = element_text(self.shell, name.base, &selector);
         self.value_of(text)
     }
@@ -506,8 +505,11 @@ impl<'a, 'shell> Parser<'a, 'shell> {
                 CallbackPolicy::Run,
             );
         }
-        let subscript = unquote(name.subscript.unwrap_or_default());
-        let selector = arrays::resolve_selector(self.shell, name.base, subscript.as_bstr())?;
+        let selector = arrays::resolve_text_selector(
+            self.shell,
+            name.base,
+            name.subscript.unwrap_or_default(),
+        )?;
         let text = value.to_string();
         arrays::assign_element(
             self.shell,
@@ -724,24 +726,6 @@ fn evaluate_at_depth(shell: &mut Shell, input: &BStr, depth: u32) -> Result<i64,
         return Err(parser.error(b"expecting EOF"));
     }
     Ok(result)
-}
-
-/// Remove the quoting Bash removes before it reads a subscript, so that
-/// `A['k']`, `A["k"]` and `A[k]` all name the key `k`.
-fn unquote(subscript: &BStr) -> BString {
-    let mut output = BString::default();
-    let mut escaped = false;
-    for &byte in subscript.iter() {
-        if escaped {
-            output.push(byte);
-            escaped = false;
-        } else if byte == b'\\' {
-            escaped = true;
-        } else if byte != b'\'' && byte != b'"' {
-            output.push(byte);
-        }
-    }
-    output
 }
 
 /// The stored text of one array element, empty when it is unset.

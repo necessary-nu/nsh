@@ -234,7 +234,8 @@ fn assign(shell: &mut Shell, name: &BStr, base: &BStr, value: &BStr) -> Result<(
     match bytes.find_byte(b'[') {
         Some(at) if bytes.last() == Some(&b']') => {
             let subscript = BStr::new(&bytes[at + 1..bytes.len() - 1]).to_owned();
-            let selector = arrays::resolve_selector(shell, base, BStr::new(subscript.as_slice()))?;
+            let selector =
+                arrays::resolve_text_selector(shell, base, BStr::new(subscript.as_slice()))?;
             arrays::assign_element(
                 shell,
                 base,
@@ -394,8 +395,10 @@ fn render(shell: &Shell, name: &BStr) -> Option<BString> {
                 line.extend_from_slice(b"]=");
                 line.extend_from_slice(&double_quote(BStr::new(element.as_slice())));
             }
-            // Bash pads the closing paren for associative arrays only.
-            if value.kind() == VariableKind::Associative {
+            /* Bash pads the closing paren for associative arrays only, and
+             * only when there is an element to pad away from: an empty one
+             * prints `=()` like an indexed array. */
+            if value.kind() == VariableKind::Associative && !keys.is_empty() {
                 line.push(b' ');
             }
             line.push(b')');

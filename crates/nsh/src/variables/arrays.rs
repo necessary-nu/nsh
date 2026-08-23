@@ -74,6 +74,76 @@ pub(crate) fn resolve_selector(
     normalize_index(shell, name, index).map(ArraySelector::Index)
 }
 
+/// Resolve a subscript that reached the shell as *text* rather than as a
+/// parsed word.
+///
+/// `${A[k]}`, `unset -v 'A[k]'`, `declare -n r='A[k]'` and `(( A[k] ))`
+/// all name an element with bytes no parser expanded. Bash reads those
+/// bytes as a word: quotes come off, text outside single quotes expands,
+/// and a blank is data rather than a field separator.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn resolve_text_selector(
+    shell: &mut Shell,
+    name: &BStr,
+    subscript: &BStr,
+) -> Result<ArraySelector, Error> {
+    let resolved = subscript_word(shell, subscript)?;
+    resolve_selector(shell, name, BStr::new(resolved.as_slice()))
+}
+
+/// Apply a subscript's quoting and expansion, yielding the bytes that
+/// select an element.
+fn subscript_word(shell: &mut Shell, subscript: &BStr) -> Result<BString, Error> {
+    const ACTIVE: &[u8] = b"'\"\\$`";
+    if !subscript.iter().any(|byte| ACTIVE.contains(byte)) {
+        return Ok(subscript.to_owned());
+    }
+    let mut resolved = BString::default();
+    let mut expandable = BString::default();
+    let mut in_double_quotes = false;
+    let mut at = 0;
+    while at < subscript.len() {
+        let byte = subscript[at];
+        at += 1;
+        match byte {
+            b'\'' if !in_double_quotes => {
+                expand_run(shell, &mut expandable, &mut resolved)?;
+                while at < subscript.len() && subscript[at] != b'\'' {
+                    resolved.push(subscript[at]);
+                    at += 1;
+                }
+                at += 1;
+            }
+            b'"' => in_double_quotes = !in_double_quotes,
+            b'\\' if at < subscript.len() => {
+                let escaped = subscript[at];
+                at += 1;
+                /* Outside double quotes a backslash removes any byte's
+                 * meaning; inside, only these four keep theirs, and the
+                 * double-quoted expansion below already knows which. */
+                if in_double_quotes || matches!(escaped, b'$' | b'`' | b'"' | b'\\') {
+                    expandable.push(b'\\');
+                }
+                expandable.push(escaped);
+            }
+            _ => expandable.push(byte),
+        }
+    }
+    expand_run(shell, &mut expandable, &mut resolved)?;
+    Ok(resolved)
+}
+
+/// Expand one run of subscript text that no single quote protected.
+fn expand_run(shell: &mut Shell, run: &mut BString, resolved: &mut BString) -> Result<(), Error> {
+    if run.is_empty() {
+        return Ok(());
+    }
+    let expanded = crate::parser::expand_string(shell, BStr::new(run.as_slice()))?;
+    resolved.extend_from_slice(&expanded);
+    run.clear();
+    Ok(())
+}
+
 /// Bash counts a negative subscript back from the highest set index, so
 /// `a[-1]` is the last element rather than an error.
 fn normalize_index(shell: &mut Shell, name: &BStr, index: i64) -> Result<u64, Error> {

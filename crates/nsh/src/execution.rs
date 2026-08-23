@@ -483,6 +483,30 @@ fn is_executable_candidate(full_path: &[u8], metadata: &nsh_platform::FileMetada
 // [spec:posix:req:cmd.search-remembered-location]
 // [spec:posix:req:cmd.search-path-unsuccessful]
 // [spec:posix:req:cmd.search-name-with-slash]
+/// A Bash function whose name a POSIX shell would read as a pathname.
+///
+/// Bash consults the function table before it interprets a command name
+/// containing a slash, which is what lets `ble/array#push` -- and, in
+/// Bash, even a function literally named `/bin/echo` -- be called at all.
+/// POSIX reads such a name as a pathname and never as a function, and
+/// that stays the answer with the dialect off.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn bash_path_named_function(
+    shell: &crate::context::Shell,
+    name: &BStr,
+    search: CommandSearch,
+) -> Option<Command> {
+    if shell.options.dialect() != crate::options::Dialect::Bash
+        || search.skip_functions
+        || search.regular_builtins_only
+        || !nsh_platform::shell_path_has_separator(name)
+    {
+        return None;
+    }
+    let stored = shell.commands.map.get(name)?;
+    matches!(stored.command, Command::Function(_)).then(|| stored.command.clone())
+}
+
 pub fn find_command(
     shell: &mut crate::context::Shell,
     name: &BStr,
@@ -492,6 +516,11 @@ pub fn find_command(
 ) -> Result<crate::evaluation::Flow, Error> {
     let dialect = shell.options.dialect();
     shell.commands.ensure_dispatch(dialect);
+
+    if let Some(function) = bash_path_named_function(shell, name, search) {
+        *entry = function;
+        return Ok(crate::evaluation::Flow::Done((0).into()));
+    }
 
     /* If name contains a slash, don't use PATH or hash table */
     if nsh_platform::shell_path_has_separator(name) {
