@@ -30,7 +30,10 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         message.extend_from_slice(name.as_bytes());
         message.extend_from_slice(b": not a shell builtin\n");
         shell.write_output(OutputDestination::Stderr, &message)?;
-        return Ok(Flow::Done(ExitStatus::NOT_FOUND));
+        /* Not 127: nothing was searched for and not found. `builtin`
+         * looked in the one table it has and refused the operand, which
+         * is an ordinary failure of the built-in itself. */
+        return Ok(Flow::Done(ExitStatus::FAILURE));
     };
 
     let mut argv: Vec<&BStr> = Vec::with_capacity(rest.len() + 1);

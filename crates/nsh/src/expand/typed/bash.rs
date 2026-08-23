@@ -65,10 +65,11 @@ pub(super) fn indirect_names(
         return Ok(None);
     }
     let prefix = name[..name.len() - 1].to_vec();
-    let mut names = shell
-        .variables()
+    /* Every name that has an entry, not only every name with a scalar
+     * in it: `hello=()` declares `hello` and Bash lists it here even
+     * though there is no element to read. */
+    let mut names = crate::variables::value::declared_names(shell)
         .into_iter()
-        .map(|(name, _)| name)
         .filter(|name| name.starts_with(&prefix))
         .collect::<Vec<_>>();
     names.sort();

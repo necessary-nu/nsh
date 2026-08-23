@@ -149,7 +149,15 @@ const MATRIX: &[(&str, &[u8], Refusal)] = &[
         Refusal::Unset,
     ),
     ("BASHOPTS", b"printf %s \"$BASHOPTS\"", Refusal::Unset),
-    ("SHELLOPTS", b"printf %s \"$SHELLOPTS\"", Refusal::Unset),
+    /* An option has to be on for this one to have anything to say:
+     * `SHELLOPTS` lists the `set -o` names that are, and none of them
+     * is in a fresh shell. `set -x` writes its trace to stderr, so the
+     * POSIX half of the row still sees an empty stdout. */
+    (
+        "SHELLOPTS",
+        b"set -x; printf %s \"$SHELLOPTS\"",
+        Refusal::Unset,
+    ),
     (
         "EPOCHSECONDS",
         b"printf %s \"$EPOCHSECONDS\"",

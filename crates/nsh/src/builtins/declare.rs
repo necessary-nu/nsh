@@ -19,6 +19,8 @@ use crate::variables::nameref::{self, LocalValue};
 use crate::variables::value::{BashAttribute, VariableKind, VariableValue};
 use crate::variables::{VariableAttributes, add_attributes, set_bytes};
 
+pub(crate) mod functions;
+
 /// Which entry a declaration operand creates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Scope {
@@ -41,7 +43,10 @@ struct Requested {
     exported: Option<bool>,
     global: bool,
     print: bool,
+    /// `-f`: print a function's source rather than declare a variable.
     functions: bool,
+    /// `-F`: print only the name a function is filed under.
+    function_names: bool,
 }
 
 impl Requested {
@@ -58,6 +63,7 @@ impl Requested {
             && !self.read_only
             && !self.global
             && !self.functions
+            && !self.function_names
     }
 }
 
@@ -74,6 +80,13 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return Ok(Flow::Done(ExitStatus::ERROR));
         }
     };
+
+    /* The function options are not declarations and never reach the
+     * assignment path below: `declare -f x` prints what `x` already is
+     * and must not bring an `x` into being. */
+    if requested.functions || requested.function_names {
+        return functions::run(shell, requested.function_names, operands);
+    }
 
     if requested.print || operands.is_empty() {
         return print(shell, &requested, operands);
@@ -125,7 +138,8 @@ fn parse<'a>(args: &'a [&'a BStr]) -> Result<(Requested, &'a [&'a BStr]), u8> {
                 b'x' => requested.exported = Some(enable),
                 b'g' => requested.global = enable,
                 b'p' => requested.print = true,
-                b'f' | b'F' => requested.functions = true,
+                b'f' => requested.functions = true,
+                b'F' => requested.function_names = true,
                 other => return Err(*other),
             }
         }
@@ -258,12 +272,6 @@ fn valid_operand(shell: &mut Shell, operand: &BStr) -> bool {
 
 /// `declare -p`, and the bare `declare` listing.
 fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result<Flow, Error> {
-    if requested.functions {
-        // Function listing is the `-f` slice's own work; declaring it
-        // unsupported is more honest than printing an empty list.
-        return Ok(Flow::Done(ExitStatus::SUCCESS));
-    }
-
     /* A bare `declare` -- no options, no operands -- is Bash's own
      * `set`: it lists `name=value`, not the `declare -- name="value"`
      * line that `-p` prints. */

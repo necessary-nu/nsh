@@ -6421,6 +6421,13 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id bash-introspection-gaps
+                                title "Close the register's function-introspection and remaining-builtin gaps"
+                                kind @feat
+                                deps (verify-bash-compatibility-profile)
+                            }
                         )
                     }
                 )

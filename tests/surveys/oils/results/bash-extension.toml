@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-extension"
 group_label = "Bash extension survey"
 shell = "target/bash-mode/bash"
-shell_sha256 = "823288764f93beb1401bd34e2b8203c757d6bac5bf57e12a529140cfdfde3206"
+shell_sha256 = "7a4443256478d9eb54939254111b2772ea5014eb23bd19e1abdbbac391e3c6c5"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -13,8 +13,8 @@ timeout_ms = 5000
 [totals]
 selected = 1121
 executed = 1121
-pass = 761
-fail = 322
+pass = 784
+fail = 299
 skip = 0
 unsupported = 17
 known_bug = 21
@@ -901,42 +901,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "assign-extended.test.sh"
-index = 2
-line = 28
-description = "declare -f exit code indicates function existence"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 3
-line = 51
-description = "declare -F prints function names"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 4
-line = 69
-description = "declare -F with shopt -s extdebug prints more info"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 5
-line = 95
-description = "declare -F with shopt -s extdebug and main file"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
 index = 7
 line = 132
 description = "declare"
@@ -1007,15 +971,6 @@ difference_fields = []
 
 [[nonpassing]]
 spec = "assign-extended.test.sh"
-index = 22
-line = 672
-description = "typeset -f"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
 index = 24
 line = 714
 description = "typeset -r makes a string readonly"
@@ -1080,39 +1035,6 @@ description = "typeset +r removes read-only attribute (TODO: documented in bash 
 outcome = "fail"
 status = 2
 qualifier = "OK"
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 36
-line = 946
-description = "function name with /"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "assign-extended.test.sh"
-index = 38
-line = 964
-description = "unset and shell funcs"
-outcome = "fail"
-status = 0
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "ble-idioms.test.sh"
-index = 5
-line = 80
-description = "recursive arith: recursion"
-outcome = "fail"
-status = 2
 difference_fields = [
     "stdout",
     "status",
@@ -1253,15 +1175,6 @@ difference_fields = [
     "stdout",
     "status",
 ]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 12
-line = 205
-description = "mapfile / readarray stdin  TODO: Fix me."
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-bind.test.sh"
@@ -2153,24 +2066,6 @@ difference_fields = []
 
 [[nonpassing]]
 spec = "builtin-read.test.sh"
-index = 46
-line = 777
-description = "read from redirected directory is non-fatal error"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-read.test.sh"
-index = 47
-line = 794
-description = "read -n from directory"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-read.test.sh"
 index = 48
 line = 810
 description = "mapfile from directory (bash doesn't handle errors)"
@@ -2264,24 +2159,6 @@ qualifier = "BUG"
 difference_fields = []
 
 [[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 17
-line = 179
-description = "type prints function source code"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 27
-line = 275
-description = "type -a -> builtin and file and shell function"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
 spec = "dbracket.test.sh"
 index = 28
 line = 234
@@ -2300,15 +2177,6 @@ outcome = "known-bug"
 status = 0
 qualifier = "BUG"
 difference_fields = []
-
-[[nonpassing]]
-spec = "extglob-files.test.sh"
-index = 18
-line = 293
-description = "No extended glob with simple_word_eval (YSH evaluation)"
-outcome = "fail"
-status = 127
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "extglob-files.test.sh"
@@ -2754,63 +2622,6 @@ status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]
-spec = "print-source-code.test.sh"
-index = 0
-line = 4
-description = "typeset -f prints function source code"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "print-source-code.test.sh"
-index = 1
-line = 15
-description = "typeset -f with function keyword (ksh style)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "print-source-code.test.sh"
-index = 2
-line = 28
-description = "typeset -f prints function source code - nested functions"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "print-source-code.test.sh"
-index = 3
-line = 51
-description = "non-{ } function bodies can be serialized (rare)"
-outcome = "fail"
-status = 2
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "process-sub.test.sh"
-index = 2
-line = 24
-description = "Process sub from shell to stdin"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
 spec = "process-sub.test.sh"
 index = 4
 line = 58
@@ -3247,38 +3058,10 @@ difference_fields = [
 ]
 
 [[nonpassing]]
-spec = "serialize.test.sh"
-index = 9
-line = 213
-description = "xtrace"
-outcome = "fail"
-status = 0
-qualifier = "OK"
-difference_fields = ["stderr"]
-
-[[nonpassing]]
 spec = "sh-options-bash.test.sh"
 index = 1
 line = 24
 description = "SHELLOPTS is readonly"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 4
-line = 66
-description = "export SHELLOPTS does cross-process tracing"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 5
-line = 83
-description = "export SHELLOPTS does cross-process tracing with bash"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
@@ -3367,15 +3150,6 @@ description = "Case folding - multi code point"
 outcome = "fail"
 status = 0
 qualifier = "BUG"
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 11
-line = 237
-description = "${!prefix@} matches var name (regression)"
-outcome = "fail"
-status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]

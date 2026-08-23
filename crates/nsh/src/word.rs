@@ -280,7 +280,7 @@ impl ParsedWord {
 }
 
 impl ParameterOperation {
-    fn operator(self) -> &'static [u8] {
+    pub(crate) fn operator(self) -> &'static [u8] {
         match self {
             Self::Value => b"",
             Self::Default => b"-",

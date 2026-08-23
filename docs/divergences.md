@@ -628,3 +628,55 @@ shorter string with no diagnostic. Diagnosing it would be better, and is
 not what Bash does either.
 
 Costs `unicode.test.sh:3` and `unicode.test.sh:5`.
+
+### `RANDOM` and `SRANDOM` cannot be seeded
+
+**Status:** deliberate. `crates/nsh/src/variables/special.rs`.
+
+Bash makes `RANDOM` replayable: `RANDOM=n` seeds the generator, so anyone
+who knows `n` knows the whole sequence. Here an assignment to `RANDOM`
+re-seeds from the host's randomness instead, and `SRANDOM` -- which Bash
+already documents as unseedable -- draws from the same source on every
+read. A generator that anything security-adjacent might reach must not be
+steerable by the data it is generating for.
+
+Observable difference: no sequence from either name is reproducible, so a
+test that pins a seed to get a fixed sequence gets a different one each
+run. Nothing in the pinned Bash survey depends on it.
+
+### One recursion budget covers parentheses and name re-reads
+
+**Status:** deliberate. `crates/nsh/src/arithmetic.rs`.
+
+Bash evaluates a name's *value* as an expression, which is what makes
+`loop='i<=100&&(s+=i,i++,loop)'` count to a hundred, and it bounds that
+recursion at 1024 levels. It does not bound the parenthesis nesting the
+recursion carries, and the product is real stack: sixty parentheses
+inside a self-referring name segfault Bash 5.2.
+
+Both spend the same stack, so both spend one budget here, and the
+expression is refused with `expression recursion level exceeded` where
+Bash dies. The ceiling is Bash's own 1024, so every expression Bash
+evaluates without recursing through parentheses is unaffected.
+
+Observable difference: an expression that nests more than 1024 levels
+deep in total is a diagnostic rather than a crash.
+
+### `declare -f` prints a rendering of the definition, not its source
+
+**Status:** a stated limit. `crates/nsh/src/nodes/source.rs`.
+
+Bash keeps each word's original spelling and re-indents the grammar
+around it. This tree keeps structure rather than bytes, so a printed body
+is re-spelled from its parts: it means what the definition means and
+re-reads as the same function, but it is not always the same text Bash
+would print. A here-document's delimiter is not retained and is printed
+as `EOF`; a brace group holding one command loses its braces, because
+`{ list; }` parses to the list itself; `a & b` prints on two lines; and a
+parameter takes `${name}` where the byte after it could otherwise be read
+as more of the name.
+
+Nothing re-enters the parser to produce this text, which is the half of
+`[dec:nsh:safety-trumps-compatibility]` that matters here: an
+introspection call must not be a way to have the shell re-read whatever a
+stored definition happened to contain.

@@ -87,9 +87,11 @@ fn builtin_runs_the_name_a_function_took() {
     assert_eq!(run(&mut shell, b"echo() { printf 'shadowed\\n'; }").0, 0);
     assert_eq!(run(&mut shell, b"echo hello").1, b"shadowed\n");
     assert_eq!(run(&mut shell, b"builtin echo hello").1, b"hello\n");
-    // `builtin` never leaves the registry, so an external name fails
-    // rather than being searched for on the file system.
-    assert_eq!(run(&mut shell, b"builtin cat").0, 127);
+    /* `builtin` never leaves the registry, so an external name fails
+     * rather than being searched for on the file system -- and it fails
+     * with 1, because nothing was searched for and not found. */
+    assert_eq!(run(&mut shell, b"builtin cat").0, 1);
+    assert_eq!(run(&mut shell, b"builtin nosuchname").0, 1);
 }
 
 // [spec:nsh:req:compat.bash.builtins-special-variables/test]
@@ -380,4 +382,104 @@ fn echo_decodes_escapes_only_when_asked() {
     assert_eq!(output(true, br"echo -e 'a\tb'"), b"a\tb\n");
     assert_eq!(output(true, br"echo -n -e 'a\tb'"), b"a\tb");
     assert_eq!(output(false, br"echo 'a\tb'"), b"a\tb\n");
+}
+
+/// `$BASH`, `$BASHPID` and `$SRANDOM` answer for the running shell, and
+/// none of them exists in the POSIX dialect.
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
+#[test]
+fn the_shell_reports_its_own_identity() {
+    let _guard = serialized();
+    let mut bash = new_shell(true);
+
+    // `$$` is the shell; `$BASHPID` is whichever process is reading it,
+    // so a command substitution's fork is visible in one and not the
+    // other.
+    let (status, printed) = run(
+        &mut bash,
+        b"test \"$BASHPID\" = \"$$\" && echo same\n\
+          test \"$(echo $BASHPID)\" != \"$$\" && echo forked\n",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(BStr::new(&printed), BStr::new(b"same\nforked\n"));
+
+    // Not seedable, and not a sequence anything can rejoin: an
+    // assignment is accepted and the next read is a fresh draw.
+    let (status, printed) = run(
+        &mut bash,
+        b"a=$SRANDOM; b=$SRANDOM; SRANDOM=1; c=$SRANDOM; SRANDOM=1; d=$SRANDOM\n\
+          test \"$a\" != \"$b\" && echo varies\n\
+          test \"$c\" != \"$d\" && echo unseeded\n",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(BStr::new(&printed), BStr::new(b"varies\nunseeded\n"));
+
+    let mut posix = new_shell(false);
+    assert_eq!(
+        run(&mut posix, b"echo \"[$BASH][$BASHPID][$SRANDOM]\"\n").1,
+        b"[][][]\n"
+    );
+}
+
+/// `$DIRSTACK` is the directory stack, and everything that moves the
+/// stack -- including `cd`, whose directory is entry zero -- moves it.
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
+#[test]
+fn the_directory_stack_reads_as_an_array() {
+    let _guard = serialized();
+    let mut bash = new_shell(true);
+    let (status, printed) = run(
+        &mut bash,
+        b"cd /\npushd /tmp > /dev/null\necho ${#DIRSTACK[@]} ${DIRSTACK[1]}\n\
+          popd > /dev/null\necho ${#DIRSTACK[@]} ${DIRSTACK[0]}\n",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(BStr::new(&printed), BStr::new(b"2 /\n1 /\n"));
+}
+
+/// `SHELLOPTS` names the options `set -o` presents, so a real Bash can
+/// read the exported value back, and an inherited one turns its options
+/// on.
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
+#[test]
+fn the_option_listing_crosses_the_environment() {
+    let _guard = serialized();
+    let mut bash = new_shell(true);
+    // The dialect switch is spelled `posix` and is off here, so it never
+    // reaches a child as a name Bash has never heard of.
+    let (status, printed) = run(&mut bash, b"set -x\necho \"$SHELLOPTS\"\n");
+    assert_eq!(status, 0);
+    assert_eq!(BStr::new(&printed), BStr::new(b"xtrace\n"));
+
+    let inherited = Shell::builder()
+        .streams(Streams::capture().expect("create capture streams"))
+        .option(BStr::new(b"bash"), true)
+        .env([("SHELLOPTS", "xtrace:nounset")])
+        .build()
+        .expect("build shell");
+    let mut inherited = inherited;
+    let (_, printed) = run(&mut inherited, b"set -o | grep -c 'nounset *on'\n");
+    assert_eq!(BStr::new(&printed), BStr::new(b"1\n"));
+}
+
+/// `shopt -s lastpipe` keeps a pipeline's last stage in this shell, so
+/// what it assigns survives the pipeline.
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
+#[test]
+fn the_last_pipeline_stage_stays_here() {
+    let _guard = serialized();
+    let mut bash = new_shell(true);
+    let (status, printed) = run(
+        &mut bash,
+        b"n=0\n\
+          printf 'a\\nb\\nc\\n' | while read -r line; do n=$((n + 1)); done\n\
+          echo forked=$n\n\
+          shopt -s lastpipe\n\
+          printf 'a\\nb\\nc\\n' | while read -r line; do n=$((n + 1)); done\n\
+          echo here=$n\n\
+          false | true | cat > /dev/null\n\
+          echo \"${PIPESTATUS[@]}\"\n",
+    );
+    assert_eq!(status, 0);
+    assert_eq!(BStr::new(&printed), BStr::new(b"forked=0\nhere=3\n1 0 0\n"));
 }

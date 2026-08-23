@@ -1,14 +1,15 @@
 //! The variables a Bash shell maintains on a script's behalf.
 //!
 //! Three kinds live here and they are not the same thing. *Facts* --
-//! `BASH_VERSION`, `OSTYPE`, `UID` -- are published once when the dialect
-//! turns on and then behave like any other variable. *Clocks and
-//! generators* -- `RANDOM`, `SECONDS`, `EPOCHSECONDS`, `EPOCHREALTIME`,
-//! `LINENO`, `BASH_SUBSHELL` -- have no stored value worth trusting, so
-//! they are recomputed on the read that asks for them. And `PIPESTATUS`
-//! is *published by the evaluator*, the way `call_stack` publishes
-//! `FUNCNAME`: an ordinary indexed array that every existing reader
-//! already understands.
+//! `BASH`, `BASH_VERSION`, `OSTYPE`, `UID` -- are published once when the
+//! dialect turns on and then behave like any other variable. *Clocks and
+//! generators* -- `RANDOM`, `SRANDOM`, `SECONDS`, `EPOCHSECONDS`,
+//! `EPOCHREALTIME`, `LINENO`, `BASHPID`, `BASH_SUBSHELL` -- have no
+//! stored value worth trusting, so they are recomputed on the read that
+//! asks for them. And `PIPESTATUS` and `DIRSTACK` are *published by
+//! whatever moves them*, the way `call_stack` publishes `FUNCNAME`:
+//! ordinary indexed arrays that every existing reader already
+//! understands.
 //!
 //! Recomputation is driven from the read path rather than from a timer
 //! because a shell has no timer: [`refresh`] runs on the same lookups
@@ -21,15 +22,17 @@
 //! assignment and will replay a sequence for anyone who knows the seed;
 //! `[dec:nsh:safety-trumps-compatibility]` says not to import that, so
 //! an assignment here re-seeds from the host's randomness and the
-//! sequence is never reproducible. `docs/divergences.md` records it.
+//! sequence is never reproducible. `SRANDOM` draws from the same place
+//! on every read, which is what Bash's own already documents.
+//! `docs/divergences.md` records both.
 
 use bstr::{BStr, BString};
-use nsh_platform::NativeStrExt as _;
+use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 use super::value::{VariableKind, VariableValue};
 use super::{Callback, VariableAttributes, VariableState, arrays};
 use crate::context::Shell;
-use crate::options::Dialect;
+use crate::options::{Dialect, ShellOption};
 use crate::status::ExitStatus;
 
 /// What `$BASH_VERSION` answers, and the fields `$BASH_VERSINFO` splits
@@ -128,7 +131,8 @@ fn publish(shell: &mut Shell) {
     let host = nsh_platform::host_name()
         .map(|name| BString::from(name.to_shell_bytes()))
         .unwrap_or_default();
-    let scalars: [(&[u8], BString); 8] = [
+    let scalars: [(&[u8], BString); 9] = [
+        (b"BASH", shell_path(shell)),
         (b"BASH_VERSION", BString::from(version.as_str())),
         (b"HOSTNAME", host),
         (
@@ -186,17 +190,25 @@ fn publish(shell: &mut Shell) {
         .collect();
     store_array(shell, BStr::new(b"GROUPS"), &groups);
 
+    /* Read before the marks below overwrite the entry: what arrived in
+     * the environment is a request, and the mark is what makes the name
+     * answer for the option table from here on. */
+    import_shell_options(shell);
+
     for name in [
         b"RANDOM".as_slice(),
+        b"SRANDOM",
         b"SECONDS",
         b"EPOCHSECONDS",
         b"EPOCHREALTIME",
+        b"BASHPID",
         b"BASH_SUBSHELL",
         b"SHELLOPTS",
         b"BASHOPTS",
     ] {
         mark_dynamic(shell, BStr::new(name));
     }
+    publish_directory_stack(shell);
     /* Bash marks the two option listings read-only. That mark is not
      * copied here, and the reason is the error boundary rather than the
      * listing: an assignment to a read-only name ends a non-interactive
@@ -205,6 +217,108 @@ fn publish(shell: &mut Shell) {
      * Bash tolerates -- into an aborted script. The listings answer for
      * the option table either way, because the next read recomputes
      * them and discards whatever was assigned. */
+}
+
+/// `$DIRSTACK`: the directory stack as an ordinary indexed array.
+///
+/// Published rather than computed, for the reason `PIPESTATUS` is: an
+/// indexed array already answers `${DIRSTACK[@]}`, `${#DIRSTACK[@]}` and
+/// `${DIRSTACK[1]}`. It is republished by everything that can move the
+/// stack -- `pushd`, `popd`, `dirs -c` and `cd` -- because entry zero is
+/// the current directory itself.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub(crate) fn publish_directory_stack(shell: &mut Shell) {
+    if shell.options.dialect() != Dialect::Bash || !shell.variables.special.published {
+        return;
+    }
+    let mut entries = vec![shell.working_directory.logical.clone().unwrap_or_default()];
+    entries.extend(shell.directory_stack.below().iter().cloned());
+    store_array(shell, BStr::new(b"DIRSTACK"), &entries);
+}
+
+/// `$BASH`: the path this shell was started from.
+///
+/// A name with a separator in it is made absolute; a bare one is looked
+/// up in `PATH`, which is what makes `$BASH` runnable in a script that
+/// was itself started by name.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+fn shell_path(shell: &mut Shell) -> BString {
+    let Some(name) = shell.options.invocation_name.clone() else {
+        return BString::default();
+    };
+    if nsh_platform::shell_path_has_separator(BStr::new(name.as_slice())) {
+        return name
+            .as_slice()
+            .try_to_path_buf()
+            .and_then(|path| nsh_platform::absolute_path(&path))
+            .map_or_else(
+                |_| name.clone(),
+                |path| BString::from(path.to_shell_bytes()),
+            );
+    }
+    let path = super::path_value(shell);
+    let mut cursor = crate::execution::PathCursor::literal(BStr::new(path.as_slice()));
+    while let Some(candidate) = cursor.advance(BStr::new(name.as_slice())) {
+        let Ok(native) = candidate.path.as_slice().try_to_path_buf() else {
+            continue;
+        };
+        if nsh_platform::effective_access(&native, nsh_platform::AccessMode::EXEC_OK) {
+            return candidate.path;
+        }
+    }
+    name
+}
+
+/// Turn on the `set -o` options an inherited `SHELLOPTS` names.
+///
+/// `export SHELLOPTS` is how Bash carries `set -x` into a child, and the
+/// child half of that is this: the value is read once at startup and
+/// every name in it that the option table knows is switched on.
+///
+/// Three names are refused. The dialect is `argv[0]`'s to choose and the
+/// invocation's shape is the command line's, so an environment variable
+/// may not decide either -- and a shell that let one do so could be
+/// handed `interactive` by whatever set the environment.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+fn import_shell_options(shell: &mut Shell) {
+    let name = BStr::new(b"SHELLOPTS");
+    if !super::variable_attributes(shell, name).is_some_and(|attributes| attributes.exported) {
+        return;
+    }
+    let Some(value) = super::lookup_bytes(shell, name) else {
+        return;
+    };
+    let requested: Vec<BString> = value
+        .split(|byte| *byte == b':')
+        .map(BString::from)
+        .collect();
+    for requested in requested {
+        let Some(option) = ShellOption::from_name(BStr::new(requested.as_slice())) else {
+            continue;
+        };
+        if matches!(
+            option,
+            ShellOption::Bash | ShellOption::Interactive | ShellOption::Stdin
+        ) {
+            continue;
+        }
+        shell.options.set(option, true);
+    }
+}
+
+/// Keep the two option listings current in the variable table.
+///
+/// They are recomputed on the read path, but an exported `SHELLOPTS`
+/// leaves through the environment rather than through a read, so the
+/// stored bytes have to be right at the moment an option changes.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub(crate) fn options_changed(shell: &mut Shell) {
+    if !shell.variables.special.published {
+        return;
+    }
+    for name in [b"SHELLOPTS".as_slice(), b"BASHOPTS"] {
+        refresh(shell, BStr::new(name));
+    }
 }
 
 /// `$SHLVL` counts shell invocations, so it continues the value the
@@ -264,6 +378,23 @@ pub(crate) fn set_pipeline_status(shell: &mut Shell, statuses: &[ExitStatus]) {
     store_array(shell, BStr::new(b"PIPESTATUS"), &elements);
 }
 
+/// Record a pipeline stage this shell ran itself.
+///
+/// `shopt -s lastpipe` keeps the final stage here, so the job never held
+/// it and the array `wait_for_job` published is one member short.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub(crate) fn append_pipeline_status(shell: &mut Shell, status: ExitStatus) {
+    if shell.options.dialect() != Dialect::Bash {
+        return;
+    }
+    let name = BStr::new(b"PIPESTATUS");
+    let mut elements: Vec<BString> = super::value::variable_value(shell, name)
+        .map(arrays::elements)
+        .unwrap_or_default();
+    elements.push(BString::from(status.code().to_string()));
+    store_array(shell, name, &elements);
+}
+
 /// Recompute the value of a name whose stored bytes are stale by
 /// construction, immediately before a reader borrows it.
 // [spec:nsh:req:compat.bash.builtins-special-variables]
@@ -290,6 +421,13 @@ pub(crate) fn refresh(shell: &mut Shell, name: &BStr) {
 fn compute(shell: &mut Shell, name: &BStr) -> Option<BString> {
     let text = match name.as_ref() as &[u8] {
         b"RANDOM" => shell.variables.special.next_random().to_string(),
+        /* Bash's own `SRANDOM` is 32 bits straight from the host and
+         * carries no sequence a script could rejoin, so unlike `RANDOM`
+         * there is nothing here to diverge from: every read is a fresh
+         * draw and an assignment is not a seed.
+         * [dec:nsh:safety-trumps-compatibility] */
+        b"SRANDOM" => (nsh_platform::facts::entropy_seed() as u32).to_string(),
+        b"BASHPID" => nsh_platform::current_process_id().to_string(),
         b"SECONDS" => {
             let elapsed =
                 nsh_platform::facts::monotonic_seconds() - shell.variables.special.seconds_origin;

@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-named-diagnostic"
 group_label = "Named *-bash diagnostic slice"
 shell = "target/bash-mode/bash"
-shell_sha256 = "823288764f93beb1401bd34e2b8203c757d6bac5bf57e12a529140cfdfde3206"
+shell_sha256 = "7a4443256478d9eb54939254111b2772ea5014eb23bd19e1abdbbac391e3c6c5"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -13,8 +13,8 @@ timeout_ms = 5000
 [totals]
 selected = 112
 executed = 112
-pass = 89
-fail = 21
+pass = 95
+fail = 15
 skip = 0
 unsupported = 0
 known_bug = 2
@@ -32,15 +32,6 @@ difference_fields = [
     "stdout",
     "status",
 ]
-
-[[nonpassing]]
-spec = "builtin-bash.test.sh"
-index = 12
-line = 205
-description = "mapfile / readarray stdin  TODO: Fix me."
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-trap-bash.test.sh"
@@ -73,24 +64,6 @@ outcome = "known-bug"
 status = 0
 qualifier = "BUG"
 difference_fields = []
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 17
-line = 179
-description = "type prints function source code"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-type-bash.test.sh"
-index = 27
-line = 275
-description = "type -a -> builtin and file and shell function"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "glob-bash.test.sh"
@@ -151,24 +124,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "sh-options-bash.test.sh"
-index = 4
-line = 66
-description = "export SHELLOPTS does cross-process tracing"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
-index = 5
-line = 83
-description = "export SHELLOPTS does cross-process tracing with bash"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options-bash.test.sh"
 index = 7
 line = 124
 description = "If shopt --set xtrace is allowed, it should update SHELLOPTS, not BASHOPTS"
@@ -185,15 +140,6 @@ description = "Case folding - multi code point"
 outcome = "fail"
 status = 0
 qualifier = "BUG"
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-bash.test.sh"
-index = 11
-line = 237
-description = "${!prefix@} matches var name (regression)"
-outcome = "fail"
-status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]

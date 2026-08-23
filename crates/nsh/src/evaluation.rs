@@ -28,6 +28,7 @@ mod bash_arithmetic;
 mod bash_arrays;
 mod bash_conditional;
 pub(crate) mod bash_process_substitution;
+mod last_pipe;
 
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
@@ -1209,6 +1210,7 @@ fn evaluate_pipeline(
     pipeline: &Pipeline,
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
+    let caller_context = context;
     let context = context.with_exit();
     flow!(run_pipeline_debug_traps(shell, pipeline));
 
@@ -1219,14 +1221,28 @@ fn evaluate_pipeline(
             input: Option<Descriptor>,
             output: Option<Descriptor>,
         },
+        /// `shopt -s lastpipe`: the final stage stays in this shell.
+        LastStage {
+            command: &'a Node,
+            input: Option<Descriptor>,
+            job_id: JobId,
+        },
         Control(Flow),
     }
 
+    let keep_last_stage = last_pipe::applies(shell, pipeline);
     let start = crate::error::with_interrupts_deferred(shell, |shell| {
         let job_id = crate::jobs::create_job(shell, pipeline.commands.len());
         let mut previous = None;
         for (index, command) in pipeline.commands.iter().enumerate() {
             let has_next = index + 1 < pipeline.commands.len();
+            if !has_next && keep_last_stage {
+                return Ok(PipelineStart::LastStage {
+                    command,
+                    input: previous.take(),
+                    job_id,
+                });
+            }
             match prepare_command_hash(shell, command)? {
                 Flow::Done(_) => {}
                 control => return Ok(PipelineStart::Control(control)),
@@ -1276,6 +1292,11 @@ fn evaluate_pipeline(
     match start {
         PipelineStart::Parent(status) => Ok(Flow::Done(status)),
         PipelineStart::Control(control) => Ok(control),
+        PipelineStart::LastStage {
+            command,
+            input,
+            job_id,
+        } => last_pipe::run(shell, command, input, job_id, caller_context),
         PipelineStart::Child {
             command,
             input,
@@ -2257,12 +2278,22 @@ fn write_trace_fields(
     list: &[ExpandedField],
     mut already_printed: bool,
 ) -> Result<bool, Error> {
+    /* Bash quotes a traced word that would not read back as itself, so
+     * `sh -c 'echo 2'` shows one argument rather than two words. dash
+     * writes the field as it stands and POSIX mode keeps doing so. */
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
+    let locale = shell.locale.clone();
     for field in list {
         let mut record = Vec::new();
         if already_printed {
             record.push(b' ');
         }
-        record.extend_from_slice(field.as_bstr());
+        if bash {
+            record.extend_from_slice(&crate::escape::bash::trace_quote(&locale, field.as_bstr()));
+        } else {
+            record.extend_from_slice(field.as_bstr());
+        }
         already_printed = true;
         shell.write_output(dest, &record)?;
     }

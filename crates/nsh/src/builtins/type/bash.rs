@@ -212,7 +212,15 @@ fn write_resolutions(
                 line.push(b'\'');
             }
             Resolution::Keyword => line.extend_from_slice(b" is a shell keyword"),
-            Resolution::Function => line.extend_from_slice(b" is a function"),
+            Resolution::Function => {
+                line.extend_from_slice(b" is a function");
+                // Bash follows the sentence with the definition itself,
+                // which is the same text `declare -f` prints.
+                if let Some(source) = crate::builtins::declare::functions::source(shell, name) {
+                    line.push(b'\n');
+                    line.extend_from_slice(&source);
+                }
+            }
             Resolution::Builtin { special } => {
                 line.extend_from_slice(if *special {
                     b" is a special shell builtin" as &[u8]

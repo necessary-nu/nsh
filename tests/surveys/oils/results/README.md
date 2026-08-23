@@ -13,9 +13,9 @@ profile with the profile turned off.
 
 | Group | Selected | Pass | Fail | Unsupported | Known bug | Timeout | Error |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `bash-comparison` | 2,735 | 1,967 | 689 | 40 | 39 | 0 | 0 |
-| `bash-extension` | 1,121 | 761 | 322 | 17 | 21 | 0 | 0 |
-| `bash-named-diagnostic` | 112 | 89 | 21 | 0 | 2 | 0 | 0 |
+| `bash-comparison` | 2,735 | 2,001 | 654 | 40 | 40 | 0 | 0 |
+| `bash-extension` | 1,121 | 784 | 299 | 17 | 21 | 0 | 0 |
+| `bash-named-diagnostic` | 112 | 95 | 15 | 0 | 2 | 0 | 0 |
 
 These are whole-group numbers. The closure gate judges the `bash-extension`
 group after the scope decision and the reference calibration have been

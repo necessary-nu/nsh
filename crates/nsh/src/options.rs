@@ -162,6 +162,7 @@ pub fn apply_option_changes(shell: &mut crate::context::Shell) -> Result<(), cra
     crate::execution::dispatch_changed(shell);
     // [spec:nsh:req:compat.bash.builtins-special-variables]
     crate::variables::special::dialect_changed(shell);
+    crate::variables::special::options_changed(shell);
     crate::trap::set_interactive_signal_policy(
         shell,
         shell.options.enabled(ShellOption::Interactive),

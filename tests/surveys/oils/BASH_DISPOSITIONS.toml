@@ -281,26 +281,6 @@ disposition = "not-implemented"
 reason = "`test -v name` reports true for a name that was declared with `typeset -a`/`-A` but holds no element; Bash reports false until an element exists."
 
 [[case]]
-id = "assign-extended.test.sh:2"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "assign-extended.test.sh:3"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "assign-extended.test.sh:5"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "assign-extended.test.sh:22"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
 id = "assign-extended.test.sh:24"
 disposition = "sanctioned-divergence"
 reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
@@ -326,21 +306,6 @@ disposition = "sanctioned-divergence"
 reason = "Error boundary: an assignment to a read-only name ends a non-interactive shell here (status 2), where Bash reports it and carries on with status 1. POSIX XCU 2.8.1 requires the exit; adopting Bash's relaxation would make the same script stop at a different place depending on a dialect flag. Recorded in docs/divergences.md."
 
 [[case]]
-id = "assign-extended.test.sh:36"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "assign-extended.test.sh:38"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "ble-idioms.test.sh:5"
-disposition = "not-implemented"
-reason = "Arithmetic evaluation does not re-evaluate a variable's text as an expression, so the recursive `((loop))` idiom yields nothing."
-
-[[case]]
 id = "ble-idioms.test.sh:19"
 disposition = "not-implemented"
 reason = "Bash's assignment-word lexer consumes a balanced `[...]` after a name, so blanks and shell operators inside a subscript are data. This lexer ends the word at the first blank or operator, so `a[1 + 1]=x` and `a[5&3]=x` are parsed as commands rather than assignments."
@@ -356,49 +321,19 @@ disposition = "not-implemented"
 reason = "Here-strings (`<<<`) are not implemented at all: `cat <<< text` is a syntax error. This is a plain gap in the Bash redirection grammar."
 
 [[case]]
-id = "builtin-bash.test.sh:12"
-disposition = "not-implemented"
-reason = "`shopt -s lastpipe` is not implemented, so the last stage of a pipeline always runs in a subshell and `seq 2 | mapfile m` leaves the array unset in the parent."
-
-[[case]]
 id = "builtin-read.test.sh:26"
 disposition = "defect"
 reason = "Field splitting drops the text after a backslash-protected run: `printf '\\a \\b\\n' | read line` yields `a` where every shell yields the whole line. Reproduces with the dialect off, so this is a POSIX-mode defect rather than a Bash gap. Filed on this node on 2026-08-22."
 
 [[case]]
-id = "builtin-read.test.sh:46"
-disposition = "not-implemented"
-reason = "A `read` that fails because the descriptor is a directory reports status 128 rather than 1."
-
-[[case]]
-id = "builtin-read.test.sh:47"
-disposition = "not-implemented"
-reason = "A `read` that fails because the descriptor is a directory reports status 128 rather than 1."
-
-[[case]]
 id = "builtin-trap-err.test.sh:12"
 disposition = "not-implemented"
-reason = "`set -o errtrace` runs the ERR trap for a failing command inside an asynchronous list where Bash does not."
+reason = "Bash raises `ERR` for `{ false; } &` and not for `false &`, because it forks an asynchronous *simple* command below the point the condition is raised and a compound one above it. This tree does not keep the braces -- `{ list; }` parses to the list itself -- so the two forms are the same node here and the trap runs for both."
 
 [[case]]
 id = "builtin-type-bash.test.sh:3"
 disposition = "not-implemented"
-reason = "`type -t` does not classify `{` as a keyword."
-
-[[case]]
-id = "builtin-type-bash.test.sh:17"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "builtin-type-bash.test.sh:27"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "extglob-files.test.sh:18"
-disposition = "not-implemented"
-reason = "`builtin nosuchname` reports status 127 rather than Bash's 1."
+reason = "`time` is not in the grammar, so `type -t time` reports nothing. Naming it a keyword while `time echo hi` is a command that is not found would advertise a grammar this shell does not have, so the gap is the reserved word rather than the classification. `select` is absent for the same reason and this case does not reach it."
 
 [[case]]
 id = "extglob-files.test.sh:22"
@@ -466,26 +401,6 @@ disposition = "not-implemented"
 reason = "`shopt -s nocasematch` applies to `==` pattern operands but not to the `=~` regular-expression operand."
 
 [[case]]
-id = "print-source-code.test.sh:0"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "print-source-code.test.sh:1"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "print-source-code.test.sh:2"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
-id = "print-source-code.test.sh:3"
-disposition = "not-implemented"
-reason = "A function definition does not retain the text or a printable form of its body, so `declare -f`, `declare -F`, `typeset -f` and `type -a` list nothing and report success for a name that has no function. Serializing an owned syntax tree back to source is a feature nobody has built."
-
-[[case]]
 id = "process-sub.test.sh:4"
 disposition = "not-implemented"
 reason = "The `$(<file)` command-substitution shorthand is not implemented; it runs a command with no words and yields nothing instead of the file's contents."
@@ -541,16 +456,6 @@ disposition = "sanctioned-divergence"
 reason = "`SHELLOPTS` is published but not marked read-only, so assigning to it succeeds where Bash refuses with status 1. Marking it read-only would turn a line Bash tolerates into an aborted script under the error boundary above. Recorded in docs/divergences.md."
 
 [[case]]
-id = "sh-options-bash.test.sh:4"
-disposition = "not-implemented"
-reason = "`SHELLOPTS` is not read back from the environment at startup, so exporting it does not carry `set -x` into a child shell. The second case also shows the exported value being rejected by a real Bash, so the published spelling is wrong as well."
-
-[[case]]
-id = "sh-options-bash.test.sh:5"
-disposition = "not-implemented"
-reason = "`SHELLOPTS` is not read back from the environment at startup, so exporting it does not carry `set -x` into a child shell. The second case also shows the exported value being rejected by a real Bash, so the published spelling is wrong as well."
-
-[[case]]
 id = "toysh.test.sh:0"
 disposition = "not-implemented"
 reason = "A suffix operator or an `@`-transform applied through `${a[*]}` is applied to the joined string; Bash applies it to each element and joins afterwards."
@@ -579,11 +484,6 @@ reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes 
 id = "unicode.test.sh:5"
 disposition = "sanctioned-divergence"
 reason = "`\\uXXXX`/`\\UXXXXXXXX` above U+10FFFF produce no bytes; Bash encodes the value anyway, yielding a byte sequence that is not UTF-8 for any character. Refusing to manufacture it is deliberate (`crates/nsh/src/escape.rs::unicode_bytes`); the refusal is silent, which is a wart the entry records rather than hides."
-
-[[case]]
-id = "var-op-bash.test.sh:11"
-disposition = "not-implemented"
-reason = "`${!prefix@}` lists only names with a scalar value, so a name declared as an empty array is missing from the list."
 
 [[case]]
 id = "var-op-bash.test.sh:16"
