@@ -60,10 +60,14 @@ fn restorable_option_state() {
 
     let (status, set_state, _) = run(&mut shell, b"set +o");
     assert_eq!(status, 0);
+    /* In Bash mode the dialect switch is reported as `posix`, off --
+     * `[spec:nsh:req:compat.bash.posix-option]`. What matters is that the
+     * saved state names the switch at all, so re-executing it restores the
+     * dialect, which the round trip below checks. */
     assert!(
         set_state
             .split(|byte| *byte == b'\n')
-            .any(|line| line == b"set -o bash")
+            .any(|line| line == b"set +o posix")
     );
     assert_eq!(run(&mut shell, &set_state).0, 0);
     assert_eq!(run(&mut shell, b"set +o").1, set_state);
@@ -73,7 +77,7 @@ fn restorable_option_state() {
     assert!(
         human_state
             .split(|byte| *byte == b'\n')
-            .any(|line| line.starts_with(b"bash") && line.ends_with(b"on"))
+            .any(|line| line.starts_with(b"posix") && line.ends_with(b"off"))
     );
 
     let (status, stdout, _) = run(&mut shell, b"shopt -o -p bash");

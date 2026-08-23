@@ -12,7 +12,15 @@ fn run_shell(argument_zero: &[u8], args: &[&[u8]]) -> Output {
     command.env("LC_ALL", "C").output().expect("run nsh")
 }
 
-fn bash_lines(output: &Output) -> Vec<&[u8]> {
+/// Whether each `set -o` report in the output shows the dialect on.
+///
+/// The switch is one boolean with two names: outside the dialect it is
+/// reported as `bash`, and inside it as `posix`, off -- Bash has no option
+/// called `bash`, so a listing made in Bash mode must not invent one. See
+/// `[spec:nsh:req:compat.bash.posix-option]`. Reading it as a boolean keeps
+/// these tests about which dialect was selected rather than about the
+/// spelling of a line.
+fn dialect_states(output: &Output) -> Vec<bool> {
     assert!(
         output.status.success(),
         "shell failed: stdout={:?}, stderr={:?}",
@@ -22,7 +30,17 @@ fn bash_lines(output: &Output) -> Vec<&[u8]> {
     output
         .stdout
         .split(|byte| *byte == b'\n')
-        .filter(|line| line.starts_with(b"bash "))
+        .filter_map(|line| {
+            let on = line.ends_with(b"on");
+            if line.starts_with(b"bash ") {
+                Some(on)
+            } else if line.starts_with(b"posix ") {
+                /* Reported inside the dialect, and inverted there. */
+                Some(!on)
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
@@ -30,13 +48,13 @@ fn bash_lines(output: &Output) -> Vec<&[u8]> {
 #[test]
 fn invocation_and_options_select_bash_mode() {
     let ordinary = run_shell(b"nsh", &[b"-c", b"set -o"]);
-    assert_eq!(bash_lines(&ordinary), [b"bash            off"]);
+    assert_eq!(dialect_states(&ordinary), [false]);
 
     let explicit = run_shell(b"nsh", &[b"-o", b"bash", b"-c", b"set -o"]);
-    assert_eq!(bash_lines(&explicit), [b"bash            on"]);
+    assert_eq!(dialect_states(&explicit), [true]);
 
     let disabled = run_shell(b"nsh", &[b"+o", b"bash", b"-c", b"set -o"]);
-    assert_eq!(bash_lines(&disabled), [b"bash            off"]);
+    assert_eq!(dialect_states(&disabled), [false]);
 }
 
 // [spec:nsh:req:compat.bash.selection/test]
@@ -48,15 +66,11 @@ fn raw_invocation_basename_selects_mode() {
         b"/opt/shells/-bash",
     ] {
         let output = run_shell(argument_zero, &[b"-c", b"set -o"]);
-        assert_eq!(
-            bash_lines(&output),
-            [b"bash            on"],
-            "{argument_zero:?}"
-        );
+        assert_eq!(dialect_states(&output), [true], "{argument_zero:?}");
     }
 
     let overridden = run_shell(b"bash", &[b"+o", b"bash", b"-c", b"set -o"]);
-    assert_eq!(bash_lines(&overridden), [b"bash            off"]);
+    assert_eq!(dialect_states(&overridden), [false]);
 }
 
 // [spec:nsh:req:compat.bash.selection/test]
@@ -64,7 +78,7 @@ fn raw_invocation_basename_selects_mode() {
 fn command_operand_does_not_select_mode() {
     let output = run_shell(b"nsh", &[b"-c", b"printf '%s\\n' \"$0\"; set -o", b"bash"]);
     assert!(output.stdout.starts_with(b"bash\n"));
-    assert_eq!(bash_lines(&output), [b"bash            off"]);
+    assert_eq!(dialect_states(&output), [false]);
 }
 
 // [spec:nsh:req:compat.bash.state-isolation/test]
@@ -74,13 +88,7 @@ fn subshell_option_changes_remain_local() {
         b"nsh",
         &[b"-o", b"bash", b"-c", b"(set +o bash; set -o); set -o"],
     );
-    assert_eq!(
-        bash_lines(&output),
-        [
-            b"bash            off".as_slice(),
-            b"bash            on".as_slice(),
-        ]
-    );
+    assert_eq!(dialect_states(&output), [false, true]);
 }
 
 /// Every way in and out of the dialect, and what each one selects.
@@ -163,17 +171,25 @@ const ENTRIES: &[Entry] = &[
 /// with a construct only the dialect accepts.
 const REPORT: &[u8] = b"set -o; [[ a == a ]] && printf 'dialect on\\n'";
 
-/// `bash_lines` insists the shell succeeded, which a deliberately refused
+/// `dialect_states` insists the shell succeeded, which a deliberately refused
 /// construct does not. This reads the same report without that demand.
 fn reported_dialect(output: &Output) -> bool {
-    let lines: Vec<&[u8]> = output
+    let states: Vec<bool> = output
         .stdout
         .split(|byte| *byte == b'\n')
-        .filter(|line| line.starts_with(b"bash "))
+        .filter_map(|line| {
+            let on = line.ends_with(b"on");
+            if line.starts_with(b"bash ") {
+                Some(on)
+            } else if line.starts_with(b"posix ") {
+                Some(!on)
+            } else {
+                None
+            }
+        })
         .collect();
-    match lines.as_slice() {
-        [b"bash            on"] => true,
-        [b"bash            off"] => false,
+    match states.as_slice() {
+        [state] => *state,
         other => panic!("unreadable set -o report: {other:?}"),
     }
 }
