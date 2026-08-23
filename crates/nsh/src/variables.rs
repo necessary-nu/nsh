@@ -586,7 +586,8 @@ fn set_entry(
     if old.attributes.read_only && guard == arrays::ReadOnlyGuard::Enforce {
         let mut message = name.to_vec();
         message.extend_from_slice(b": is read only");
-        return Err(shell.diagnostics().shell_error(&message));
+        // [spec:nsh:req:compat.bash.error-boundary]
+        return Err(shell.diagnostics().dialect_error(&message));
     }
 
     if value.is_some() || attributes != VariableAttributes::NONE {

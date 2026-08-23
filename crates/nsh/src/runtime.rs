@@ -265,19 +265,13 @@ pub(crate) fn command_loop(
         if let crate::parser::ParseResult::Tree(command) = parsed {
             shell.jobs.job_warning = shell.jobs.job_warning.advance();
             eof_count = 0;
-            let flow = if top_level {
-                crate::evaluation::evaluate_top_level(
-                    shell,
-                    command.as_ref(),
-                    EvaluationContext::DEFAULT,
-                )
-            } else {
-                crate::evaluation::evaluate_tree(
-                    shell,
-                    command.as_ref(),
-                    EvaluationContext::DEFAULT,
-                )
-            }?;
+            // [spec:nsh:req:compat.bash.error-boundary]
+            let flow = crate::evaluation::evaluate_record(
+                shell,
+                command.as_ref(),
+                EvaluationContext::DEFAULT,
+                top_level,
+            )?;
             match flow {
                 crate::evaluation::Flow::Done(command_status) => {
                     if command.is_some() {

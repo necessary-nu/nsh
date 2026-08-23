@@ -6315,6 +6315,30 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id bash-mode-error-boundary
+                                title "Give Bash mode Bash's error boundary"
+                                kind @fix
+                            }
+
+                            {
+                                id bash-array-assignment-gaps
+                                title "Close the remaining Bash array and assignment gaps"
+                                kind @feat
+                            }
+
+                            {
+                                id bash-expansion-gaps
+                                title "Close the remaining Bash expansion gaps"
+                                kind @feat
+                            }
+
+                            {
+                                id bash-introspection-gaps
+                                title "Close Bash function serialization and remaining builtins"
+                                kind @feat
+                            }
                         )
                     }
 

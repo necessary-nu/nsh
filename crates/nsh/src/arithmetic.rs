@@ -424,7 +424,13 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         text.extend_from_slice(b": \"");
         text.extend_from_slice(self.input.as_ref());
         text.push(b'"');
-        self.shell.diagnostics().shell_error(&text)
+        /* Bash answers 1 and abandons the record for every arithmetic
+         * failure -- a syntax error, a division by zero, a subscript that
+         * will not evaluate. `set -u` on an unset name inside an
+         * expression is not one of them and keeps the fatal boundary in
+         * both dialects, which is why that raise is separate. */
+        // [spec:nsh:req:compat.bash.error-boundary]
+        self.shell.diagnostics().dialect_error(&text)
     }
 
     /// Bash's comma operator: evaluate each side, answer with the right.
@@ -743,6 +749,9 @@ fn element_text(shell: &mut Shell, base: &BStr, selector: &ArraySelector) -> BSt
             .associative(BStr::new(key.as_slice()))
             .map(BStr::to_owned)
             .unwrap_or_default(),
+        // `$(( a[-5] ))` is reported and then reads as zero, as an unset
+        // element does.
+        ArraySelector::Missing => BString::default(),
         ArraySelector::All | ArraySelector::Joined => arrays::elements(&stored)
             .first()
             .cloned()

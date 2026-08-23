@@ -192,19 +192,20 @@ fn publish(shell: &mut Shell) {
         b"EPOCHSECONDS",
         b"EPOCHREALTIME",
         b"BASH_SUBSHELL",
-        b"SHELLOPTS",
-        b"BASHOPTS",
     ] {
-        mark_dynamic(shell, BStr::new(name));
+        mark_dynamic(shell, BStr::new(name), VariableAttributes::NONE);
     }
-    /* Bash marks the two option listings read-only. That mark is not
-     * copied here, and the reason is the error boundary rather than the
-     * listing: an assignment to a read-only name ends a non-interactive
-     * shell in this implementation, where Bash's leaves status 1 and
-     * carries on. Importing the mark would turn `SHELLOPTS=x` -- a line
-     * Bash tolerates -- into an aborted script. The listings answer for
-     * the option table either way, because the next read recomputes
-     * them and discards whatever was assigned. */
+    /* Bash marks the two option listings read-only, and so does this.
+     * The mark was withheld until 2026-08-23 because an assignment to a
+     * read-only name ended a non-interactive shell here, so importing it
+     * would have turned `SHELLOPTS=x` -- a line Bash tolerates with
+     * status 1 -- into an aborted script. Bash mode now takes Bash's
+     * boundary, so the mark says what Bash's says: the assignment is
+     * refused, the shell answers 1 and reads on. */
+    // [spec:nsh:req:compat.bash.error-boundary]
+    for name in [b"SHELLOPTS".as_slice(), b"BASHOPTS"] {
+        mark_dynamic(shell, BStr::new(name), VariableAttributes::READ_ONLY);
+    }
 }
 
 /// `$SHLVL` counts shell invocations, so it continues the value the
@@ -219,7 +220,10 @@ fn shell_level(shell: &mut Shell) -> i64 {
 
 /// Give `name` a value that the read path recomputes, creating the entry
 /// if a script has not already claimed the name for itself.
-fn mark_dynamic(shell: &mut Shell, name: &BStr) {
+///
+/// The attributes land after the value, because a name published
+/// read-only would otherwise refuse the shell's own seed.
+fn mark_dynamic(shell: &mut Shell, name: &BStr, attributes: VariableAttributes) {
     drop(super::set_bytes(
         shell,
         name,
@@ -228,6 +232,7 @@ fn mark_dynamic(shell: &mut Shell, name: &BStr) {
     ));
     if let Some(entry) = shell.variables.entries.get_mut(name) {
         entry.callback = Callback::Special;
+        entry.attributes.read_only |= attributes.read_only;
     }
 }
 
@@ -432,6 +437,8 @@ pub(crate) fn is_assigned(shell: &mut Shell, name: &BStr) -> bool {
     match selector {
         arrays::ArraySelector::Index(index) => value.indexed(index).is_some(),
         arrays::ArraySelector::Key(key) => value.associative(BStr::new(key.as_slice())).is_some(),
+        // A subscript that named no element selects nothing to be set.
+        arrays::ArraySelector::Missing => false,
         arrays::ArraySelector::All | arrays::ArraySelector::Joined => {
             !arrays::elements(value).is_empty()
         }

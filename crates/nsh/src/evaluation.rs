@@ -391,8 +391,12 @@ pub(crate) fn parse_and_execute(
             } else {
                 context.without_exit()
             };
-            let command_status =
-                flow!(evaluate_top_level(shell, command.as_ref(), command_context));
+            let command_status = flow!(evaluate_record(
+                shell,
+                command.as_ref(),
+                command_context,
+                true
+            ));
             if command.is_some() {
                 status = command_status;
             }
@@ -403,23 +407,66 @@ pub(crate) fn parse_and_execute(
     Ok(Flow::Done(status))
 }
 
-/// Evaluate one parsed top-level command, retaining the rest of an
-/// interactive command list after a parameter-expansion failure.
+/// Evaluate one parsed input record, and resume at the next one after a
+/// failure whose boundary is the record rather than the shell.
 ///
-/// The ordinary evaluator returns the error because a non-interactive shell
-/// must terminate. An interactive root instead abandons the affected command,
-/// restores its temporary state, and resumes at the next `;` command (or the
-/// next parsed input record).
+/// This is the resumption point for [`Error::Abandoned`], and it is the
+/// right one because it is where Bash's is: `parse_and_execute` reads one
+/// record, runs it, and its `setjmp` catches the `DISCARD` an expansion or
+/// assignment failure raises, so the rest of *that* record is abandoned and
+/// the next is read. Every caller is such a loop -- the interactive command
+/// loop, a script or `-c` string, and the `eval`, dot and `source` frames
+/// that parse newly supplied text. Bash recovers at all of them, and
+/// observably: `readonly r=1; r=2; echo x` prints nothing while the same
+/// three commands on three lines print `x`, and an `eval` whose text fails
+/// leaves the caller's locals and its enclosing loop intact.
+///
+/// Nothing is unwound here on purpose. Every temporary the abandoned record
+/// held is already released by the frame that owns it as the error passes
+/// through: [`crate::resource::ResourceScope::restore`] runs on the error
+/// path and takes redirections, input frames and local scopes with it,
+/// `evaluate_loop` decrements its own depth, and `with_interrupts_deferred`
+/// restores the previous deferral. Clearing those wholesale -- as the
+/// interactive arm does, because a POSIX interactive shell really is
+/// returning to its outermost loop -- would destroy the locals of a
+/// function that merely called `eval`.
+///
+/// `errexit` overrides the recovery, and that is Bash's rule rather than an
+/// interpretation of it: `set -e` makes Bash's `report_error` end the shell
+/// where it stands. A script that asked to stop at the first error gets to
+/// stop at this one, and the recovery cannot be the thing that swallows it.
+///
+/// `outermost` is false for a record of a `.` or `source` operand, which
+/// recovers the same way but does not take the interactive arm -- that one
+/// belongs to the loop a person is typing at. It is a different rule: a
+/// POSIX expansion failure abandons the affected command and resumes at the
+/// next `;` command, which is finer than a record and is what dash does.
+///
+/// No dialect test: [`Error::Abandoned`] is built only in Bash mode.
 // [spec:nsh:req:compat.smoosh.error-contracts]
-pub(crate) fn evaluate_top_level(
+// [spec:nsh:req:compat.bash.error-boundary]
+pub(crate) fn evaluate_record(
     shell: &mut Shell,
     node: Option<&Node>,
     context: EvaluationContext,
+    outermost: bool,
 ) -> Result<Flow, Error> {
-    if !shell.options.enabled(ShellOption::Interactive) || shell.shell_level != 0 {
-        return evaluate_tree(shell, node, context);
+    let interactive_root =
+        outermost && shell.options.enabled(ShellOption::Interactive) && shell.shell_level == 0;
+    let outcome = if interactive_root {
+        evaluate_interactive_sequence(shell, node, context)
+    } else {
+        evaluate_tree(shell, node, context)
+    };
+    match outcome {
+        Err(error) if error.is_abandoned() && !shell.options.enabled(ShellOption::Errexit) => {
+            let status = error.status();
+            drop(error);
+            shell.status = status;
+            Ok(Flow::Done(status))
+        }
+        outcome => outcome,
     }
-    evaluate_interactive_sequence(shell, node, context)
 }
 
 /// Record the line the command about to run begins on.
@@ -479,7 +526,18 @@ fn redirection_only_status(
     }
 }
 
+/// Whether a built-in's failure ends the shell rather than becoming the
+/// command's status.
+///
+/// POSIX makes a special built-in's error fatal to a non-interactive shell.
+/// Bash does not, outside its own POSIX mode, and a failure the dialect has
+/// already classed as survivable must not be escalated by the frame that
+/// catches it -- `readonly r=1; unset r; echo next` prints `next` there.
+// [spec:nsh:req:compat.bash.error-boundary]
 fn builtin_error_is_fatal(shell: &Shell, special_builtin: bool, error: &Error) -> bool {
+    if error.is_abandoned() {
+        return false;
+    }
     error.is_interrupt() || (special_builtin && shell.evaluation.signal_trap_depth == 0)
 }
 

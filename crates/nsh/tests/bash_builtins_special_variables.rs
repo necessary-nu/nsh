@@ -305,8 +305,11 @@ fn attribute_transform_reads_the_declaration() {
 }
 
 /// `SHELLOPTS` and `BASHOPTS` answer for the option tables, so an
-/// assignment to either cannot make them answer for the script.
+/// assignment to either cannot make them answer for the script. Bash
+/// marks both read-only and this does too: the assignment is refused
+/// with status 1, the shell reads on, and the listing is unchanged.
 // [spec:nsh:req:compat.bash.builtins-special-variables/test]
+// [spec:nsh:req:compat.bash.error-boundary/test]
 #[test]
 fn option_listings_follow_the_option_tables() {
     let _guard = serialized();
@@ -327,7 +330,7 @@ fn option_listings_follow_the_option_tables() {
         .1,
         b"on\n"
     );
-    assert_eq!(run(&mut shell, b"SHELLOPTS=nonsense; echo $?").1, b"0\n");
+    assert_eq!(run(&mut shell, b"SHELLOPTS=nonsense").0, 1);
     assert_eq!(
         run(
             &mut shell,
