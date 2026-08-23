@@ -151,14 +151,16 @@ implementation source is not an implementation input.
 
 ## Interactive profile
 
-> [spec:nsh:req:compat.bash.interactive]
-> An interactive Bash-mode frontend MUST implement Bash prompt expansion,
-> history controls, `bind`, and programmable completion required by the Bash
-> Reference Profile. It MUST retain baseline up/down history navigation without
-> requiring vi or emacs mode. History, completion, terminal, and prompt state
-> MUST be created only for an interactive shell; selecting Bash mode in a
-> non-interactive shell MUST NOT initialize terminal editing or persistent
-> history state.
+Interactive behaviour is deliberately outside this profile. Bash mode is a
+contract about scripts and syntax: what a Bash script means when this shell
+runs it. Prompt rendering, history controls, `bind` and programmable
+completion are the interactive shell's user interface, and reproducing them
+would mean reproducing GNU Readline -- a separate project this shell does not
+use, since it edits with `nshedit`. A rule requiring them was carried here
+until 2026-08-23 and is retired; see `[dec:nsh:bash-compatibility-is-scripts]`.
+
+Baseline up/down history navigation without vi or emacs mode remains an `nsh`
+property in its own right, documented outside this profile, and is unaffected.
 
 ## Implementation and closure gates
 

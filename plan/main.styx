@@ -6315,42 +6315,6 @@ children (
                                     }
                                 )
                             }
-
-                            {
-                                id implement-bash-interactive-profile
-                                title "Implement Bash prompts, history, bind, and completion"
-                                implements {
-                                    nsh-library ([spec:nsh:req:compat.bash.interactive])
-                                }
-                                deps (
-                                    implement-bash-builtins-special-vars
-                                    implement-bash-expansion-globbing
-                                    implement-bash-functions-scoping
-                                    verify-idiomatic-core-conformance
-                                )
-                                log (
-                                    {
-                                        at 2026-08-19T18:36:07.408360542Z
-                                        author "brendan@necessary.nu"
-                                        kind @note
-                                        text "Definition of done: close calibrated prompt expansion, history controls, bind, and programmable-completion cases in nshterm/nshedit, retain mode-independent up/down history, and prove non-interactive shells allocate no editor, terminal, completion, or persistent history state."
-                                    }
-
-                                    {
-                                        at 2026-08-22T21:16:09.710326468Z
-                                        author "brendan@necessary.nu"
-                                        kind @decision
-                                        text "Four deviations from Bash taken under [dec:nsh:safety-trumps-compatibility], each also written into docs/divergences.md under \"Bash-compatibility divergences\".\n\n1. PROMPT STAGING (CVE-1999-0491 / CVE-1999-1383 / CVE-2016-0634). Bash's decode_prompt_string decodes \\w \\h \\u into one flat string and then word-expands the whole thing, so a directory name is syntax. Bash 4.4 answered the third instance by backslash-quoting the spliced text, which holds only while the quoting and the expander agree about every byte. crates/nsh/src/prompt.rs does not produce a string to expand: decoding yields a sequence of segments -- Source (bytes from the prompt variable's own text, which the expander may interpret) and Rendered (escape output, which nothing interprets) -- and expansion runs per Source run. Named unsafety: an ambient data-to-syntax path. Specified behaviour: host data is concatenated as opaque bytes and never reaches a parser. Cost: PS1='${x\\w}', an escape inside a parameter expansion, cannot build a name here; Bash splices and parses. `\\\\` still decodes to a Source backslash, which is the one place a backslash from the prompt's own source still quotes -- three spec cases turn on it and it is the user's own text, not host data.\n\n2. COMPLETION ENCODINGS (CVE-2017-5932). A Candidate owns bytes and renders three ways: value (what compgen prints), insertion (structural: bare when every byte can stand for itself, otherwise single-quoted whole, so the lexer reads it back unchanged), display (control bytes and escape introducers become visible text). Nothing builds a command line out of a candidate. Consequence: `complete -C cmd` does not have the completed word appended to the command *text* -- Bash builds \"<command> <cmd> <word> <prev>\" and runs the result; nsh runs the command's own text and passes the three words as positional parameters.\n\n3. history -a/-w REFUSE AN ARRAY HISTFILE. Bash writes ${HISTFILE[0]}, so HISTFILE=(a b c) silently overwrites the file `a`. nsh refuses and fails. The oils corpus already marks Bash's behaviour as the deviation (## OK bash on builtin-history.test.sh:9).\n\n4. `bind` RECORDS WITHOUT INSTALLING -- not a safety divergence, an incomplete one. bind maintains and reports Readline's tables faithfully, but a stated binding is not installed into nshedit, whose command set is not Readline's. Mapping `yank`/`accept-line` onto nshedit commands by name would bind a key to something plausible rather than the right thing. The mapping is the outstanding work.\n\nAlso recorded: `\\j` inside a forked pipeline child reports 0 where Bash reports the parent's job count, because initialize_child_process frees the job table (dash forkchild). One survey case (prompt.test.sh:27); not traded against job-control stability."
-                                    }
-
-                                    {
-                                        at 2026-08-22T21:16:34.063610078Z
-                                        author "brendan@necessary.nu"
-                                        kind @note
-                                        text "Measured with the identical-binary method: release nsh built at b41fe5a and at HEAD, each copied to a file named exactly `bash` in its own directory, both run through `nsh-survey run-oils --group bash-extension --expect-shell bash`. Real /usr/bin/bash 5.2.37 was run through the same harness first to establish the reachable ceiling per spec.\n\nWhole group: 713/1121 -> 812/1121 (+99 pass), 373 -> 270 fail, 0 regressions, 0 timeouts, 0 runner errors. Four further cases moved fail -> known-bug/unsupported (builtin-completion 2, 3, 42; builtin-fc 12), which is also agreement with Bash.\n\nPer spec (base -> new, and what real bash scores on the same harness):\n  prompt              0 -> 30  (bash 31/33)\n  builtin-completion  0 -> 39  (bash 40/51, +3 known-bug)\n  interactive         0 -> 12  (bash 15/18)\n  builtin-history     2 ->  7  (bash 7/17)\n  builtin-fc          1 ->  2  (bash 2/14)\n  builtin-bind        0 ->  9  (bash 9/9)\nIncidental gains outside the six: array-sparse:31 (compgen -F), var-op-bash:15 (@P), process-sub:1 (the known containment flake).\n\nRemaining gap to the bash ceiling, with the reason each case is not mine to close:\n  prompt:27  `\\j` in a pipeline child -- see the decision entry.\n  prompt:29  `\\!` history numbering -- needs `set -o history` and non-interactive\n             recording semantics; the exact numbering bash produces (1 then 3\n             across two `${PS1@P}` in pipelines) was not reproduced.\n  builtin-completion:6  `\"${COMP_WORDS[@]}\"` on an unset name yields one empty\n             field instead of none. That is the pre-existing expansion defect\n             already filed at b41fe5a, owned by the expansion surface, not here.\n  interactive:1  `-i -c` must recover per command after a fatal expansion error;\n             our `-c` text is one evaluate_string and the error ends it.\n  interactive:10 diagnostics must name the rc file (`bad_oshrc:`); ours name the\n             shell and a line number. Changing the diagnostic prefix format is a\n             whole-corpus change and does not belong in this node.\n  interactive:13 `show-shell-state()` -- Bash allows hyphens in function names,\n             our parser answers \"Bad function name\". Parser surface, not mine.\n\nStructurally unreachable for any shell under this harness (bash fails them too):\nprompt 0 and 32; interactive 4, 5, 6; the ten builtin-fc and ten builtin-history\ncases that gate on `case $SH in bash)` while the runner sets SH to a path;\nbuiltin-completion 23, 24, 33, 34, 39 (they cd to an oils checkout via\n$REPO_ROOT) and 48, 49 (`compadjust`, an OSH builtin).\n\nPOSIX harness unchanged: 731/731 cases, 973/973 automatic rules, pending 0."
-                                    }
-                                )
-                            }
                         )
                     }
 
@@ -6373,7 +6337,6 @@ children (
                                     implement-bash-functions-scoping
                                     implement-bash-traps-introspection
                                     implement-bash-builtins-special-vars
-                                    implement-bash-interactive-profile
                                 )
                                 log (
                                     {
