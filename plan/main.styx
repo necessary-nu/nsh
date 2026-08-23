@@ -6978,6 +6978,15 @@ children (
                         )
                     }
                 )
+                log (
+                    {
+                        at 2026-08-23T23:49:51.678132683Z
+                        author "brendan@necessary.nu"
+                        kind @blocker
+                        text "The Windows target does not compile, and has not for at least as long as 0acac69. Found incidentally while checking that `[optional-line-editor]`'s feature split did not break a cross-target build; confirmed pre-existing by stashing the change and re-running the same check at HEAD.\n\n  cargo check --workspace --target x86_64-pc-windows-gnu\n  error[E0423]: cannot initialize a tuple struct which contains private fields\n    --> crates/nsh-platform/src/windows_facts.rs:12:5\n     |  UserId(1)\n  note: constructor is not visible here due to private fields\n    --> crates/nsh-platform/src/windows.rs:1054:19\n     |  pub struct UserId(u32);\n\n`windows_facts.rs` constructs `UserId` from outside the module that declares it, and the field is private. One line either way -- a constructor on `UserId`, or `pub(crate)` on the field -- but which one is a boundary question rather than a typo: `UserId` crosses the platform boundary, and `[dec:nsh:public-surface]` has something to say about whether a host-identity scalar is constructible by its callers at all.\n\nNot fixed here because it belongs to this node and not to a feature split, and because nothing gates on it: no CI entry, no commit-gate check and no test builds a non-host target, which is why it went unnoticed. That absence is the more durable finding. `x86_64-unknown-linux-musl` was checked in the same pass and is clean."
+                        after_done true
+                    }
+                )
             }
 
             {
