@@ -1051,40 +1051,6 @@ pub fn is_terminal(fd: &impl AsDescriptor) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct UserId(u32);
-
-impl UserId {
-    pub fn is_root(self) -> bool {
-        false
-    }
-
-    pub fn as_raw(self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GroupId(u32);
-
-impl GroupId {
-    pub fn as_raw(self) -> u32 {
-        self.0
-    }
-}
-
-pub fn effective_uid() -> UserId {
-    UserId(1)
-}
-
-pub fn effective_gid() -> GroupId {
-    GroupId(1)
-}
-
-pub fn supplementary_groups() -> std::io::Result<Vec<GroupId>> {
-    Ok(Vec::new())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PathErrorKind {
     NotFound,
     NameTooLong,

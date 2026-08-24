@@ -235,7 +235,10 @@ pub use windows::*;
 #[cfg(windows)]
 mod windows_facts;
 #[cfg(windows)]
-pub use windows_facts::{host_name, real_uid, wait_for_input};
+pub use windows_facts::{
+    GroupId, UserId, effective_gid, effective_uid, host_name, real_uid, supplementary_groups,
+    wait_for_input,
+};
 
 /// Host facts a Bash-compatible shell publishes as variables, and the two
 /// clocks it reads: the monotonic one behind `SECONDS` and the wall clock
