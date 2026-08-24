@@ -519,6 +519,47 @@ evidence remains those survey cases. A future result showing the port ahead in
 exactly these two cases is therefore expected; a different editor mismatch is
 not covered by this entry.
 
+## Bash-compatibility divergences taken under `[dec:nsh:we-own-the-defects]`
+
+Bash is a reference, not an authority. Where Bash contradicts *itself*,
+there is no behaviour to match, and the entry below records which of its
+two answers this shell gives everywhere.
+
+### One bracket parser, in every context a pattern appears in
+
+**Status:** deliberate. `crates/nsh/src/pattern.rs::Matcher::bracket`.
+
+A `]` that opens a bracket list is a member of it, not the terminator, so
+`[]]` matches `]` and `[^]]` matches everything except `]`. POSIX states
+that rule for `[!...]`; for shell patterns it leaves `[^...]` undefined,
+so the reading is a choice. This shell makes it once and applies it to
+`case`, `[[ ]]`, `${var//pattern/}` and pathname expansion alike.
+
+Bash gives two different answers to the same spelling:
+
+```
+$ case a in [^]]) echo MATCH;; *) echo no;; esac
+MATCH
+$ s=ab^cd; echo "${s//[^]]/z}"
+ab^cd            # nsh: zzzzz
+```
+
+Its `case` and `[[ ]]` read `[^]]` as "not `]`", which is what this shell
+does. Its substitution path instead closes the list at the first `]`,
+leaving a pattern that requires a further `]` after any single character
+-- and since the negated list is now empty, one that matches nothing at
+all, for any subject. Verified against GNU bash 5.2.37: `[^]]` and `[!]]`
+never match in `${//}`, while `[]]`, `[^a]` and `[]a]` all behave
+normally.
+
+Matching Bash here would mean shipping two bracket parsers and selecting
+between them by the syntactic context the pattern was written in. The
+Oils corpus notes the same split from the other side -- "This is a
+PARSING divergence" -- and OSH also declines to reproduce it.
+
+Costs `var-op-patsub.test.sh:23` in the compatibility survey, registered
+as a sanctioned divergence rather than a defect.
+
 ## Bash-compatibility divergences taken under `[dec:nsh:safety-trumps-compatibility]`
 
 These are not dash divergences and have no entry in

@@ -29,6 +29,32 @@ fn structural_fields() {
     );
 }
 
+/// `$*` joins with IFS because choosing the separator is what it is for;
+/// `$@` joins with a space because it never named one. dash uses IFS for
+/// both, so `IFS=x; v="$@"` reads `axbxc` there and `a b c` here.
+#[test]
+// [spec:nsh:sem:idiom.typed-expansion/test]
+fn joined_at_uses_a_space_not_ifs() {
+    let mut shell = Shell::builder().build().unwrap();
+    shell.run(b"IFS=x; set -- a b c").unwrap();
+
+    for word in [b"\"$@\"".as_slice(), b"$@".as_slice()] {
+        assert_eq!(
+            shell.expand_word_quoted(BStr::new(word)).unwrap(),
+            BString::from("a b c"),
+            "joined $@ separates with a space, whatever IFS says",
+        );
+    }
+    assert_eq!(
+        shell.expand_word_quoted(BStr::new(b"\"[$@]\"")).unwrap(),
+        BString::from("[a b c]"),
+    );
+    assert_eq!(
+        shell.expand_word_quoted(BStr::new(b"\"$*\"")).unwrap(),
+        BString::from("axbxc"),
+    );
+}
+
 #[test]
 fn parameter_operand_quotes() {
     let mut shell = Shell::builder().build().unwrap();

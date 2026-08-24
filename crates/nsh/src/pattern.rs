@@ -451,6 +451,20 @@ impl Matcher<'_> {
 
     /// Return the continuation and every subject width matched by one
     /// well-formed bracket expression. `None` means `[` is an ordinary byte.
+    ///
+    /// `first_member` is why `[]]` and `[^]]` both hold a literal `]`: a
+    /// `]` that opens the list is a member, not the terminator. POSIX
+    /// states that rule for `[!...]` and leaves `[^...]` undefined for
+    /// shell patterns, so the choice is ours -- and it is to apply one
+    /// rule to both, in every context a pattern appears in.
+    ///
+    /// Bash does not. `case a in [^]]` matches there, as it does here,
+    /// but `${s//[^]]/z}` matches *nothing* in Bash -- its substitution
+    /// path closes the list at the first `]` and is then left requiring a
+    /// second one. One spelling means two things depending on where it is
+    /// written. Reproducing that would mean carrying two bracket parsers
+    /// and choosing between them by call site. Recorded in
+    /// docs/divergences.md; costs `var-op-patsub.test.sh:23`.
     // [spec:dash:sem:expand.ccmatch-fn]
     // [spec:posix:req:pattern.unmatched-open-bracket-unspecified]
     fn bracket(&self, mut at: usize, subject_at: usize) -> Option<(usize, Vec<usize>)> {

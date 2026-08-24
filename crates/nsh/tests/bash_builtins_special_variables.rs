@@ -43,6 +43,37 @@ fn output(bash: bool, script: &[u8]) -> Vec<u8> {
 }
 
 // [spec:nsh:req:compat.bash.builtins-special-variables/test]
+/// A backslash protects the next byte from field splitting, and
+/// protected bytes are content: `read line` on `\a \b` keeps `a b`.
+///
+/// The scan only visits *unprotected* runs, so a protected byte could not
+/// cancel the truncation a preceding separator had pencilled in, and
+/// everything from that separator on was dropped -- `\a \b \c` read as
+/// `a`. dash does the same; nothing specifies losing the text.
+// [spec:posix:req:builtin.read.backslash-escape/test]
+#[test]
+fn protected_bytes_keep_the_rest_of_the_record() {
+    // Each case runs a pipeline, so it reaps children; see `serialized`.
+    let _guard = serialized();
+    for bash in [false, true] {
+        let mut shell = new_shell(bash);
+        for (input, expected) in [
+            ("\\a", "a"),
+            ("\\a \\b", "a b"),
+            ("x \\i", "x i"),
+            ("\\a \\b \\c", "a b c"),
+            ("p \\q r", "p q r"),
+        ] {
+            let script = format!("printf '%s\\n' '{input}' | {{ read line; echo \"[$line]\"; }}");
+            assert_eq!(
+                run(&mut shell, script.as_bytes()).1,
+                format!("[{expected}]\n").into_bytes(),
+                "read of {input:?} with bash={bash}",
+            );
+        }
+    }
+}
+
 #[test]
 fn let_reports_the_last_expression_as_a_status() {
     let _guard = serialized();

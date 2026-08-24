@@ -200,7 +200,9 @@ pub(super) fn indirect_target(
             Some(text) => text,
             None => return Ok(BString::default()),
         },
-        Value::At(words) | Value::Star(words) => super::join_parameters(shell, &words),
+        Value::At(words) | Value::Star(words) => {
+            super::join_parameters(&words, super::first_ifs_character(shell))
+        }
     };
     if names_a_parameter(&shell.locale, target.as_bstr()) {
         return Ok(target);
@@ -801,7 +803,7 @@ pub(super) fn map_value(
             .map(|word| transform(&shell.locale, word))
             .collect::<Vec<_>>();
         return Ok(Expansion::one(Field::from_bytes(
-            &super::join_parameters(shell, &mapped),
+            &super::join_parameters(&mapped, super::first_ifs_character(shell)),
             context.protects(),
             context.splits(),
             context.quoted,

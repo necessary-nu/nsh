@@ -81,19 +81,9 @@ disposition = "not-implemented"
 reason = "An empty subscript `a[]=v` is accepted and assigns index 0, and `${a[]}` reads it; Bash rejects both as a bad substitution. Nothing validates that a subscript has an expression in it, and the rejection also needs Bash's error boundary: Bash reports each line and carries on with status 1."
 
 [[case]]
-id = "array-compat.test.sh:1"
-disposition = "defect"
-reason = "`\"$@\"` embedded in a larger word joins its fields with the first byte of `IFS`; every shell joins with a space there, and this reproduces with the dialect off."
-
-[[case]]
 id = "array-sparse.test.sh:31"
 disposition = "out-of-contract"
 reason = "`compgen` is part of the programmable-completion surface retired by [dec:nsh:bash-compatibility-is-scripts]; there is no `complete`/`compgen`/`compopt` and reporting one would advertise a facility that is not here."
-
-[[case]]
-id = "builtin-read.test.sh:26"
-disposition = "defect"
-reason = "Field splitting drops the text after a backslash-protected run: `printf '\\a \\b\\n' | read line` yields `a` where every shell yields the whole line. Reproduces with the dialect off, so this is a POSIX-mode defect rather than a Bash gap. Filed on this node on 2026-08-22."
 
 [[case]]
 id = "builtin-trap-err.test.sh:12"
@@ -127,8 +117,8 @@ reason = "An associative array iterates in sorted key order where Bash iterates 
 
 [[case]]
 id = "var-op-patsub.test.sh:23"
-disposition = "defect"
-reason = "A bracket expression whose first member is `]` (`[^]]`) is parsed as an empty set followed by literal text, so the pattern matches everything. POSIX requires `]` first in a bracket expression to be literal, and this reproduces with the dialect off."
+disposition = "sanctioned-divergence"
+reason = "Bash contradicts itself on `[^]]`, so there is no single behaviour to match. `case a in [^]]` matches in Bash, as it does here -- a `]` that opens a bracket list is a member of it, not the terminator. But Bash's substitution path closes the list at the first `]`, which leaves an empty negated list followed by a required `]`, and `${s//[^]]/z}` therefore matches nothing for any subject (verified against GNU bash 5.2.37; `[!]]` behaves the same way, while `[]]`, `[^a]` and `[]a]` are normal). POSIX states the leading-`]` rule for `[!...]` and leaves `[^...]` undefined for shell patterns, so the reading is a choice; this shell makes it once and applies it to `case`, `[[ ]]`, `${var//}` and pathname expansion alike. Reproducing Bash would mean two bracket parsers selected by call site. The Oils corpus records the same split (\"This is a PARSING divergence\") and OSH also declines it. Reason at the point of divergence in `crates/nsh/src/pattern.rs::Matcher::bracket`; recorded in docs/divergences.md. Reclassified from `defect` on 2026-08-24 after the earlier entry mis-stated it as a POSIX-mode bug of ours."
 
 [[case]]
 id = "var-ref.test.sh:2"

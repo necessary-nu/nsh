@@ -531,7 +531,9 @@ impl Value {
             Self::Star(words) if context.full && !context.quoted => {
                 words.is_empty() || (words.len() == 1 && words[0].is_empty())
             }
-            Self::At(words) | Self::Star(words) => join_parameters(shell, words).is_empty(),
+            Self::At(words) | Self::Star(words) => {
+                join_parameters(words, first_ifs_character(shell)).is_empty()
+            }
         }
     }
 }
@@ -970,13 +972,30 @@ fn value_expansion(
                         .collect(),
                 });
             }
-            let joined = join_parameters(shell, &words);
+            let joined = join_parameters(&words, first_ifs_character(shell));
             Ok(Expansion::one(Field::from_bytes(
                 &joined, false, true, false,
             )))
         }
-        Value::At(words) | Value::Star(words) => {
-            let joined = join_parameters(shell, &words);
+        /* A context that cannot hold more than one field -- an
+         * assignment, a here-document -- still has to join what `$@`
+         * produced. `$*` joins with IFS, because choosing the separator
+         * is what `$*` is for; `$@` joins with a space, because it never
+         * named a separator and the fields it made were the point. dash
+         * uses IFS for both, so `IFS=x; v="$@"` differs there; POSIX
+         * leaves the case unspecified and a space is the answer that
+         * does not silently rewrite the values. */
+        Value::At(words) => {
+            let joined = join_parameters(&words, b" ");
+            Ok(Expansion::one(Field::from_bytes(
+                &joined,
+                context.protects(),
+                context.splits(),
+                context.quoted,
+            )))
+        }
+        Value::Star(words) => {
+            let joined = join_parameters(&words, first_ifs_character(shell));
             Ok(Expansion::one(Field::from_bytes(
                 &joined,
                 context.protects(),
@@ -991,8 +1010,10 @@ fn empty_value(context: Context) -> Expansion {
     Expansion::one(Field::from_bytes(b"", false, false, context.quoted))
 }
 
-fn join_parameters(shell: &Shell, words: &[BString]) -> BString {
-    let separator = first_ifs_character(shell);
+/// Join what `$@` or `$*` produced into the one field its context can
+/// hold. The separator is the caller's because the two do not share one:
+/// see the `Value::At` arm above.
+fn join_parameters(words: &[BString], separator: &[u8]) -> BString {
     let mut joined = BString::new(Vec::new());
     for (index, word) in words.iter().enumerate() {
         if index != 0 {
@@ -1078,7 +1099,7 @@ fn value_bytes(shell: &Shell, value: Value, context: Context) -> BString {
                 }
                 joined
             } else {
-                join_parameters(shell, &words)
+                join_parameters(&words, first_ifs_character(shell))
             }
         }
     }

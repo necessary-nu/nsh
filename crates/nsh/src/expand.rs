@@ -359,8 +359,20 @@ fn split_regions_into_fields(
         separator_is_whitespace: false,
     };
     let mut final_end = string.len();
+    /* How far the regions have accounted for. Only *unprotected* runs are
+     * regions, so anything between one region and the next is text a
+     * backslash or a quote protected -- text the scan below never visits.
+     * It is still content, and content is what cancels a pending
+     * truncation: `read line` on `\a \b` keeps `a b`, where truncating at
+     * the space it saw would keep `a`. This is the protected half of the
+     * rule the loop applies to every byte it does visit. */
+    let mut accounted = 0usize;
 
     for region in regions {
+        if region.start > accounted {
+            split_state.trailing_whitespace_start = None;
+        }
+        accounted = region.end;
         let end = region.end;
         let mut cursor = region.start;
         debug_assert!(
@@ -406,6 +418,10 @@ fn split_regions_into_fields(
 
             cursor = split_fields_slow(shell, &mut split_state, fields, string, cursor);
         }
+    }
+    if string.len() > accounted {
+        // Protected text after the last region, by the same rule.
+        split_state.trailing_whitespace_start = None;
     }
     if let Some(trailing_whitespace_start) = split_state.trailing_whitespace_start {
         /* This is the one write into `string` that happens after
