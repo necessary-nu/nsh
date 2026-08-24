@@ -34,6 +34,26 @@ impl WordLexer<'_> {
         self.output.push(WordToken::Literal(byte));
     }
 
+    /// Record the byte at the cursor into a here-document delimiter, if
+    /// there is one.
+    ///
+    /// A delimiter is kept literally so the body can be matched against it
+    /// later, and the input can end part-way through one -- `<<${e` and
+    /// `<<${x:` are whole files. `check_here_document_end` says the
+    /// delimiter is being recorded; it says nothing about whether the
+    /// cursor is on a byte, and reading one out of an end-of-input item
+    /// panicked. Recording nothing is right: ending is not an operator
+    /// either, so the parse falls through and fails for the reason it
+    /// really failed -- an unterminated construct.
+    // [spec:nsh:req:idiom.bounded-recursion]
+    pub(super) fn record_delimiter_byte(&mut self) {
+        if self.check_here_document_end
+            && let Some(byte) = self.input.byte()
+        {
+            self.push_literal(byte);
+        }
+    }
+
     pub(super) fn push_escaped(&mut self, byte: u8) {
         self.output.push(WordToken::Escaped(byte));
     }

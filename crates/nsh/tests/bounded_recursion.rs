@@ -208,25 +208,49 @@ fn ordinary_call_depth_is_unaffected() {
 /// matched against it, and the input can end in the middle of one.
 ///
 /// `<<${e` is the whole file, five bytes, and it panicked: the recorder
-/// asked a boundary item for a byte it does not carry. Found by the
-/// `parse` fuzz target, and the shape of the whole class -- an
-/// `expect_byte` whose "control flow already excluded a boundary" is not
-/// true on some path.
+/// asked an end-of-input item for a byte it does not carry. Found by the
+/// `parse` fuzz target. `check_here_document_end` says the delimiter is
+/// being recorded and says nothing about whether the cursor is on a
+/// byte, so every site that confused the two is the same defect --
+/// `record_delimiter_byte` is now the only way to record one.
 // [spec:nsh:req:idiom.bounded-recursion/test]
 #[test]
-fn an_unterminated_here_delimiter_is_an_error() {
+fn a_truncated_here_delimiter_is_an_error() {
     with_stack(|| {
         for script in [
-            &b"<<${e"[..],
-            &b"<<${"[..],
-            &b"<<`"[..],
-            &b"<<${e"[..],
-            &b"cat <<${x"[..],
-            &b"<<$(("[..],
+            "<<${e",
+            "<<${",
+            "<<`",
+            "<<$((",
+            "<<$(",
+            "<<${x:",
+            "<<${x:-",
+            "<<${x:=",
+            "<<${x:?",
+            "<<${x:+",
+            "<<${x#",
+            "<<${x##",
+            "<<${x%",
+            "<<${x%%",
+            "<<${x/",
+            "<<${x//",
+            "<<${x^",
+            "<<${x@",
+            "<<${x[",
+            "<<${#",
+            "<<${!",
+            "<<${x-",
+            "<<${x=",
+            "<<${x+",
+            "<<${x:1",
+            "cat <<${x",
+            "<<\"",
+            "<<'",
+            "<<${x:-${y",
         ] {
             let mut shell = shell();
             // The assertion is that this returns at all.
-            let _ = shell.run(script);
+            let _ = shell.run(script.as_bytes());
             drop(shell.take_captured_stderr());
         }
     });

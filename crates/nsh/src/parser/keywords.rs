@@ -9,36 +9,37 @@
 use bstr::{BStr, BString};
 
 use super::{
-    Error, ForCommand, ListMode, Node, NodeText, ParsedWord, Shell, Token, TokenContext, TokenKind,
-    WordNode, command, expected_token_error, is_valid_name, list, mem, pipeline, read_token,
-    required_compound_node, syntax_error,
+    CaseClause, CaseCommand, Error, ForCommand, IfCommand, ListMode, Node, NodeText, ParsedWord,
+    Shell, Token, TokenContext, TokenKind, WordNode, command, expected_token_error, is_valid_name,
+    list, mem, pipeline, read_token, required_compound_node, syntax_error,
 };
 
 /// How deeply one parse unit may nest commands.
 ///
 /// Recursive descent spends stack per level and script text is untrusted,
 /// so the depth is bounded rather than trusted. Unbounded, `(` repeated
-/// often enough overflows the stack: about 1,700 times in a release build
-/// on an 8 MiB stack, about 200 in a debug one. Nothing has to run to
-/// reach it -- `sh -n` on a hostile file is enough -- and there is no
-/// unwind, so an embedder gets a dead process where
-/// [`dec:nsh:shell-as-library`] promised an `Err`.
+/// often enough overflows the stack. Nothing has to run to reach it --
+/// `sh -n` on a hostile file is enough -- and there is no unwind, so an
+/// embedder gets a dead process where [`dec:nsh:shell-as-library`]
+/// promised an `Err`.
 ///
-/// The number is set by the worst configuration that is actually built,
-/// with margin, rather than by the language: a debug build costs roughly
-/// 40 KiB per level and overflows an 8 MiB stack at about 200, so 100
-/// leaves a factor of two there. A release build costs about 4.8 KiB, so
-/// the same 100 levels is half a mebibyte and fits four times over in the
-/// 2 MiB a spawned Rust thread gets by default. It is the *nesting*
-/// depth, not the length of a list, and it is far past what written
-/// scripts reach -- generated `configure` scripts manage a dozen or two.
+/// The number is set by measurement against the smallest stack the shell
+/// can plausibly be asked to run on, not by the language. A release build
+/// costs 3,952 bytes a level, so 100 levels is 0.38 MiB and fits five
+/// times over in the 2 MiB a spawned Rust thread gets by default; a debug
+/// build costs 28,896. It is the *nesting* depth, not the length of a
+/// list, and it is far past what written scripts reach -- generated
+/// `configure` scripts manage a dozen or two.
 ///
-/// That per-level cost is itself the defect. dash spends about 160 bytes
-/// a level and Bash keeps its parser stack on the heap entirely, so both
-/// tolerate depths this cannot. Most of ours is `command`'s frame holding
-/// the locals of every keyword branch at once, taken or not. Filed on
-/// `bound-recursive-evaluation`; this bound is correct whatever that
-/// number becomes, and can rise when it falls.
+/// Those figures were 5,200 and 41,120 before `if_command` and
+/// `case_command` moved out of `command`'s frame, which is where the rest
+/// of the cost still is: in a debug build every branch of that dispatch
+/// keeps its locals whether taken or not. What remains per level is
+/// `command` 12,432, `pipeline` 9,960 and `list` 6,176. dash spends about
+/// 160 bytes a level and Bash keeps its parser stack on the heap, so both
+/// tolerate depths this cannot. Filed on `bound-recursive-evaluation`;
+/// the bound is correct whatever the number becomes, and rises when it
+/// falls.
 // [spec:nsh:req:idiom.bounded-recursion]
 const MAX_COMMAND_DEPTH: u32 = 100;
 
@@ -59,6 +60,121 @@ pub(super) fn nested_command(
     let parsed = command(shell, context);
     shell.input.command_depth -= 1;
     parsed
+}
+
+/// `if list; then list; [elif ...] [else list;] fi`.
+///
+/// Extracted from `command` for the stack rather than for tidiness: in a
+/// debug build every branch of that dispatch keeps its locals in one
+/// frame whether taken or not, and this one's clause vector was part of
+/// why a nesting level cost 41 KiB. See `MAX_COMMAND_DEPTH`.
+// [spec:posix:syn:grammar.if-clause]
+pub(super) fn if_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
+    /* The C threads the elif chain through `elsepart` on the way down,
+     * writing each new nif into its parent before parsing it.  An owned
+     * tree cannot hand out that parent pointer, so the clauses are
+     * collected in parse order and folded back up afterwards; the
+     * sequence of `list(0)?` calls — and so of everything they read — is
+     * unchanged. */
+    let mut clauses: Vec<(Node, Node)> = Vec::new();
+    let parsed = list(shell, ListMode::Compound)?;
+    let test = required_compound_node(shell, parsed, TokenKind::Then)?;
+    if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
+        return Err(expected_token_error(shell, Some(TokenKind::Then)));
+    }
+    let parsed = list(shell, ListMode::Compound)?;
+    let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
+    clauses.push((test, then_branch));
+    while read_token(shell, TokenContext::NONE)?.kind == TokenKind::Elif {
+        let parsed = list(shell, ListMode::Compound)?;
+        let test = required_compound_node(shell, parsed, TokenKind::Then)?;
+        if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
+            return Err(expected_token_error(shell, Some(TokenKind::Then)));
+        }
+        let parsed = list(shell, ListMode::Compound)?;
+        let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
+        clauses.push((test, then_branch));
+    }
+    let mut else_branch: Option<Node> = if shell.input.last_token == TokenKind::Else {
+        list(shell, ListMode::Compound)?.into_node()
+    } else {
+        shell.input.token_pushed_back = true;
+        None
+    };
+    for (test, then_branch) in clauses.into_iter().rev() {
+        else_branch = Some(Node::If(IfCommand {
+            condition: Box::new(test),
+            then_branch: Box::new(then_branch),
+            else_branch: else_branch.map(Box::new),
+        }));
+    }
+    Ok(else_branch)
+}
+
+/// `case word in [(] pattern [| pattern] ) list ;; ... esac`.
+///
+/// Extracted for the same reason as [`if_command`]: two vectors and a
+/// nested token loop that every other branch of `command` was paying for.
+// [spec:posix:syn:grammar.case-clause]
+pub(super) fn case_command(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+    if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Word {
+        return Err(expected_token_error(shell, Some(TokenKind::Word)));
+    }
+    let expr = Node::Word(WordNode {
+        word: mem::take(&mut shell.input.word),
+    });
+    if read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind != TokenKind::In {
+        return Err(expected_token_error(shell, Some(TokenKind::In)));
+    }
+    let mut cases: Vec<CaseClause> = Vec::new();
+    loop {
+        // [spec:posix:syn:grammar.case-clause]
+        // Rule 4 applies here, before an optional `(`, and nowhere in
+        // the pattern loop below: words after `(` or `|` stay patterns
+        // even when their spelling is otherwise a reserved word.
+        let mut token = read_token(shell, TokenContext::RESERVED_WORDS_AFTER_NEWLINES)?.kind;
+        if token == TokenKind::Esac {
+            break;
+        }
+        if shell.input.last_token == TokenKind::LeftParen {
+            read_token(shell, TokenContext::NONE)?;
+        }
+        let mut pattern: Vec<Node> = Vec::new();
+        loop {
+            if !shell.input.last_token.can_be_case_pattern() {
+                return Err(expected_token_error(shell, Some(TokenKind::Word)));
+            }
+            pattern.push(Node::Word(WordNode {
+                word: mem::take(&mut shell.input.word),
+            }));
+            if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Pipe {
+                break;
+            }
+            read_token(shell, TokenContext::NONE)?;
+        }
+        if shell.input.last_token != TokenKind::RightParen {
+            return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
+        }
+        let body = list(shell, ListMode::StopAtTerminator)?.into_node();
+        token = read_token(shell, TokenContext::RESERVED_WORDS_AFTER_NEWLINES)?.kind;
+        cases.push(CaseClause {
+            patterns: pattern,
+            body: body.map(Box::new),
+            fallthrough: token == TokenKind::FallThrough,
+        });
+
+        if token == TokenKind::Esac {
+            break;
+        }
+        if token != TokenKind::EndCase && token != TokenKind::FallThrough {
+            return Err(expected_token_error(shell, Some(TokenKind::EndCase)));
+        }
+    }
+    Ok(Node::Case(CaseCommand {
+        line,
+        word: Box::new(expr),
+        clauses: cases,
+    }))
 }
 
 /// The shape `for` and `select` share: a name, an optional `in` list, and

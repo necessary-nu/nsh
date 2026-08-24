@@ -727,45 +727,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         parsed_command = Some(bash_node);
         closing_token = None;
     } else if token == TokenKind::If {
-        /* The C threads the elif chain through `elsepart` on the way down,
-         * writing each new nif into its parent before parsing it.  An owned
-         * tree cannot hand out that parent pointer, so the clauses are
-         * collected in parse order and folded back up afterwards; the
-         * sequence of `list(0)?` calls — and so of everything they read — is
-         * unchanged. */
-        let mut clauses: Vec<(Node, Node)> = Vec::new();
-        let parsed = list(shell, ListMode::Compound)?;
-        let test = required_compound_node(shell, parsed, TokenKind::Then)?;
-        if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
-            return Err(expected_token_error(shell, Some(TokenKind::Then)));
-        }
-        let parsed = list(shell, ListMode::Compound)?;
-        let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
-        clauses.push((test, then_branch));
-        while read_token(shell, TokenContext::NONE)?.kind == TokenKind::Elif {
-            let parsed = list(shell, ListMode::Compound)?;
-            let test = required_compound_node(shell, parsed, TokenKind::Then)?;
-            if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
-                return Err(expected_token_error(shell, Some(TokenKind::Then)));
-            }
-            let parsed = list(shell, ListMode::Compound)?;
-            let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
-            clauses.push((test, then_branch));
-        }
-        let mut else_branch: Option<Node> = if shell.input.last_token == TokenKind::Else {
-            list(shell, ListMode::Compound)?.into_node()
-        } else {
-            shell.input.token_pushed_back = true;
-            None
-        };
-        for (test, then_branch) in clauses.into_iter().rev() {
-            else_branch = Some(Node::If(IfCommand {
-                condition: Box::new(test),
-                then_branch: Box::new(then_branch),
-                else_branch: else_branch.map(Box::new),
-            }));
-        }
-        parsed_command = else_branch;
+        parsed_command = keywords::if_command(shell)?;
         closing_token = Some(TokenKind::Fi);
     } else if token == TokenKind::While || token == TokenKind::Until {
         let constructor: fn(BinaryCommand) -> Node = if shell.input.last_token == TokenKind::While {
@@ -814,64 +776,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         )?));
         closing_token = Some(TokenKind::Done);
     } else if token == TokenKind::Case {
-        if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Word {
-            return Err(expected_token_error(shell, Some(TokenKind::Word)));
-        }
-        let expr = Node::Word(WordNode {
-            word: mem::take(&mut shell.input.word),
-        });
-        if read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind != TokenKind::In {
-            return Err(expected_token_error(shell, Some(TokenKind::In)));
-        }
-        let mut cases: Vec<CaseClause> = Vec::new();
-        loop {
-            // [spec:posix:syn:grammar.case-clause]
-            // Rule 4 applies here, before an optional `(`, and nowhere in
-            // the pattern loop below: words after `(` or `|` stay patterns
-            // even when their spelling is otherwise a reserved word.
-            let mut token = read_token(shell, TokenContext::RESERVED_WORDS_AFTER_NEWLINES)?.kind;
-            if token == TokenKind::Esac {
-                break;
-            }
-            if shell.input.last_token == TokenKind::LeftParen {
-                read_token(shell, TokenContext::NONE)?;
-            }
-            let mut pattern: Vec<Node> = Vec::new();
-            loop {
-                if !shell.input.last_token.can_be_case_pattern() {
-                    return Err(expected_token_error(shell, Some(TokenKind::Word)));
-                }
-                pattern.push(Node::Word(WordNode {
-                    word: mem::take(&mut shell.input.word),
-                }));
-                if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Pipe {
-                    break;
-                }
-                read_token(shell, TokenContext::NONE)?;
-            }
-            if shell.input.last_token != TokenKind::RightParen {
-                return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
-            }
-            let body = list(shell, ListMode::StopAtTerminator)?.into_node();
-            token = read_token(shell, TokenContext::RESERVED_WORDS_AFTER_NEWLINES)?.kind;
-            cases.push(CaseClause {
-                patterns: pattern,
-                body: body.map(Box::new),
-                fallthrough: token == TokenKind::FallThrough,
-            });
-
-            if token == TokenKind::Esac {
-                break;
-            }
-            if token != TokenKind::EndCase && token != TokenKind::FallThrough {
-                return Err(expected_token_error(shell, Some(TokenKind::EndCase)));
-            }
-        }
-        parsed_command = Some(Node::Case(CaseCommand {
-            line: saved_line_number,
-            word: Box::new(expr),
-            clauses: cases,
-        }));
+        parsed_command = Some(keywords::case_command(shell, saved_line_number)?);
         closing_token = None;
     } else if token == TokenKind::LeftParen {
         let parsed = list(shell, ListMode::Compound)?;
@@ -2061,11 +1966,7 @@ fn parse_parameter_operator(
          * falls through and the parse fails for the reason it really
          * failed: an unterminated construct, which is what every other
          * shell reports. Found by fuzzing; it panicked here. */
-        if lexer.check_here_document_end
-            && let Some(byte) = lexer.input.byte()
-        {
-            lexer.push_literal(byte);
-        }
+        lexer.record_delimiter_byte();
 
         if let Some(operation) = bash::parameter_operator(shell, lexer)? {
             parameter_syntax.operation = operation;
@@ -2079,9 +1980,7 @@ fn parse_parameter_operator(
             };
             lexer.input = read_unit_skipping_line_continuations(shell)?;
             if lexer.input == current_unit {
-                if lexer.check_here_document_end {
-                    lexer.push_literal(lexer.input.expect_byte());
-                }
+                lexer.record_delimiter_byte();
                 parameter_syntax.operation = if trim_prefix {
                     ParameterOperation::RemoveLargestPrefix
                 } else {
@@ -2096,9 +1995,7 @@ fn parse_parameter_operator(
             if lexer.input.is(b':') {
                 parameter_syntax.colon = true;
                 lexer.input = read_unit_skipping_line_continuations(shell)?;
-                if lexer.check_here_document_end {
-                    lexer.push_literal(lexer.input.expect_byte());
-                }
+                lexer.record_delimiter_byte();
             }
             parameter_syntax.operation = match lexer.input.byte() {
                 Some(b'}') if !parameter_syntax.colon || !bash::active(shell) => {
@@ -2439,7 +2336,7 @@ fn parse_arithmetic_expansion(lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     syntax_stack::push(&mut lexer.syntax_frames, SyntaxContext::Arithmetic);
     lexer.current_syntax_mut().double_quoted = true;
     if lexer.check_here_document_end {
-        lexer.push_literal(lexer.input.expect_byte());
+        lexer.record_delimiter_byte();
     } else {
         lexer.output.truncate(lexer.output.len().saturating_sub(2));
         lexer.output.push(WordToken::ArithmeticStart);
