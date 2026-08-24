@@ -88,7 +88,7 @@ reason = "`time` is not in the grammar, so `type -t time` reports nothing. Namin
 [[case]]
 id = "toysh.test.sh:6"
 disposition = "not-implemented"
-reason = "`{name}<word` is not implemented: Bash allocates a descriptor above 9 and stores its number in `name`, and this shell has no redirection that names a variable. Here-strings themselves work."
+reason = "`{name}<word` is blocked on the descriptor model, not on the syntax. Bash allocates a descriptor above 9 -- deliberately, so the number cannot collide with one a script wrote by hand -- and stores it in a shell variable. `LogicalDescriptor::COUNT` is 10 and `DescriptorTable` is a fixed `[DescriptorSlot; 10]` indexed 0..9, so there is no representation for the descriptor this feature has to hand back; `LogicalDescriptor::new` refuses anything outside the array. Making the table dynamic touches the containment [contain-descriptor-materialization] established and the ownership rules [dec:nsh:host-owns-streams] sets, so it is an operator decision rather than an implementation. Filed with the three candidate shapes on `bash-named-descriptor-redirection`. Here-strings themselves work; only the named-descriptor form does not."
 
 [[case]]
 id = "var-op-bash.test.sh:24"
