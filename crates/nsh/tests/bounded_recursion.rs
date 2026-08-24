@@ -203,3 +203,31 @@ fn ordinary_call_depth_is_unaffected() {
         );
     });
 }
+
+/// A here-document delimiter is recorded literally so the body can be
+/// matched against it, and the input can end in the middle of one.
+///
+/// `<<${e` is the whole file, five bytes, and it panicked: the recorder
+/// asked a boundary item for a byte it does not carry. Found by the
+/// `parse` fuzz target, and the shape of the whole class -- an
+/// `expect_byte` whose "control flow already excluded a boundary" is not
+/// true on some path.
+// [spec:nsh:req:idiom.bounded-recursion/test]
+#[test]
+fn an_unterminated_here_delimiter_is_an_error() {
+    with_stack(|| {
+        for script in [
+            &b"<<${e"[..],
+            &b"<<${"[..],
+            &b"<<`"[..],
+            &b"<<${e"[..],
+            &b"cat <<${x"[..],
+            &b"<<$(("[..],
+        ] {
+            let mut shell = shell();
+            // The assertion is that this returns at all.
+            let _ = shell.run(script);
+            drop(shell.take_captured_stderr());
+        }
+    });
+}

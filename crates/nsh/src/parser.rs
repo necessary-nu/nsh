@@ -2054,8 +2054,17 @@ fn parse_parameter_operator(
     } else if parameter_syntax.operation == ParameterOperation::Invalid {
         let current_unit = lexer.input;
 
-        if lexer.check_here_document_end {
-            lexer.push_literal(lexer.input.expect_byte());
+        /* A here-document delimiter is recorded literally so the body can
+         * be matched against it later, but the input can end in the
+         * middle of one -- `<<${e` is the whole file -- and then there is
+         * no byte to record. Ending is not an operator either, so this
+         * falls through and the parse fails for the reason it really
+         * failed: an unterminated construct, which is what every other
+         * shell reports. Found by fuzzing; it panicked here. */
+        if lexer.check_here_document_end
+            && let Some(byte) = lexer.input.byte()
+        {
+            lexer.push_literal(byte);
         }
 
         if let Some(operation) = bash::parameter_operator(shell, lexer)? {
