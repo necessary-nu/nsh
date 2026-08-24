@@ -1,0 +1,30 @@
+# Its own workspace on purpose: libFuzzer needs a nightly toolchain and a
+# `-Z` sanitizer flag, and the shell itself must keep building on stable.
+# Nothing here ships.
+[workspace]
+
+[package]
+name = "nsh-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bstr = "1"
+
+[dependencies.nsh]
+path = "../crates/nsh"
+
+[[bin]]
+name = "parse"
+path = "fuzz_targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = true
