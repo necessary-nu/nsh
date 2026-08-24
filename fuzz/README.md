@@ -57,6 +57,29 @@ the inputs before it.
 Roughly 260 executions a second, dominated by that construction. Worth
 improving if the target ever needs to run for days rather than hours.
 
+### `matcher`
+
+Arbitrary patterns against arbitrary subjects, through `case`
+(glob), `[[ =~ ]]` (ERE) and `shopt -s extglob` (extended glob).
+
+Both engines carry *budgets* rather than answers -- the glob matcher
+memoizes on `(pattern node, offset)`, the ERE engine answers `no match` at
+a step and depth budget -- and
+`[dec:nsh:safety-trumps-compatibility]` makes those a semantic
+commitment: "the budget cannot be raised or removed as a performance
+tweak". A budget nobody attacks is a budget nobody has checked, and the
+regex engine segfaulted on `[[ $s =~ (a)+ ]]` over a long subject once
+already.
+
+Neither byte string is spliced into script text. The scripts are fixed and
+the fuzzer's bytes arrive through the *environment*, so a pattern cannot
+quote its way out into a command -- which also means this target never
+forks and runs at parser speed. A NUL separates pattern from subject,
+unambiguous because a shell variable cannot hold one.
+
+A hang counts as a finding here: libFuzzer's `-timeout` reports it, and an
+unbounded backtrack is what the budgets exist to prevent.
+
 ## What is not covered yet
 
 * **Expansion and execution.** `Shell::expand_word` runs command
@@ -69,9 +92,6 @@ improving if the target ever needs to run for days rather than hours.
   natural oracle. It is `pub(crate)`, so this needs an internals surface
   the fuzz crate can see — a `fuzzing` feature — which is a decision about
   the public surface rather than a line of code.
-* **The pattern matcher and the ERE engine**, both of which carry step and
-  depth budgets that a fuzzer should be attacking directly rather than
-  through the parser.
 * **Differential fuzzing against Bash.** The 119 corpora under
   `tests/corpus/` are differential against *dash* and cover POSIX mode
   only; everything the Bash dialect adds has no differential oracle at
