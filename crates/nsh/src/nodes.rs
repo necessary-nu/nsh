@@ -264,7 +264,7 @@ pub struct NegatedCommand {
 // [spec:nsh:req:idiom.structural-ast]
 #[derive(Clone)]
 pub enum Node {
-    Command(SimpleCommand),
+    Command(Box<SimpleCommand>),
     Pipeline(Pipeline),
     Redirect(CompoundCommand),
     Background(CompoundCommand),
@@ -275,10 +275,10 @@ pub enum Node {
     If(IfCommand),
     While(BinaryCommand),
     Until(BinaryCommand),
-    For(ForCommand),
+    For(Box<ForCommand>),
     /// `select name in words; do list; done` -- Bash's menu loop, which
     /// reuses [`ForCommand`] because the syntax is `for`'s exactly.
-    Select(ForCommand),
+    Select(Box<ForCommand>),
     /// `time [-p] pipeline` -- a reserved word, so it can prefix a
     /// built-in or a function, which an external `time` cannot.
     Timed(TimedCommand),

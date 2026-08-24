@@ -18,7 +18,7 @@ use super::{Node, NodeText, WordNode};
 pub(crate) enum BashNode {
     Conditional(Box<BashConditional>),
     ArithmeticCommand(BashArithmeticCommand),
-    ArithmeticFor(BashArithmeticFor),
+    ArithmeticFor(Box<BashArithmeticFor>),
     Function(BashFunction),
     ArrayAssignment(Box<BashArrayAssignment>),
     ProcessSubstitution(BashProcessSubstitution),

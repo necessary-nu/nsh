@@ -757,11 +757,11 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
             arithmetic_form = true;
             parsed_command = Some(bash::arithmetic_for(shell, saved_line_number)?);
         } else {
-            parsed_command = Some(Node::For(keywords::iteration_command(
+            parsed_command = Some(Node::For(Box::new(keywords::iteration_command(
                 shell,
                 saved_line_number,
                 var_token,
-            )?));
+            )?)));
         }
         closing_token = (!arithmetic_form).then_some(TokenKind::Done);
     } else if token == TokenKind::Select {
@@ -769,11 +769,11 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
          * evaluator's, not the grammar's. */
         // [spec:nsh:req:compat.bash.select-time-grammar]
         let var_token = read_token(shell, TokenContext::NONE)?;
-        parsed_command = Some(Node::Select(keywords::iteration_command(
+        parsed_command = Some(Node::Select(Box::new(keywords::iteration_command(
             shell,
             saved_line_number,
             var_token,
-        )?));
+        )?)));
         closing_token = Some(TokenKind::Done);
     } else if token == TokenKind::Case {
         parsed_command = Some(keywords::case_command(shell, saved_line_number)?);
@@ -929,12 +929,12 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
         }
     }
     /* out: */
-    Ok(Some(Node::Command(SimpleCommand {
+    Ok(Some(Node::Command(Box::new(SimpleCommand {
         line: saved_line_number,
         assignments: variables,
         arguments: args,
         redirections,
-    })))
+    }))))
 }
 
 // [spec:dash:sem:parser.makename-fn]

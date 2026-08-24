@@ -1835,12 +1835,12 @@ mod tests {
     // [spec:nsh:sem:idiom.specified-defects+1/test]
     #[test]
     fn job_text_includes_assignment_only_commands() {
-        let command = Node::Command(SimpleCommand {
+        let command = Node::Command(Box::new(SimpleCommand {
             line: 1,
             assignments: vec![word(b"answer=42")],
             arguments: Vec::new(),
             redirections: Vec::new(),
-        });
+        }));
 
         assert_eq!(render_command(&command), BString::from(b"answer=42"));
     }
@@ -1854,12 +1854,12 @@ mod tests {
             word: Box::new(word(b"value")),
             clauses: vec![CaseClause {
                 patterns: vec![word(b"first"), word(b"second")],
-                body: Some(Box::new(Node::Command(SimpleCommand {
+                body: Some(Box::new(Node::Command(Box::new(SimpleCommand {
                     line: 1,
                     assignments: Vec::new(),
                     arguments: vec![word(b"echo")],
                     redirections: Vec::new(),
-                }))),
+                })))),
                 fallthrough: false,
             }],
         });

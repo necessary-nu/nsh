@@ -23,25 +23,27 @@ use super::{
 /// embedder gets a dead process where [`dec:nsh:shell-as-library`]
 /// promised an `Err`.
 ///
-/// The number is set by measurement against the smallest stack the shell
-/// can plausibly be asked to run on, not by the language. A release build
-/// costs 3,952 bytes a level, so 100 levels is 0.38 MiB and fits five
-/// times over in the 2 MiB a spawned Rust thread gets by default; a debug
-/// build costs 28,896. It is the *nesting* depth, not the length of a
-/// list, and it is far past what written scripts reach -- generated
-/// `configure` scripts manage a dozen or two.
+/// Set by measurement against the smallest stack the shell can plausibly
+/// be asked to run on. A release build spends 1,744 bytes a level, so 256
+/// levels is 0.43 MiB and fits four times over in the 2 MiB a spawned
+/// Rust thread gets by default. A debug build spends 14,928, which is
+/// 3.7 MiB at this depth -- comfortable on an 8 MiB main thread, and the
+/// reason `bounded_recursion.rs` names its own stack size rather than
+/// trusting the 2 MiB the test harness hands a thread.
 ///
-/// Those figures were 5,200 and 41,120 before `if_command` and
-/// `case_command` moved out of `command`'s frame, which is where the rest
-/// of the cost still is: in a debug build every branch of that dispatch
-/// keeps its locals whether taken or not. What remains per level is
-/// `command` 12,432, `pipeline` 9,960 and `list` 6,176. dash spends about
-/// 160 bytes a level and Bash keeps its parser stack on the heap, so both
-/// tolerate depths this cannot. Filed on `bound-recursive-evaluation`;
-/// the bound is correct whatever the number becomes, and rises when it
-/// falls.
+/// It is the *nesting* depth, not the length of a list, and it is far
+/// past what written scripts reach: generated `configure` scripts manage
+/// a dozen or two.
+///
+/// Both figures used to be far worse -- 5,200 and 41,120 -- and what
+/// changed is where the nodes live. Moving `if_command` and
+/// `case_command` out of `command`'s frame took the first cut; boxing the
+/// fat `Node` variants took `Node` from 136 bytes to 48 and took the
+/// rest, because roughly 26 node-sized slots are live per level and every
+/// one of them shrank. dash spends about 160 bytes a level for the same
+/// grammar, holding `union node *` where this held the nodes themselves.
 // [spec:nsh:req:idiom.bounded-recursion]
-const MAX_COMMAND_DEPTH: u32 = 100;
+const MAX_COMMAND_DEPTH: u32 = 256;
 
 /// Enter one command, refusing to nest past [`MAX_COMMAND_DEPTH`].
 ///

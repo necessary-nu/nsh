@@ -2003,7 +2003,7 @@ fn evaluate_command_in_scope(
 
                     /* Fork off a child process if necessary. */
                     if !context.exits() || crate::trap::has_traps(shell) {
-                        let syntax = Node::Command(command.clone());
+                        let syntax = Node::Command(Box::new(command.clone()));
                         status = crate::error::with_interrupts_deferred(shell, |shell| {
                             let job = crate::jobs::fork_and_execute(
                                 shell,

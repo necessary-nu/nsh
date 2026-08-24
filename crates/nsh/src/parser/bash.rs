@@ -98,13 +98,15 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
     if read_token(shell, TokenContext::RESERVED_WORDS)?.kind != closer {
         return Err(expected_token_error(shell, Some(closer)));
     }
-    Ok(Node::Bash(BashNode::ArithmeticFor(BashArithmeticFor {
-        line,
-        init,
-        test,
-        update,
-        body: Box::new(body),
-    })))
+    Ok(Node::Bash(BashNode::ArithmeticFor(Box::new(
+        BashArithmeticFor {
+            line,
+            init,
+            test,
+            update,
+            body: Box::new(body),
+        },
+    ))))
 }
 
 /// Bash enables extended globs inside `[[ ]]` regardless of `shopt`, but
