@@ -114,7 +114,12 @@ pub fn parse_escape(input: &[u8], single_quoted: bool) -> EscapeChunk {
         b'a' => EscapeChunk::one(0x07, 1),
         b'b' => EscapeChunk::one(0x08, 1),
         b'f' => EscapeChunk::one(0x0c, 1),
-        b'e' => EscapeChunk::one(0x1b, 1),
+        /* `\E` is Bash's second spelling of `\e`, and the shell has to
+         * accept it because the shell *emits* it: `${x@Q}` of an escape
+         * renders `$'\E'`, so without this the shell could not read its
+         * own quoted output back. Found by the `quoting` fuzz target,
+         * whose whole property is that round-trip. */
+        b'e' | b'E' => EscapeChunk::one(0x1b, 1),
         b'n' => EscapeChunk::one(b'\n', 1),
         b'r' => EscapeChunk::one(b'\r', 1),
         b't' => EscapeChunk::one(b'\t', 1),

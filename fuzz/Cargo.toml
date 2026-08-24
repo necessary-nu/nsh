@@ -33,5 +33,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "quoting"
+path = "fuzz_targets/quoting.rs"
+test = false
+doc = false
+bench = false
+
 [profile.release]
 debug = true

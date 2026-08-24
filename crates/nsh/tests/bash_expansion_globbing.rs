@@ -465,3 +465,77 @@ fn star_operators_map_before_they_join() {
         b"hello hello1 hello2\n".to_vec()
     );
 }
+
+/// `${x@Q}` and `printf %q` claim to produce text the shell reads back as
+/// the original value. That claim is checkable against the shell itself,
+/// and it is a security property rather than a cosmetic one: `@Q` is what
+/// a script reaches for when it has to put untrusted data back into shell
+/// syntax, so a value that escapes its quoting there is command
+/// injection -- the data-to-syntax path
+/// [dec:nsh:safety-trumps-compatibility] names.
+///
+/// `$'\E'` used to break it. The shell *emitted* `\E` from `@Q` -- Bash's
+/// second spelling of `\e` -- and its own `$'...'` reader did not accept
+/// it, so the shell could not read its own quoted output. Found by the
+/// `quoting` fuzz target and minimised to one byte, `0x1b`.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn quoting_round_trips_for_any_byte() {
+    let mut shell = shell(true);
+    let hostile: Vec<Vec<u8>> = vec![
+        b"\x1b".to_vec(),
+        b"a\x1bb".to_vec(),
+        b"a b".to_vec(),
+        b"a'b".to_vec(),
+        b"a\"b".to_vec(),
+        b"a$(id)b".to_vec(),
+        b"a`id`b".to_vec(),
+        b"a\\b".to_vec(),
+        b"a\tb".to_vec(),
+        b"a\nb".to_vec(),
+        b"a\rb".to_vec(),
+        b"*".to_vec(),
+        b"$x".to_vec(),
+        b"!".to_vec(),
+        b"".to_vec(),
+        b"a;id;b".to_vec(),
+        b"\x01\x02\x7f".to_vec(),
+        b"\xff\xfe".to_vec(),
+        b"-n".to_vec(),
+        b"~root".to_vec(),
+        (1u8..=255).collect(),
+    ];
+
+    for value in hostile {
+        let (status, _) = run(
+            &mut shell,
+            format!(
+                "X={}\n\
+                 eval \"y=${{X@Q}}\"\n\
+                 [ \"$y\" = \"$X\" ] || exit 9\n\
+                 printf -v q '%q' \"$X\"\n\
+                 eval \"z=$q\"\n\
+                 [ \"$z\" = \"$X\" ] || exit 8\n",
+                quote_for_test(&value),
+            )
+            .as_bytes(),
+        );
+        assert_eq!(
+            status,
+            0,
+            "did not round-trip: {:?}",
+            BStr::new(value.as_slice()),
+        );
+    }
+}
+
+/// Single-quote a byte string for embedding in a test script, the one way
+/// that needs nothing from the shell under test.
+fn quote_for_test(value: &[u8]) -> String {
+    let mut out = String::from("$'");
+    for byte in value {
+        out.push_str(&format!("\\x{byte:02x}"));
+    }
+    out.push('\'');
+    out
+}
