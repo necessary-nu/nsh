@@ -657,6 +657,20 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
     let mut negate = false;
     let command_context = if first == TokenKind::Bang {
         negate = true;
+        /* POSIX's grammar takes one `!` -- `pipeline: Bang pipe_sequence`
+         * -- and dash refuses a second. Bash repeats it, and each one
+         * negates: `! ! true` is 0 and `! ! ! true` is 1. A script that
+         * writes it has to run here, so the dialect decides, and the
+         * POSIX dialect keeps refusing what the grammar refuses.
+         * Found by the `differential` fuzz target. */
+        // [spec:posix:syn:grammar.pipeline]
+        // [spec:nsh:req:compat.bash.select-time-grammar]
+        if bash::active(shell) {
+            while read_token(shell, TokenContext::COMMAND_START)?.kind == TokenKind::Bang {
+                negate = !negate;
+            }
+            shell.input.token_pushed_back = true;
+        }
         TokenContext::COMMAND_START
     } else {
         shell.input.token_pushed_back = true;

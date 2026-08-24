@@ -13,7 +13,7 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 bstr = "1"
 
 [dependencies.nsh]
@@ -36,6 +36,13 @@ bench = false
 [[bin]]
 name = "quoting"
 path = "fuzz_targets/quoting.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
 test = false
 doc = false
 bench = false

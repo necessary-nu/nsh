@@ -69,20 +69,22 @@ Status: **done**, **next**, **blocked**.
 |---|---|---|---|---|
 | 1 | Parser: bytes → AST, under `noexec` | returns | no | done |
 | 2 | Glob, extglob and ERE matching | returns + hang | no | done |
-| 3 | Quoting round-trip: `${x@Q}`, `printf %q` | **property** | no | next |
+| 3 | Quoting round-trip: `${x@Q}`, `printf %q` | **property** | no | done |
 | 4 | Field splitting and `IFS` | **property** | no | next |
 | 5 | Arithmetic `$(( ))` | returns + differential | no | next |
 | 6 | Parameter expansion `${...}` operators | returns + differential | no | next |
 | 7 | `printf` format interpreter | returns + differential | no | next |
 | 8 | Here-documents, redirection, descriptor table | returns | some | next |
 | 9 | `parse → print → parse` | **property** | no | blocked |
-| 10 | Whole shell vs GNU Bash 5.2, Bash dialect | **differential** | yes | next, largest |
+| 10 | Whole shell vs GNU Bash 5.2, Bash dialect | **differential** | yes | done |
 | 11 | Whole shell vs dash, POSIX mode | **differential** | yes | partial |
 | 12 | Locale and multibyte decoding | returns | no | later |
 
 Ordering rationale: 3 and 4 are properties reachable through the public
-API today, so they are the cheapest strength upgrade available. 10 is the
-largest hole and the most work. 9 is one decision away.
+API today, so they were the cheapest strength upgrade available. 10 was
+the largest hole; its generator is now the thing to extend, since every
+construct it cannot emit is a construct nothing differential covers. 9 is
+still one decision away.
 
 ## What is blocked, and on what
 
@@ -125,8 +127,24 @@ discipline: run the byte targets for an hour after any parser or lexer
 change, and the differential targets before closing a compatibility node.
 A crash found is a test written.
 
+## Findings so far
+
+Recorded because the point of the ladder is that each rung finds a class
+the one below cannot, and that is now measured rather than argued.
+
+| rung | target | finding |
+|---|---|---|
+| returns | `parse` | `<<${e` -- five bytes -- panicked; four sites read a byte out of an end-of-input item |
+| property | `quoting` | the shell emitted `$'\E'` from `@Q` and could not read it back; one byte, found in seconds |
+| differential | `differential` | Bash accepts `! ! cmd`, this shell refused it |
+
+`parse` and `matcher` executed over 800,000 inputs between them without
+finding either of the last two, because both only assert that the shell
+*returns*, and in both cases it returned happily with the wrong answer.
+
 ## What "properly" means here
 
 A fuzz target that only checks for crashes is a smoke test with extra
 steps. The measure of this plan is how much of it sits on rungs 2 and 3
-of the ladder, and today that number is zero.
+of the ladder -- two of eleven targets, so far, and both of them found
+something on their first run.

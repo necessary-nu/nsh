@@ -151,3 +151,33 @@ fn time_prefixes_a_function() {
     assert!(report.starts_with(b"\nreal\t"));
     assert_eq!(status, 3);
 }
+
+/// POSIX's grammar takes one `!` -- `pipeline: Bang pipe_sequence` --
+/// and dash refuses a second. Bash repeats it and each one negates.
+/// A Bash script that writes it has to run here, so the dialect decides.
+/// Found by the `differential` fuzz target.
+// [spec:nsh:req:compat.bash.select-time-grammar/test]
+#[test]
+fn repeated_negation_is_bash_only() {
+    let mut bash_mode = shell(true);
+    for (script, expected) in [
+        ("! true; echo $?", "1\n"),
+        ("! ! true; echo $?", "0\n"),
+        ("! ! false; echo $?", "1\n"),
+        ("! ! ! true; echo $?", "1\n"),
+        ("! ! ! ! false; echo $?", "1\n"),
+    ] {
+        let (status, printed, _) = run(&mut bash_mode, script.as_bytes());
+        assert_eq!(printed, expected.as_bytes(), "{script}");
+        assert_eq!(status, 0, "{script}");
+    }
+
+    /* The POSIX dialect keeps refusing what the POSIX grammar refuses,
+     * and a syntax error is an `Err` rather than a status, so this cannot
+     * go through `run`. */
+    let mut posix = shell(false);
+    let refused = posix.run(b"! ! true; echo reached".as_slice());
+    drop(posix.take_captured_stdout());
+    drop(posix.take_captured_stderr());
+    assert!(refused.is_err(), "POSIX mode accepted a second `!`");
+}
