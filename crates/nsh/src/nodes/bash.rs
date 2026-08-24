@@ -16,11 +16,11 @@ use super::{Node, NodeText, WordNode};
 // [spec:nsh:req:compat.bash.parser-ast]
 #[derive(Clone)]
 pub(crate) enum BashNode {
-    Conditional(BashConditional),
+    Conditional(Box<BashConditional>),
     ArithmeticCommand(BashArithmeticCommand),
     ArithmeticFor(BashArithmeticFor),
     Function(BashFunction),
-    ArrayAssignment(BashArrayAssignment),
+    ArrayAssignment(Box<BashArrayAssignment>),
     ProcessSubstitution(BashProcessSubstitution),
 }
 

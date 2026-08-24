@@ -135,10 +135,9 @@ fn conditional_expression(shell: &mut Shell, line: i32) -> Result<Node, Error> {
         return Err(syntax_error(shell, b"expected ']]'"));
     }
 
-    Ok(Node::Bash(BashNode::Conditional(BashConditional {
-        line,
-        expression,
-    })))
+    Ok(Node::Bash(BashNode::Conditional(Box::new(
+        BashConditional { line, expression },
+    ))))
 }
 
 /// Whether `name()` may introduce a function definition.
@@ -216,7 +215,7 @@ pub(super) fn array_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode>
         operator,
         value: BashArrayValue::Word(arg_part(&arg, value_start, units.len())),
     };
-    Ok(Node::Bash(BashNode::ArrayAssignment(assignment)))
+    Ok(Node::Bash(BashNode::ArrayAssignment(Box::new(assignment))))
 }
 
 /// Recognise an unsubscripted `name+=...` append assignment.
@@ -238,12 +237,14 @@ fn append_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode> {
         return Err(arg);
     }
     let value = arg_part(&arg, plus + 2, units.len());
-    Ok(Node::Bash(BashNode::ArrayAssignment(BashArrayAssignment {
-        name: NodeText::from(name.as_bstr()),
-        subscript: None,
-        operator: BashAssignmentOperator::Append,
-        value: BashArrayValue::Word(value),
-    })))
+    Ok(Node::Bash(BashNode::ArrayAssignment(Box::new(
+        BashArrayAssignment {
+            name: NodeText::from(name.as_bstr()),
+            subscript: None,
+            operator: BashAssignmentOperator::Append,
+            value: BashArrayValue::Word(value),
+        },
+    ))))
 }
 
 /// Whether this command's assignment-shaped operands are assignments.
@@ -310,7 +311,7 @@ pub(super) fn compound_array(
         elements.push(array_element(arg));
     }
     assignment.value = BashArrayValue::Compound(elements);
-    target.push(Node::Bash(BashNode::ArrayAssignment(assignment)));
+    target.push(Node::Bash(BashNode::ArrayAssignment(Box::new(assignment))));
     Ok(true)
 }
 
@@ -747,7 +748,7 @@ fn compound_prefix(shell: &Shell, node: Node) -> Option<BashArrayAssignment> {
                 }),
             })
         }
-        Node::Bash(BashNode::ArrayAssignment(assignment)) => Some(assignment),
+        Node::Bash(BashNode::ArrayAssignment(assignment)) => Some(*assignment),
         _ => None,
     }
 }
