@@ -39,6 +39,45 @@ fn expect(script: &[u8], stdout: &[u8]) {
 /// never named. Written emptiness only: `$empty` is an expression, and
 /// `a[$empty]` is element 0 in Bash and here.
 // [spec:nsh:req:compat.bash.arrays-declarations/test]
+/// `dyn=x; typeset s${dyn}+=v` reaches the built-in as one expanded word,
+/// so the `+=` in it is the built-in's to read rather than the parser's.
+///
+/// And an unsubscripted `+=` does not make the name an array. A *written*
+/// subscript does -- `v=str; v[0]=new` is `declare -a` in Bash -- but
+/// `v=a; v+=b` stays `declare -- v="ab"`, which is what `declare -p`
+/// after a dynamic `export NAME${suffix}+=value` has to show.
+// [spec:nsh:req:compat.bash.arrays-declarations/test]
+#[test]
+fn a_dynamic_name_takes_an_append() {
+    let mut shell = shell(true);
+    let (status, printed) = run(
+        &mut shell,
+        b"dyn=x\n\
+          typeset s${dyn}+=foo\n\
+          typeset s${dyn}+=bar\n\
+          echo \"1 $sx\"\n\
+          export e${dyn}+=' -L/lib'\n\
+          declare -p ex\n\
+          readonly r${dyn}+=ro\n\
+          declare -p rx\n\
+          plain=a; plain+=b\n\
+          declare -p plain",
+    );
+
+    assert_eq!(
+        printed,
+        concat!(
+            "1 foobar\n",
+            "declare -x ex=\" -L/lib\"\n",
+            "declare -r rx=\"ro\"\n",
+            "declare -- plain=\"ab\"\n",
+        )
+        .as_bytes()
+        .to_vec(),
+    );
+    assert_eq!(status, 0);
+}
+
 #[test]
 fn an_empty_subscript_names_no_element() {
     let mut shell = shell(true);

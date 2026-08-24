@@ -102,6 +102,7 @@ impl Destination {
             shell,
             BStr::new(name.as_slice()),
             BStr::new(rendered.as_slice()),
+            false,
         )
     }
 }

@@ -56,9 +56,12 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let operands = option_scan.operands();
     if export_operands && !operands.is_empty() {
         for word in operands {
-            match word.iter().position(|&byte| byte == b'=') {
-                Some(at) => {
-                    let name = BStr::new(&word[..at]);
+            /* `export NAME${suffix}+=value` reaches here as one expanded
+             * word, so the `+=` is the built-in's to read. */
+            // [spec:nsh:req:compat.bash.arrays-declarations]
+            match crate::variables::arrays::split_assignment_operand(word) {
+                (name, Some(value), append) => {
+                    let name = BStr::new(name.as_slice());
                     if variable_attributes(shell, name)
                         .is_some_and(|attributes| attributes.read_only)
                     {
@@ -67,9 +70,15 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         // [spec:nsh:req:compat.bash.error-boundary]
                         return Err(shell.diagnostics().dialect_builtin_error(1, &message));
                     }
-                    set_bytes(shell, name, Some(BStr::new(&word[at + 1..])), attribute)?;
+                    let value = BStr::new(value.as_slice());
+                    if append {
+                        crate::variables::arrays::assign_text_target(shell, name, value, true)?;
+                        add_attributes(shell, name, attribute);
+                    } else {
+                        set_bytes(shell, name, Some(value), attribute)?;
+                    }
                 }
-                None => {
+                (_, None, _) => {
                     if !add_attributes(shell, word, attribute) {
                         set_bytes(shell, word, None, attribute)?;
                     }

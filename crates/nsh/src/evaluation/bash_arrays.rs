@@ -68,16 +68,26 @@ pub(crate) fn assign(
                     )?;
                     Ok(true)
                 }
-                // `a+=v` with no subscript appends to the zero element,
-                // which for a scalar is ordinary string concatenation.
+                // `a+=v` with no subscript appends to the zero element of
+                // an array and concatenates onto a scalar -- without
+                // making the scalar an array, which a written subscript
+                // would.
+                None if append => {
+                    arrays::append_unsubscripted(
+                        shell,
+                        BStr::new(name.as_slice()),
+                        BStr::new(value.as_slice()),
+                        guard,
+                    )?;
+                    Ok(true)
+                }
                 None => {
-                    let selector = ArraySelector::Index(0);
                     arrays::assign_element(
                         shell,
                         BStr::new(name.as_slice()),
-                        &selector,
+                        &ArraySelector::Index(0),
                         BStr::new(value.as_slice()),
-                        append,
+                        false,
                         guard,
                     )?;
                     Ok(true)

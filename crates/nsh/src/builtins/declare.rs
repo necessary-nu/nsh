@@ -176,14 +176,7 @@ fn apply(
     operand: &BStr,
     scope: Scope,
 ) -> Result<bool, Error> {
-    let bytes: &[u8] = operand.as_ref();
-    let (name, value) = match bytes.find_byte(b'=') {
-        Some(at) => (
-            BStr::new(&bytes[..at]).to_owned(),
-            Some(BStr::new(&bytes[at + 1..]).to_owned()),
-        ),
-        None => (operand.to_owned(), None),
-    };
+    let (name, value, append) = arrays::split_assignment_operand(operand);
     // A subscripted operand keeps its brackets out of the stored name.
     let base = operand_name(BStr::new(name.as_slice())).to_owned();
     let base = BStr::new(base.as_slice());
@@ -246,7 +239,7 @@ fn apply(
         // [spec:nsh:req:compat.bash.arrays-declarations]
         match compound::parenthesised(value).filter(|_| is_array(shell, base)) {
             Some(inner) => compound::assign(shell, base, inner)?,
-            None => arrays::assign_text_target(shell, BStr::new(name.as_slice()), value)?,
+            None => arrays::assign_text_target(shell, BStr::new(name.as_slice()), value, append)?,
         }
     }
 

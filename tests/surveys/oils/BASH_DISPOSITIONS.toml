@@ -71,11 +71,6 @@ reason = "`bind` key bindings. Retired from the profile by [dec:nsh:bash-compati
 # One entry per eligible in-scope case that does not pass.
 
 [[case]]
-id = "append.test.sh:14"
-disposition = "not-implemented"
-reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
-
-[[case]]
 id = "array-sparse.test.sh:31"
 disposition = "out-of-contract"
 reason = "`compgen` is part of the programmable-completion surface retired by [dec:nsh:bash-compatibility-is-scripts]; there is no `complete`/`compgen`/`compopt` and reporting one would advertise a facility that is not here."
@@ -89,11 +84,6 @@ reason = "Bash raises `ERR` for `{ false; } &` and not for `false &`, because it
 id = "builtin-type-bash.test.sh:3"
 disposition = "not-implemented"
 reason = "`time` is not in the grammar, so `type -t time` reports nothing. Naming it a keyword while `time echo hi` is a command that is not found would advertise a grammar this shell does not have, so the gap is the reserved word rather than the classification. `select` is absent for the same reason and this case does not reach it."
-
-[[case]]
-id = "nix-idioms.test.sh:4"
-disposition = "not-implemented"
-reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
 
 [[case]]
 id = "toysh.test.sh:6"

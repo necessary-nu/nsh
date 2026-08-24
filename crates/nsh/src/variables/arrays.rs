@@ -304,6 +304,51 @@ pub(crate) fn assign_element(
     store(shell, name, current, VariableAttributes::NONE, guard)
 }
 
+/// `name+=value`, written with no subscript at all.
+///
+/// The distinction the selector cannot carry: a *written* subscript
+/// promotes a scalar to an array -- `v=str; v[0]=new` gives
+/// `declare -a v` in Bash -- while an unsubscripted `+=` does not.
+/// `v=a; v+=b` is `declare -- v="ab"`, and a name that does not exist yet
+/// becomes a scalar rather than an array of one element.
+///
+/// A name that already holds an array, or carries `-i`, takes the append
+/// at element zero, which is what [`assign_element`] does; only the
+/// scalar case needed telling apart.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn append_unsubscripted(
+    shell: &mut Shell,
+    name: &BStr,
+    value: &BStr,
+    guard: ReadOnlyGuard,
+) -> Result<(), Error> {
+    /* Element zero for an indexed array; for an associative one that is
+     * the *key* `0`, which is a key like any other and is what Bash
+     * writes. */
+    let selector = match super::value::variable_value(shell, name).map(VariableValue::kind) {
+        Some(VariableKind::Indexed) => Some(ArraySelector::Index(0)),
+        Some(VariableKind::Associative) => Some(ArraySelector::Key(BString::from("0"))),
+        Some(VariableKind::Scalar) | None => None,
+    };
+    if let Some(selector) = selector {
+        return assign_element(shell, name, &selector, value, true, guard);
+    }
+    reject_bad_name(shell, name)?;
+    reject_read_only(shell, name, guard)?;
+    let existing = super::lookup_bytes(shell, name).unwrap_or_default();
+    let appended = append_element(shell, name, BStr::new(existing.as_slice()), value)?;
+    /* `store` rather than `set_bytes`, because the guard has to reach the
+     * write: `readonly r+=bar` declares `r` and assigns it in one command,
+     * and the declaration is allowed to write the name it just marked. */
+    store(
+        shell,
+        name,
+        VariableValue::Scalar(appended),
+        VariableAttributes::NONE,
+        guard,
+    )
+}
+
 /// Combine an element's bytes with what `+=` appends to them.
 ///
 /// `declare -i` makes the two numbers rather than strings, so `i=1;
@@ -448,10 +493,34 @@ pub(crate) fn assign_compound(
 /// bytes no parser split into a name and a subscript, so the brackets
 /// are read here rather than by each caller.
 // [spec:nsh:req:compat.bash.arrays-declarations]
+/// Split a declaration built-in's operand into `name`, the value it was
+/// given, and whether the operator was `+=`.
+///
+/// The operand reached the built-in as one expanded word, so `+=` in it
+/// is not the parser's assignment operator -- `dyn=x; typeset s${dyn}+=v`
+/// spells `sx+=v` only after expansion, and Bash reads it there. Nothing
+/// else may take a trailing `+`: `a+b=c` is not a name and has to stay
+/// not a name.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn split_assignment_operand(operand: &BStr) -> (BString, Option<BString>, bool) {
+    let bytes: &[u8] = operand.as_ref();
+    let Some(at) = bytes.iter().position(|byte| *byte == b'=') else {
+        return (operand.to_owned(), None, false);
+    };
+    let append = at > 0 && bytes[at - 1] == b'+';
+    let name_end = if append { at - 1 } else { at };
+    (
+        BString::from(&bytes[..name_end]),
+        Some(BString::from(&bytes[at + 1..])),
+        append,
+    )
+}
+
 pub(crate) fn assign_text_target(
     shell: &mut Shell,
     name: &BStr,
     value: &BStr,
+    append: bool,
 ) -> Result<(), Error> {
     let bytes: &[u8] = name.as_ref();
     let subscript = match bytes.iter().position(|byte| *byte == b'[') {
@@ -461,12 +530,22 @@ pub(crate) fn assign_text_target(
         _ => None,
     };
     let Some((open, subscript)) = subscript else {
+        if append {
+            return append_unsubscripted(shell, name, value, ReadOnlyGuard::Enforce);
+        }
         return super::set_bytes(shell, name, Some(value), VariableAttributes::NONE);
     };
     let base = BString::from(&bytes[..open]);
     let base = BStr::new(base.as_slice());
     let selector = resolve_text_selector(shell, base, BStr::new(subscript))?;
-    assign_element(shell, base, &selector, value, false, ReadOnlyGuard::Enforce)
+    assign_element(
+        shell,
+        base,
+        &selector,
+        value,
+        append,
+        ReadOnlyGuard::Enforce,
+    )
 }
 
 /// `unset a[i]` removes one element; `unset a` is the ordinary path.
