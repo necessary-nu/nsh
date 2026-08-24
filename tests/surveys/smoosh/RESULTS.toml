@@ -3,19 +3,43 @@ survey = "smoosh-shell-posix"
 source_commit = "cc67dbe6a4953e51431997eac025b5e3f46c3d2d"
 group = "full"
 shell = "target/release/nsh"
-shell_sha256 = "b8289d9e6f0ec3ecbab6f568ede78ecc36bdeeb25adedab19281be31fed910c2"
+shell_sha256 = "8d8db2e4f41ed515b506eef399a87ff9852b37d624c8ef6af89229f4db81ef32"
 shell_flags = []
 containment = "sandbox-pid-net-ro-root"
 posix_mode = "shell-native"
 default_timeout_ms = 5000
 known_hang_timeout_ms = 1000
-nonpassing = []
 
 [totals]
 selected = 186
 executed = 186
-pass = 186
-fail = 0
+pass = 181
+fail = 5
 timeout = 0
 error = 0
 skip = 0
+
+[[nonpassing]]
+name = "builtin.trap.subshell.false.exit.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "builtin.trap.subshell.loud.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "builtin.trap.subshell.loud2.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "builtin.trap.subshell.true.ec1.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "semantics.return.trap.test"
+outcome = "fail"
+known_hang = false

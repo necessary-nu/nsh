@@ -681,13 +681,22 @@ pub fn exit_shell(
                     }
                     break 'exit_trap_done;
                 }
-                Ok(crate::evaluation::Flow::Done(status)) => {
-                    shell.status = explicit_status.unwrap_or(status);
+                /* "The value of `$?` after the trap action completes
+                 * shall be the value it had before the trap action was
+                 * executed" -- so what the action last ran does not
+                 * decide what the shell exits with. `trap "false" EXIT`
+                 * on a successful script still leaves 0, and
+                 * `trap ":" EXIT; false` still leaves 1. An `exit` inside
+                 * the action is handled above and does name the status;
+                 * an outer `exit n` still outranks both. */
+                // [spec:posix:req:builtin.trap.action-overrides-and-exit-status]
+                Ok(crate::evaluation::Flow::Done(_)) => {
+                    shell.status = explicit_status.unwrap_or(trap_entry_status);
                 }
-                Ok(control) => {
-                    shell.status = explicit_status
-                        .or_else(|| control.status())
-                        .unwrap_or(shell.status);
+                /* A `return` or a loop control escaping the action is not
+                 * a status either, for the same reason. */
+                Ok(_) => {
+                    shell.status = explicit_status.unwrap_or(trap_entry_status);
                 }
                 Err(error) => {
                     /* The EXIT trap failed. An explicit outer `exit n`

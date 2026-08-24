@@ -519,6 +519,44 @@ evidence remains those survey cases. A future result showing the port ahead in
 exactly these two cases is therefore expected; a different editor mismatch is
 not covered by this entry.
 
+## Smoosh divergences taken under `[dec:nsh:we-own-the-defects]`
+
+### An EXIT trap action does not decide the shell's exit status
+
+**Status:** deliberate. `crates/nsh/src/trap.rs::exit_shell`.
+
+POSIX states the rule outright:
+
+> The value of `"$?"` after the trap action completes shall be the value
+> it had before the trap action was executed.
+> — `[spec:posix:req:builtin.trap.action-overrides-and-exit-status]`
+
+So an EXIT action's own last command does not become what the shell exits
+with. `trap ":" EXIT; false` leaves 1, and `trap "false" EXIT; true`
+leaves 0. An `exit` *inside* the action still names the status, and an
+outer `exit n` still outranks both.
+
+This shell took the action's status instead, which is worse than losing
+one: it *invented* one. `set -e; trap cleanup EXIT` -- the standard
+defensive-script idiom -- reported success no matter how the script
+failed, because `cleanup`'s last command usually succeeds. Found by the
+adversarial POSIX cases in `posix/harness/cases_adversarial.py`, not by
+the differential harness.
+
+Five Smoosh cases expect the opposite and now fail:
+`builtin.trap.subshell.false.exit`, `.loud`, `.loud2`, `.true.ec1`, and
+`semantics.return.trap`. They are the outlier rather than the oracle --
+GNU bash 5.2.37 and dash 0.5.13 were both run against all five and both
+agree with this shell, byte for byte on output and exactly on status.
+Two of the five cite dash bug threads in their own comments. Recorded in
+`tests/surveys/smoosh/RESULTS.toml` under `nonpassing`, which is why the
+recorded total is 181/186 rather than 186/186.
+
+Not covered by this entry: an EXIT action that fails to *parse*. There
+bash keeps the pre-trap status and dash reports its own syntax-error
+status; this shell follows dash. The action never completed, so the rule
+above does not reach it, and nothing in the corpus decides it.
+
 ## Bash-compatibility divergences taken under `[dec:nsh:we-own-the-defects]`
 
 Bash is a reference, not an authority. Where Bash contradicts *itself*,

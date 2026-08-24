@@ -3124,65 +3124,6 @@ impl_evidence (
         {impl_name shell, rule builtin.trap.utility-defaults}
         {impl_name shell, rule builtin.trap.utility-syntax-guidelines}
         {impl_name shell, rule builtin.trap.xsi-signal-numbers}
-    ), rule_versions_seen (
-        {id builtin.set.double-hyphen, version 0}
-        {id builtin.set.exit-status, version 0}
-        {id builtin.set.first-argument-hyphen, version 0}
-        {id builtin.set.no-operands-writes-variables, version 0}
-        {id builtin.set.opt-a-allexport, version 0}
-        {id builtin.set.opt-a-separate-environments, version 0}
-        {id builtin.set.opt-c-noclobber, version 0}
-        {id builtin.set.opt-e-errexit, version 0}
-        {id builtin.set.opt-e-per-environment, version 0}
-        {id builtin.set.opt-f-noglob, version 0}
-        {id builtin.set.opt-m-monitor, version 0}
-        {id builtin.set.opt-n-noexec, version 0}
-        {id builtin.set.opt-o-allexport, version 0}
-        {id builtin.set.opt-o-errexit, version 0}
-        {id builtin.set.opt-o-monitor, version 0}
-        {id builtin.set.opt-o-noexec, version 0}
-        {id builtin.set.opt-o-noglob, version 0}
-        {id builtin.set.opt-o-nolog, version 0}
-        {id builtin.set.opt-o-notify, version 0}
-        {id builtin.set.opt-o-nounset, version 0}
-        {id builtin.set.opt-o-option, version 0}
-        {id builtin.set.opt-o-pipefail, version 0}
-        {id builtin.set.opt-o-verbose, version 0}
-        {id builtin.set.opt-o-vi, version 0}
-        {id builtin.set.opt-o-xtrace, version 0}
-        {id builtin.set.opt-v-verbose, version 0}
-        {id builtin.set.opt-x-xtrace, version 0}
-        {id builtin.set.options-and-arguments, version 0}
-        {id builtin.set.options-default-off, version 0}
-        {id builtin.set.plus-o-report, version 0}
-        {id builtin.set.positional-parameters, version 0}
-        {id builtin.set.stderr-diagnostics-only, version 0}
-        {id builtin.set.synopsis, version 0}
-        {id builtin.set.utility-defaults, version 0}
-        {id builtin.set.utility-syntax-guidelines, version 0}
-        {id builtin.set.variable-output-reinput, version 0}
-        {id builtin.trap.action-executed-as-eval, version 0}
-        {id builtin.trap.action-overrides-and-exit-status, version 0}
-        {id builtin.trap.action-values, version 0}
-        {id builtin.trap.condition, version 0}
-        {id builtin.trap.exit-action-environment, version 0}
-        {id builtin.trap.exit-condition, version 0}
-        {id builtin.trap.exit-status, version 0}
-        {id builtin.trap.invalid-condition-warning, version 0}
-        {id builtin.trap.kill-stop-undefined, version 0}
-        {id builtin.trap.list-condition-set, version 0}
-        {id builtin.trap.list-format, version 0}
-        {id builtin.trap.list-suitable-for-reinput, version 0}
-        {id builtin.trap.operand-interpretation, version 0}
-        {id builtin.trap.persistence, version 0}
-        {id builtin.trap.signal-name-extensions, version 0}
-        {id builtin.trap.signals-ignored-on-entry, version 0}
-        {id builtin.trap.stderr-usage, version 0}
-        {id builtin.trap.subshell-lexical-check, version 0}
-        {id builtin.trap.subshell-reset, version 0}
-        {id builtin.trap.utility-defaults, version 0}
-        {id builtin.trap.utility-syntax-guidelines, version 0}
-        {id builtin.trap.xsi-signal-numbers, version 0}
     )}
     {id posix-builtins-signals, covered_rules (
         builtin.kill.env-nlspath
