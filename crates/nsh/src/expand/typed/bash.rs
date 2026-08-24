@@ -191,7 +191,13 @@ pub(super) fn indirect_target(
         Value::Unset => {
             let mut message = BString::from(reference);
             message.extend_from_slice(b": invalid indirect expansion");
-            return Err(shell.diagnostics().expansion_error_value(&message));
+            /* Same boundary as the refusal below: reported, the command
+             * abandoned, and the next one read. `${!undef-default}` does
+             * not reach its default -- the reference is what is missing,
+             * not the value it would have named -- and `set -u` does not
+             * change that, because the diagnostic is already written. */
+            // [spec:nsh:req:compat.bash.error-boundary]
+            return Err(shell.diagnostics().dialect_expansion_error(&message));
         }
         /* A name that holds an array has no scalar to read -- `$A` reads
          * no element of an associative array -- and there Bash yields

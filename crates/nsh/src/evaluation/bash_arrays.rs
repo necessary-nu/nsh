@@ -50,6 +50,7 @@ pub(crate) fn assign(
             let value = expand_value(shell, word)?;
             match &assignment.subscript {
                 Some(subscript) => {
+                    reject_empty_subscript(shell, BStr::new(name.as_slice()), subscript)?;
                     let subscript =
                         expand_scalar(shell, subscript, ExpansionMode::ASSIGNMENT_TILDE)?;
                     let selector = arrays::resolve_selector(
@@ -347,6 +348,28 @@ fn expand_value(shell: &mut Shell, word: &WordNode) -> Result<BString, Error> {
 }
 
 /// Expand a word to exactly one field under `mode`.
+/// Refuse `a[]=v`, which names no element.
+///
+/// Written emptiness only: the word `$empty` is an expression that
+/// evaluates to 0, and Bash assigns element zero for it. `a[]` is not an
+/// expression at all, and taking it as 0 would write over an element the
+/// script never named. Bash reports and carries on with status 1, which
+/// is what the dialect boundary gives.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+// [spec:nsh:req:compat.bash.error-boundary]
+fn reject_empty_subscript(
+    shell: &mut Shell,
+    name: &BStr,
+    subscript: &WordNode,
+) -> Result<(), Error> {
+    if !subscript.word.parts().is_empty() {
+        return Ok(());
+    }
+    let mut message = BString::from(name);
+    message.extend_from_slice(b"[]: bad array subscript");
+    Err(shell.diagnostics().dialect_error(&message))
+}
+
 fn expand_scalar(
     shell: &mut Shell,
     word: &WordNode,

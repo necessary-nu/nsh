@@ -56,6 +56,32 @@ fn expect(script: &[u8], status: i32, stdout: &[u8]) {
 /// shell: three commands on one line lose the two after the failure, and
 /// the same three on three lines lose only the one that failed.
 // [spec:nsh:req:compat.bash.error-boundary/test]
+/// `${!undef}` has no reference to follow, and Bash says so on every
+/// occurrence rather than ending the script -- including under `set -u`,
+/// and including the `-` default form, because what is missing is the
+/// reference and not the value it would have named.
+// [spec:nsh:req:compat.bash.error-boundary/test]
+#[test]
+fn an_unset_reference_abandons_one_record() {
+    let (status, printed, complained) = bash_run(
+        b"echo \"A ${!undef-'default'}\"\n\
+          echo \"B ${!undef}\"\n\
+          set -u\n\
+          echo NOUNSET\n\
+          echo \"C ${!undef-'default'}\"\n\
+          echo \"D ${!undef}\"\n\
+          echo REACHED",
+    );
+
+    assert_eq!(printed, b"NOUNSET\nREACHED\n".to_vec());
+    assert_eq!(status, 0);
+    assert_eq!(
+        complained,
+        b"undef: invalid indirect expansion\n".repeat(4),
+        "one diagnostic per occurrence, and the script runs on",
+    );
+}
+
 #[test]
 fn a_read_only_assignment_abandons_its_record() {
     expect(

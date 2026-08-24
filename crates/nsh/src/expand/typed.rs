@@ -788,6 +788,19 @@ fn split_subscript(name: &BStr) -> Option<(&BStr, &BStr)> {
 fn subscripted_value(shell: &mut Shell, base: &BStr, subscript: &BStr) -> Result<Value, Error> {
     use crate::variables::arrays::{self, ArraySelector};
 
+    /* `a[]` has no expression in it, and an empty arithmetic expression is
+     * 0 -- so without this the shell reads element zero of an array the
+     * script never asked about. The test is on the written text, not on
+     * what it expands to: `${a[$empty]}` names element 0 in Bash and here,
+     * because there the script did write an expression. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    if subscript.is_empty() && shell.options.dialect() == Dialect::Bash {
+        let mut message = BString::from(b"${".as_slice());
+        message.extend_from_slice(base);
+        message.extend_from_slice(b"[]}: bad substitution");
+        return Err(shell.diagnostics().dialect_expansion_error(&message));
+    }
+
     /* A read keeps its subscript as text, so its quoting and any expansion
      * written inside it are resolved here; the assignment side already
      * carries a word the expander has been through. */

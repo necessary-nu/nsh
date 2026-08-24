@@ -76,11 +76,6 @@ disposition = "not-implemented"
 reason = "A declaration built-in does not accept a name built by expansion with `+=`, so `typeset s${dyn}+=foo` and `export NAME${suffix}+=value` do not append."
 
 [[case]]
-id = "arith-context.test.sh:15"
-disposition = "not-implemented"
-reason = "An empty subscript `a[]=v` is accepted and assigns index 0, and `${a[]}` reads it; Bash rejects both as a bad substitution. Nothing validates that a subscript has an expression in it, and the rejection also needs Bash's error boundary: Bash reports each line and carries on with status 1."
-
-[[case]]
 id = "array-sparse.test.sh:31"
 disposition = "out-of-contract"
 reason = "`compgen` is part of the programmable-completion surface retired by [dec:nsh:bash-compatibility-is-scripts]; there is no `complete`/`compgen`/`compopt` and reporting one would advertise a facility that is not here."
@@ -119,11 +114,6 @@ reason = "An associative array iterates in sorted key order where Bash iterates 
 id = "var-op-patsub.test.sh:23"
 disposition = "sanctioned-divergence"
 reason = "Bash contradicts itself on `[^]]`, so there is no single behaviour to match. `case a in [^]]` matches in Bash, as it does here -- a `]` that opens a bracket list is a member of it, not the terminator. But Bash's substitution path closes the list at the first `]`, which leaves an empty negated list followed by a required `]`, and `${s//[^]]/z}` therefore matches nothing for any subject (verified against GNU bash 5.2.37; `[!]]` behaves the same way, while `[]]`, `[^a]` and `[]a]` are normal). POSIX states the leading-`]` rule for `[!...]` and leaves `[^...]` undefined for shell patterns, so the reading is a choice; this shell makes it once and applies it to `case`, `[[ ]]`, `${var//}` and pathname expansion alike. Reproducing Bash would mean two bracket parsers selected by call site. The Oils corpus records the same split (\"This is a PARSING divergence\") and OSH also declines it. Reason at the point of divergence in `crates/nsh/src/pattern.rs::Matcher::bracket`; recorded in docs/divergences.md. Reclassified from `defect` on 2026-08-24 after the earlier entry mis-stated it as a POSIX-mode bug of ours."
-
-[[case]]
-id = "var-ref.test.sh:2"
-disposition = "not-implemented"
-reason = "Indirect expansion now resolves a subscript, a suffix operator, an `@`-transform and a nested indirection, and rejects a resolved name that is not a name -- with status 1, as Bash does. What is left is the boundary: the diagnostic ends a non-interactive shell where Bash abandons the current command and carries on. Depends on the Bash-mode error boundary."
 
 [[case]]
 id = "var-ref.test.sh:12"

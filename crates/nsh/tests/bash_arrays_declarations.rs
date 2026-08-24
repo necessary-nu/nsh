@@ -34,6 +34,33 @@ fn expect(script: &[u8], stdout: &[u8]) {
 /// of that built-in, not a prefix assignment, and it used to reach the
 /// expander as a non-word node and abort the script.
 // [spec:nsh:req:compat.bash.arrays-declarations/test]
+/// `a[]` names no element, and an empty arithmetic expression is 0, so
+/// without a refusal the shell writes element zero of an array the script
+/// never named. Written emptiness only: `$empty` is an expression, and
+/// `a[$empty]` is element 0 in Bash and here.
+// [spec:nsh:req:compat.bash.arrays-declarations/test]
+#[test]
+fn an_empty_subscript_names_no_element() {
+    let mut shell = shell(true);
+    let (status, printed) = run(
+        &mut shell,
+        b"a=(1 2 3); e=\n\
+          a[]=42\n\
+          echo \"1 $?\"\n\
+          echo \"2 ${a[@]}\"\n\
+          echo \"3 ${a[]}\"\n\
+          echo \"4 $?\"\n\
+          a[$e]=9\n\
+          echo \"5 $? ${a[0]}\"\n\
+          echo \"6 ${a[ ]}\"\n\
+          echo 7 end",
+    );
+
+    // Line 3 never prints: the expansion abandons that command.
+    assert_eq!(printed, b"1 1\n2 1 2 3\n4 1\n5 0 9\n6 9\n7 end\n".to_vec(),);
+    assert_eq!(status, 0, "the record is abandoned, the shell is not");
+}
+
 #[test]
 fn a_declaration_operand_carries_a_compound_value() {
     expect(
