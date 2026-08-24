@@ -6509,6 +6509,20 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id bound-recursive-evaluation
+                                title "Bound recursion so hostile script text cannot crash the shell"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-08-24T11:31:56.393323332Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "Two reachable SIGSEGVs, both from ordinary script text, measured 2026-08-24 against `01d1b14`+ through scripts/sandboxed.\n\n1. THE PARSER, and this is the worse one because it needs no execution at all.\n\n     python3 -c \"print('('*2000 + ':' + ')'*2000)\" > d.sh\n     nsh    -n d.sh   -> 139 (SIGSEGV)\n     dash   -n d.sh   -> 0     (survives 20,000)\n\n   Threshold is between 1,000 and 2,000. `-n` is `set -o noexec`, so a syntax check on hostile input crashes the process -- an editor, a linter, a CI pre-flight, anything that parses without running. `[dec:nsh:shell-as-library]` makes that sharper still: an embedder calling `Shell::run` on a string it did not write gets a segfault, not an `Err`, and there is no unwind to catch.\n\n2. FUNCTION CALL DEPTH at run time.\n\n     f() { f; }; f\n     nsh  -> 139 (SIGSEGV)\n     bash -> 139 (SIGSEGV; unbounded unless FUNCNEST is set)\n     dash -> \"Maximum function recursion depth (1000) reached\", clean\n\n   Bash crashing too means this is not a compatibility gap. It is the named-unsafety case in [dec:nsh:safety-trumps-compatibility] -- unbounded resource consumption -- so the answer is dash's, not Bash's, and `FUNCNEST` is the knob Bash offers for it.\n\nDESIGN, which is why this is a node and not a patch. `enforce-bash-safe-core` already recorded the general shape: one budget shared across command substitution, functions, `eval`, traps and subshell evaluators, charged for attempted work rather than produced output. This node is the narrower half -- depth, not total work -- and it still has to answer:\n\n  * Where the counter lives. Parse depth and call depth are different counters with different limits; the parser's has no `Shell` in scope on every path.\n  * What happens at the limit: which status, whether it is a trappable error or a hard stop, and whether it is `Error::Expansion`, `Error::Abandoned` or something new.\n  * Whether a forked subshell inherits the depth or resets it.\n  * Whether the limit is fixed (dash: 1000) or a variable a script can raise (Bash: `FUNCNEST`). A raisable limit is a knob for turning the safety off, which wants stating either way.\n\nFound by hand while sizing a fuzzing effort, not by any gate -- the 119 differential corpora are static and generated for other purposes, and the Oils and Smoosh surveys are semantic. Nothing in the tree currently looks for a crash."
+                                    }
+                                )
+                            }
                         )
                     }
                 )
