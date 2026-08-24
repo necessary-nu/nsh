@@ -474,6 +474,7 @@ pub fn parse_command(shell: &mut Shell, interactive: bool) -> Result<ParseResult
     let dialect = shell.options.dialect();
     shell.input.begin_parse(dialect);
     shell.input.token_pushed_back = false;
+    shell.input.command_depth = 0;
     shell.input.pending_here_documents = Vec::new();
     shell.input.completed_here_documents = Vec::new();
     shell.input.prompt_before_read = interactive;
@@ -661,7 +662,7 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
         shell.input.token_pushed_back = true;
         TokenContext::NONE
     };
-    parsed_command = command(shell, command_context)?;
+    parsed_command = keywords::nested_command(shell, command_context)?;
     if read_token(shell, TokenContext::NONE)?.kind == TokenKind::Pipe {
         /* Every `stalloc(sizeof(struct nodelist))` the C does here is one
          * `Vec` slot; the list is built front to back either way, and
@@ -673,7 +674,7 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
         ];
         loop {
             render_command_list.push(
-                command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+                keywords::nested_command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
                     .ok_or_else(|| expected_token_error(shell, None))?,
             );
             if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Pipe {
@@ -1009,8 +1010,9 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
                 /* Move the parsed name into a dedicated function variant so
                  * the tree never passes through an invalid intermediate. */
                 let line_number = crate::input::current_input_frame(&mut shell.input).line_number;
-                let body = command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
-                    .ok_or_else(|| expected_token_error(shell, None))?;
+                let body =
+                    keywords::nested_command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+                        .ok_or_else(|| expected_token_error(shell, None))?;
                 return Ok(Some(Node::Function(FunctionDefinition {
                     line: line_number,
                     name: NodeText::new(BString::from(word.word.as_bstr())),

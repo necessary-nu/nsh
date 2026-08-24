@@ -10,9 +10,56 @@ use bstr::{BStr, BString};
 
 use super::{
     Error, ForCommand, ListMode, Node, NodeText, ParsedWord, Shell, Token, TokenContext, TokenKind,
-    WordNode, expected_token_error, is_valid_name, list, mem, pipeline, read_token,
+    WordNode, command, expected_token_error, is_valid_name, list, mem, pipeline, read_token,
     required_compound_node, syntax_error,
 };
+
+/// How deeply one parse unit may nest commands.
+///
+/// Recursive descent spends stack per level and script text is untrusted,
+/// so the depth is bounded rather than trusted. Unbounded, `(` repeated
+/// often enough overflows the stack: about 1,700 times in a release build
+/// on an 8 MiB stack, about 200 in a debug one. Nothing has to run to
+/// reach it -- `sh -n` on a hostile file is enough -- and there is no
+/// unwind, so an embedder gets a dead process where
+/// [`dec:nsh:shell-as-library`] promised an `Err`.
+///
+/// The number is set by the worst configuration that is actually built,
+/// with margin, rather than by the language: a debug build costs roughly
+/// 40 KiB per level and overflows an 8 MiB stack at about 200, so 100
+/// leaves a factor of two there. A release build costs about 4.8 KiB, so
+/// the same 100 levels is half a mebibyte and fits four times over in the
+/// 2 MiB a spawned Rust thread gets by default. It is the *nesting*
+/// depth, not the length of a list, and it is far past what written
+/// scripts reach -- generated `configure` scripts manage a dozen or two.
+///
+/// That per-level cost is itself the defect. dash spends about 160 bytes
+/// a level and Bash keeps its parser stack on the heap entirely, so both
+/// tolerate depths this cannot. Most of ours is `command`'s frame holding
+/// the locals of every keyword branch at once, taken or not. Filed on
+/// `bound-recursive-evaluation`; this bound is correct whatever that
+/// number becomes, and can rise when it falls.
+// [spec:nsh:req:idiom.bounded-recursion]
+const MAX_COMMAND_DEPTH: u32 = 100;
+
+/// Enter one command, refusing to nest past [`MAX_COMMAND_DEPTH`].
+///
+/// Every route into a command goes through here, so the count is the
+/// nesting depth exactly, and it is decremented on the way out whether
+/// the command parsed or not.
+// [spec:nsh:req:idiom.bounded-recursion]
+pub(super) fn nested_command(
+    shell: &mut Shell,
+    context: TokenContext,
+) -> Result<Option<Node>, Error> {
+    if shell.input.command_depth >= MAX_COMMAND_DEPTH {
+        return Err(syntax_error(shell, b"too many nested commands"));
+    }
+    shell.input.command_depth += 1;
+    let parsed = command(shell, context);
+    shell.input.command_depth -= 1;
+    parsed
+}
 
 /// The shape `for` and `select` share: a name, an optional `in` list, and
 /// a `do ... done` body.
