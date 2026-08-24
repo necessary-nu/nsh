@@ -1227,11 +1227,9 @@ fn expand_redirections<'a>(
 }
 
 fn descriptor_source(shell: &mut Shell, text: &BStr) -> Result<Option<LogicalDescriptor>, Error> {
-    if text.len() == 1 && text[0].is_ascii_digit() {
-        Ok(Some(
-            LogicalDescriptor::from_digit(text[0])
-                .expect("an ASCII digit names a logical descriptor"),
-        ))
+    // [spec:posix:req:redir.duplicate-output]
+    if let Some(number) = LogicalDescriptor::from_digits(text) {
+        Ok(Some(number))
     } else if text == BStr::new(b"-") {
         Ok(None)
     } else {

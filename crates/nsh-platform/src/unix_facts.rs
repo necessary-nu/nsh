@@ -18,6 +18,20 @@ pub fn real_uid() -> UserId {
     UserId(rustix::process::getuid().as_raw())
 }
 
+/// The first descriptor number the process cannot use.
+///
+/// The shell needs this because POSIX leaves the highest nameable
+/// descriptor implementation-defined and the honest answer is the host's:
+/// `exec 1000000>file` has to be refused where `exec 42>file` is not, and
+/// the line between them is `RLIMIT_NOFILE`, not a constant.
+#[must_use]
+pub fn descriptor_limit() -> u32 {
+    rustix::process::getrlimit(rustix::process::Resource::Nofile)
+        .current
+        .and_then(|limit| u32::try_from(limit).ok())
+        .unwrap_or(u32::MAX)
+}
+
 /// The host's own name, for `$HOSTNAME`.
 #[must_use]
 pub fn host_name() -> Option<OsString> {
@@ -67,6 +81,21 @@ pub fn wait_for_input(fd: &impl AsDescriptor, timeout: Option<f64>) -> std::io::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The nameable-descriptor ceiling is the host's, not a constant of
+    /// ours: it has to admit the numbers a script really uses and refuse
+    /// the ones `dup2` would.
+    #[test]
+    fn the_descriptor_limit_is_the_host_limit() {
+        let limit = descriptor_limit();
+        let expected = rustix::process::getrlimit(rustix::process::Resource::Nofile).current;
+        match expected.and_then(|value| u32::try_from(value).ok()) {
+            Some(value) => assert_eq!(limit, value),
+            None => assert_eq!(limit, u32::MAX),
+        }
+        // Slots a shell script names in practice are all below it.
+        assert!(limit > 64, "a usable host offers more than 64 descriptors");
+    }
 
     /// The identities are the ones the kernel reports, and the host has
     /// a name of some length.

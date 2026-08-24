@@ -4,6 +4,7 @@
 use crate::error::Error;
 use bstr::{BStr, BString};
 use nsh_platform::{Descriptor, ShellBytesExt as _};
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use crate::context::Shell;
@@ -88,12 +89,14 @@ impl ExpandedRedirection<'_> {
 /// shared owners: ordinary unwind restores them, while fork reset drops
 /// obsolete backups without changing the active table.
 pub struct RedirectionFrame {
-    saved_descriptors: [SavedDescriptor; LogicalDescriptor::COUNT],
-}
-
-enum SavedDescriptor {
-    Empty,
-    Saved(Option<crate::descriptors::SharedDescriptor>),
+    /// What each slot this frame redirected held before it did.
+    ///
+    /// A map rather than one entry per nameable slot: the set of slots a
+    /// script can name is every decimal number, and a frame touches a
+    /// handful. Absent means "this frame did not redirect that slot", so
+    /// the enum that used to say so is the key's presence now. `Some(None)`
+    /// is a slot that was genuinely closed, which is not the same thing.
+    saved_descriptors: BTreeMap<LogicalDescriptor, Option<crate::descriptors::SharedDescriptor>>,
 }
 
 /// The stack of saved logical-descriptor states.
@@ -154,6 +157,7 @@ pub(crate) fn redirect(
          * in every redirection arm; the list is a `Vec` now. */
         for redirection in redirections {
             let descriptor = redirection.descriptor();
+            reject_unusable_descriptor(shell, descriptor)?;
             let source = open_redirection(shell, redirection)?;
             if !matches!(source, RedirectSource::Noop) {
                 /* The C's `fd == 0` is "this redirection replaced the shell's
@@ -163,16 +167,15 @@ pub(crate) fn redirect(
                     crate::input::reset_input(shell);
                 }
 
-                if let Some(frame_index) = saved_frame {
-                    let descriptor_index = descriptor.index();
-                    if matches!(
-                        shell.redirections.frames[frame_index].saved_descriptors[descriptor_index],
-                        SavedDescriptor::Empty
-                    ) {
-                        let saved = shell.descriptors.get(descriptor);
-                        shell.redirections.frames[frame_index].saved_descriptors
-                            [descriptor_index] = SavedDescriptor::Saved(saved);
-                    }
+                if let Some(frame_index) = saved_frame
+                    && !shell.redirections.frames[frame_index]
+                        .saved_descriptors
+                        .contains_key(&descriptor)
+                {
+                    let saved = shell.descriptors.get(descriptor);
+                    shell.redirections.frames[frame_index]
+                        .saved_descriptors
+                        .insert(descriptor, saved);
                 }
 
                 install_redirection(shell, descriptor, source)?;
@@ -188,9 +191,7 @@ pub(crate) fn redirect(
     if mode == RedirectionMode::Push {
         if let Some(frame_index) = saved_frame {
             let saved_descriptors = &shell.redirections.frames[frame_index].saved_descriptors;
-            if let Some(SavedDescriptor::Saved(Some(saved))) =
-                saved_descriptors.get(LogicalDescriptor::STDERR.index())
-            {
+            if let Some(Some(saved)) = saved_descriptors.get(&LogicalDescriptor::STDERR) {
                 let destination = crate::descriptors::DescriptorSlot::default();
                 destination.replace(Some(saved.clone()));
                 shell.io.previous_stderr().set_destination(destination);
@@ -414,6 +415,27 @@ pub fn open_command_file(shell: &mut Shell, pathname: &BStr) -> Result<Descripto
 // [spec:posix:req:xcurel.file-create-existing-actions]
 // [spec:posix:def:xcurel.file-create-existing-codes]
 // [spec:posix:req:xcurel.file-append-mode]
+/// Refuse a slot the host could never hold.
+///
+/// POSIX leaves the highest nameable descriptor implementation-defined,
+/// and the table here is sparse, so a slot is only a map key until a child
+/// is exec'd -- `exec 1000000>file` would otherwise succeed now and fail
+/// much later, somewhere the script cannot see. The line is the host's
+/// `RLIMIT_NOFILE`, which is the same line Bash reports at.
+// [spec:posix:syn:redir.format]
+fn reject_unusable_descriptor(
+    shell: &mut Shell,
+    descriptor: LogicalDescriptor,
+) -> Result<(), Error> {
+    if descriptor.index() < nsh_platform::descriptor_limit() as usize {
+        return Ok(());
+    }
+    let mut message = descriptor.digits();
+    message.extend_from_slice(b": Bad file descriptor");
+    let line = shell.evaluation.diagnostic_line;
+    Err(shell.diagnostics().report(Error::other(line, 1, &message)))
+}
+
 fn open_redirection(
     shell: &mut Shell,
     redirection: &ExpandedRedirection<'_>,
@@ -626,19 +648,20 @@ pub fn create_pipe(shell: &mut crate::context::Shell, memfd: bool) -> Result<(Pi
         if let Ok(read_fd) = nsh_platform::anonymous_file("dash") {
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
                 .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
-            let read = nsh_platform::move_fd_cloexec(read_fd, LogicalDescriptor::COUNT as i32)
+            let read = nsh_platform::move_fd_cloexec(read_fd, LogicalDescriptor::INHERITED as i32)
                 .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
-            let write = nsh_platform::move_fd_cloexec(write_fd, LogicalDescriptor::COUNT as i32)
-                .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
+            let write =
+                nsh_platform::move_fd_cloexec(write_fd, LogicalDescriptor::INHERITED as i32)
+                    .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
             return Ok((Pipe { read, write }, true));
         }
     }
 
     let (read, write) =
         nsh_platform::pipe().map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
-    let read = nsh_platform::move_fd_cloexec(read, LogicalDescriptor::COUNT as i32)
+    let read = nsh_platform::move_fd_cloexec(read, LogicalDescriptor::INHERITED as i32)
         .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
-    let write = nsh_platform::move_fd_cloexec(write, LogicalDescriptor::COUNT as i32)
+    let write = nsh_platform::move_fd_cloexec(write, LogicalDescriptor::INHERITED as i32)
         .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
     Ok((Pipe { read, write }, false))
 }
@@ -731,32 +754,18 @@ fn here_document_write_error(shell: &mut Shell, error: std::io::Error) -> Error 
 pub fn pop_redirection(shell: &mut Shell, discard: bool) {
     crate::error::with_interrupts_deferred(shell, |shell| {
         let frame_index = shell.redirections.frames.len() - 1;
-        let mut descriptor_index = 0;
-        while descriptor_index < LogicalDescriptor::COUNT {
-            let saved_descriptor = std::mem::replace(
-                &mut shell.redirections.frames[frame_index].saved_descriptors[descriptor_index],
-                SavedDescriptor::Empty,
-            );
-
-            if matches!(saved_descriptor, SavedDescriptor::Empty) {
-                descriptor_index += 1;
+        /* Ascending, as the fixed table's index walk was: a frame that
+         * saved both 0 and 2 has to put them back in the same order it
+         * used to, because restoring slot 0 resets the parser's input. */
+        let saved = std::mem::take(&mut shell.redirections.frames[frame_index].saved_descriptors);
+        for (descriptor, held) in saved {
+            if discard {
                 continue;
             }
-
-            match saved_descriptor {
-                SavedDescriptor::Saved(saved) => {
-                    if !discard {
-                        let descriptor = LogicalDescriptor::from_index(descriptor_index)
-                            .expect("a redirection frame has only logical descriptors");
-                        if descriptor == LogicalDescriptor::STDIN {
-                            crate::input::reset_input(shell);
-                        }
-                        shell.descriptors.replace(descriptor, saved);
-                    }
-                }
-                SavedDescriptor::Empty => unreachable!(),
+            if descriptor == LogicalDescriptor::STDIN {
+                crate::input::reset_input(shell);
             }
-            descriptor_index += 1;
+            shell.descriptors.replace(descriptor, held);
         }
         /* `redirlist = rp->next` — which also drops anything pushed above `rp`
          * and never popped, as the C's assignment did. */
@@ -851,7 +860,7 @@ pub(crate) fn push_redirections(
     }
 
     shell.redirections.frames.push(RedirectionFrame {
-        saved_descriptors: std::array::from_fn(|_| SavedDescriptor::Empty),
+        saved_descriptors: BTreeMap::new(),
     });
 
     depth

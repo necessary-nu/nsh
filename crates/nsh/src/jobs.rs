@@ -1556,7 +1556,7 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
         push_command_text(b" ", text);
         match redirection {
             Redirection::File(redirection) => {
-                push_command_text(&[redirection.descriptor.as_digit()], text);
+                push_command_text(&redirection.descriptor.digits(), text);
                 push_command_text(
                     match redirection.operator {
                         FileRedirectionOperator::Write => b">",
@@ -1570,7 +1570,7 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
                 redirection.target.word.render(text);
             }
             Redirection::Descriptor(redirection) => {
-                push_command_text(&[redirection.descriptor.as_digit()], text);
+                push_command_text(&redirection.descriptor.digits(), text);
                 push_command_text(
                     match redirection.operator {
                         DescriptorRedirectionOperator::Input => b"<&",
@@ -1580,7 +1580,7 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
                 );
                 match &redirection.target {
                     DescriptorTarget::Number(descriptor) => {
-                        push_command_text(&[descriptor.as_digit()], text)
+                        push_command_text(&descriptor.digits(), text)
                     }
                     DescriptorTarget::Close => push_command_text(b"-", text),
                     DescriptorTarget::Word(word) => word.word.render(text),
@@ -1588,7 +1588,7 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
             }
             Redirection::HereDocument(_) => push_command_text(b"<<...", text),
             Redirection::HereString(here) => {
-                push_command_text(&[here.descriptor.as_digit()], text);
+                push_command_text(&here.descriptor.digits(), text);
                 push_command_text(b"<<<", text);
                 here.word.word.render(text);
             }

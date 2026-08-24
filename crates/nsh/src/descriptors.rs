@@ -6,6 +6,7 @@
 //! descriptor above the shell-language range. Redirection changes the slot;
 //! dropping the last handle closes the backing descriptor automatically.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -18,36 +19,65 @@ use nsh_platform::{AsDescriptor, BorrowedDescriptor, Descriptor};
 /// not close anything.
 // [spec:nsh:def:idiom.logical-descriptors]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct LogicalDescriptor(u8);
+pub(crate) struct LogicalDescriptor(u32);
 
 impl LogicalDescriptor {
-    pub(crate) const COUNT: usize = 10;
+    /// How many descriptors the shell snapshots from the process at
+    /// startup, and the floor its own backing descriptors are moved above.
+    ///
+    /// Two jobs in one number, and they are the same number for a reason:
+    /// everything below the floor is a slot a script could be naming, and
+    /// everything the shell holds for itself has to sit above whatever it
+    /// might be asked to install. Ten is where the *inherited* range ends,
+    /// not where the *nameable* range does -- POSIX's IO_NUMBER is "a
+    /// string consisting solely of digits" and `[spec:posix:syn:redir.format]`
+    /// says "one or more digit", so `exec 42>file` names slot 42. Slots
+    /// past the inherited range are created on demand, and
+    /// [`DescriptorTable::materialize`] raises the floor above the highest
+    /// one in use before it duplicates anything.
+    pub(crate) const INHERITED: usize = 10;
     pub(crate) const STDIN: Self = Self(0);
     pub(crate) const STDOUT: Self = Self(1);
     pub(crate) const STDERR: Self = Self(2);
 
+    /// No upper bound of our own. POSIX leaves the maximum
+    /// implementation-defined, and the honest maximum is the one the host
+    /// enforces: `exec 1000000>file` fails at `dup2` with the same "bad
+    /// file descriptor" Bash reports, rather than at a constant invented
+    /// here.
     pub(crate) const fn new(number: i32) -> Option<Self> {
-        if number >= 0 && number < Self::COUNT as i32 {
-            Some(Self(number as u8))
+        if number >= 0 {
+            Some(Self(number as u32))
         } else {
             None
         }
     }
 
     pub(crate) const fn from_index(index: usize) -> Option<Self> {
-        if index < Self::COUNT {
-            Some(Self(index as u8))
+        if index <= u32::MAX as usize {
+            Some(Self(index as u32))
         } else {
             None
         }
     }
 
-    pub(crate) const fn from_digit(digit: u8) -> Option<Self> {
-        if digit >= b'0' && digit <= b'9' {
-            Self::new((digit - b'0') as i32)
-        } else {
-            None
+    /// Read an IO_NUMBER: a run of decimal digits, and nothing else.
+    ///
+    /// A run that will not fit is not a descriptor this shell can name, so
+    /// it is no more a redirection than `abc>file` is -- the caller falls
+    /// back to treating the text as an ordinary word.
+    // [spec:posix:syn:redir.format]
+    // [spec:posix:syn:grammar.token-classification]
+    pub(crate) fn from_digits(digits: &[u8]) -> Option<Self> {
+        if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+            return None;
         }
+        digits
+            .iter()
+            .try_fold(0u32, |value, digit| {
+                value.checked_mul(10)?.checked_add(u32::from(*digit - b'0'))
+            })
+            .map(Self)
     }
 
     pub(crate) const fn index(self) -> usize {
@@ -58,8 +88,9 @@ impl LogicalDescriptor {
         self.0 as i32
     }
 
-    pub(crate) const fn as_digit(self) -> u8 {
-        b'0' + self.0
+    /// The decimal text a job listing reprints this descriptor as.
+    pub(crate) fn digits(self) -> Vec<u8> {
+        self.0.to_string().into_bytes()
     }
 }
 
@@ -81,7 +112,7 @@ impl SharedDescriptor {
     /// Move an owned descriptor into the shell's hidden backing range.
     pub(crate) fn from_owned(descriptor: Descriptor) -> std::io::Result<Self> {
         let descriptor =
-            nsh_platform::move_fd_cloexec(descriptor, LogicalDescriptor::COUNT as i32)?;
+            nsh_platform::move_fd_cloexec(descriptor, LogicalDescriptor::INHERITED as i32)?;
         Ok(Self(Arc::new(descriptor)))
     }
 }
@@ -143,29 +174,56 @@ impl DescriptorSlot {
 }
 
 /// All descriptor slots in one shell execution environment.
+///
+/// Sparse, because the set of slots a script can name is the set of
+/// decimal numbers and not a range: `exec 42>file` is an ordinary
+/// redirection. The inherited range 0..[`LogicalDescriptor::INHERITED`] is
+/// always present so that materialization keeps saying the same thing
+/// about it -- an inherited descriptor the shell never touched is still
+/// closed in the child if the slot is empty -- and anything above it
+/// exists only once a script has named it.
 #[derive(Debug)]
 pub(crate) struct DescriptorTable {
-    slots: [DescriptorSlot; LogicalDescriptor::COUNT],
+    slots: Mutex<BTreeMap<LogicalDescriptor, DescriptorSlot>>,
 }
 
 impl DescriptorTable {
     pub(crate) fn from_streams(streams: &crate::streams::Streams) -> std::io::Result<Self> {
         let initial = streams.initial_descriptors()?;
+        let mut slots = BTreeMap::new();
+        for (number, value) in initial.iter().enumerate() {
+            let descriptor =
+                LogicalDescriptor::from_index(number).expect("the inherited range is in range");
+            let slot = DescriptorSlot::default();
+            slot.replace(value.clone());
+            slots.insert(descriptor, slot);
+        }
         Ok(Self {
-            slots: std::array::from_fn(|number| {
-                let slot = DescriptorSlot::default();
-                slot.replace(initial[number].clone());
-                slot
-            }),
+            slots: Mutex::new(slots),
         })
     }
 
-    pub(crate) fn slot(&self, descriptor: LogicalDescriptor) -> DescriptorSlot {
-        self.slots[descriptor.index()].clone()
+    fn locked(&self) -> MutexGuard<'_, BTreeMap<LogicalDescriptor, DescriptorSlot>> {
+        self.slots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// A stable handle to one slot, creating it if this is the first time
+    /// the shell has named it.
+    ///
+    /// Creating is what makes the handle stable: a writer retains it, so
+    /// `exec 42>file` followed by `echo >&42` has to reach the same slot.
+    pub(crate) fn slot(&self, descriptor: LogicalDescriptor) -> DescriptorSlot {
+        self.locked().entry(descriptor).or_default().clone()
+    }
+
+    /// What a slot holds, without bringing it into existence.
+    ///
+    /// Reading `>&99` must not grow the table by a slot nothing will ever
+    /// write to, so this asks rather than creates.
     pub(crate) fn get(&self, descriptor: LogicalDescriptor) -> Option<SharedDescriptor> {
-        self.slot(descriptor).get()
+        self.locked().get(&descriptor).and_then(DescriptorSlot::get)
     }
 
     pub(crate) fn replace(
@@ -195,17 +253,29 @@ impl DescriptorTable {
     /// state. It is called at the process terminus immediately before exec.
     // [spec:nsh:req:idiom.descriptor-materialization]
     pub(crate) fn materialize(&self) -> std::io::Result<()> {
-        let mut changes = Vec::with_capacity(LogicalDescriptor::COUNT);
-        for (number, slot) in self.slots.iter().enumerate() {
+        let entries: Vec<(LogicalDescriptor, DescriptorSlot)> = self
+            .locked()
+            .iter()
+            .map(|(descriptor, slot)| (*descriptor, slot.clone()))
+            .collect();
+        /* Every source has to sit above every target, or installing one
+         * slot would overwrite the descriptor another slot is about to be
+         * installed from. With a fixed table that was the constant floor;
+         * with a sparse one it is the highest slot actually in play, and
+         * never below the floor, so the inherited range behaves exactly as
+         * it did. */
+        let floor = entries
+            .iter()
+            .map(|(descriptor, _)| descriptor.as_i32().saturating_add(1))
+            .max()
+            .unwrap_or(0)
+            .max(LogicalDescriptor::INHERITED as i32);
+        let mut changes = Vec::with_capacity(entries.len());
+        for (descriptor, slot) in entries {
             let source = match slot.get() {
-                Some(descriptor) => Some(nsh_platform::duplicate_cloexec(
-                    &descriptor,
-                    LogicalDescriptor::COUNT as i32,
-                )?),
+                Some(held) => Some(nsh_platform::duplicate_cloexec(&held, floor)?),
                 None => None,
             };
-            let descriptor = LogicalDescriptor::from_index(number)
-                .expect("the table contains only logical descriptors");
             changes.push((descriptor.as_i32(), source));
         }
         nsh_platform::ProcessDescriptorTransaction::new(changes)?.apply()
@@ -222,8 +292,15 @@ mod tests {
     }
 
     fn empty_table() -> DescriptorTable {
+        let mut slots = BTreeMap::new();
+        for number in 0..LogicalDescriptor::INHERITED {
+            slots.insert(
+                LogicalDescriptor::from_index(number).unwrap(),
+                DescriptorSlot::default(),
+            );
+        }
         DescriptorTable {
-            slots: std::array::from_fn(|_| DescriptorSlot::default()),
+            slots: Mutex::new(slots),
         }
     }
 
@@ -237,10 +314,23 @@ mod tests {
     #[test]
     fn descriptor_identity_is_validated() {
         assert_eq!(LogicalDescriptor::new(0), Some(LogicalDescriptor::STDIN));
-        assert_eq!(LogicalDescriptor::new(9).unwrap().as_digit(), b'9');
+        assert_eq!(LogicalDescriptor::new(9).unwrap().digits(), b"9".to_vec());
         assert!(LogicalDescriptor::new(-1).is_none());
-        assert!(LogicalDescriptor::new(LogicalDescriptor::COUNT as i32).is_none());
-        assert!(LogicalDescriptor::from_digit(b'x').is_none());
+        /* Past the inherited range is a slot like any other: POSIX's
+         * IO_NUMBER is a digit *string*, so `exec 42>file` names one. */
+        // [spec:posix:syn:redir.format/test]
+        let past = LogicalDescriptor::new(LogicalDescriptor::INHERITED as i32);
+        assert_eq!(past, LogicalDescriptor::from_digits(b"10"));
+        assert_eq!(past.unwrap().digits(), b"10".to_vec());
+        assert_eq!(
+            LogicalDescriptor::from_digits(b"007"),
+            LogicalDescriptor::new(7),
+        );
+        assert!(LogicalDescriptor::from_digits(b"x").is_none());
+        assert!(LogicalDescriptor::from_digits(b"").is_none());
+        assert!(LogicalDescriptor::from_digits(b"1a").is_none());
+        // A run that cannot be held is not an IO_NUMBER, so it stays a word.
+        assert!(LogicalDescriptor::from_digits(b"99999999999999999999").is_none());
     }
 
     #[test]
@@ -360,14 +450,19 @@ mod tests {
             table.install_owned(seven, write).unwrap();
             table.materialize().unwrap();
 
-            let seven =
-                nsh_platform::snapshot_process_fd(seven.as_i32(), LogicalDescriptor::COUNT as i32)
-                    .unwrap()
-                    .unwrap();
+            let seven = nsh_platform::snapshot_process_fd(
+                seven.as_i32(),
+                LogicalDescriptor::INHERITED as i32,
+            )
+            .unwrap()
+            .unwrap();
             nsh_platform::write_all(&seven, b"logical").unwrap();
-            if nsh_platform::snapshot_process_fd(eight.as_i32(), LogicalDescriptor::COUNT as i32)
-                .unwrap()
-                .is_some()
+            if nsh_platform::snapshot_process_fd(
+                eight.as_i32(),
+                LogicalDescriptor::INHERITED as i32,
+            )
+            .unwrap()
+            .is_some()
             {
                 nsh_platform::exit_immediately(2);
             }

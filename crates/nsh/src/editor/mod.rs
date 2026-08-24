@@ -200,24 +200,24 @@ impl LineEditor {
         // [spec:nsh:def:idiom.logical-descriptors]
         let input = nsh_platform::duplicate_cloexec(
             input_fd,
-            crate::descriptors::LogicalDescriptor::COUNT as i32,
+            crate::descriptors::LogicalDescriptor::INHERITED as i32,
         )?
         .into_file();
         let output = nsh_platform::duplicate_cloexec(
             output_fd,
-            crate::descriptors::LogicalDescriptor::COUNT as i32,
+            crate::descriptors::LogicalDescriptor::INHERITED as i32,
         )?
         .into_file();
         let terminal_snapshots = Arc::new(Mutex::new(TerminalSnapshots::default()));
         let terminal = OwnedTerminal::new(
             nsh_platform::duplicate_cloexec(
                 &input,
-                crate::descriptors::LogicalDescriptor::COUNT as i32,
+                crate::descriptors::LogicalDescriptor::INHERITED as i32,
             )?
             .into_file(),
             nsh_platform::duplicate_cloexec(
                 &output,
-                crate::descriptors::LogicalDescriptor::COUNT as i32,
+                crate::descriptors::LogicalDescriptor::INHERITED as i32,
             )?
             .into_file(),
             locale.clone(),

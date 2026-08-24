@@ -167,7 +167,7 @@ pub fn refresh_editor_configuration(shell: &mut crate::context::Shell) {
                             };
                             let Ok(duplicate) = nsh_platform::duplicate_cloexec(
                                 &file,
-                                LogicalDescriptor::COUNT as i32,
+                                LogicalDescriptor::INHERITED as i32,
                             ) else {
                                 return None;
                             };

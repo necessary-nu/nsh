@@ -236,8 +236,8 @@ pub use windows::*;
 mod windows_facts;
 #[cfg(windows)]
 pub use windows_facts::{
-    GroupId, UserId, effective_gid, effective_uid, host_name, real_uid, supplementary_groups,
-    wait_for_input,
+    GroupId, UserId, descriptor_limit, effective_gid, effective_uid, host_name, real_uid,
+    supplementary_groups, wait_for_input,
 };
 
 /// Host facts a Bash-compatible shell publishes as variables, and the two

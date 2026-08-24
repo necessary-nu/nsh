@@ -6371,6 +6371,13 @@ children (
                                         kind @blocker
                                         text "Needs an operator decision before any code, because it is a change to the descriptor model rather than to the parser.\n\n`{name}<word` asks the shell to allocate a descriptor, open the target on it, and store its *number* in a shell variable. Bash allocates above 9 specifically so the number cannot collide with one a script wrote by hand. `crates/nsh/src/descriptors.rs` has `LogicalDescriptor::COUNT = 10` and `DescriptorTable { slots: [DescriptorSlot; 10] }`: the table is a fixed array indexed 0..9, and `LogicalDescriptor::new` refuses anything outside it. There is no representation for the descriptor this feature has to hand back.\n\nSo the question is not how to parse `{abc}<<< walrus`. It is whether the table becomes dynamic, and that touches the containment `[contain-descriptor-materialization]` established and the ownership rules `[dec:nsh:host-owns-streams]` sets. Three shapes worth weighing:\n\n  1. Grow the table to a fixed larger bound (say 64) and allocate the named descriptor from the top. Cheapest, keeps the array, and puts an arbitrary limit where Bash has the process's own.\n  2. Keep 0..9 as the array and hold named descriptors in a separate map beside it. The two then have different lifetimes and different `Drop` behaviour, which is exactly the kind of split the materialization work removed.\n  3. Make the table a map throughout. Honest, and the largest change: every `LogicalDescriptor` site assumes an index today.\n\nAlso unresolved and cheaper to settle: `{name}<&-` closes and Bash leaves the variable holding the old number; a nameref or a read-only `name` has to be refused; and the number must be stored as a string, since everything a script reads is bytes.\n\nCosts `toysh.test.sh:6` in the compatibility survey, which is registered against this node. Recorded on 2026-08-24 after the case was found to be blocked on the model, not on the syntax -- the earlier register entry said only \"this shell has no redirection that names a variable\", which understated it."
                                     }
+
+                                    {
+                                        at 2026-08-24T09:55:13.013224858Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
                         )

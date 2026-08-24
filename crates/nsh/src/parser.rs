@@ -1093,11 +1093,12 @@ fn parse_redirection_target(
             descriptor,
         } => {
             let text = shell.input.word_text();
-            let target = if text.len() == 1 && text[0].is_ascii_digit() {
-                DescriptorTarget::Number(
-                    LogicalDescriptor::from_digit(text[0])
-                        .expect("an ASCII digit names a logical descriptor"),
-                )
+            /* "If word evaluates to one or more digits, the file
+             * descriptor denoted by n shall be a duplicate" -- so `>&42`
+             * duplicates onto slot 42, not only `>&2`. */
+            // [spec:posix:req:redir.duplicate-output]
+            let target = if let Some(number) = LogicalDescriptor::from_digits(text) {
+                DescriptorTarget::Number(number)
             } else if text == BStr::new(b"-") {
                 DescriptorTarget::Close
             } else {
@@ -1829,16 +1830,35 @@ fn finish_word_token(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<Tok
     if lexer.subscript_depth != 0 {
         return Err(syntax_error(shell, b"Missing ']'"));
     }
-    let descriptor_digit = match lexer.output.as_slice() {
-        [] => Some(0),
-        [WordToken::Literal(byte)] if byte.is_ascii_digit() => Some(*byte),
-        _ => None,
+    /* IO_NUMBER is "a string consisting solely of digits", not one digit:
+     * `exec 42>file` names slot 42. The outer `Option` is whether this is
+     * an IO_NUMBER at all; the inner one is whether it carried a number,
+     * since an operator with nothing before it takes its own default. A
+     * digit run too large to name a slot is not an IO_NUMBER either, and
+     * the standard says the token identifier is then TOKEN -- an ordinary
+     * word, which is what falling through to the bottom of this function
+     * produces. */
+    // [spec:posix:syn:grammar.token-classification]
+    // [spec:posix:syn:redir.format]
+    let io_number: Option<Option<LogicalDescriptor>> = if lexer.output.is_empty() {
+        Some(None)
+    } else {
+        lexer
+            .output
+            .iter()
+            .map(|token| match token {
+                WordToken::Literal(byte) if byte.is_ascii_digit() => Some(*byte),
+                _ => None,
+            })
+            .collect::<Option<Vec<u8>>>()
+            .and_then(|digits| LogicalDescriptor::from_digits(&digits))
+            .map(Some)
     };
     if lexer.delimiter.is_none() {
-        if let Some(digit) = descriptor_digit
-            .filter(|_| (lexer.input.is(b'>') || lexer.input.is(b'<')) && !lexer.quoted)
+        if let Some(explicit) =
+            io_number.filter(|_| (lexer.input.is(b'>') || lexer.input.is(b'<')) && !lexer.quoted)
         {
-            parse_redirection(shell, lexer, digit)?;
+            parse_redirection(shell, lexer, explicit)?;
             shell.input.last_token = TokenKind::Redirection;
             shell.input.last_token_quoted = false;
             return Ok(Token::plain(TokenKind::Redirection));
@@ -1941,7 +1961,7 @@ fn finish_word_if_delimited(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Res
 fn parse_redirection(
     shell: &mut Shell,
     lexer: &mut WordLexer<'_>,
-    descriptor_digit: u8,
+    explicit: Option<LogicalDescriptor>,
 ) -> Result<(), Error> {
     enum ParsedRedirection {
         File(FileRedirectionOperator),
@@ -2005,9 +2025,8 @@ fn parse_redirection(
             unread_input_unit(shell);
         }
     }
-    if descriptor_digit != 0 {
-        descriptor = LogicalDescriptor::from_digit(descriptor_digit)
-            .expect("the lexer accepts only a descriptor digit before redirection");
+    if let Some(explicit) = explicit {
+        descriptor = explicit;
     }
     shell.input.pending_redirection = Some(match redirection {
         ParsedRedirection::Descriptor(operator) => PendingRedirection::Descriptor {

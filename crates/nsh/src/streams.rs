@@ -45,15 +45,15 @@ impl Streams {
             owned: Some([
                 SharedDescriptor::from(nsh_platform::duplicate_cloexec(
                     &stdin,
-                    LogicalDescriptor::COUNT as i32,
+                    LogicalDescriptor::INHERITED as i32,
                 )?),
                 SharedDescriptor::from(nsh_platform::duplicate_cloexec(
                     &stdout,
-                    LogicalDescriptor::COUNT as i32,
+                    LogicalDescriptor::INHERITED as i32,
                 )?),
                 SharedDescriptor::from(nsh_platform::duplicate_cloexec(
                     &stderr,
-                    LogicalDescriptor::COUNT as i32,
+                    LogicalDescriptor::INHERITED as i32,
                 )?),
             ]),
         })
@@ -90,9 +90,9 @@ impl Streams {
     // [spec:nsh:def:idiom.logical-descriptors]
     pub(crate) fn initial_descriptors(
         &self,
-    ) -> std::io::Result<[Option<SharedDescriptor>; LogicalDescriptor::COUNT]> {
+    ) -> std::io::Result<[Option<SharedDescriptor>; LogicalDescriptor::INHERITED]> {
         if let Some(owned) = &self.owned {
-            let mut result: [Option<SharedDescriptor>; LogicalDescriptor::COUNT] =
+            let mut result: [Option<SharedDescriptor>; LogicalDescriptor::INHERITED] =
                 std::array::from_fn(|_| None);
             result[LogicalDescriptor::STDIN.index()] = Some(owned[0].clone());
             result[LogicalDescriptor::STDOUT.index()] = Some(owned[1].clone());
@@ -100,14 +100,14 @@ impl Streams {
             return Ok(result);
         }
 
-        let mut result: [Option<SharedDescriptor>; LogicalDescriptor::COUNT] =
+        let mut result: [Option<SharedDescriptor>; LogicalDescriptor::INHERITED] =
             std::array::from_fn(|_| None);
         for (number, slot) in result.iter_mut().enumerate() {
             let descriptor = LogicalDescriptor::from_index(number)
                 .expect("the stream table contains only logical descriptors");
             *slot = nsh_platform::snapshot_process_fd(
                 descriptor.as_i32(),
-                LogicalDescriptor::COUNT as i32,
+                LogicalDescriptor::INHERITED as i32,
             )?
             .map(SharedDescriptor::from);
         }

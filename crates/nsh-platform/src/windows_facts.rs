@@ -7,6 +7,15 @@ use super::{AsDescriptor, TerminalSettings};
 /// `ENABLE_ECHO_INPUT`, which `read -s` clears.
 const ENABLE_ECHO_INPUT: u32 = 0x0004;
 
+/// The first descriptor number the process cannot use.
+///
+/// The CRT's descriptor table is what a shell redirection names here, and
+/// its documented ceiling is 8192.
+#[must_use]
+pub fn descriptor_limit() -> u32 {
+    8192
+}
+
 /// The identity Windows reports for the process.
 ///
 /// Declared here rather than in `windows` because this is the module
