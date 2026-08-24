@@ -107,6 +107,18 @@ fn run_dot_with_missing_status(
             // A dot script is a fresh lexical command context for loop control:
             // loops active in its caller do not enclose commands read here.
             // [spec:nsh:req:compat.smoosh.control-boundaries]
+            /* `. self.sh` sourcing itself nests the evaluator exactly as a
+             * call does and is unbounded in every shell here -- nsh, dash
+             * and Bash all segfault on it. Same counter, same bound, and
+             * the same reason as a function's: an embedder gets an `Err`
+             * where the stack would otherwise go. */
+            // [spec:nsh:req:idiom.bounded-recursion]
+            if shell.variables.call_stack.depth() >= crate::evaluation::MAX_CALL_DEPTH {
+                let mut message = b"Maximum function recursion depth (".to_vec();
+                message.extend_from_slice(crate::evaluation::MAX_CALL_DEPTH.to_string().as_bytes());
+                message.extend_from_slice(b") reached");
+                return Err(shell.diagnostics().shell_error(&message));
+            }
             let caller_loopnest = shell.evaluation.loop_depth;
             shell.evaluation.loop_depth = 0;
             crate::variables::call_stack::push_source(

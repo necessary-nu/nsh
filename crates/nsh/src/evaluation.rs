@@ -2187,6 +2187,29 @@ fn evaluate_builtin(
 // [spec:posix:req:cmd.function-return]
 // [spec:posix:req:cmd.function-exit-status]
 // [spec:posix:req:cmd.function-syntax-error-properties]
+/// How deeply calls may nest before the shell refuses to go further.
+///
+/// Bash leaves this unbounded unless `FUNCNEST` is set and segfaults on
+/// `f() { f; }; f`; dash refuses at 1,000 and says so. Bash's crash is
+/// the named unsafety in [dec:nsh:safety-trumps-compatibility] rather
+/// than a behaviour to reproduce, so the shape here is dash's -- refuse,
+/// with its wording, so a script that hits it reads the same diagnostic.
+///
+/// The number is not dash's, and the arithmetic is why. A call costs
+/// 1,952 bytes of stack in a release build, measured; dash's 1,000 would
+/// be 1.86 MiB, which does not fit the 2 MiB a spawned Rust thread gets
+/// by default with anything to spare. 512 is 0.95 MiB, half the budget,
+/// and is the same rule the parser's bound is set by -- size it against
+/// the smallest stack the shell can plausibly be asked to run on, not
+/// the largest. A debug build costs 13,952 bytes a call, so the full
+/// depth wants 7 MiB there and the tests say so where it matters.
+///
+/// The limit is observable, since the diagnostic names it, but it is not
+/// a compatibility surface: no rule fixes it and it moves if the
+/// per-call cost does.
+// [spec:nsh:req:idiom.bounded-recursion]
+pub(crate) const MAX_CALL_DEPTH: usize = 512;
+
 fn evaluate_function(
     shell: &mut Shell,
     function: &FunctionDefinition,
@@ -2196,6 +2219,22 @@ fn evaluate_function(
     /* `saveparam = shellparam` plus the `shellparam.malloc = 0` that the C
      * puts inside the protected region so the epilogue's `freeparam` cannot
      * reach what the copy still points at. */
+    /* A call spends a stack frame and a script may recurse without
+     * meaning to, so the depth is bounded rather than trusted: `f() { f;
+     * }; f` otherwise overflows the stack, which Bash does too and dash
+     * does not. Bash's crash is not a behaviour to reproduce -- unbounded
+     * resource consumption is the named unsafety in
+     * [dec:nsh:safety-trumps-compatibility] -- so this follows dash and
+     * refuses, at the same depth and with the same words. Every kind of
+     * frame counts, because `.` inside a function nests the evaluator
+     * exactly as another call does. */
+    // [spec:nsh:req:idiom.bounded-recursion]
+    if shell.variables.call_stack.depth() >= MAX_CALL_DEPTH {
+        let mut message = b"Maximum function recursion depth (".to_vec();
+        message.extend_from_slice(MAX_CALL_DEPTH.to_string().as_bytes());
+        message.extend_from_slice(b") reached");
+        return Err(shell.diagnostics().shell_error(&message));
+    }
     let saved_parameters = crate::options::take_positional_parameters(shell);
     let saved_function_line = shell.evaluation.function_line;
     let saved_loop_depth = shell.evaluation.loop_depth;

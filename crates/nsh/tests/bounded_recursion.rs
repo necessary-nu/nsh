@@ -160,3 +160,46 @@ fn the_refusal_names_what_it_refused() {
         );
     });
 }
+
+/// A call spends a stack frame, and a script can recurse without meaning
+/// to. Bash leaves this unbounded and segfaults; dash refuses, and so
+/// does this.
+// [spec:nsh:req:idiom.bounded-recursion/test]
+#[test]
+fn runaway_calls_are_refused_not_fatal() {
+    with_stack(|| {
+        for (name, script) in [
+            ("direct", "f() { f; }\nf"),
+            ("mutual", "a() { b; }\nb() { a; }\na"),
+        ] {
+            let mut shell = executing_shell();
+            let outcome = shell.run(script.as_bytes());
+
+            assert!(outcome.is_err(), "{name} recursion was not refused");
+            let complained = shell.take_captured_stderr().expect("capture stderr");
+            assert!(
+                complained.contains_str("Maximum function recursion depth"),
+                "{name}: unexpected diagnostic: {}",
+                BStr::new(&complained),
+            );
+        }
+    });
+}
+
+/// Calls a script can actually mean are unaffected.
+// [spec:nsh:req:idiom.bounded-recursion/test]
+#[test]
+fn ordinary_call_depth_is_unaffected() {
+    with_stack(|| {
+        let mut shell = executing_shell();
+        let status = shell
+            .run(b"n=0\nf() { n=$((n+1)); [ $n -ge 100 ] && return 0; f; }\nf\necho $n")
+            .expect("100 nested calls run");
+
+        assert_eq!(status.code(), 0);
+        assert_eq!(
+            shell.take_captured_stdout().expect("capture stdout"),
+            b"100\n".to_vec(),
+        );
+    });
+}
