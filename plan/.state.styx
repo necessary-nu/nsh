@@ -1342,6 +1342,7 @@ assertions (
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
     {id optional-line-editor, kind @doing, author "brendan@necessary.nu", at 2026-08-23T23:35:12.415170204Z}
     {id bash-named-descriptor-redirection, kind @doing, author "brendan@necessary.nu", at 2026-08-24T09:55:13.013224858Z}
+    {id bash-select-and-time-grammar, kind @doing, author "brendan@necessary.nu", at 2026-08-24T10:07:50.753985924Z}
 )
 
 impl_evidence (

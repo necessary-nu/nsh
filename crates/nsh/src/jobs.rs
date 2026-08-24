@@ -1477,6 +1477,22 @@ fn render_node(node: Option<&Node>, text: &mut BString) {
             render_node(Some(command.right.as_ref()), text);
             push_command_text(b"; done", text);
         }
+        Node::Timed(command) => {
+            push_command_text(b"time ", text);
+            if command.posix_format {
+                push_command_text(b"-p ", text);
+            }
+            render_node(command.command.as_deref(), text);
+        }
+        Node::Select(command) => {
+            push_command_text(b"select ", text);
+            push_command_text(command.variable.as_bstr(), text);
+            push_command_text(b" in ", text);
+            render_command_list(&command.words, true, text);
+            push_command_text(b"; do ", text);
+            render_node(Some(command.body.as_ref()), text);
+            push_command_text(b"; done", text);
+        }
         Node::For(command) => {
             push_command_text(b"for ", text);
             push_command_text(command.variable.as_bstr(), text);

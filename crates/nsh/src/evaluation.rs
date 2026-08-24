@@ -29,6 +29,8 @@ mod bash_arrays;
 mod bash_conditional;
 pub(crate) mod bash_process_substitution;
 mod last_pipe;
+mod select;
+mod timed;
 mod trace;
 
 use crate::context::Shell;
@@ -678,6 +680,8 @@ pub fn evaluate_tree(
                 status
             }
             Node::For(command) => flow!(evaluate_for(shell, command, context)),
+            Node::Select(command) => flow!(select::evaluate_select(shell, command, context)),
+            Node::Timed(command) => flow!(timed::evaluate_timed(shell, command, context)),
             Node::While(command) => flow!(evaluate_loop(shell, command, false, context)),
             Node::Until(command) => flow!(evaluate_loop(shell, command, true, context)),
             Node::Subshell(command) => {
@@ -2314,8 +2318,11 @@ fn prehash_tree(shell: &mut Shell, node: Option<&Node>) -> Result<Flow, Error> {
             flow!(prehash_tree(shell, Some(conditional.then_branch.as_ref())));
             flow!(prehash_tree(shell, conditional.else_branch.as_deref()));
         }
-        Node::For(command) => {
+        Node::For(command) | Node::Select(command) => {
             flow!(prehash_tree(shell, Some(command.body.as_ref())));
+        }
+        Node::Timed(command) => {
+            flow!(prehash_tree(shell, command.command.as_deref()));
         }
         Node::Case(command) => {
             for clause in &command.clauses {

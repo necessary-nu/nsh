@@ -74,7 +74,12 @@ fn here_documents(node: &mut Node, bodies: &mut VecDeque<WordNode>) -> Result<()
                 here_documents(else_branch, bodies)?;
             }
         }
-        Node::For(command) => here_documents(&mut command.body, bodies)?,
+        Node::For(command) | Node::Select(command) => here_documents(&mut command.body, bodies)?,
+        Node::Timed(command) => {
+            if let Some(inner) = command.command.as_mut() {
+                here_documents(inner, bodies)?;
+            }
+        }
         Node::Case(command) => {
             for clause in &mut command.clauses {
                 if let Some(body) = &mut clause.body {

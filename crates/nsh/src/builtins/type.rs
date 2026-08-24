@@ -78,7 +78,7 @@ pub(crate) fn describe_command(
         }
 
         /* First look at the keywords */
-        if crate::parser::reserved_word(command).is_some() {
+        if crate::parser::reserved_word(command, shell.options.dialect()).is_some() {
             let bytes = if verbose {
                 b" is a shell keyword" as &[u8]
             } else {

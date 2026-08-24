@@ -276,7 +276,7 @@ fn resolve(shell: &mut Shell, requested: Requested, name: &BStr) -> Vec<Resoluti
 /// actually treats as such -- claiming `select` or `time` here would
 /// report a grammar the shell does not have.
 fn is_keyword(shell: &Shell, name: &BStr) -> bool {
-    if crate::parser::reserved_word(name).is_some() {
+    if crate::parser::reserved_word(name, shell.options.dialect()).is_some() {
         return true;
     }
     shell.options.dialect() == crate::options::Dialect::Bash

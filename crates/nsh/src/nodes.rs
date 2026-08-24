@@ -140,6 +140,17 @@ pub struct ForCommand {
     pub variable: NodeText,
 }
 
+/// A pipeline the shell reports the duration of.
+#[derive(Clone)]
+pub struct TimedCommand {
+    pub line: i32,
+    /// `time -p`, which reports seconds to two places instead of Bash's
+    /// `real\t0m0.000s`.
+    pub posix_format: bool,
+    /// A bare `time` has nothing to time and reports zeros.
+    pub command: Option<Box<Node>>,
+}
+
 /// A case command.
 #[derive(Clone)]
 pub struct CaseCommand {
@@ -265,6 +276,12 @@ pub enum Node {
     While(BinaryCommand),
     Until(BinaryCommand),
     For(ForCommand),
+    /// `select name in words; do list; done` -- Bash's menu loop, which
+    /// reuses [`ForCommand`] because the syntax is `for`'s exactly.
+    Select(ForCommand),
+    /// `time [-p] pipeline` -- a reserved word, so it can prefix a
+    /// built-in or a function, which an external `time` cannot.
+    Timed(TimedCommand),
     Case(CaseCommand),
     Function(FunctionDefinition),
     Word(WordNode),

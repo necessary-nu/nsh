@@ -21,7 +21,7 @@ use crate::nodes::{
     BinaryCommand, CaseClause, CaseCommand, CompoundCommand, DescriptorRedirection,
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
     ForCommand, FunctionDefinition, HereDocument, HereString, IfCommand, NegatedCommand, Node,
-    NodeText, Pipeline, Redirection, SimpleCommand, WordNode,
+    NodeText, Pipeline, Redirection, SimpleCommand, TimedCommand, WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
 use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, WordToken};
@@ -58,7 +58,9 @@ pub(crate) enum TokenKind {
     For,
     If,
     In,
+    Select,
     Then,
+    Time,
     Until,
     While,
     LeftBrace,
@@ -136,6 +138,8 @@ impl TokenKind {
             Self::For => b"\"for\"",
             Self::If => b"\"if\"",
             Self::In => b"\"in\"",
+            Self::Select => b"\"select\"",
+            Self::Time => b"\"time\"",
             Self::Then => b"\"then\"",
             Self::Until => b"\"until\"",
             Self::While => b"\"while\"",
@@ -229,7 +233,7 @@ impl TokenContext {
 // [spec:posix:def:token.reserved-words-optional]
 // [spec:posix:req:token.reserved-word-time]
 // [spec:posix:def:token.reserved-words-trailing-colon]
-static RESERVED_WORDS: [(&[u8], TokenKind); 16] = [
+static RESERVED_WORDS: [(&[u8], TokenKind); 18] = [
     (b"!", TokenKind::Bang),
     (b"case", TokenKind::Case),
     (b"do", TokenKind::Do),
@@ -241,7 +245,14 @@ static RESERVED_WORDS: [(&[u8], TokenKind); 16] = [
     (b"for", TokenKind::For),
     (b"if", TokenKind::If),
     (b"in", TokenKind::In),
+    /* Bash's, not POSIX's: a POSIX script may name a command `select`, so
+     * recognising it there would change what that script means. */
+    (b"select", TokenKind::Select),
     (b"then", TokenKind::Then),
+    /* POSIX's own -- XCU 2.4 reserves `time` -- so it is a keyword in
+     * both dialects rather than a Bash extension. */
+    // [spec:posix:req:token.reserved-word-time]
+    (b"time", TokenKind::Time),
     (b"until", TokenKind::Until),
     (b"while", TokenKind::While),
     (b"{", TokenKind::LeftBrace),
@@ -624,9 +635,26 @@ fn parse_and_or(shell: &mut Shell) -> Result<Option<Node>, Error> {
 // [spec:posix:syn:cmd.pipeline-format]
 // [spec:posix:req:cmd.pipeline-bang-subshell-separation]
 fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error> {
+    let line = crate::input::current_input_frame(&mut shell.input).line_number;
+    let first = read_token(shell, context)?.kind;
+    /* `time` prefixes the whole pipeline, `!` included -- `time ! true`
+     * times the negation and answers 1 -- so it is read before the `!`
+     * and wraps whatever the rest of this function builds. A bare `time`
+     * has no pipeline to time and reports zeros, which is why the command
+     * is optional. */
+    // [spec:posix:req:token.reserved-word-time]
+    // [spec:nsh:req:compat.bash.select-time-grammar]
+    if first == TokenKind::Time {
+        let posix_format = keywords::timed_posix_format(shell)?;
+        return Ok(Some(Node::Timed(TimedCommand {
+            line,
+            posix_format,
+            command: keywords::timed_pipeline(shell)?.map(Box::new),
+        })));
+    }
     let mut parsed_command: Option<Node>;
     let mut negate = false;
-    let command_context = if read_token(shell, context)?.kind == TokenKind::Bang {
+    let command_context = if first == TokenKind::Bang {
         negate = true;
         TokenContext::COMMAND_START
     } else {
@@ -766,56 +794,24 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
             arithmetic_form = true;
             parsed_command = Some(bash::arithmetic_for(shell, saved_line_number)?);
         } else {
-            if var_token.kind != TokenKind::Word
-                || var_token.quoted
-                || !is_valid_name(&shell.locale, shell.input.word_text())
-            {
-                return Err(syntax_error(shell, b"Bad for loop variable"));
-            }
-            /* the C stores `wordtext` into the node here, before any further
-             * token read can overwrite it */
-            let var = NodeText::from(shell.input.word_text());
-            let mut args: Vec<Node> = Vec::new();
-            if read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind == TokenKind::In
-            {
-                while read_token(shell, TokenContext::NONE)?.kind == TokenKind::Word {
-                    args.push(Node::Word(WordNode {
-                        word: mem::take(&mut shell.input.word),
-                    }));
-                }
-                if shell.input.last_token != TokenKind::Newline
-                    && shell.input.last_token != TokenKind::Semicolon
-                {
-                    return Err(expected_token_error(shell, None));
-                }
-            } else {
-                /* The implicit `"$@"` of a `for` with no `in` is syntax,
-                 * so construct the structural word directly. */
-                args.push(Node::Word(WordNode {
-                    word: ParsedWord::quoted_parameter(BString::from(b"@".as_slice())),
-                }));
-                /*
-                 * Newline or semicolon here is optional (but note
-                 * that the original Bourne shell only allowed NL).
-                 */
-                if shell.input.last_token != TokenKind::Semicolon {
-                    shell.input.token_pushed_back = true;
-                }
-            }
-            if read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind != TokenKind::Do
-            {
-                return Err(expected_token_error(shell, Some(TokenKind::Do)));
-            }
-            let parsed = list(shell, ListMode::Compound)?;
-            let body = required_compound_node(shell, parsed, TokenKind::Done)?;
-            parsed_command = Some(Node::For(ForCommand {
-                line: saved_line_number,
-                words: args,
-                body: Box::new(body),
-                variable: var,
-            }));
+            parsed_command = Some(Node::For(keywords::iteration_command(
+                shell,
+                saved_line_number,
+                var_token,
+            )?));
         }
         closing_token = (!arithmetic_form).then_some(TokenKind::Done);
+    } else if token == TokenKind::Select {
+        /* `for`'s syntax exactly; the menu and the read are the
+         * evaluator's, not the grammar's. */
+        // [spec:nsh:req:compat.bash.select-time-grammar]
+        let var_token = read_token(shell, TokenContext::NONE)?;
+        parsed_command = Some(Node::Select(keywords::iteration_command(
+            shell,
+            saved_line_number,
+            var_token,
+        )?));
+        closing_token = Some(TokenKind::Done);
     } else if token == TokenKind::Case {
         if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Word {
             return Err(expected_token_error(shell, Some(TokenKind::Word)));
@@ -1225,7 +1221,7 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
          * check for keywords
          */
         if context.reserved_words {
-            if let Some(kind) = reserved_word(shell.input.word_text()) {
+            if let Some(kind) = reserved_word(shell.input.word_text(), shell.options.dialect()) {
                 token.kind = kind;
                 shell.input.last_token = token.kind;
                 break;
@@ -2653,12 +2649,19 @@ pub fn render_prompt(shell: &mut Shell) -> BString {
 }
 
 /// Recognize a reserved word and return its semantic token directly.
+///
+/// The dialect decides one entry. `select` is Bash's, and a POSIX script
+/// may legitimately name a command that -- reserving it there would change
+/// what an existing script means. `time` is POSIX's own (XCU 2.4), so it
+/// is a keyword either way.
 // [spec:dash:sem:parser.findkwd-fn]
-pub fn reserved_word(s: &BStr) -> Option<TokenKind> {
+// [spec:posix:req:token.reserved-word-time]
+pub fn reserved_word(s: &BStr, dialect: crate::options::Dialect) -> Option<TokenKind> {
     RESERVED_WORDS
         .binary_search_by(|(word, _)| word.cmp(&s.as_ref()))
         .ok()
         .map(|index| RESERVED_WORDS[index].1)
+        .filter(|kind| *kind != TokenKind::Select || dialect == crate::options::Dialect::Bash)
 }
 
 // ---------------------------------------------------------------------
@@ -2676,6 +2679,7 @@ pub fn parser_eof(shell: &Shell) -> bool {
 }
 
 pub(crate) mod bash;
+mod keywords;
 
 mod finalize;
 

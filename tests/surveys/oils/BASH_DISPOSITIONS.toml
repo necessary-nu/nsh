@@ -81,11 +81,6 @@ disposition = "not-implemented"
 reason = "Bash raises `ERR` for `{ false; } &` and not for `false &`, because it forks an asynchronous *simple* command below the point the condition is raised and a compound one above it. This tree does not keep the braces -- `{ list; }` parses to the list itself -- so the two forms are the same node here and the trap runs for both."
 
 [[case]]
-id = "builtin-type-bash.test.sh:3"
-disposition = "not-implemented"
-reason = "`time` is not in the grammar, so `type -t time` reports nothing. Naming it a keyword while `time echo hi` is a command that is not found would advertise a grammar this shell does not have, so the gap is the reserved word rather than the classification. `select` is absent for the same reason and this case does not reach it."
-
-[[case]]
 id = "toysh.test.sh:6"
 disposition = "not-implemented"
 reason = "`{name}<word` is blocked on the descriptor model, not on the syntax. Bash allocates a descriptor above 9 -- deliberately, so the number cannot collide with one a script wrote by hand -- and stores it in a shell variable. `LogicalDescriptor::COUNT` is 10 and `DescriptorTable` is a fixed `[DescriptorSlot; 10]` indexed 0..9, so there is no representation for the descriptor this feature has to hand back; `LogicalDescriptor::new` refuses anything outside the array. Making the table dynamic touches the containment [contain-descriptor-materialization] established and the ownership rules [dec:nsh:host-owns-streams] sets, so it is an operator decision rather than an implementation. Filed with the three candidate shapes on `bash-named-descriptor-redirection`. Here-strings themselves work; only the named-descriptor form does not."

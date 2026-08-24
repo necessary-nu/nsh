@@ -167,6 +167,16 @@ impl Printer {
             Node::While(command) => self.loop_command(b"while", command, indent),
             Node::Until(command) => self.loop_command(b"until", command, indent),
             Node::For(command) => self.for_command(command, indent),
+            Node::Select(command) => self.select_command(command, indent),
+            Node::Timed(command) => {
+                self.out.extend_from_slice(b"time ");
+                if command.posix_format {
+                    self.out.extend_from_slice(b"-p ");
+                }
+                if let Some(inner) = &command.command {
+                    self.command(inner, indent);
+                }
+            }
             Node::Case(command) => self.case_command(command, indent),
             Node::Function(definition) => {
                 self.nested_function(definition.name.as_bstr(), &definition.body, indent);
@@ -244,8 +254,17 @@ impl Printer {
         self.out.extend_from_slice(b"done");
     }
 
+    /// `select` reprints as `select`, and is otherwise a `for`.
+    fn select_command(&mut self, command: &ForCommand, indent: usize) {
+        self.iteration(b"select ", command, indent);
+    }
+
     fn for_command(&mut self, command: &ForCommand, indent: usize) {
-        self.out.extend_from_slice(b"for ");
+        self.iteration(b"for ", command, indent);
+    }
+
+    fn iteration(&mut self, keyword: &[u8], command: &ForCommand, indent: usize) {
+        self.out.extend_from_slice(keyword);
         self.out.extend_from_slice(command.variable.as_bstr());
         if !command.words.is_empty() {
             self.out.extend_from_slice(b" in");

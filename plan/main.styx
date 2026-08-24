@@ -6358,6 +6358,14 @@ children (
                                 id bash-select-and-time-grammar
                                 title "Add `select` and `time` to the grammar"
                                 kind @feat
+                                log (
+                                    {
+                                        at 2026-08-24T10:07:50.753985924Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
+                                )
                             }
 
                             {

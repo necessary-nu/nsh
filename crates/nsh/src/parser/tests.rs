@@ -1,4 +1,5 @@
 use super::*;
+use crate::options::Dialect;
 
 // [spec:nsh:req:idiom.immutable-ast/test]
 #[test]
@@ -36,18 +37,41 @@ fn findkwd_preserves_the_sorted_table_contract() {
         }
         previous = Some(bytes);
 
-        assert_eq!(reserved_word(BStr::new(bytes)), Some(kind));
+        assert_eq!(reserved_word(BStr::new(bytes), Dialect::Bash), Some(kind));
 
         let mut longer = bytes.to_vec();
         longer.push(b'x');
-        assert_eq!(reserved_word(BStr::new(&longer)), None);
+        assert_eq!(reserved_word(BStr::new(&longer), Dialect::Bash), None);
     }
 
     for missing in [b"".as_slice(), b"cas", b"integer", b"zebra"] {
-        assert_eq!(reserved_word(BStr::new(missing)), None);
+        assert_eq!(reserved_word(BStr::new(missing), Dialect::Bash), None);
     }
 
-    assert_eq!(reserved_word(BStr::new(&[0xff_u8])), None);
+    assert_eq!(reserved_word(BStr::new(&[0xff_u8]), Dialect::Bash), None);
+}
+
+/// `select` is Bash's alone: reserving it in the POSIX dialect would
+/// change what a script naming a command `select` means. `time` is
+/// POSIX's own (XCU 2.4) and is reserved in both.
+// [spec:posix:req:token.reserved-word-time/test]
+#[test]
+fn the_dialect_decides_one_reserved_word() {
+    assert_eq!(
+        reserved_word(BStr::new(b"select"), Dialect::Bash),
+        Some(TokenKind::Select),
+    );
+    assert_eq!(reserved_word(BStr::new(b"select"), Dialect::Posix), None);
+    for dialect in [Dialect::Posix, Dialect::Bash] {
+        assert_eq!(
+            reserved_word(BStr::new(b"time"), dialect),
+            Some(TokenKind::Time),
+        );
+        assert_eq!(
+            reserved_word(BStr::new(b"while"), dialect),
+            Some(TokenKind::While),
+        );
+    }
 }
 
 #[test]
