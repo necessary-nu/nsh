@@ -15,8 +15,8 @@
 //! `noexec` is what keeps the target pure. The parser runs and nothing it
 //! parses is executed, so a corpus entry cannot fork, write a file or
 //! spawn anything, and the fuzzer stays fast enough to be worth running.
-//! Run it under `scripts/sandboxed` regardless -- see `fuzz/README.md`
-//! for why that is not optional.
+//! See `fuzz/README.md` for the containment rule used when running
+//! campaigns.
 
 #![no_main]
 

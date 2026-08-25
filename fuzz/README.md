@@ -12,13 +12,17 @@ Real scripts are far better starting points than random bytes: they reach
 constructs a generator takes a very long time to stumble into. Neither the
 corpus nor the artifacts are committed.
 
-## Containment is not optional
+## Containment
 
-`fuzz/run.sh` goes through `scripts/sandboxed`, and nothing here should be
-run any other way. The rule is the same one the rest of the test tree
-follows, and the reason is sharper for a fuzzer than for a test: the whole
-point of one is to reach states nobody predicted, so "this target cannot
-execute anything" is precisely a claim it is trying to falsify.
+Use exactly one process containment layer. On a normal host, run through
+`fuzz/run.sh`; it wraps `cargo fuzz run` with `scripts/sandboxed`. Inside
+an already managed workspace sandbox, run the equivalent `cargo fuzz`
+command directly instead of nesting `scripts/sandboxed`.
+
+The reason is sharper for a fuzzer than for a test: the whole point of one
+is to reach states nobody predicted, so "this target cannot execute
+anything" is precisely a claim it is trying to falsify. The managed
+workspace sandbox already supplies that outer boundary in Codex sessions.
 
 ## Why this exists
 
@@ -82,20 +86,15 @@ unbounded backtrack is what the budgets exist to prevent.
 
 ## What is not covered yet
 
-* **Expansion and execution.** `Shell::expand_word` runs command
-  substitution by design, so a target over it executes whatever the fuzzer
-  writes. That is survivable under the sandbox and is how the differential
-  corpora already work, but it forks per iteration and wants its own
-  budget rather than being bolted onto this one.
-* **A parse/print round-trip.** `parse -> print -> parse` should reach the
-  same tree, and the printer in `crates/nsh/src/nodes/source.rs` is the
-  natural oracle. It is `pub(crate)`, so this needs an internals surface
-  the fuzz crate can see — a `fuzzing` feature — which is a decision about
-  the public surface rather than a line of code.
-* **Differential fuzzing against Bash.** The 119 corpora under
-  `tests/corpus/` are differential against *dash* and cover POSIX mode
-  only; everything the Bash dialect adds has no differential oracle at
-  all.
+* **Long-running campaigns.** The target set now covers parser,
+  matcher, quoting, field splitting, arithmetic, parameter expansion,
+  `printf`, redirection and Bash-mode differential runs. The remaining
+  work is operational: scheduled campaigns, corpus reduction, and turning
+  each finding into a regression before the fix lands.
+* **Differential dispositions.** Bash-mode differential fuzzing will keep
+  finding deliberate divergences. Those need a register, in the shape of
+  Oils' `BASH_DISPOSITIONS.toml`, so known policy differences do not keep
+  reporting as fresh failures.
 
 ## Maintenance
 
@@ -105,4 +104,4 @@ also means the workspace `fmt` and `clippy` gates do not see it, so a
 target can rot without anything reporting it. Build it after touching the
 public API:
 
-    cd fuzz && cargo +nightly fuzz build
+    cargo +nightly fuzz build

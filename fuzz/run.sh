@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Build and run one fuzz target under process-tree containment.
+# Build and run one fuzz target under process-tree containment on a normal host.
 #
-# Containment is not optional even though the parse target runs under
-# `noexec`. The whole point of a fuzzer is to reach states nobody
-# predicted, and "noexec cannot execute anything" is one of the things it
-# is looking for a counterexample to. Everything here therefore goes
-# through scripts/sandboxed, which is the same rule the rest of the test
-# tree follows.
+# Use this wrapper when there is no outer sandbox already managing the
+# workspace. In a managed Codex session, run cargo-fuzz directly from the
+# existing sandbox instead of nesting this wrapper.
 #
 #   fuzz/run.sh parse              # run until interrupted
 #   fuzz/run.sh parse 300          # run for 300 seconds

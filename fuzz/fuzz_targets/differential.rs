@@ -229,10 +229,7 @@ impl Stmt {
                 b.render(out, depth + 1);
             }
             Self::AndOr(a) => {
-                out.push_str(&format!(
-                    "[ -n '{}' ] && echo yes || echo no\n",
-                    a.text(),
-                ));
+                out.push_str(&format!("[ -n '{}' ] && echo yes || echo no\n", a.text(),));
             }
             Self::Negate(body) => {
                 out.push_str("! ");
@@ -279,6 +276,13 @@ struct Outcome {
     stdout: Vec<u8>,
     status: i32,
     refused: bool,
+}
+
+/// A stable identifier for an artifact without printing generated shell text.
+fn fingerprint(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 fn under_nsh(script: &str) -> Option<Outcome> {
@@ -340,18 +344,17 @@ fuzz_target!(|data: &[u8]| {
     }
     assert!(
         !ours.refused,
-        "nsh refused a script bash ran\n--- script ---\n{script}\
-         --- bash (status {their_status}) ---\n{}",
-        bstr::BStr::new(&theirs),
+        "nsh refused a Bash script: input={:016x} bash_status={their_status} bash_stdout={:016x}",
+        fingerprint(data),
+        fingerprint(&theirs),
     );
 
     assert!(
         ours.stdout == theirs && ours.status == their_status,
-        "disagreed with bash\n--- script ---\n{script}\
-         --- nsh    (status {}) ---\n{}\n\
-         --- bash   (status {their_status}) ---\n{}",
+        "nsh/Bash disagreement: input={:016x} nsh_status={} bash_status={their_status} nsh_stdout={:016x} bash_stdout={:016x}",
+        fingerprint(data),
         ours.status,
-        bstr::BStr::new(&ours.stdout),
-        bstr::BStr::new(&theirs),
+        fingerprint(&ours.stdout),
+        fingerprint(&theirs),
     );
 });

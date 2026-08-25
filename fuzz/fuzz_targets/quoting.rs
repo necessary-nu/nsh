@@ -19,7 +19,8 @@
 //! Which is why the check runs the round-trip through `eval` rather than
 //! comparing strings in Rust: if the quoting leaks, `eval` is where it
 //! would execute, and a corpus entry that manages it is exactly the
-//! finding. Contained by `scripts/sandboxed` like everything else here.
+//! finding. The target does not print fuzzer bytes in panic messages; it
+//! reports stable fingerprints instead.
 //!
 //! The verdict comes back as an exit status the shell computes, so the
 //! comparison happens in the shell's own `[` and cannot be fooled by a
@@ -38,6 +39,13 @@ printf -v q '%q' \"$X\"\n\
 eval \"z=$q\"\n\
 [ \"$z\" = \"$X\" ] || exit 8\n\
 exit 0\n";
+
+/// A stable artifact identifier that does not render fuzzer bytes as text.
+fn fingerprint(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
 
 fuzz_target!(|data: &[u8]| {
     /* A shell variable cannot hold a NUL, so a value containing one is
@@ -70,12 +78,12 @@ fuzz_target!(|data: &[u8]| {
 
     assert!(
         code == 0,
-        "quoting did not round-trip ({}): {:?}",
+        "quoting did not round-trip via {}: input={:016x}",
         match code {
             9 => "${X@Q}",
             8 => "printf %q",
             _ => "script did not complete",
         },
-        bstr::BStr::new(data),
+        fingerprint(data),
     );
 });

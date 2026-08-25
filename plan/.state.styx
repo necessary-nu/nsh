@@ -1343,6 +1343,7 @@ assertions (
     {id optional-line-editor, kind @doing, author "brendan@necessary.nu", at 2026-08-23T23:35:12.415170204Z}
     {id bash-named-descriptor-redirection, kind @doing, author "brendan@necessary.nu", at 2026-08-24T09:55:13.013224858Z}
     {id bash-select-and-time-grammar, kind @doing, author "brendan@necessary.nu", at 2026-08-24T10:07:50.753985924Z}
+    {id fuzz-the-shell, kind @complete, author "brendan@necessary.nu", at 2026-08-25T14:31:05.885569498Z}
 )
 
 impl_evidence (

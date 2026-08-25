@@ -108,6 +108,13 @@ pub use crate::source::{Source, Startup};
 pub use crate::status::{ExitStatus, Signal};
 pub use crate::streams::Streams;
 
+// This is enabled only by the cargo-fuzz workspace. It keeps the normal
+// library surface closed while letting the round-trip property exercise the
+// parser and printer without executing the generated program text.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing;
+
 // ---- the shell instance ----------------------------------------------
 //
 // The receiver every function that touches shell state is being given,

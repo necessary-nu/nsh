@@ -18,6 +18,7 @@ bstr = "1"
 
 [dependencies.nsh]
 path = "../crates/nsh"
+features = ["fuzzing"]
 
 [[bin]]
 name = "parse"
@@ -43,6 +44,48 @@ bench = false
 [[bin]]
 name = "differential"
 path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "field_split"
+path = "fuzz_targets/field_split.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "arithmetic"
+path = "fuzz_targets/arithmetic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parameter"
+path = "fuzz_targets/parameter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "printf"
+path = "fuzz_targets/printf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "redirection"
+path = "fuzz_targets/redirection.rs"
 test = false
 doc = false
 bench = false

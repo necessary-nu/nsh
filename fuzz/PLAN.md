@@ -70,12 +70,12 @@ Status: **done**, **next**, **blocked**.
 | 1 | Parser: bytes → AST, under `noexec` | returns | no | done |
 | 2 | Glob, extglob and ERE matching | returns + hang | no | done |
 | 3 | Quoting round-trip: `${x@Q}`, `printf %q` | **property** | no | done |
-| 4 | Field splitting and `IFS` | **property** | no | next |
-| 5 | Arithmetic `$(( ))` | returns + differential | no | next |
-| 6 | Parameter expansion `${...}` operators | returns + differential | no | next |
-| 7 | `printf` format interpreter | returns + differential | no | next |
-| 8 | Here-documents, redirection, descriptor table | returns | some | next |
-| 9 | `parse → print → parse` | **property** | no | blocked |
+| 4 | Field splitting and `IFS` | **property** | no | done |
+| 5 | Arithmetic `$(( ))` | returns + differential | no | done |
+| 6 | Parameter expansion `${...}` operators | returns + differential | no | done |
+| 7 | `printf` format interpreter | returns + differential | no | done |
+| 8 | Here-documents, redirection, descriptor table | returns + differential | some | done |
+| 9 | `parse → print → parse` | **property** | no | done |
 | 10 | Whole shell vs GNU Bash 5.2, Bash dialect | **differential** | yes | done |
 | 11 | Whole shell vs dash, POSIX mode | **differential** | yes | partial |
 | 12 | Locale and multibyte decoding | returns | no | later |
@@ -88,13 +88,6 @@ still one decision away.
 
 ## What is blocked, and on what
 
-* **Target 9 needs an internals surface.** The printer
-  (`crates/nsh/src/nodes/source.rs`) is `pub(crate)`, as are the pattern
-  matcher and the arithmetic evaluator, so a fuzz target cannot reach any
-  of them directly. The fix is a `fuzzing` feature on the `nsh` crate
-  exporting a `#[doc(hidden)]` module. That is a decision about the public
-  surface under `[dec:nsh:public-surface]`, not a line of code, and it
-  wants the operator's assent before it exists.
 * **Target 10 needs a divergence policy.** A differential fuzzer against
   Bash will find divergences that are deliberate --
   `[dec:nsh:safety-trumps-compatibility]` has three registered already --
@@ -117,10 +110,10 @@ pinned by a test and not by the presence of a file. That is how the
 is worth doing periodically as well: `debug_assert!` fires there and not
 in release, and this tree has several that encode real invariants.
 
-**Containment.** Every run goes through `scripts/sandboxed`. Not
-negotiable, and sharper for a fuzzer than for a test: the point of one is
-to reach states nobody predicted, so "this target cannot execute
-anything" is precisely a claim it is trying to falsify.
+**Containment.** Use one outer sandbox. On a normal host that is
+`fuzz/run.sh`, which wraps `cargo fuzz run` with `scripts/sandboxed`.
+Inside a managed workspace sandbox, run `cargo fuzz` directly and do not
+nest another sandbox layer.
 
 **Cadence.** There is no CI in this repository, so this is a manual
 discipline: run the byte targets for an hour after any parser or lexer
@@ -137,6 +130,7 @@ the one below cannot, and that is now measured rather than argued.
 | returns | `parse` | `<<${e` -- five bytes -- panicked; four sites read a byte out of an end-of-input item |
 | property | `quoting` | the shell emitted `$'\E'` from `@Q` and could not read it back; one byte, found in seconds |
 | differential | `differential` | Bash accepts `! ! cmd`, this shell refused it |
+| differential | `differential` | unquoted `$@` with non-whitespace `IFS` lost an empty field at a positional boundary |
 
 `parse` and `matcher` executed over 800,000 inputs between them without
 finding either of the last two, because both only assert that the shell

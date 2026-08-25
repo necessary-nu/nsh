@@ -1281,7 +1281,7 @@ mod tests {
                 splittable: false,
             }]
         );
-        assert!(field.empty_anchors.is_empty());
+        assert_eq!(field.empty_anchors, vec![3]);
 
         let empty = Field::from_bytes(b"", true, false, true);
         assert_eq!(empty.empty_anchors, vec![0]);

@@ -74,6 +74,18 @@ fn protected_bytes_keep_the_rest_of_the_record() {
     }
 }
 
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+#[test]
+fn unquoted_at_preserves_ifs_empty_fields() {
+    let _guard = serialized();
+    let mut shell = new_shell(true);
+    let script = b"set -- 'a#b' 'a%b'\nIFS='a b'\nprintf '[%s]\\n' $@";
+    assert_eq!(
+        run(&mut shell, script),
+        (0, b"[]\n[#]\n[]\n[]\n[%]\n".to_vec()),
+    );
+}
+
 #[test]
 fn let_reports_the_last_expression_as_a_status() {
     let _guard = serialized();

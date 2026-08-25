@@ -62,6 +62,18 @@ pub(crate) fn function_definition(name: &BStr, body: &Node) -> BString {
     printer.out
 }
 
+/// Print one parsed command tree as canonical shell source.
+///
+/// This is separate from [`function_definition`] because the fuzzing
+/// round-trip needs to render an arbitrary top-level command without first
+/// storing it as a function definition.
+#[cfg(feature = "fuzzing")]
+pub(crate) fn command(node: &Node) -> BString {
+    let mut printer = Printer::new();
+    printer.list(node, 0);
+    printer.out
+}
+
 /// The output buffer and the here-document bodies owed to the next line.
 struct Printer {
     out: BString,

@@ -6,9 +6,9 @@ use crate::pattern::{Pattern, PatternOptions};
 pub(super) struct Field {
     pub(super) bytes: BString,
     pub(super) regions: Vec<FieldRegion>,
-    /// A quoted zero-width contribution at each byte boundary. Empty quotes
-    /// can survive field splitting at the beginning, middle, or end of a
-    /// word, so their sparse offsets are retained explicitly.
+    /// A zero-width contribution at each byte boundary. Empty quotes and the
+    /// boundary between non-final unquoted `$@` parameters can each survive
+    /// field splitting, so their sparse offsets are retained explicitly.
     pub(super) empty_anchors: Vec<usize>,
 }
 
@@ -54,10 +54,7 @@ impl Field {
                 })
                 .into_iter()
                 .collect(),
-            empty_anchors: (preserve_empty && len == 0)
-                .then_some(0)
-                .into_iter()
-                .collect(),
+            empty_anchors: preserve_empty.then_some(len).into_iter().collect(),
         }
     }
 

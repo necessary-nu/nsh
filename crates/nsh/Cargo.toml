@@ -16,6 +16,9 @@ path = "src/lib.rs"
 # Off by default so embedding the shell does not link a line editor;
 # `nsh-cli` turns it on, because a shell frontend is exactly what needs it.
 edit = ["dep:nshedit", "dep:nshterm", "nsh-platform/edit"]
+# A deliberately narrow, hidden interface for the separate cargo-fuzz
+# workspace. It exposes canonical parse-and-printing, not parser internals.
+fuzzing = []
 
 [dependencies]
 bstr = "1"
