@@ -92,7 +92,7 @@ fn select(
             listing.extend_from_slice(name);
             if shell.options.shopt(crate::options::BashShopt::ExtDebug) {
                 listing.push(b' ');
-                listing.extend_from_slice(definition.line.to_string().as_bytes());
+                listing.extend_from_slice(definition.line.get().to_string().as_bytes());
                 listing.push(b' ');
                 listing.extend_from_slice(&crate::variables::call_stack::definition_source(
                     shell, name,

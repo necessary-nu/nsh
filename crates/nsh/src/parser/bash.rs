@@ -14,6 +14,7 @@ use super::{
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
+use crate::nodes::SourceLine;
 use crate::nodes::{
     BashArithmeticCommand, BashArithmeticFor, BashArrayAssignment, BashArrayElement,
     BashArrayValue, BashAssignmentOperator, BashConditional, BashConditionalExpr, BashFunction,
@@ -42,7 +43,7 @@ pub(super) fn active(shell: &Shell) -> bool {
 pub(super) fn command_prefix(
     shell: &mut Shell,
     token: TokenKind,
-    line: i32,
+    line: SourceLine,
 ) -> Result<Option<Node>, Error> {
     if !active(shell) {
         return Ok(None);
@@ -62,14 +63,14 @@ pub(super) fn command_prefix(
     }
 }
 
-pub(super) fn arithmetic_command(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+pub(super) fn arithmetic_command(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
     let expression = arithmetic_text(shell)?;
     Ok(Node::Bash(BashNode::ArithmeticCommand(
         BashArithmeticCommand { line, expression },
     )))
 }
 
-pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+pub(super) fn arithmetic_for(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
     let text = arithmetic_text(shell)?;
     let [init, test, update] = for_clauses(shell, text.as_bstr())?;
 
@@ -116,14 +117,14 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error
 /// rather than cleared, because a conditional can nest inside a command
 /// substitution that appears in such a pattern.
 // [spec:nsh:req:compat.bash.conditionals-arithmetic]
-pub(super) fn conditional(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+pub(super) fn conditional(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
     let enclosing = mem::replace(&mut shell.input.parsing_conditional, false);
     let parsed = conditional_expression(shell, line);
     shell.input.parsing_conditional = enclosing;
     parsed
 }
 
-fn conditional_expression(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+fn conditional_expression(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
     let first = read_token(shell, TokenContext::NONE)?;
     // `[[ ]]` has nothing to be true or false about, and Bash rejects it
     // while parsing rather than answering with a status.
@@ -159,7 +160,7 @@ pub(super) fn accepts_function_name(shell: &mut Shell, name: &BStr) -> bool {
 }
 
 // [spec:nsh:req:idiom.structural-ast]
-pub(super) fn function(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+pub(super) fn function(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
     let name_token = read_token(shell, TokenContext::NONE)?;
     if name_token.kind != TokenKind::Word || shell.input.word_text().is_empty() {
         return Err(syntax_error(shell, b"invalid Bash function name"));

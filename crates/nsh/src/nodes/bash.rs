@@ -9,12 +9,12 @@
     reason = "Bash syntax is parsed ahead of the paused evaluator implementation"
 )]
 
-use super::{Node, NodeText, WordNode};
+use super::{Node, NodeText, SourceLine, WordNode};
 
 /// Bash-only syntax in the shell's owned parse tree.
 // [spec:nsh:req:idiom.structural-ast]
 // [spec:nsh:req:compat.bash.parser-ast]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum BashNode {
     Conditional(Box<BashConditional>),
     ArithmeticCommand(BashArithmeticCommand),
@@ -25,14 +25,14 @@ pub(crate) enum BashNode {
 }
 
 /// A `[[ expression ]]` command.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashConditional {
-    pub(crate) line: i32,
+    pub(crate) line: SourceLine,
     pub(crate) expression: BashConditionalExpr,
 }
 
 /// The precedence-bearing expression inside `[[ ... ]]`.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum BashConditionalExpr {
     Empty,
     Word(WordNode),
@@ -52,16 +52,16 @@ pub(crate) enum BashConditionalExpr {
 }
 
 /// A `(( expression ))` command.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashArithmeticCommand {
-    pub(crate) line: i32,
+    pub(crate) line: SourceLine,
     pub(crate) expression: NodeText,
 }
 
 /// A `for (( init; test; update )); do ...; done` command.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashArithmeticFor {
-    pub(crate) line: i32,
+    pub(crate) line: SourceLine,
     pub(crate) init: NodeText,
     pub(crate) test: NodeText,
     pub(crate) update: NodeText,
@@ -76,9 +76,9 @@ pub(crate) enum BashFunctionStyle {
 }
 
 /// A function introduced by Bash's `function` reserved word.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashFunction {
-    pub(crate) line: i32,
+    pub(crate) line: SourceLine,
     pub(crate) name: NodeText,
     pub(crate) style: BashFunctionStyle,
     pub(crate) body: Box<Node>,
@@ -92,7 +92,7 @@ pub(crate) enum BashAssignmentOperator {
 }
 
 /// An indexed or compound array assignment.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashArrayAssignment {
     pub(crate) name: NodeText,
     pub(crate) subscript: Option<WordNode>,
@@ -101,14 +101,14 @@ pub(crate) struct BashArrayAssignment {
 }
 
 /// The right-hand side of an array assignment.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum BashArrayValue {
     Word(WordNode),
     Compound(Vec<BashArrayElement>),
 }
 
 /// One word in a compound array assignment.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashArrayElement {
     pub(crate) subscript: Option<WordNode>,
     pub(crate) operator: BashAssignmentOperator,
@@ -123,7 +123,7 @@ pub(crate) enum BashProcessDirection {
 }
 
 /// An owned `<(list)` or `>(list)` embedded in a word.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashProcessSubstitution {
     pub(crate) direction: BashProcessDirection,
     pub(crate) body: Option<Box<Node>>,

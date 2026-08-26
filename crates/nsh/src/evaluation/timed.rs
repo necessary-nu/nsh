@@ -62,7 +62,7 @@ pub(super) fn evaluate_timed(
     command: &TimedCommand,
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
-    record_command_line(shell, command.line);
+    record_command_line(shell, command.line.get());
 
     let started = Durations::now();
     /* The pipeline's own outcome is what `time` answers with, including a

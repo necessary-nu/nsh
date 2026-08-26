@@ -58,7 +58,7 @@ pub(crate) use bash::{
 /// Here the bytes are owned from the moment the parser produces them, so both
 /// cases are the same case and `Clone` is derived.
 ///
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct NodeText(BString);
 
 impl NodeText {
@@ -91,40 +91,73 @@ impl From<&BStr> for NodeText {
     }
 }
 
+/// The input line a grammar form was parsed on.
+///
+/// A position is provenance, not identity: two forms that differ only in
+/// where they were read are the same form, and printing a tree relocates
+/// every line in it. So all positions compare equal, and code that really
+/// wants the number asks for it with [`SourceLine::get`]. That is what lets
+/// [`spec:nsh:req:idiom.printable-ast`] be checked by comparing trees.
+// [spec:nsh:req:idiom.printable-ast]
+#[derive(Clone, Copy, Debug, Eq)]
+pub struct SourceLine(i32);
+
+impl SourceLine {
+    pub const fn new(line: i32) -> SourceLine {
+        SourceLine(line)
+    }
+
+    pub const fn get(self) -> i32 {
+        self.0
+    }
+}
+
+impl PartialEq for SourceLine {
+    fn eq(&self, _: &SourceLine) -> bool {
+        true
+    }
+}
+
+impl From<i32> for SourceLine {
+    fn from(line: i32) -> Self {
+        SourceLine(line)
+    }
+}
+
 /// A simple command and its lexical components.
 // [spec:nsh:req:idiom.structural-ast]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
-    pub line: i32,
+    pub line: SourceLine,
     pub assignments: Vec<Node>,
     pub arguments: Vec<Node>,
     pub redirections: Vec<Redirection>,
 }
 
 /// A pipeline of commands.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Pipeline {
     pub background: bool,
     pub commands: Vec<Node>,
 }
 
 /// A command wrapped by redirection, background execution, or a subshell.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CompoundCommand {
-    pub line: i32,
+    pub line: SourceLine,
     pub command: Box<Node>,
     pub redirections: Vec<Redirection>,
 }
 
 /// The two children of a binary grammar form.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct BinaryCommand {
     pub left: Box<Node>,
     pub right: Box<Node>,
 }
 
 /// An if command.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct IfCommand {
     pub condition: Box<Node>,
     pub then_branch: Box<Node>,
@@ -132,18 +165,18 @@ pub struct IfCommand {
 }
 
 /// A for command.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ForCommand {
-    pub line: i32,
+    pub line: SourceLine,
     pub words: Vec<Node>,
     pub body: Box<Node>,
     pub variable: NodeText,
 }
 
 /// A pipeline the shell reports the duration of.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct TimedCommand {
-    pub line: i32,
+    pub line: SourceLine,
     /// `time -p`, which reports seconds to two places instead of Bash's
     /// `real\t0m0.000s`.
     pub posix_format: bool,
@@ -152,15 +185,15 @@ pub struct TimedCommand {
 }
 
 /// A case command.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CaseCommand {
-    pub line: i32,
+    pub line: SourceLine,
     pub word: Box<Node>,
     pub clauses: Vec<CaseClause>,
 }
 
 /// One case clause.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CaseClause {
     pub patterns: Vec<Node>,
     pub body: Option<Box<Node>>,
@@ -168,15 +201,15 @@ pub struct CaseClause {
 }
 
 /// A shell function definition.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FunctionDefinition {
-    pub line: i32,
+    pub line: SourceLine,
     pub name: NodeText,
     pub body: Box<Node>,
 }
 
 /// A parsed word stored in the syntax tree.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct WordNode {
     pub word: ParsedWord,
 }
@@ -194,7 +227,7 @@ pub enum FileRedirectionOperator {
 /// A parsed redirection. Redirections are syntax attached to commands, not
 /// commands themselves, so they do not inhabit [`Node`].
 // [spec:nsh:req:idiom.immutable-ast]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Redirection {
     File(FileRedirection),
     Descriptor(DescriptorRedirection),
@@ -204,7 +237,7 @@ pub enum Redirection {
 
 /// A redirection whose operand names a file.
 // [spec:nsh:def:idiom.logical-descriptors]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FileRedirection {
     pub operator: FileRedirectionOperator,
     pub descriptor: LogicalDescriptor,
@@ -219,7 +252,7 @@ pub enum DescriptorRedirectionOperator {
 }
 
 /// The parsed operand of `<&` or `>&`.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum DescriptorTarget {
     Number(LogicalDescriptor),
     Close,
@@ -227,7 +260,7 @@ pub enum DescriptorTarget {
 }
 
 /// A redirection whose operand names another shell descriptor.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DescriptorRedirection {
     pub operator: DescriptorRedirectionOperator,
     pub descriptor: LogicalDescriptor,
@@ -235,7 +268,7 @@ pub struct DescriptorRedirection {
 }
 
 /// A here-document redirection.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HereDocument {
     pub descriptor: LogicalDescriptor,
     pub expand: bool,
@@ -248,21 +281,21 @@ pub struct HereDocument {
 /// than lines of input: the word is expanded once, a newline is appended,
 /// and the result is read from the descriptor.
 // [spec:nsh:req:compat.bash.expansion-globbing]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HereString {
     pub descriptor: LogicalDescriptor,
     pub word: WordNode,
 }
 
 /// A negated command.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct NegatedCommand {
     pub command: Box<Node>,
 }
 
 /// The shell syntax tree.
 // [spec:nsh:req:idiom.structural-ast]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Node {
     Command(Box<SimpleCommand>),
     Pipeline(Pipeline),

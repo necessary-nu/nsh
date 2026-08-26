@@ -10,8 +10,8 @@ use bstr::{BStr, BString};
 
 use super::{
     CaseClause, CaseCommand, Error, ForCommand, IfCommand, ListMode, Node, NodeText, ParsedWord,
-    Shell, Token, TokenContext, TokenKind, WordNode, command, expected_token_error, is_valid_name,
-    list, mem, pipeline, read_token, required_compound_node, syntax_error,
+    Shell, SourceLine, Token, TokenContext, TokenKind, WordNode, command, expected_token_error,
+    is_valid_name, list, mem, pipeline, read_token, required_compound_node, syntax_error,
 };
 
 /// How deeply one parse unit may nest commands.
@@ -173,7 +173,7 @@ pub(super) fn case_command(shell: &mut Shell, line: i32) -> Result<Node, Error> 
         }
     }
     Ok(Node::Case(CaseCommand {
-        line,
+        line: SourceLine::new(line),
         word: Box::new(expr),
         clauses: cases,
     }))
@@ -232,7 +232,7 @@ pub(super) fn iteration_command(
     let parsed = list(shell, ListMode::Compound)?;
     let body = required_compound_node(shell, parsed, TokenKind::Done)?;
     Ok(ForCommand {
-        line,
+        line: SourceLine::new(line),
         words,
         body: Box::new(body),
         variable,

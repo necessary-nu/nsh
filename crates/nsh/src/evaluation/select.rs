@@ -32,7 +32,7 @@ pub(super) fn evaluate_select(
     command: &ForCommand,
     context: super::EvaluationContext,
 ) -> Result<Flow, Error> {
-    record_command_line(shell, command.line);
+    record_command_line(shell, command.line.get());
     let context = context.tested_only();
 
     let mut expanded_fields = ExpandedFields::new();

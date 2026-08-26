@@ -646,7 +646,7 @@ pub fn evaluate_tree(
         // [spec:nsh:req:idiom.structural-ast]
         status = match node {
             Node::Redirect(redirection) => {
-                record_command_line(shell, redirection.line);
+                record_command_line(shell, redirection.line.get());
                 let expanded_redirections = expand_redirections(shell, &redirection.redirections)?;
                 let outcome = crate::resource::with_resources(shell, |shell, resources| {
                     match resources.apply_redirections(shell, &expanded_redirections) {
@@ -796,14 +796,14 @@ pub fn evaluate_tree(
             }
             Node::Bash(crate::nodes::BashNode::Conditional(conditional)) => {
                 check_exit = true;
-                record_command_line(shell, conditional.line);
+                record_command_line(shell, conditional.line.get());
                 // [spec:nsh:req:compat.bash.traps-introspection]
                 flow!(crate::trap::bash::run_debug(shell));
                 bash_conditional::evaluate(shell, conditional)?
             }
             Node::Bash(crate::nodes::BashNode::ArithmeticCommand(arithmetic)) => {
                 check_exit = true;
-                record_command_line(shell, arithmetic.line);
+                record_command_line(shell, arithmetic.line.get());
                 // [spec:nsh:req:compat.bash.traps-introspection]
                 flow!(crate::trap::bash::run_debug(shell));
                 bash_arithmetic::command(shell, arithmetic)?
@@ -957,7 +957,7 @@ fn evaluate_for(
     let mut status: ExitStatus;
     let context = context.tested_only();
 
-    record_command_line(shell, command.line);
+    record_command_line(shell, command.line.get());
 
     for argument in &command.words {
         crate::expand::expand_argument(
@@ -973,7 +973,7 @@ fn evaluate_for(
     for field in &expanded_fields.fields {
         /* Bash raises `DEBUG` once per iteration for a `for` command,
          * not once for the whole loop. */
-        match repeat_debug_trap(shell, command.line)? {
+        match repeat_debug_trap(shell, command.line.get())? {
             Flow::Done(_) => {}
             control => {
                 shell.evaluation.loop_depth -= 1;
@@ -1019,7 +1019,7 @@ fn evaluate_case(
     let mut status = ExitStatus::SUCCESS;
     let mut fallthrough = false;
 
-    record_command_line(shell, command.line);
+    record_command_line(shell, command.line.get());
     // [spec:nsh:req:compat.bash.traps-introspection]
     flow!(crate::trap::bash::run_debug(shell));
 
@@ -1098,7 +1098,7 @@ fn evaluate_subshell(
     let mut status = ExitStatus::SUCCESS;
     let mut context = context;
 
-    record_command_line(shell, command.line);
+    record_command_line(shell, command.line.get());
 
     let expanded_redirections = expand_redirections(shell, &command.redirections)?;
     /* Whether the tail below runs in a child of this process or in this
@@ -1255,7 +1255,7 @@ fn descriptor_source(shell: &mut Shell, text: &BStr) -> Result<Option<LogicalDes
 fn run_pipeline_debug_traps(shell: &mut Shell, pipeline: &Pipeline) -> Result<Flow, Error> {
     for command in &pipeline.commands {
         if let Node::Command(simple) = command {
-            flow!(repeat_debug_trap(shell, simple.line));
+            flow!(repeat_debug_trap(shell, simple.line.get()));
         }
     }
     Ok(Flow::Done(shell.status))
@@ -1638,7 +1638,7 @@ fn evaluate_command_in_scope(
     let mut use_local_variables: bool;
     let mut command_control: Option<Flow> = None;
 
-    record_command_line(shell, command.line);
+    record_command_line(shell, command.line.get());
     // [spec:nsh:req:compat.bash.traps-introspection]
     flow!(crate::trap::bash::run_debug(shell));
     if command
@@ -2242,7 +2242,7 @@ fn evaluate_function(
     crate::error::with_interrupts_deferred(shell, |shell| {
         /* Command lookup cloned the owned body, so redefining this function
          * while it runs cannot pull the body out from under this call. */
-        shell.evaluation.function_line = function.line;
+        shell.evaluation.function_line = function.line.get();
         // [spec:nsh:req:compat.smoosh.nonlexical-control]
         // Ordinarily only loops lexically inside the function are visible.
         // The explicit extension preserves the caller's dynamic loop depth so

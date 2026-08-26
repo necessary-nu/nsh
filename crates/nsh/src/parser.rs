@@ -21,7 +21,7 @@ use crate::nodes::{
     BinaryCommand, CaseClause, CaseCommand, CompoundCommand, DescriptorRedirection,
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
     ForCommand, FunctionDefinition, HereDocument, HereString, IfCommand, NegatedCommand, Node,
-    NodeText, Pipeline, Redirection, SimpleCommand, TimedCommand, WordNode,
+    NodeText, Pipeline, Redirection, SimpleCommand, SourceLine, TimedCommand, WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
 use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, WordToken};
@@ -562,7 +562,7 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
                 }
                 Node::Redirect(wrapper) => Node::Background(wrapper),
                 command => Node::Background(CompoundCommand {
-                    line: saved_line_number,
+                    line: SourceLine::new(saved_line_number),
                     command: Box::new(command),
                     redirections: Vec::new(),
                 }),
@@ -648,7 +648,7 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
     if first == TokenKind::Time {
         let posix_format = keywords::timed_posix_format(shell)?;
         return Ok(Some(Node::Timed(TimedCommand {
-            line,
+            line: SourceLine::new(line),
             posix_format,
             command: keywords::timed_pipeline(shell)?.map(Box::new),
         })));
@@ -737,7 +737,8 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
     let saved_line_number = crate::input::current_input_frame(&mut shell.input).line_number;
 
     let token = read_token(shell, context)?.kind;
-    if let Some(bash_node) = bash::command_prefix(shell, token, saved_line_number)? {
+    if let Some(bash_node) = bash::command_prefix(shell, token, SourceLine::new(saved_line_number))?
+    {
         parsed_command = Some(bash_node);
         closing_token = None;
     } else if token == TokenKind::If {
@@ -769,7 +770,10 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         let mut arithmetic_form = false;
         if var_token.kind == TokenKind::DoubleParen {
             arithmetic_form = true;
-            parsed_command = Some(bash::arithmetic_for(shell, saved_line_number)?);
+            parsed_command = Some(bash::arithmetic_for(
+                shell,
+                SourceLine::new(saved_line_number),
+            )?);
         } else {
             parsed_command = Some(Node::For(Box::new(keywords::iteration_command(
                 shell,
@@ -796,7 +800,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         let parsed = list(shell, ListMode::Compound)?;
         let inner = required_compound_node(shell, parsed, TokenKind::RightParen)?;
         parsed_command = Some(Node::Subshell(CompoundCommand {
-            line: saved_line_number,
+            line: SourceLine::new(saved_line_number),
             command: Box::new(inner),
             redirections: Vec::new(),
         }));
@@ -837,7 +841,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
                 Node::Subshell(wrapper)
             }
             Some(command) => Node::Redirect(CompoundCommand {
-                line: saved_line_number,
+                line: SourceLine::new(saved_line_number),
                 command: Box::new(command),
                 redirections,
             }),
@@ -933,7 +937,7 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
                     keywords::nested_command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
                         .ok_or_else(|| expected_token_error(shell, None))?;
                 return Ok(Some(Node::Function(FunctionDefinition {
-                    line: line_number,
+                    line: SourceLine::new(line_number),
                     name: NodeText::new(BString::from(word.word.as_bstr())),
                     body: Box::new(body),
                 })));
@@ -944,7 +948,7 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
     }
     /* out: */
     Ok(Some(Node::Command(Box::new(SimpleCommand {
-        line: saved_line_number,
+        line: SourceLine::new(saved_line_number),
         assignments: variables,
         arguments: args,
         redirections,

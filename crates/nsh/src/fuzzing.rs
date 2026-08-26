@@ -9,6 +9,7 @@ use bstr::{BStr, BString};
 
 use crate::context::Shell;
 use crate::error::Error;
+use crate::nodes::Node;
 
 /// Parse `source` without executing it and return its canonical rendering.
 ///
@@ -37,6 +38,91 @@ pub fn canonical_source(shell: &mut Shell, source: &BStr) -> Result<BString, Err
         }
         Ok(rendered)
     })
+}
+
+/// What printing a parsed program and reading it back again produced.
+///
+/// A verdict rather than a pair of trees: the property is what the fuzz
+/// workspace needs, and the syntax tree stays inside the crate that owns it.
+// [spec:nsh:req:idiom.printable-ast]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reversibility {
+    /// The source did not parse, so there was nothing to print. An ordinary
+    /// answer to arbitrary bytes, and not a finding.
+    NotParsed,
+    /// The printed program did not parse.
+    NotReparsed { printed: BString },
+    /// The printed program parsed as a different program.
+    Changed { printed: BString },
+    /// The printed program parsed as the same program.
+    Reversible { printed: BString },
+}
+
+/// Whether printing `source`'s program and parsing the result recovers it.
+///
+/// This is [`spec:nsh:req:idiom.printable-ast`] made checkable. Source
+/// positions do not take part, because printing relocates every one of them
+/// and a position is provenance rather than identity -- see
+/// [`crate::nodes::SourceLine`].
+// [spec:nsh:req:idiom.printable-ast]
+pub fn printing_is_reversible(shell: &mut Shell, source: &BStr) -> Reversibility {
+    let Ok(program) = parse_program(shell, source) else {
+        return Reversibility::NotParsed;
+    };
+    let printed = print_program(&program);
+    match parse_program(shell, printed.as_ref()) {
+        Err(_) => Reversibility::NotReparsed { printed },
+        Ok(reparsed) if reparsed != program => Reversibility::Changed { printed },
+        Ok(_) => Reversibility::Reversible { printed },
+    }
+}
+
+/// Parse every top-level command in `source` without executing any of them.
+///
+/// The input frame and all parser-local resources are restored before this
+/// returns, including when parsing rejects the source.
+///
+/// A top-level `;` produces a [`Node::Sequence`] while a newline produces two
+/// commands, and the two spell the same program: the separator is layout, so
+/// the sequence is flattened into the list it already is. Nothing below the
+/// top level is touched, where a sequence is a child rather than punctuation.
+fn parse_program(shell: &mut Shell, source: &BStr) -> Result<Vec<Node>, Error> {
+    crate::resource::with_resources(shell, |shell, _resources| {
+        crate::input::set_input_string(shell, source);
+        let mut program = Vec::new();
+        loop {
+            match crate::parser::parse_command(shell, false)? {
+                crate::parser::ParseResult::Eof => break,
+                crate::parser::ParseResult::Tree(Some(node)) => {
+                    push_command_sequence(&mut program, node);
+                }
+                crate::parser::ParseResult::Tree(None) => {}
+            }
+        }
+        Ok(program)
+    })
+}
+
+fn push_command_sequence(program: &mut Vec<Node>, node: Node) {
+    match node {
+        Node::Sequence(sequence) => {
+            push_command_sequence(program, *sequence.left);
+            push_command_sequence(program, *sequence.right);
+        }
+        node => program.push(node),
+    }
+}
+
+fn print_program(program: &[Node]) -> BString {
+    let mut printed = BString::new(Vec::new());
+    for node in program {
+        let command = crate::nodes::source::command(node);
+        printed.extend_from_slice(&command);
+        if command.last() != Some(&b'\n') {
+            printed.push(b'\n');
+        }
+    }
+    printed
 }
 
 #[cfg(test)]
@@ -217,6 +303,96 @@ EOF
     fn canonical_source_drops_a_redundant_operand_quote() {
         assert_roundtrip_fixed(b"\"${a+\"\"${a#\x00${ ''$''}''a}}\"$(\"\")\"\"''");
         assert_roundtrip_fixed(b"\"${a+\"\"${a#\x00${ ''$''}'a'}}\"$(\"\")\"\"''");
+    }
+
+    /// The tree a printed program parses back to is the one it came from,
+    /// down to every part the grammar carries. Positions are the exception,
+    /// and deliberately so: printing relocates all of them.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_a_program_recovers_the_program() {
+        let mut shell = shell();
+        for source in [
+            b"false ; x=hi".as_slice(),
+            b"cat <<EOF\nbody\nEOF\n",
+            b"a=(1 2 3)\necho \"${a[@]}\"",
+            b"for ((i = 0; i < 2; i++)); do echo $i; done",
+            b"case x in a) echo a;; *) echo b;; esac",
+            b"echo one | grep -q one && echo yes || echo no",
+            b"while false; do echo x; done",
+            b"echo hi 2>&1 >/dev/null",
+            b"{ echo one; echo two; } > /dev/null",
+            b"echo $(( 1 + 2 ))",
+        ] {
+            let verdict = printing_is_reversible(&mut shell, BStr::new(source));
+            assert!(
+                matches!(verdict, Reversibility::Reversible { .. }),
+                "{:?} printed to something else: {verdict:?}",
+                BStr::new(source),
+            );
+        }
+    }
+
+    /// Rejecting the input is an ordinary answer to arbitrary bytes: there is
+    /// no program to print, so there is nothing the property can say.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_says_nothing_about_a_rejected_program() {
+        let mut shell = shell();
+        assert_eq!(
+            printing_is_reversible(&mut shell, BStr::new(b"if")),
+            Reversibility::NotParsed,
+        );
+    }
+
+    /// A `}` inside a quoted operand is dropped along with everything after
+    /// it, and the wreckage prints as a stable program that means something
+    /// else -- which is why the fixed-point property never reported it.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_still_loses_a_braced_quoted_operand() {
+        let mut shell = shell();
+        let source = b"echo \"${a+\"a}b\"}\"";
+        let verdict = printing_is_reversible(&mut shell, BStr::new(source));
+        let Reversibility::Changed { printed } = verdict else {
+            panic!("expected the known loss, got {verdict:?}");
+        };
+        assert_eq!(printed, BString::from(b"echo \"${a+a}b}\"\n".as_slice()));
+    }
+
+    /// How a definition was introduced is in the tree and is not printed:
+    /// `f() { ... }` and `function f { ... }` both come back wearing the one
+    /// spelling this renderer knows.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_still_loses_a_definition_style() {
+        let mut shell = shell();
+        for source in [b"f() { echo one; }".as_slice(), b"function f { echo one; }"] {
+            let verdict = printing_is_reversible(&mut shell, BStr::new(source));
+            let Reversibility::Changed { printed } = verdict else {
+                panic!(
+                    "expected the known loss for {:?}, got {verdict:?}",
+                    BStr::new(source)
+                );
+            };
+            assert_eq!(
+                printed,
+                BString::from(b"function f () \n{ \n    echo one\n}\n".as_slice()),
+            );
+        }
+    }
+
+    /// Which quote opened a run is not in the tree, so a run that expands
+    /// nothing comes back in apostrophes however it was written.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_still_respells_a_quoted_word() {
+        let mut shell = shell();
+        let verdict = printing_is_reversible(&mut shell, BStr::new(b"printf \"%s\\n\" hi"));
+        let Reversibility::Changed { printed } = verdict else {
+            panic!("expected the known loss, got {verdict:?}");
+        };
+        assert_eq!(printed, BString::from(b"printf '%s\\n' hi\n".as_slice()));
     }
 
     roundtrip_regressions! {

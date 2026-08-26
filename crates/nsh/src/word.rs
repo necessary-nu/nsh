@@ -11,14 +11,14 @@ use crate::nodes::Node;
 
 /// A word after lexical parsing and before expansion.
 // [spec:nsh:def:idiom.word-ir]
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct ParsedWord {
     parts: Vec<WordPart>,
     spelling: BString,
 }
 
 /// One structural part of a parsed shell word.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum WordPart {
     /// Bytes that have no additional quoting protection.
     Literal(BString),
@@ -40,7 +40,7 @@ pub(crate) enum WordPart {
 ///
 /// Start/end events are enum variants rather than byte values, so every
 /// possible input byte remains ordinary shell data.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum WordToken {
     Literal(u8),
     Escaped(u8),
@@ -62,7 +62,7 @@ pub(crate) enum WordToken {
 }
 
 /// One sliceable top-level word unit used by Bash-only array syntax.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum WordUnit {
     Literal(u8),
     Part(WordPart),
@@ -76,7 +76,7 @@ pub(crate) enum QuoteBoundary {
 }
 
 /// A parameter expansion and its optional word operand.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ParameterExpansion {
     pub(crate) name: BString,
     pub(crate) operation: ParameterOperation,
