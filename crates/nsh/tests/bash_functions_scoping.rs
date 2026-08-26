@@ -265,6 +265,19 @@ fn a_printed_definition_reads_back_as_itself() {
     expect(script, b"a  b one un*q\nstable\n");
 }
 
+/// An escaped single quote does not acquire empty quoted regions each
+/// time a printed definition is parsed again.
+// [spec:nsh:req:compat.bash.functions-scoping/test]
+#[test]
+fn an_escaped_single_quote_survives_a_printed_definition() {
+    let script: &[u8] = b"f() { printf '%s\\n' \\'; }\n\
+                          code=$(declare -f f)\n\
+                          eval \"$code\"\n\
+                          test \"$code\" = \"$(declare -f f)\" || exit 97\n\
+                          f\n";
+    expect(script, b"'\n");
+}
+
 /// A body that is not a brace group is still printed as one, which is
 /// what Bash does and what makes every definition re-readable.
 // [spec:nsh:req:compat.bash.functions-scoping/test]

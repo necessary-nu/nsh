@@ -1027,6 +1027,14 @@ pub(super) fn track_assignment_subscript(shell: &Shell, lexer: &mut WordLexer<'_
     if !lexer.assignment_position || lexer.current_syntax().syntax != SyntaxContext::Base {
         return;
     }
+    /* A bracket inside `${...}` belongs to the expansion, not to the
+     * subscript around it: Bash skips a whole expansion while looking for
+     * the matching `]`, so `a[${x:-]}]=1` subscripts on the expansion and
+     * closes on the bracket after it, and `a[${ ]}` is still unterminated. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    if lexer.current_syntax().variable_depth != 0 {
+        return;
+    }
     if lexer.input.is(b'[') {
         if lexer.subscript_depth > 0 {
             lexer.subscript_depth += 1;
