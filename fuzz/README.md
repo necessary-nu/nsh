@@ -14,10 +14,15 @@ corpus nor the artifacts are committed.
 
 ## Containment
 
-Use exactly one process containment layer. On a normal host, run through
-`fuzz/run.sh`; it wraps `cargo fuzz run` with `scripts/sandboxed`. Inside
-an already managed workspace sandbox, run the equivalent `cargo fuzz`
-command directly instead of nesting `scripts/sandboxed`.
+Use exactly one process containment layer. `fuzz/run.sh` is the one command
+on both a normal host and in a managed Codex workspace: it detects the
+workspace boundary and runs Cargo directly there; otherwise it wraps Cargo
+with `scripts/sandboxed`.
+
+Use `--containment outer` when another managed environment already provides
+the boundary and is not auto-detected. Use `--containment new` to force the
+normal-host wrapper. `--dry-run` prints the selected command without seeding
+a corpus or executing a target.
 
 The reason is sharper for a fuzzer than for a test: the whole point of one
 is to reach states nobody predicted, so "this target cannot execute

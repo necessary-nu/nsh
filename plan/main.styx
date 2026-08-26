@@ -6552,6 +6552,21 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id make-fuzz-runner-containment-aware
+                                title "Give fuzz campaigns one containment-aware entry point"
+                                kind @test
+                                deps (fuzz-the-shell)
+                                log (
+                                    {
+                                        at 2026-08-25T14:51:07.917246564Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
+                                )
+                            }
                         )
                     }
                 )

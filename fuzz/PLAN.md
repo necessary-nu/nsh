@@ -110,10 +110,13 @@ pinned by a test and not by the presence of a file. That is how the
 is worth doing periodically as well: `debug_assert!` fires there and not
 in release, and this tree has several that encode real invariants.
 
-**Containment.** Use one outer sandbox. On a normal host that is
-`fuzz/run.sh`, which wraps `cargo fuzz run` with `scripts/sandboxed`.
-Inside a managed workspace sandbox, run `cargo fuzz` directly and do not
-nest another sandbox layer.
+**Containment.** Use one outer sandbox. `fuzz/run.sh` is the normal entry
+point on both a host and in a managed Codex workspace: it detects the latter
+and runs `cargo fuzz` directly under the existing boundary; on a host it
+wraps Cargo with `scripts/sandboxed`. `--containment outer` overrides the
+detector for another managed environment, `--containment new` forces the
+host wrapper, and `--dry-run` exposes the selected command without running
+the fuzzer.
 
 **Cadence.** There is no CI in this repository, so this is a manual
 discipline: run the byte targets for an hour after any parser or lexer

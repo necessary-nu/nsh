@@ -2,3 +2,6 @@ target
 corpus
 artifacts
 coverage
+
+# cargo-fuzz's -jobs supervisor writes one worker log per job here.
+fuzz-*.log
