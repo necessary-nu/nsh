@@ -83,8 +83,10 @@ Status: **done**, **next**, **blocked**.
 Ordering rationale: 3 and 4 are properties reachable through the public
 API today, so they were the cheapest strength upgrade available. 10 was
 the largest hole; its generator is now the thing to extend, since every
-construct it cannot emit is a construct nothing differential covers. 9 is
-still one decision away.
+construct it cannot emit is a construct nothing differential covers -- and
+it is where 9's budget belongs too, because byte mutation reaches the
+degenerate corner of the grammar and stays there while the defects that
+matter live in programs people write.
 
 ## What is blocked, and on what
 
@@ -101,10 +103,21 @@ still one decision away.
 `fuzz/run.sh`. Minimise periodically with `cargo fuzz cmin` -- a corpus
 that grows without bound slows every run.
 
-**Crashes.** Minimise with `cargo fuzz tmin`, then the artifact becomes a
-case in `crates/nsh/tests/` before the fix lands, so the regression is
-pinned by a test and not by the presence of a file. That is how the
-`<<${e` family was handled and it should stay the rule.
+**Crashes.** Minimise, fix the cause, then sweep. `fuzz/sweep.sh TARGET`
+replays every stored artifact against the current build and reports which
+still reproduce; `--prune` removes the rest, so the artifact directory
+stays a list of open findings rather than a history of closed ones. One
+fix usually kills a family: the round-trip corpus went from 284 artifacts
+to 3 across four fixes, so triaging artifact by artifact is triaging the
+same defect thirty times.
+
+What gets pinned is the *mechanism*, named, with the artifact hash in a
+comment. A bug found is a test written -- not an artifact found. The cost
+of the other rule was measured rather than guessed: the round-trip table
+reached 111 tests over 101 distinct inputs, ten of them byte-for-byte
+duplicates, with `<<t\n${f-'}` pinned six times under six hashes, for
+something closer to eight real defects. The named cases are the ones
+anyone reads afterwards.
 
 **Sanitizers.** ASan by default through `cargo-fuzz`. A debug-profile run
 is worth doing periodically as well: `debug_assert!` fires there and not
@@ -119,9 +132,17 @@ host wrapper, and `--dry-run` exposes the selected command without running
 the fuzzer.
 
 **Cadence.** There is no CI in this repository, so this is a manual
-discipline: run the byte targets for an hour after any parser or lexer
-change, and the differential targets before closing a compatibility node.
-A crash found is a test written.
+discipline, and the discipline is to stop when you have a finding. Run a
+byte target until it produces a root cause you have not seen; then stop,
+fix it, sweep the corpus, and resume. Running past that point buys copies
+rather than information -- an hour against a printer with three open
+losses is an hour of rediscovering them, which is how 284 artifacts came
+to be waiting at once.
+
+The number to watch is distinct root causes per hour, not artifacts per
+hour. Below roughly one an hour a target has said what it knows and the
+budget belongs on the next rung. Run the differential targets before
+closing a compatibility node.
 
 ## Findings so far
 
@@ -134,10 +155,20 @@ the one below cannot, and that is now measured rather than argued.
 | property | `quoting` | the shell emitted `$'\E'` from `@Q` and could not read it back; one byte, found in seconds |
 | differential | `differential` | Bash accepts `! ! cmd`, this shell refused it |
 | differential | `differential` | unquoted `$@` with non-whitespace `IFS` lost an empty field at a positional boundary |
+| property | `roundtrip` | `declare -f` printed a function body that runs differently -- and the fixed-point oracle passed it |
 
 `parse` and `matcher` executed over 800,000 inputs between them without
-finding either of the last two, because both only assert that the shell
-*returns*, and in both cases it returned happily with the wrong answer.
+finding either of the two differential findings, because both only assert
+that the shell *returns*, and in both cases it returned happily with the
+wrong answer.
+
+The last row is the same lesson one rung higher, and it is the reason
+`[spec:nsh:req:idiom.printable-ast]` exists. `roundtrip` asked for a fixed
+point -- print twice, get the same text -- which any output the printer can
+spell consistently satisfies, including output that means something else.
+`echo "${a+"a}b"}"` prints as `echo "${a+a}b}"`, runs differently, and is a
+fixed point, so 107 artifacts of triage never surfaced it. A property is
+only as strong as the thing it refuses.
 
 ## What "properly" means here
 

@@ -12,18 +12,20 @@ set -euo pipefail
 
 usage() {
     cat >&2 <<'EOF'
-usage: fuzz/run.sh [--containment auto|outer|new] [--dry-run] TARGET [SECONDS] [libfuzzer flags...]
+usage: fuzz/run.sh [--containment auto|outer|new] [--build] [--dry-run] TARGET [SECONDS] [libfuzzer flags...]
 
-  auto   use the managed Codex workspace boundary when detected; otherwise
-         create the normal host boundary (default)
-  outer  use an existing outer containment boundary
-  new    create the normal host boundary with scripts/sandboxed
+  auto    use the managed Codex workspace boundary when detected; otherwise
+          create the normal host boundary (default)
+  outer   use an existing outer containment boundary
+  new     create the normal host boundary with scripts/sandboxed
+  --build build the target and stop, so a replay can run the binary itself
 EOF
     exit 2
 }
 
 containment=${NSH_FUZZ_CONTAINMENT:-auto}
 dry_run=false
+build_only=false
 while (($#)); do
     case $1 in
         --containment)
@@ -37,6 +39,10 @@ while (($#)); do
             ;;
         --dry-run)
             dry_run=true
+            shift
+            ;;
+        --build)
+            build_only=true
             shift
             ;;
         --help|-h)
@@ -101,13 +107,20 @@ esac
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 corpus="$root/fuzz/corpus/$target"
-command=(
-    cargo +nightly fuzz run "$target" "$corpus" --
-    -max_total_time="$seconds"
-    -rss_limit_mb=4096
-    -max_len=65536
-    "$@"
-)
+if $build_only; then
+    # `fuzz/sweep.sh` replays stored artifacts by executing the target binary
+    # once per file, which still needs the build to happen inside the boundary
+    # a campaign would have used.
+    command=(cargo +nightly fuzz build "$target" "$@")
+else
+    command=(
+        cargo +nightly fuzz run "$target" "$corpus" --
+        -max_total_time="$seconds"
+        -rss_limit_mb=4096
+        -max_len=65536
+        "$@"
+    )
+fi
 
 if [[ $containment == new ]]; then
     # The sandbox gets a wall clock of its own so an unattended run cannot
@@ -129,6 +142,10 @@ if $dry_run; then
     printf ' %q' "${command[@]}" >&2
     printf '\n' >&2
     exit 0
+fi
+
+if $build_only; then
+    exec "${command[@]}"
 fi
 
 mkdir -p "$corpus" "$root/fuzz/artifacts/$target"
