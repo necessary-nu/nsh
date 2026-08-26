@@ -43,6 +43,11 @@
 
 use nsh::streams::Streams;
 
+/// Forking a process shell while another test thread is doing the same can
+/// leave the child with a copied, permanently locked process-global mutex.
+/// Keep the fork-and-run cases in this test binary one at a time.
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Run `script` with stdout and stderr merged onto one pipe — which is how
 /// `tests/harness/dscase.sh:64-71` runs all 61,498 differential cases, and
 /// therefore the only stream shape whose byte order this crate has an
@@ -50,6 +55,9 @@ use nsh::streams::Streams;
 ///
 /// Forks, because the child becomes a shell and ends there.
 fn run(script: &str) -> (String, i32) {
+    let _guard = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (r, w) = nsh_platform::pipe().expect("create pipe");
 
     let command = script.as_bytes().to_vec();
