@@ -41,6 +41,15 @@ undefined behavior.
 > outside the parsed tree rather than through `Cell`, `RefCell`, mutex slots, or
 > other delayed mutation of syntax.
 
+> [spec:nsh:req:idiom.printable-ast]
+> Rendering a parsed syntax tree back as shell source and parsing that source
+> again MUST produce the same tree, apart from the source positions the render
+> relocates. A renderer MUST NOT substitute a different construct for one it
+> cannot spell, so every construct the parser accepts MUST be representable in
+> the tree together with whatever the renderer needs to spell it again. Layout
+> -- indentation, separators, and line breaks -- is not part of the tree and is
+> the renderer's to choose.
+
 > [spec:nsh:sem:idiom.typed-expansion]
 > Word expansion consumes Parsed Words and produces owned byte-string fields.
 > Quoting, splitting, substitution, and globbing MUST be expressed as typed
