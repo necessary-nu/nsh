@@ -416,6 +416,34 @@ EOF
         }
     }
 
+    /// A here-document delimiter is the body's, not the printer's: a body
+    /// holding a line that spells some other delimiter can only be closed
+    /// again with the word the source wrote. A body that ended at end of
+    /// input carries the line the reader saw, which is what Bash feeds and
+    /// what lets a printed document close at all.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_keeps_a_here_document_delimiter() {
+        let mut shell = shell();
+        for (source, printed) in [
+            (
+                b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
+                b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
+            ),
+            (b"cat <<'Q'\nbody\nQ\n", b"cat <<'Q'\nbody\nQ\n"),
+            (b"<<a\nx", b" <<a\nx\na\n"),
+        ] {
+            assert_eq!(
+                printing_is_reversible(&mut shell, BStr::new(source)),
+                Reversibility::Reversible {
+                    printed: BString::from(printed)
+                },
+                "{:?}",
+                BStr::new(source),
+            );
+        }
+    }
+
     /// Every shape the round-trip fuzzer found before
     /// [`spec:nsh:req:idiom.printable-ast`] existed, paired with the artifact
     /// it was reduced from.

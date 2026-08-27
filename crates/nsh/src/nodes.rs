@@ -273,6 +273,14 @@ pub struct HereDocument {
     pub descriptor: LogicalDescriptor,
     pub expand: bool,
     pub body: WordNode,
+    /// The word that ends the body.
+    ///
+    /// Not needed to read the document -- the parser has already found the
+    /// end by the time this node exists -- but a body that holds a line
+    /// spelling some other delimiter can only be printed back under the one
+    /// the source wrote.
+    // [spec:nsh:req:idiom.printable-ast]
+    pub delimiter: NodeText,
 }
 
 /// A Bash here-string redirection.

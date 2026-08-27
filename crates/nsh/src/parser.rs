@@ -994,6 +994,7 @@ fn parse_redirection_target(
             let expand = !token.quoted;
             here.delimiter = BString::from(shell.input.word.as_bstr());
             here.expand = expand;
+            let delimiter = NodeText::new(here.delimiter.clone());
             shell.input.pending_here_documents.push(here);
             Redirection::HereDocument(HereDocument {
                 descriptor,
@@ -1001,6 +1002,7 @@ fn parse_redirection_target(
                 body: WordNode {
                     word: ParsedWord::new(),
                 },
+                delimiter,
             })
         }
         PendingRedirection::HereString { descriptor } => Redirection::HereString(HereString {
@@ -1092,9 +1094,18 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
                 false,
             )?;
         }
-        let body = WordNode {
-            word: mem::take(&mut shell.input.word),
-        };
+        let mut word = mem::take(&mut shell.input.word);
+        /* A body that ended at the delimiter carries the newline before it.
+         * One that ended at end of input does not, and Bash still reads the
+         * document as a line: `cat <<a` over `x` with no newline writes
+         * `x\n`. Recording the line the reader saw is also the only way the
+         * body can be printed back, since a printed document has to close
+         * with a delimiter on its own line. */
+        // [spec:nsh:req:idiom.printable-ast]
+        if !word.is_empty() && !word.as_bstr().ends_with(b"\n") {
+            word.push_literal_byte(b'\n');
+        }
+        let body = WordNode { word };
         shell.input.completed_here_documents.push(body);
     }
     Ok(())

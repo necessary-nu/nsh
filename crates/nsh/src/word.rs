@@ -252,6 +252,17 @@ impl ParsedWord {
         self.parts.is_empty()
     }
 
+    /// Append one literal byte, keeping the spelling cache in step.
+    pub(crate) fn push_literal_byte(&mut self, byte: u8) {
+        match self.parts.last_mut() {
+            Some(WordPart::Literal(bytes)) => bytes.push(byte),
+            _ => self
+                .parts
+                .push(WordPart::Literal(BString::from(vec![byte]))),
+        }
+        self.spelling.push(byte);
+    }
+
     pub(crate) fn parts(&self) -> &[WordPart] {
         &self.parts
     }

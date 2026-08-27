@@ -641,7 +641,19 @@ impl<'a> Printer<'a> {
         if !body.is_empty() && body.last() != Some(&b'\n') {
             body.push(b'\n');
         }
-        let delimiter = unused_delimiter(&body);
+        // The source's own delimiter, unless the body holds a line spelling
+        // it -- which only happens when the input ended before the terminator
+        // did, and then any delimiter is a guess.
+        let spelled = document.delimiter.as_bstr();
+        let delimiter = if spelled.is_empty()
+            || body
+                .split(|byte| *byte == b'\n')
+                .any(|line| line == spelled)
+        {
+            unused_delimiter(&body)
+        } else {
+            BString::from(spelled)
+        };
 
         self.descriptor_prefix(document.descriptor.index(), 0);
         self.out.extend_from_slice(b"<<");
