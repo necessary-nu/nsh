@@ -856,7 +856,17 @@ impl<'a> Printer<'a> {
         let protected: &[u8] = match quoting {
             Quoting::Word => {
                 for (at, &byte) in bytes.iter().enumerate() {
-                    if byte == b'$' && !opens_expansion(bytes.get(at + 1).copied(), next) {
+                    if byte == b'$' && !opens_expansion(bytes.get(at + 1).copied(), next, quoting) {
+                        self.out.push(byte);
+                        continue;
+                    }
+                    // A `#` opens a comment only where a word begins, which
+                    // is a question about what was written last.
+                    // [spec:nsh:req:idiom.printable-ast]
+                    let begins_word = self.out.last().is_none_or(|byte| {
+                        matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(')
+                    });
+                    if byte == b'#' && !begins_word {
                         self.out.push(byte);
                         continue;
                     }
@@ -901,7 +911,7 @@ impl<'a> Printer<'a> {
         };
         for (at, &byte) in bytes.iter().enumerate() {
             if protected.contains(&byte)
-                && (byte != b'$' || opens_expansion(bytes.get(at + 1).copied(), next))
+                && (byte != b'$' || opens_expansion(bytes.get(at + 1).copied(), next, quoting))
             {
                 self.out.push(b'\\');
             }
@@ -1200,7 +1210,7 @@ fn unterminated_array_word(word: &ParsedWord) -> bool {
 /// byte following it inside the same literal run, and `next` the part that
 /// follows the run when there is no such byte.
 // [spec:nsh:req:idiom.printable-ast]
-fn opens_expansion(after: Option<u8>, next: Option<&WordPart>) -> bool {
+fn opens_expansion(after: Option<u8>, next: Option<&WordPart>, quoting: Quoting) -> bool {
     if let Some(byte) = after {
         return matches!(
             byte,
@@ -1214,9 +1224,12 @@ fn opens_expansion(after: Option<u8>, next: Option<&WordPart>) -> bool {
         Some(WordPart::Quote(QuoteBoundary::Open(_))) => true,
         Some(WordPart::Quote(QuoteBoundary::Close)) | None => false,
         Some(WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. }) => {
-            opens_expansion(bytes.first().copied(), None)
+            opens_expansion(bytes.first().copied(), None, quoting)
         }
-        Some(WordPart::Escaped(byte)) => opens_expansion(Some(*byte), None),
+        // An escape written in a command word always carries its backslash,
+        // and a `$` against a backslash starts nothing.
+        Some(WordPart::Escaped(_)) if quoting == Quoting::Word => false,
+        Some(WordPart::Escaped(byte)) => opens_expansion(Some(*byte), None, quoting),
     }
 }
 

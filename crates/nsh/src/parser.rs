@@ -1992,6 +1992,7 @@ fn parse_parameter_operator(
     bad_substitution: bool,
     parameter_syntax: &mut ParameterSyntax,
     nested_syntax: &mut SyntaxContext,
+    invalid_prefix: &mut BString,
 ) -> Result<(), Error> {
     if bad_substitution {
         unread_input_unit(shell);
@@ -2054,7 +2055,15 @@ fn parse_parameter_operator(
                     *nested_syntax = SyntaxContext::Base;
                     ParameterOperation::Substring
                 }
-                _ => ParameterOperation::Invalid,
+                _ => {
+                    // The byte that is not an operator is still the source's,
+                    // and nothing else in the expansion will hold it.
+                    // [spec:nsh:req:idiom.printable-ast]
+                    if let Some(byte) = lexer.input.byte() {
+                        invalid_prefix.push(byte);
+                    }
+                    ParameterOperation::Invalid
+                }
             };
         }
     } else {
@@ -2209,6 +2218,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             bad_substitution,
             &mut parameter_syntax,
             &mut nested_syntax,
+            &mut invalid_prefix,
         )?;
 
         if nested_syntax == SyntaxContext::Arithmetic {

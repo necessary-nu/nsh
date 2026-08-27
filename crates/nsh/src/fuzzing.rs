@@ -139,6 +139,20 @@ mod tests {
             .expect("shell")
     }
 
+    /// Assert each source prints as itself, one line per program.
+    fn assert_prints_itself(shell: &mut Shell, sources: &[&[u8]]) {
+        for source in sources {
+            assert_eq!(
+                printing_is_reversible(shell, BStr::new(source)),
+                Reversibility::Reversible {
+                    printed: BString::from([*source, b"\n"].concat()),
+                },
+                "{:?}",
+                BStr::new(source),
+            );
+        }
+    }
+
     fn assert_roundtrip_fixed(source: &[u8]) {
         let mut shell = shell();
         // Rejecting the input is an ordinary answer to fuzzer bytes, and the
@@ -397,23 +411,17 @@ EOF
     #[test]
     fn printing_keeps_a_run_in_its_own_quote() {
         let mut shell = shell();
-        for source in [
-            b"printf \"%s\\n\" hi".as_slice(),
-            b"printf '%s\\n' hi",
-            b"echo \"a  b\"",
-            b"echo 'a  b'",
-            b"echo \"a\\\\b\"",
-            b"echo $\"hello\"",
-        ] {
-            assert_eq!(
-                printing_is_reversible(&mut shell, BStr::new(source)),
-                Reversibility::Reversible {
-                    printed: BString::from([source, b"\n"].concat()),
-                },
-                "{:?}",
-                BStr::new(source),
-            );
-        }
+        assert_prints_itself(
+            &mut shell,
+            &[
+                b"printf \"%s\\n\" hi".as_slice(),
+                b"printf '%s\\n' hi",
+                b"echo \"a  b\"",
+                b"echo 'a  b'",
+                b"echo \"a\\\\b\"",
+                b"echo $\"hello\"",
+            ],
+        );
     }
 
     /// A here-document delimiter is the body's, not the printer's: a body
@@ -452,27 +460,21 @@ EOF
     #[test]
     fn printing_leaves_an_inert_dollar_alone() {
         let mut shell = shell();
-        for source in [
-            b"echo $".as_slice(),
-            b"echo a$",
-            b"echo \"$\"",
-            b"echo $ x",
-            b"echo $x",
-            b"echo \"$x\"",
-            b"echo $((1))",
-            b"echo $'a'",
-            b"echo a!b",
-            b"! true",
-        ] {
-            assert_eq!(
-                printing_is_reversible(&mut shell, BStr::new(source)),
-                Reversibility::Reversible {
-                    printed: BString::from([source, b"\n"].concat()),
-                },
-                "{:?}",
-                BStr::new(source),
-            );
-        }
+        assert_prints_itself(
+            &mut shell,
+            &[
+                b"echo $".as_slice(),
+                b"echo a$",
+                b"echo \"$\"",
+                b"echo $ x",
+                b"echo $x",
+                b"echo \"$x\"",
+                b"echo $((1))",
+                b"echo $'a'",
+                b"echo a!b",
+                b"! true",
+            ],
+        );
     }
 
     /// The braces are not decoration: they decide what a redirection or a
@@ -499,6 +501,27 @@ EOF
                 BStr::new(source),
             );
         }
+    }
+
+    /// A byte that is only special where it begins something keeps its own
+    /// spelling everywhere else. `#` opens a comment only where a word
+    /// begins, and a `$` against a backslash starts nothing at all.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_leaves_a_positional_byte_alone() {
+        let mut shell = shell();
+        assert_prints_itself(
+            &mut shell,
+            &[
+                b"echo a#b".as_slice(),
+                b"echo \"#\"",
+                b"a#",
+                b"echo $\\a",
+                b"${a }",
+                b"${a b}",
+                b"${(M)x}",
+            ],
+        );
     }
 
     /// Every shape the round-trip fuzzer found before
