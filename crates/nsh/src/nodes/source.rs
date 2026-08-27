@@ -804,12 +804,12 @@ impl<'a> Printer<'a> {
     /// parameter may be written as `$name` or needs `${name}`.
     fn part(&mut self, part: &WordPart, next: Option<&WordPart>, quoting: Quoting, indent: usize) {
         match part {
-            WordPart::Literal(bytes) => self.literal(bytes, quoting),
+            WordPart::Literal(bytes) => self.literal(bytes, next, quoting),
             WordPart::Multibyte { bytes, escaped } => {
                 if *escaped && quoting == Quoting::Word {
                     push_single_quoted(&mut self.out, bytes);
                 } else {
-                    self.literal(bytes, quoting);
+                    self.literal(bytes, next, quoting);
                 }
             }
             WordPart::Escaped(byte) => self.escaped(*byte, next, quoting),
@@ -844,10 +844,14 @@ impl<'a> Printer<'a> {
 
     /// Bytes the source left unprotected, or protected by the enclosing
     /// quoting this printer has already opened.
-    fn literal(&mut self, bytes: &[u8], quoting: Quoting) {
+    fn literal(&mut self, bytes: &[u8], next: Option<&WordPart>, quoting: Quoting) {
         let protected: &[u8] = match quoting {
             Quoting::Word => {
-                for &byte in bytes {
+                for (at, &byte) in bytes.iter().enumerate() {
+                    if byte == b'$' && !opens_expansion(bytes.get(at + 1).copied(), next) {
+                        self.out.push(byte);
+                        continue;
+                    }
                     if matches!(
                         byte,
                         b' ' | b'\t'
@@ -888,8 +892,10 @@ impl<'a> Printer<'a> {
             Quoting::HereDocumentParameter => b"\"\\$`}",
             Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
         };
-        for &byte in bytes {
-            if protected.contains(&byte) {
+        for (at, &byte) in bytes.iter().enumerate() {
+            if protected.contains(&byte)
+                && (byte != b'$' || opens_expansion(bytes.get(at + 1).copied(), next))
+            {
                 self.out.push(b'\\');
             }
             self.out.push(byte);
@@ -1096,19 +1102,17 @@ fn empty_simple_command(node: &Node) -> bool {
     };
     command.assignments.is_empty()
         && command.redirections.is_empty()
-        && command.arguments.iter().all(inert_word)
-}
-
-fn inert_word(node: &Node) -> bool {
-    let Node::Word(word) = node else {
-        return false;
-    };
-    !word.word.parts().is_empty()
-        && word
-            .word
-            .parts()
-            .iter()
-            .all(|part| matches!(part, WordPart::Quote(QuoteBoundary::Close)))
+        && command.arguments.iter().all(|node| {
+            let Node::Word(word) = node else {
+                return false;
+            };
+            !word.word.parts().is_empty()
+                && word
+                    .word
+                    .parts()
+                    .iter()
+                    .all(|part| matches!(part, WordPart::Quote(QuoteBoundary::Close)))
+        })
 }
 
 /// Keep a parsed function name one shell word when its bytes include syntax.
@@ -1180,6 +1184,33 @@ fn unterminated_array_word(word: &ParsedWord) -> bool {
         }
     }
     bracket_depth != 0
+}
+
+/// Whether a `$` written before these would start an expansion.
+///
+/// A `$` that starts nothing is an ordinary byte, and protecting it anyway
+/// spells the same byte with a part the source never wrote. `after` is the
+/// byte following it inside the same literal run, and `next` the part that
+/// follows the run when there is no such byte.
+// [spec:nsh:req:idiom.printable-ast]
+fn opens_expansion(after: Option<u8>, next: Option<&WordPart>) -> bool {
+    if let Some(byte) = after {
+        return matches!(
+            byte,
+            b'{' | b'(' | b'_' | b'@' | b'*' | b'#' | b'?' | b'-' | b'$' | b'!'
+        ) || byte.is_ascii_alphanumeric();
+    }
+    match next {
+        Some(WordPart::Parameter(_) | WordPart::Command(_) | WordPart::Arithmetic(_)) => true,
+        // `$'...'` and `$"..."` are expansions of their own, so a `$` written
+        // against the quote that opens one has to be held off it.
+        Some(WordPart::Quote(QuoteBoundary::Open(_))) => true,
+        Some(WordPart::Quote(QuoteBoundary::Close)) | None => false,
+        Some(WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. }) => {
+            opens_expansion(bytes.first().copied(), None)
+        }
+        Some(WordPart::Escaped(byte)) => opens_expansion(Some(*byte), None),
+    }
 }
 
 /// Whether a protected backslash has to protect itself rather than `next`.

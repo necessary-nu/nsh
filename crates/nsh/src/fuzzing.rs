@@ -444,6 +444,35 @@ EOF
         }
     }
 
+    /// A `$` that starts nothing is an ordinary byte. Protecting it anyway
+    /// spelled the same byte with a part the source never wrote, which is
+    /// the whole shape of over-protection: `\$`, `\\`, `\'` all read back as
+    /// one part more than they went in as.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_leaves_an_inert_dollar_alone() {
+        let mut shell = shell();
+        for source in [
+            b"echo $".as_slice(),
+            b"echo a$",
+            b"echo \"$\"",
+            b"echo $ x",
+            b"echo $x",
+            b"echo \"$x\"",
+            b"echo $((1))",
+            b"echo $'a'",
+        ] {
+            assert_eq!(
+                printing_is_reversible(&mut shell, BStr::new(source)),
+                Reversibility::Reversible {
+                    printed: BString::from([source, b"\n"].concat()),
+                },
+                "{:?}",
+                BStr::new(source),
+            );
+        }
+    }
+
     /// Every shape the round-trip fuzzer found before
     /// [`spec:nsh:req:idiom.printable-ast`] existed, paired with the artifact
     /// it was reduced from.
