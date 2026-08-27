@@ -6934,6 +6934,7 @@ children (
                                 id decide-tree-canonicity
                                 title "Decide whether the tree is abstract or concrete, and say so in the rule"
                                 kind @docs
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-27T23:00:39.465683221Z
@@ -6947,6 +6948,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @decision
                                         text "DECIDED by the operator, 2026-08-28: no equivalent forms. The tree is abstract and canonical -- one program, one tree -- and a representation admitting two forms of one program is neither a tokenization nor an AST.\n\nBoth parked questions are answered by that, and both answers are no.\n\nDIAGNOSTICS GET NO VETO. `invalid_marker` and `invalid_prefix` exist because a rejected expansion's bytes have nowhere else to live; they are the tree carrying source text so an error message can quote it. Under this decision they do not survive as spelling fields. If a diagnostic must show what the operator typed, it takes it from the input -- a span or a slice -- not from the tree, and that is a separate mechanism to build rather than a licence to keep spelling in the AST. Whether such a span exists today is not established and wants checking before `canonicalize-word-parts` removes the fields it would replace.\n\n`declare -f` DOES NOT REPRODUCE THE OPERATOR'S QUOTING. Already true and already recorded in docs/divergences.md -- a quoted run is re-spelled, single quotes when nothing in it expands, double when something does, verified behaviourally across 35 cases run directly and through a round trip under both shells with byte-identical output. This decision makes that deliberate rather than incidental.\n\nCONSEQUENCE FOR THE RULE. `[spec:nsh:req:idiom.printable-ast]` needs the canonicity clause: one program has one tree, and spelling is the renderer's to choose. Without it the rule asks for a bijection and the property stays ill-posed no matter how much printer work lands."
+                                    }
+
+                                    {
+                                        at 2026-08-27T23:20:26.878567937Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -6962,20 +6970,12 @@ children (
                                         kind @note
                                         text "Independent of the canonicity decision, and the only item here that fixes a shipping bug.\n\n`[spec:nsh:req:idiom.printable-ast]` already says a renderer MUST NOT substitute a different construct for one it cannot spell. The printer does it anyway, in at least three places, and each was found by reading the code rather than by fuzzing -- which is the point: the property cannot see an invention that reparses consistently.\n\nLIVE MEANING CHANGE IN `declare -f`. `nodes/source.rs` `iteration()`:\n\n    if command.words.is_empty() { self.out.extend_from_slice(b\" in \\\"$@\\\"\"); }\n\nA `for` with an explicitly empty list prints as one over the positional parameters. Demonstrated end to end:\n\n    f(){ for a in; do echo \"iteration:$a\"; done; }\n    f p q                                    -> nothing\n    eval \"$(declare -f f | sed s/^f/g/)\"; g p q  -> iteration:p / iteration:q\n\n`declare -f` hands back a function that behaves differently from the one defined. Bash prints `for a in ;`. The tree already distinguishes the two cases -- `for a;` parses to `[\"$@\"]` and `for a in;` to `[]` -- so this needs no representation change, only for the printer to stop covering an empty list with a word the source never wrote.\n\nTHE OTHERS. An empty here-document delimiter prints as the invented `EOF` (`<<\"\"` comes back as `<<'EOF'`). `$((0))` for an unspellable arithmetic expression is already gone, replaced by a delimiter choice; the remaining arithmetic cases are representation, and belong to `record-what-the-printer-cannot-spell`.\n\nDONE WHEN. Every fallback that emits a construct absent from the tree is deleted or turned into a representation change on the sibling node; a test pins the `for` case behaviourally rather than textually, in the shape the `declare -f` demonstration above uses; and the prohibition is stated somewhere a reviewer will meet it, because it is a rule about what the printer may not do and nothing in the type system enforces it."
                                     }
-                                )
-                            }
 
-                            {
-                                id record-what-the-printer-cannot-spell
-                                title "Record the here-document delimiter and the arithmetic delimiter in the tree"
-                                kind @feat
-                                deps (stop-the-printer-inventing)
-                                log (
                                     {
-                                        at 2026-08-27T23:01:06.079909974Z
+                                        at 2026-08-27T23:19:35.39810994Z
                                         author "brendan@necessary.nu"
                                         kind @note
-                                        text "The two distinctions the tree genuinely cannot hold. Both were found by probing pairs of sources that should differ and print the same.\n\nTHE HERE-DOCUMENT DELIMITER. `HereDocument` holds `expand: bool` and `delimiter: NodeText` -- a boolean plus the stripped bytes, where the source wrote a word. So `<<\"E\"` and `<<'E'` are one tree, `<<\"\"` cannot be spelled at all and falls back to the invented `EOF`, and a delimiter carrying an expansion or a quote (`<<${a:''}`) prints something that reparses as a different document and then drifts on the next print. Five stored artifacts. The delimiter wants to be a `ParsedWord` like every other word, with `expand` derived from it rather than stored beside it.\n\nTHE ARITHMETIC DELIMITER. `$[1]` and `$((1))` are one tree. That is why the printer has to guess which to emit, and why it guesses wrong on expressions whose brackets or backquotes do not balance -- `$(([))$()` prints `$[[]$()`, which does not parse at all. Eight stored artifacts, several of them `NotReparsed` rather than merely `Changed`. Recording which delimiter was written removes the guess.\n\nScope note: these are the only two worth recording. The other collapses were measured and left alone deliberately, because Bash collapses them identically -- backquote and `$()`, `1>a` and `>a`, `(a)` and `a)` as a case pattern, `for a;` and `for a in \"$@\";`. Adding representation for those would make the tree concrete without making it correct.\n\nDONE WHEN. `<<\"\"`, `<<'E'` against `<<\"E\"`, and the `<<${a:''}` family round-trip; the arithmetic delimiter is read from the tree rather than chosen by a balance heuristic, and `arithmetic_delimiters_balanced` is gone."
+                                        text "Widened. Two families that were planned as representation changes are printer choices once the tree may not record spelling, so they land here instead of on a node of their own.\n\nTHE ARITHMETIC DELIMITER. `$((]))` prints `$[]]`, and those are different programs: Bash gives `0]` for the second, because `$[` ends at the first `]` while `$((` ends at `))`. The tree holds the expression; the printer must pick a delimiter that spells that expression rather than one that truncates it. `arithmetic_delimiters_balanced` tests the wrong thing -- balance of parentheses -- when the question is whether the chosen delimiter's terminator occurs inside the content. Six of the eight arithmetic artifacts are this. The other two are parse bugs and live on `reject-what-bash-rejects`.\n\nTHE HERE-DOCUMENT DELIMITER. `<<\"\"` prints `<<'EOF'`, an invented word, where `<<''` spells what the tree holds and Bash accepts it. `<<${a:''}` prints a delimiter with a quote broken across it and then drifts on the next print, where the delimiter nsh holds is spellable as written -- Bash round-trips it, expanding the body and closing on the same bytes. Five artifacts.\n\nTogether with the `for` list this is three inventions and about fourteen artifacts, none of which need the tree to change. That is the shape `[spec:nsh:req:idiom.canonical-tree]` predicts: once spelling cannot be recorded, \"the printer cannot spell it\" resolves into either \"the printer chose badly\" or \"the parser accepted a non-program\", and never into \"the tree needs another field\"."
                                     }
                                 )
                             }
@@ -6999,7 +6999,10 @@ children (
                                 id canonicalize-word-parts
                                 title "Have the lexer build one canonical word, not two shapes of the same one"
                                 kind @refactor
-                                deps (measure-tree-canonicity record-what-the-printer-cannot-spell)
+                                implements {
+                                    nsh-library ([spec:nsh:req:idiom.canonical-tree])
+                                }
+                                deps (measure-tree-canonicity)
                                 log (
                                     {
                                         at 2026-08-27T23:01:32.667065472Z
@@ -7028,6 +7031,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "What the collapse pays for: deleting the table the fuzzer keeps walking.\n\n`Quoting` is eleven named variants, there are four region printers, and the protection rule is a hand-maintained set of bytes per variant:\n\n    Double                          \"\\$`\n    DoubleParameter                 \"\\$`\n    DoubleProtectedParameter       '\"\\$`\n    DoubleInertParameter            \"\\$`}\n    Parameter                      '\"\\$`}\n    Subscript                      '\"\\$`]\n    HereDocument                     \\$`\n    HereDocumentParameter           \"\\$`}\n    HereDocumentProtectedParameter '\"\\$`}\n\nThat is a cross-product of about five independent questions -- is an apostrophe a quote here, may a `\"` be written, does a `}` end something, does a `]`, does the context discard quote bytes before evaluating. Eleven named cells for thirty-two states, so a missing or inconsistent cell is invisible: `DoubleProtectedParameter` protects `'` but not `}` while its here-document twin protects both, and nothing in this shape says whether that is deliberate. Every one of the last 28 commits edited a cell, and a three-minute campaign still found 341 crashes.\n\nTARGET. The context becomes a small computed set of flags carried down the descent, and protection becomes one function of the byte, the flags, and the required inertness. Most of the table exists only to guess which of the four spellings the source used; once the tree no longer records that, the question is just \"emit a spelling that survives here\", which has one answer per byte.\n\n`operand_needs_apostrophe_protection` keyed on thirteen of eighteen `ParameterOperation`s is the same shape and goes the same way: whether an operand is a pattern is a property of the operation, so it belongs in the flags rather than in a match at every use.\n\nDONE WHEN. `nodes/source.rs` has no per-context byte table, `Quoting` is not an enum of named combinations, and a fresh campaign of at least an hour produces no new distinct root cause in the printer. The function count is a signal but not the goal: it was 73 at its peak and 64 after the last pass, and absorbing rules by deleting predicates is what has been working."
+                                    }
+                                )
+                            }
+
+                            {
+                                id reject-what-bash-rejects
+                                title "Refuse the arithmetic Bash refuses, instead of parsing it unspellably"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-08-27T23:19:24.350587812Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Replaces `record-what-the-printer-cannot-spell`, which the canonicity decision made wrong. That node claimed the tree could not hold the here-document delimiter or the arithmetic delimiter and had to grow representation for both. Measured against Bash, neither claim survives.\n\nTHE ARITHMETIC. Of the eight stored artifacts in this family, Bash parses six -- `$((]))`, `$(([))$()`, `$[]]`, `$[\\\\a]`, `$((\\\\a))`, `$((${a#'${'}))`. Their errors are at evaluation (\"operand expected\"), not at parse, so accepting them is correct. Every one is spellable in the form it was written, so there is no representation gap: the printer chooses a delimiter that changes the content. `$((]))` prints `$[]]`, and those are different programs -- Bash gives `0]` for the second, because `$[` ends at the first `]` while `$((` ends at `))`. That belongs to the printer and is already covered by `stop-the-printer-inventing`.\n\nThe remaining two are this node. Bash rejects `$[])a]` and `$[$(a+=)))` outright; nsh parses them and then cannot write them back. `[spec:nsh:req:idiom.canonical-tree]` says where no spelling of a construct exists the parser MUST reject it rather than admit a tree that cannot be written back, so these are parse bugs and the round-trip failure is the symptom that found them.\n\nTHE HERE-DOCUMENT DELIMITER. Also not representation. Bash accepts `<<\"\"` and `<<''` spells it; the printer emits the invented `EOF` instead. A delimiter holding a quote round-trips in Bash too -- `cat <<${a:''}` with `$a` in the body expands it and closes on the same bytes -- so the delimiter nsh holds is spellable and the printer mangles it. Also `stop-the-printer-inventing`.\n\nWHAT IS ACTUALLY LOST. Nothing that needs recording. `<<\"E\"` and `<<'E'` collapsing to one tree is what canonicity requires, not a defect.\n\nDONE WHEN. The two forms Bash rejects are refused with a diagnostic rather than parsed, and a test pins them against the reference rather than against a printed form."
                                     }
                                 )
                             }

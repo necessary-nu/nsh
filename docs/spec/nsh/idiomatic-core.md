@@ -41,14 +41,25 @@ undefined behavior.
 > outside the parsed tree rather than through `Cell`, `RefCell`, mutex slots, or
 > other delayed mutation of syntax.
 
-> [spec:nsh:req:idiom.printable-ast]
+> [spec:nsh:req:idiom.canonical-tree]
+> A program MUST have exactly one tree. Sources that differ only in how they
+> spell the same program MUST parse to the same tree, and the tree MUST NOT
+> record which spelling was written: which quote opened a run, whether a byte
+> was made inert by a backslash or by the quoting around it, and which of two
+> interchangeable delimiters was used are spelling. A distinction that changes
+> what the program does is not spelling and MUST be represented. Where no
+> spelling of a construct exists, the parser MUST reject it rather than admit a
+> tree that cannot be written back.
+
+> [spec:nsh:req:idiom.printable-ast+1]
 > Rendering a parsed syntax tree back as shell source and parsing that source
 > again MUST produce the same tree, apart from the source positions the render
 > relocates. A renderer MUST NOT substitute a different construct for one it
 > cannot spell, so every construct the parser accepts MUST be representable in
-> the tree together with whatever the renderer needs to spell it again. Layout
-> -- indentation, separators, and line breaks -- is not part of the tree and is
-> the renderer's to choose.
+> the tree together with whatever the renderer needs to spell it again. Spelling
+> and layout -- which quote, which escape, which of two interchangeable
+> delimiters, indentation, separators, and line breaks -- are not part of the
+> tree and are the renderer's to choose.
 
 > [spec:nsh:sem:idiom.typed-expansion]
 > Word expansion consumes Parsed Words and produces owned byte-string fields.
