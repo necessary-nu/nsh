@@ -54,6 +54,10 @@ pub(crate) enum WordToken {
         operation: ParameterOperation,
         colon: bool,
         indirect: bool,
+        /// The bytes that made an invalid expansion invalid, which the name
+        /// cannot hold and the operand starts after.
+        // [spec:nsh:req:idiom.printable-ast]
+        invalid_prefix: BString,
     },
     ParameterEnd,
     Command(Option<Node>),
@@ -103,6 +107,13 @@ pub(crate) struct ParameterExpansion {
     // [spec:nsh:req:compat.bash.expansion-globbing]
     pub(crate) indirect: bool,
     pub(crate) operand: Option<Box<ParsedWord>>,
+    /// The bytes that made an invalid expansion invalid.
+    ///
+    /// `${(M)x}` fails on the `(`, which is neither a name nor part of the
+    /// operand after it, so nothing else in the expansion holds it. Printing
+    /// without it spells a different failure.
+    // [spec:nsh:req:idiom.printable-ast]
+    pub(crate) invalid_prefix: BString,
 }
 
 /// The operation selected by a parameter expansion.
@@ -172,6 +183,7 @@ impl ParsedWord {
                     colon: false,
                     indirect: false,
                     operand: None,
+                    invalid_prefix: BString::new(Vec::new()),
                 }),
                 WordPart::Quote(QuoteBoundary::Close),
             ],
@@ -377,6 +389,7 @@ impl TokenDecoder<'_> {
                     operation,
                     colon,
                     indirect,
+                    invalid_prefix,
                 } => {
                     let operand = (*operation != ParameterOperation::Value)
                         .then(|| Box::new(self.word_until(TokenBoundary::Parameter)));
@@ -386,6 +399,7 @@ impl TokenDecoder<'_> {
                         colon: *colon,
                         indirect: *indirect,
                         operand,
+                        invalid_prefix: invalid_prefix.clone(),
                     }));
                 }
                 WordToken::Command(command) => {
@@ -479,6 +493,7 @@ mod tests {
                 operation: ParameterOperation::Default,
                 colon: true,
                 indirect: false,
+                invalid_prefix: BString::new(Vec::new()),
             },
             WordToken::Literal(b'y'),
             WordToken::ParameterEnd,

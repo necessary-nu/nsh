@@ -1,15 +1,24 @@
 //! Parse, print, then parse again without executing the input.
 //!
-//! The printer is an AST renderer, not a text-preserving formatter. Its useful
-//! round-trip contract is therefore a fixed point: canonicalising a parsed
-//! program twice must produce the same program text. A parse error is an
-//! ordinary answer to fuzzer bytes; a panic, hang, or changing canonical form
-//! is the finding.
+//! The printer is an AST renderer, not a text-preserving formatter, so the
+//! naive contract is a fixed point: canonicalising twice gives the same text.
+//! That is too weak to be a property. Any output the printer can spell
+//! consistently satisfies it, including output that means something else --
+//! `echo "${a+"a}b"}"` printed as `echo "${a+a}b}"` for 107 artifacts without
+//! the fixed point ever noticing, and `declare -f` was handing back function
+//! bodies that ran differently.
+//!
+//! `[spec:nsh:req:idiom.printable-ast]` is the contract instead: printing a
+//! tree and parsing the result has to give back the same tree, apart from the
+//! source positions the render relocates. A parse error on the fuzzer's own
+//! bytes is an ordinary answer; a printed program that will not parse, or
+//! that parses as something else, is the finding.
 
 #![no_main]
 
 use bstr::BStr;
 use libfuzzer_sys::fuzz_target;
+use nsh::fuzzing::{Reversibility, printing_is_reversible};
 use nsh::{Shell, Streams};
 
 fn fingerprint(bytes: &[u8]) -> u64 {
@@ -30,23 +39,19 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
 
-    let Ok(once) = nsh::fuzzing::canonical_source(&mut shell, BStr::new(data)) else {
-        return;
-    };
-    let Ok(twice) = nsh::fuzzing::canonical_source(&mut shell, BStr::new(&once)) else {
-        panic!(
-            "canonical source did not reparse: input={:016x} once={:016x}",
+    match printing_is_reversible(&mut shell, BStr::new(data)) {
+        Reversibility::NotParsed | Reversibility::Reversible { .. } => {}
+        Reversibility::NotReparsed { printed } => panic!(
+            "printed program did not parse: input={:016x} printed={:016x}",
             fingerprint(data),
-            fingerprint(&once),
-        );
-    };
-    assert!(
-        once == twice,
-        "canonical source changed after reparse: input={:016x} once={:016x} twice={:016x}",
-        fingerprint(data),
-        fingerprint(&once),
-        fingerprint(&twice),
-    );
+            fingerprint(&printed),
+        ),
+        Reversibility::Changed { printed } => panic!(
+            "printed program parsed as a different program: input={:016x} printed={:016x}",
+            fingerprint(data),
+            fingerprint(&printed),
+        ),
+    }
     drop(shell.take_captured_stdout());
     drop(shell.take_captured_stderr());
 });

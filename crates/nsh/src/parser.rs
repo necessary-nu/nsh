@@ -2095,6 +2095,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         let indirection = bash::parameter_indirection(shell, lexer, parameter_syntax.braced)?;
         let indirect = indirection == bash::Indirection::Present;
         let mut bad_substitution = indirection == bash::Indirection::Invalid;
+        let mut invalid_prefix = BString::new(Vec::new());
         let name_start = lexer.output.len();
         'assignment_name: loop {
             if bad_substitution {
@@ -2152,6 +2153,13 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                 if !current_unit.is_special_parameter() {
                     if parameter_syntax.operation == ParameterOperation::Length {
                         parameter_syntax.operation = ParameterOperation::Invalid;
+                    }
+                    // The byte that made this invalid is neither a name byte
+                    // nor part of the operand that starts after it, so the
+                    // expansion carries it or nothing does.
+                    // [spec:nsh:req:idiom.printable-ast]
+                    if let Some(byte) = current_unit.byte() {
+                        invalid_prefix.push(byte);
                     }
                     bad_substitution = true;
                     break 'assignment_name;
@@ -2212,6 +2220,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                 operation: parameter_syntax.operation,
                 colon: parameter_syntax.colon,
                 indirect,
+                invalid_prefix,
             });
         }
     } else {

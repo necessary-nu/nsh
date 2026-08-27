@@ -36,6 +36,7 @@ pub(super) fn run(shell: &mut Shell, names_only: bool, operands: &[&BStr]) -> Re
 pub(crate) fn source(shell: &Shell, name: &BStr) -> Option<BString> {
     let definition = definition(shell, name)?;
     Some(crate::nodes::source::function_definition(
+        &shell.locale,
         name,
         &definition.body,
     ))
@@ -67,6 +68,7 @@ fn list_all(shell: &Shell, names_only: bool, listing: &mut BString) {
             listing.extend_from_slice(name);
         } else {
             listing.extend_from_slice(&crate::nodes::source::function_definition(
+                &shell.locale,
                 name,
                 &definition.body,
             ));
@@ -100,6 +102,7 @@ fn select(
             }
         } else {
             listing.extend_from_slice(&crate::nodes::source::function_definition(
+                &shell.locale,
                 name,
                 &definition.body,
             ));

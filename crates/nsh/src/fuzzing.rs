@@ -24,7 +24,7 @@ pub fn canonical_source(shell: &mut Shell, source: &BStr) -> Result<BString, Err
             match crate::parser::parse_command(shell, false)? {
                 crate::parser::ParseResult::Eof => break,
                 crate::parser::ParseResult::Tree(Some(node)) => {
-                    let command = crate::nodes::source::command(&node);
+                    let command = crate::nodes::source::command(&shell.locale, &node);
                     if command.is_empty() {
                         continue;
                     }
@@ -69,7 +69,7 @@ pub fn printing_is_reversible(shell: &mut Shell, source: &BStr) -> Reversibility
     let Ok(program) = parse_program(shell, source) else {
         return Reversibility::NotParsed;
     };
-    let printed = print_program(&program);
+    let printed = print_program(shell, &program);
     match parse_program(shell, printed.as_ref()) {
         Err(_) => Reversibility::NotReparsed { printed },
         Ok(reparsed) if reparsed != program => Reversibility::Changed { printed },
@@ -113,10 +113,10 @@ fn push_command_sequence(program: &mut Vec<Node>, node: Node) {
     }
 }
 
-fn print_program(program: &[Node]) -> BString {
+fn print_program(shell: &Shell, program: &[Node]) -> BString {
     let mut printed = BString::new(Vec::new());
     for node in program {
-        let command = crate::nodes::source::command(node);
+        let command = crate::nodes::source::command(&shell.locale, node);
         printed.extend_from_slice(&command);
         if command.last() != Some(&b'\n') {
             printed.push(b'\n');
@@ -229,6 +229,10 @@ EOF
         assert_eq!(once, twice);
     }
 
+    /// An invalid expansion fails on bytes the source wrote, and the tree
+    /// still holds them. Printing `${}` in their place spelled a different
+    /// failure and threw away whatever the braces were around.
+    // [spec:nsh:req:idiom.printable-ast/test]
     #[test]
     fn canonical_source_keeps_an_invalid_parameter_fixed() {
         let source = b"${(M)foo}";
@@ -237,7 +241,7 @@ EOF
         let twice =
             canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
 
-        assert_eq!(once, BString::from(b"${}\n".as_slice()));
+        assert_eq!(once, BString::from(b"${(M)foo}\n".as_slice()));
         assert_eq!(once, twice);
     }
 

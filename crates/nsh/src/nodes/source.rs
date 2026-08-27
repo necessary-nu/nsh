@@ -57,6 +57,10 @@ enum Quoting {
     Word,
     /// Inside a `"` this printer opened.
     Double,
+    /// Inside a `${...}` operand that no quoting encloses. The braces make
+    /// blanks and shell operators inert, so only the bytes that would end or
+    /// reopen the expansion need protecting there.
+    Parameter,
     /// Inside a `${...}` operand nested in a `"` this printer opened.
     DoubleParameter,
     /// A pattern or arithmetic `${...}` operand nested in a `"` this printer
@@ -80,8 +84,12 @@ enum Quoting {
 }
 
 /// Print `name`'s definition the way `declare -f` does.
-pub(crate) fn function_definition(name: &BStr, body: &Node) -> BString {
-    let mut printer = Printer::new();
+pub(crate) fn function_definition(
+    locale: &nsh_platform::Locale,
+    name: &BStr,
+    body: &Node,
+) -> BString {
+    let mut printer = Printer::new(locale);
     push_function_name(&mut printer.out, name);
     printer.out.extend_from_slice(b" () \n{ ");
     printer.newline(STEP);
@@ -97,24 +105,28 @@ pub(crate) fn function_definition(name: &BStr, body: &Node) -> BString {
 /// round-trip needs to render an arbitrary top-level command without first
 /// storing it as a function definition.
 #[cfg(feature = "fuzzing")]
-pub(crate) fn command(node: &Node) -> BString {
-    let mut printer = Printer::new();
+pub(crate) fn command(locale: &nsh_platform::Locale, node: &Node) -> BString {
+    let mut printer = Printer::new(locale);
     printer.top_level_list(node, 0);
     printer.finish();
     printer.out
 }
 
 /// The output buffer and the here-document bodies owed to the next line.
-struct Printer {
+struct Printer<'a> {
+    /// Needed to spell a `$'...'` run back: which bytes are one character
+    /// decides what stays literal and what becomes an octal escape.
+    locale: &'a nsh_platform::Locale,
     out: BString,
     /// Bodies that must be written at column zero after the next newline,
     /// each already terminated by its own delimiter line.
     pending: Vec<BString>,
 }
 
-impl Printer {
-    const fn new() -> Self {
+impl<'a> Printer<'a> {
+    const fn new(locale: &'a nsh_platform::Locale) -> Self {
         Self {
+            locale,
             out: BString::new(Vec::new()),
             pending: Vec::new(),
         }
@@ -619,7 +631,7 @@ impl Printer {
     /// The tree keeps the body but not the delimiter the source spelled,
     /// so one is chosen that no line of the body can be mistaken for.
     fn here_document(&mut self, document: &HereDocument, indent: usize) {
-        let mut body = Self::new();
+        let mut body = Self::new(self.locale);
         if document.expand {
             body.parsed_word(&document.body.word, Quoting::HereDocument, indent);
         } else {
@@ -676,7 +688,9 @@ impl Printer {
                 let end = closing_quote(parts, at + 1);
                 let region = &parts[at + 1..end];
                 match quoting {
-                    Quoting::Word => self.quoted_region(region, kind, indent),
+                    Quoting::Word | Quoting::Parameter => {
+                        self.quoted_region(region, kind, indent);
+                    }
                     Quoting::DoubleParameter
                     | Quoting::DoubleProtectedParameter
                     | Quoting::DoubleTruncatedParameter => {
@@ -693,6 +707,7 @@ impl Printer {
                 if matches!(
                     quoting,
                     Quoting::Word
+                        | Quoting::Parameter
                         | Quoting::DoubleParameter
                         | Quoting::DoubleProtectedParameter
                         | Quoting::DoubleTruncatedParameter
@@ -854,6 +869,7 @@ impl Printer {
                 return;
             }
             Quoting::Double => b"\"\\$`",
+            Quoting::Parameter => b"'\"\\$`}",
             Quoting::DoubleParameter | Quoting::DoubleTruncatedParameter => b"\"\\$`",
             Quoting::DoubleProtectedParameter => b"'\"\\$`",
             Quoting::HereDocument => b"\\$`",
@@ -885,6 +901,7 @@ impl Printer {
             | Quoting::Double
             | Quoting::DoubleParameter
             | Quoting::DoubleTruncatedParameter => b"\"\\$`",
+            Quoting::Parameter => b"'\"\\$`}",
             Quoting::DoubleProtectedParameter => b"'\"\\$`",
             Quoting::HereDocument => b"\\$`",
             Quoting::HereDocumentParameter | Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
@@ -910,6 +927,22 @@ impl Printer {
                 WordPart::Parameter(_) | WordPart::Command(_) | WordPart::Arithmetic(_)
             )
         });
+        if kind == QuoteKind::DollarSingle && !expands {
+            let mut bytes = BString::new(Vec::new());
+            for part in region {
+                match part {
+                    WordPart::Literal(text) | WordPart::Multibyte { bytes: text, .. } => {
+                        bytes.extend_from_slice(text);
+                    }
+                    WordPart::Escaped(byte) => bytes.push(*byte),
+                    _ => {}
+                }
+            }
+            let quoted =
+                crate::escape::bash::ansi_c_quote(self.locale, BStr::new(bytes.as_slice()));
+            self.out.extend_from_slice(&quoted);
+            return;
+        }
         if kind == QuoteKind::DollarDouble {
             self.out.push(b'$');
         }
@@ -945,16 +978,22 @@ impl Printer {
         indent: usize,
     ) {
         if parameter.operation == ParameterOperation::Invalid {
-            // Expansion fails before inspecting the partially retained
-            // operand; `${}` preserves that failure and is a fixed point.
-            self.out.extend_from_slice(b"${}");
-            if parameter
-                .operand
-                .as_deref()
-                .is_some_and(|operand| parts_contain_literal(operand.parts(), b']'))
-            {
-                self.out.push(b']');
+            // The expansion fails, but it fails on bytes the source wrote and
+            // the tree still holds. Printing `${}` in their place spelled a
+            // different failure and lost whatever the braces were around.
+            // [spec:nsh:req:idiom.printable-ast]
+            self.out.extend_from_slice(b"${");
+            self.out.extend_from_slice(&parameter.name);
+            self.out.extend_from_slice(&parameter.invalid_prefix);
+            if let Some(operand) = parameter.operand.as_ref() {
+                let inert = if quoting == Quoting::Word {
+                    Quoting::Parameter
+                } else {
+                    quoting
+                };
+                self.parsed_parts(operand.parts(), inert, indent);
             }
+            self.out.push(b'}');
             return;
         }
         if bare_parameter(parameter, next) {
@@ -981,14 +1020,11 @@ impl Printer {
                 if parts_contain_literal(operand.parts(), b']') {
                     self.out.push(b']');
                 }
-            } else if !operand.is_empty()
-                && (parameter.operation != ParameterOperation::Transform
-                    || valid_transform_operand(operand))
-            {
+            } else if !operand.is_empty() {
                 // Inside a `"` this printer opened, the operand is already
                 // protected and may not open a quote of its own.
                 let inner = match quoting {
-                    Quoting::Word => Quoting::Word,
+                    Quoting::Word | Quoting::Parameter => Quoting::Parameter,
                     Quoting::Double
                     | Quoting::DoubleParameter
                     | Quoting::DoubleProtectedParameter
@@ -1181,26 +1217,8 @@ const fn operand_needs_apostrophe_protection(operation: ParameterOperation) -> b
             | ParameterOperation::UpperAll
             | ParameterOperation::LowerFirst
             | ParameterOperation::LowerAll
+            | ParameterOperation::Transform
     )
-}
-
-/// `${name@operator}` admits one literal operator, never another expansion.
-fn valid_transform_operand(word: &ParsedWord) -> bool {
-    let spelling = word.as_bstr();
-    spelling.len() == 1
-        && matches!(
-            spelling[0],
-            b'a' | b'A' | b'k' | b'K' | b'Q' | b'L' | b'U' | b'u' | b'P'
-        )
-        && word.parts().iter().all(|part| {
-            matches!(
-                part,
-                WordPart::Literal(_)
-                    | WordPart::Escaped(_)
-                    | WordPart::Multibyte { .. }
-                    | WordPart::Quote(_)
-            )
-        })
 }
 
 fn reserved_command_word(node: &Node) -> Option<&[u8]> {
