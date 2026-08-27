@@ -71,10 +71,13 @@ enum Quoting {
     /// opened. The parser reads an apostrophe there as a quote even though
     /// the enclosing double quotes have already made it an ordinary byte.
     DoubleProtectedParameter,
-    /// A `${...}` operand whose quoting never closed, because a NUL ended the
-    /// parse inside it. Its toggles cannot be written back: the last one
-    /// would leave the operand quoted at the `}` that has to end it.
-    DoubleTruncatedParameter,
+    /// A `${...}` operand inside a `"` that will never expand -- because a
+    /// NUL ended the parse inside it, or because the expansion around it is
+    /// one the shell refuses. Its bytes are inert text, so the only one that
+    /// still matters is the `}` that ends the expansion, and a toggle in it
+    /// cannot be written back: the last one would leave the operand quoted at
+    /// that `}`.
+    DoubleInertParameter,
     /// Inside `$(( ))`.
     Arithmetic,
     /// A here-document body that still expands.
@@ -720,7 +723,7 @@ impl<'a> Printer<'a> {
                     }
                     Quoting::DoubleParameter
                     | Quoting::DoubleProtectedParameter
-                    | Quoting::DoubleTruncatedParameter => {
+                    | Quoting::DoubleInertParameter => {
                         self.double_parameter_quoted_region(region, kind, quoting, indent);
                     }
                     Quoting::Arithmetic => self.arithmetic_quoted_region(region, indent),
@@ -738,7 +741,7 @@ impl<'a> Printer<'a> {
                         | Quoting::Subscript
                         | Quoting::DoubleParameter
                         | Quoting::DoubleProtectedParameter
-                        | Quoting::DoubleTruncatedParameter
+                        | Quoting::DoubleInertParameter
                         | Quoting::Arithmetic
                         | Quoting::HereDocumentParameter
                 ) {
@@ -944,7 +947,8 @@ impl<'a> Printer<'a> {
             Quoting::Double => b"\"\\$`",
             Quoting::Parameter => b"'\"\\$`}",
             Quoting::Subscript => b"'\"\\$`]",
-            Quoting::DoubleParameter | Quoting::DoubleTruncatedParameter => b"\"\\$`",
+            Quoting::DoubleParameter => b"\"\\$`",
+            Quoting::DoubleInertParameter => b"\"\\$`}",
             Quoting::DoubleProtectedParameter => b"'\"\\$`",
             Quoting::HereDocument => b"\\$`",
             Quoting::HereDocumentParameter => b"\"\\$`}",
@@ -979,10 +983,8 @@ impl<'a> Printer<'a> {
                 self.out.push(byte);
                 return;
             }
-            Quoting::Arithmetic
-            | Quoting::Double
-            | Quoting::DoubleParameter
-            | Quoting::DoubleTruncatedParameter => b"\"\\$`",
+            Quoting::Arithmetic | Quoting::Double | Quoting::DoubleParameter => b"\"\\$`",
+            Quoting::DoubleInertParameter => b"\"\\$`}",
             Quoting::DoubleProtectedParameter => b"'\"\\$`",
             Quoting::HereDocument => b"\\$`",
             Quoting::HereDocumentParameter | Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
@@ -995,11 +997,12 @@ impl<'a> Printer<'a> {
         //
         // Either way a backslash is written once when two parts share it,
         // which is what keeps `"\n"` from growing one a round.
+        // An inert operand's bytes were never protected by a backslash the
+        // source wrote, so the mark on them is the quoting's rather than a
+        // part of the operand.
         let operand = matches!(
             quoting,
-            Quoting::DoubleParameter
-                | Quoting::DoubleProtectedParameter
-                | Quoting::DoubleTruncatedParameter
+            Quoting::DoubleParameter | Quoting::DoubleProtectedParameter
         );
         let shares_previous = matches!(previous, Some(WordPart::Escaped(b'\\')))
             && !protected.contains(&byte)
@@ -1097,8 +1100,11 @@ impl<'a> Printer<'a> {
             self.out.extend_from_slice(&parameter.invalid_prefix);
             if let Some(operand) = parameter.operand.as_ref() {
                 let inert = match quoting {
-                    Quoting::Word | Quoting::Parameter => Quoting::Parameter,
-                    Quoting::Double | Quoting::DoubleProtectedParameter => Quoting::DoubleParameter,
+                    Quoting::Word | Quoting::Parameter | Quoting::Subscript => Quoting::Parameter,
+                    Quoting::Double
+                    | Quoting::DoubleParameter
+                    | Quoting::DoubleProtectedParameter
+                    | Quoting::DoubleInertParameter => Quoting::DoubleInertParameter,
                     quoting => quoting,
                 };
                 self.parsed_parts(operand.parts(), inert, indent);
@@ -1138,9 +1144,9 @@ impl<'a> Printer<'a> {
                     Quoting::Double
                     | Quoting::DoubleParameter
                     | Quoting::DoubleProtectedParameter
-                    | Quoting::DoubleTruncatedParameter => {
+                    | Quoting::DoubleInertParameter => {
                         if !operand_quoting_closed(operand) {
-                            Quoting::DoubleTruncatedParameter
+                            Quoting::DoubleInertParameter
                         } else if operand_needs_apostrophe_protection(parameter.operation) {
                             Quoting::DoubleProtectedParameter
                         } else {
