@@ -981,13 +981,27 @@ impl<'a> Printer<'a> {
             Quoting::HereDocument => b"\\$`",
             Quoting::HereDocumentParameter | Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
         };
-        // An escape is a part, and its own backslash is the only thing that
-        // spells it back -- unless the part before it already wrote one they
-        // share, which is what keeps `"\n"` from growing a backslash a round.
+        // Inside a quoted run the mark means the run protected the byte, and
+        // the quotes still do -- so only what the quoting itself would read
+        // needs a backslash. Inside a `${...}` operand there are no quotes
+        // around the byte and the escape is a part of the operand, which only
+        // its own backslash spells back.
+        //
+        // Either way a backslash is written once when two parts share it,
+        // which is what keeps `"\n"` from growing one a round.
+        let operand = matches!(
+            quoting,
+            Quoting::DoubleParameter
+                | Quoting::DoubleProtectedParameter
+                | Quoting::DoubleTruncatedParameter
+        );
         let shares_previous = matches!(previous, Some(WordPart::Escaped(b'\\')))
             && !protected.contains(&byte)
             && byte != b'\\';
-        if !shares_previous && (byte != b'\\' || escapes_next(next, protected)) {
+        if (operand || protected.contains(&byte))
+            && !shares_previous
+            && (byte != b'\\' || escapes_next(next, protected))
+        {
             self.out.push(b'\\');
         }
         self.out.push(byte);
@@ -1076,10 +1090,10 @@ impl<'a> Printer<'a> {
             self.out.extend_from_slice(&parameter.name);
             self.out.extend_from_slice(&parameter.invalid_prefix);
             if let Some(operand) = parameter.operand.as_ref() {
-                let inert = if quoting == Quoting::Word {
-                    Quoting::Parameter
-                } else {
-                    quoting
+                let inert = match quoting {
+                    Quoting::Word | Quoting::Parameter => Quoting::Parameter,
+                    Quoting::Double | Quoting::DoubleProtectedParameter => Quoting::DoubleParameter,
+                    quoting => quoting,
                 };
                 self.parsed_parts(operand.parts(), inert, indent);
             }
