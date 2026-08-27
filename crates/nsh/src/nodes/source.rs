@@ -784,8 +784,23 @@ impl<'a> Printer<'a> {
             b'"'
         };
         self.out.push(mark);
-        for (at, part) in region.iter().enumerate() {
-            self.part(part, region.get(at + 1), Quoting::Double, indent);
+        if mark == b'\'' {
+            // Single quotes protect everything between them, so nothing in
+            // the run needs a backslash and one written here would be a byte.
+            // [spec:nsh:req:idiom.printable-ast]
+            for part in region {
+                match part {
+                    WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => {
+                        self.out.extend_from_slice(bytes);
+                    }
+                    WordPart::Escaped(byte) | WordPart::Protected(byte) => self.out.push(*byte),
+                    _ => {}
+                }
+            }
+        } else {
+            for (at, part) in region.iter().enumerate() {
+                self.part(part, region.get(at + 1), Quoting::Double, indent);
+            }
         }
         self.out.push(mark);
     }
