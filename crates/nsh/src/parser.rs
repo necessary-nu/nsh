@@ -1513,7 +1513,12 @@ fn parse_dollar_single_quote_escape(
     };
 
     unread_input_units(shell, text.len().saturating_sub(consumed));
-    destination.extend(bytes.into_iter().map(WordToken::Escaped));
+    /* A decoded byte is data, and the `$'...'` around it is what protects
+     * it. Marking it escaped as well would make `$'\"'` and `$'"'` two
+     * different words holding the same byte, and only one of them can be
+     * written back from bytes whose escapes are already gone. */
+    // [spec:nsh:req:idiom.printable-ast]
+    destination.extend(bytes.into_iter().map(WordToken::Literal));
     Ok(())
 }
 
@@ -2126,6 +2131,12 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         let indirect = indirection == bash::Indirection::Present;
         let mut bad_substitution = indirection == bash::Indirection::Invalid;
         let mut invalid_prefix = BString::new(Vec::new());
+        if bad_substitution {
+            /* `${!#a}` is refused on the `!`, and the name that would have
+             * followed it is empty, so the marker has nowhere else to go. */
+            // [spec:nsh:req:idiom.printable-ast]
+            invalid_prefix.push(b'!');
+        }
         let name_start = lexer.output.len();
         'assignment_name: loop {
             if bad_substitution {

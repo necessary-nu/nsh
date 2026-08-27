@@ -927,7 +927,7 @@ impl<'a> Printer<'a> {
     // [spec:nsh:req:idiom.printable-ast]
     fn escaped(&mut self, byte: u8, next: Option<&WordPart>, quoting: Quoting) {
         let protected: &[u8] = match quoting {
-            Quoting::Word => {
+            Quoting::Word | Quoting::Parameter => {
                 self.out.push(b'\\');
                 self.out.push(byte);
                 return;
@@ -936,7 +936,6 @@ impl<'a> Printer<'a> {
             | Quoting::Double
             | Quoting::DoubleParameter
             | Quoting::DoubleTruncatedParameter => b"\"\\$`",
-            Quoting::Parameter => b"'\"\\$`}",
             Quoting::DoubleProtectedParameter => b"'\"\\$`",
             Quoting::HereDocument => b"\\$`",
             Quoting::HereDocumentParameter | Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
@@ -1018,6 +1017,9 @@ impl<'a> Printer<'a> {
             // different failure and lost whatever the braces were around.
             // [spec:nsh:req:idiom.printable-ast]
             self.out.extend_from_slice(b"${");
+            if parameter.indirect {
+                self.out.push(b'!');
+            }
             self.out.extend_from_slice(&parameter.name);
             self.out.extend_from_slice(&parameter.invalid_prefix);
             if let Some(operand) = parameter.operand.as_ref() {
