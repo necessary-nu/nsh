@@ -443,13 +443,16 @@ impl<'a> Printer<'a> {
                 self.out.extend_from_slice(b" ]]");
             }
             BashNode::ArithmeticCommand(command) => {
-                let expression = trimmed(command.expression.as_bstr());
+                // No padding: the expression the tree holds is the one the
+                // source wrote, and a space added here comes back as part of
+                // it. [spec:nsh:req:idiom.printable-ast]
+                let expression = command.expression.as_bstr();
                 if expression.is_empty() {
                     self.out.extend_from_slice(b"(())");
                 } else {
-                    self.out.extend_from_slice(b"(( ");
+                    self.out.extend_from_slice(b"((");
                     self.out.extend_from_slice(expression);
-                    self.out.extend_from_slice(b" ))");
+                    self.out.extend_from_slice(b"))");
                 }
             }
             BashNode::ArithmeticFor(command) => self.arithmetic_for(command, indent),
@@ -738,7 +741,13 @@ impl<'a> Printer<'a> {
                     continue;
                 }
             }
-            self.part(&parts[at], parts.get(at + 1), quoting, indent);
+            self.part(
+                &parts[at],
+                at.checked_sub(1).and_then(|before| parts.get(before)),
+                parts.get(at + 1),
+                quoting,
+                indent,
+            );
             at += 1;
         }
     }
@@ -760,7 +769,13 @@ impl<'a> Printer<'a> {
             quoting == Quoting::DoubleProtectedParameter || parts_contain_literal(region, b'}');
         if !quoted {
             for (at, part) in region.iter().enumerate() {
-                self.part(part, region.get(at + 1), quoting, indent);
+                self.part(
+                    part,
+                    at.checked_sub(1).and_then(|before| region.get(before)),
+                    region.get(at + 1),
+                    quoting,
+                    indent,
+                );
             }
             return;
         }
@@ -774,7 +789,13 @@ impl<'a> Printer<'a> {
         };
         self.out.push(mark);
         for (at, part) in region.iter().enumerate() {
-            self.part(part, region.get(at + 1), Quoting::Double, indent);
+            self.part(
+                part,
+                at.checked_sub(1).and_then(|before| region.get(before)),
+                region.get(at + 1),
+                Quoting::Double,
+                indent,
+            );
         }
         self.out.push(mark);
     }
@@ -783,6 +804,7 @@ impl<'a> Printer<'a> {
         for (at, part) in region.iter().enumerate() {
             self.part(
                 part,
+                at.checked_sub(1).and_then(|before| region.get(before)),
                 region.get(at + 1),
                 Quoting::HereDocumentProtectedParameter,
                 indent,
@@ -801,7 +823,13 @@ impl<'a> Printer<'a> {
                         .filter(|byte| !matches!(byte, b'\'' | b'"')),
                 ),
                 WordPart::Escaped(b'\'' | b'"') | WordPart::Quote(_) => {}
-                _ => self.part(part, region.get(at + 1), Quoting::Arithmetic, indent),
+                _ => self.part(
+                    part,
+                    at.checked_sub(1).and_then(|before| region.get(before)),
+                    region.get(at + 1),
+                    Quoting::Arithmetic,
+                    indent,
+                ),
             }
         }
     }
@@ -810,7 +838,14 @@ impl<'a> Printer<'a> {
     ///
     /// `next` is the part that will follow it, which decides whether a
     /// parameter may be written as `$name` or needs `${name}`.
-    fn part(&mut self, part: &WordPart, next: Option<&WordPart>, quoting: Quoting, indent: usize) {
+    fn part(
+        &mut self,
+        part: &WordPart,
+        previous: Option<&WordPart>,
+        next: Option<&WordPart>,
+        quoting: Quoting,
+        indent: usize,
+    ) {
         match part {
             WordPart::Literal(bytes) => self.literal(bytes, next, quoting),
             WordPart::Multibyte { bytes, escaped } => {
@@ -820,7 +855,7 @@ impl<'a> Printer<'a> {
                     self.literal(bytes, next, quoting);
                 }
             }
-            WordPart::Escaped(byte) => self.escaped(*byte, next, quoting),
+            WordPart::Escaped(byte) => self.escaped(*byte, previous, next, quoting),
             // A `"` inside a `${...}` operand toggles the quoting the word
             // arrived in, and the parser records the toggle rather than a
             // region. Dropping it silently reopens the parameter grammar to
@@ -925,7 +960,13 @@ impl<'a> Printer<'a> {
     /// itself only when the byte after it would otherwise read as an escape,
     /// and protecting it anyway spells the same bytes with an extra part.
     // [spec:nsh:req:idiom.printable-ast]
-    fn escaped(&mut self, byte: u8, next: Option<&WordPart>, quoting: Quoting) {
+    fn escaped(
+        &mut self,
+        byte: u8,
+        previous: Option<&WordPart>,
+        next: Option<&WordPart>,
+        quoting: Quoting,
+    ) {
         let protected: &[u8] = match quoting {
             Quoting::Word | Quoting::Parameter => {
                 self.out.push(b'\\');
@@ -940,7 +981,13 @@ impl<'a> Printer<'a> {
             Quoting::HereDocument => b"\\$`",
             Quoting::HereDocumentParameter | Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
         };
-        if protected.contains(&byte) && (byte != b'\\' || escapes_next(next, protected)) {
+        // An escape is a part, and its own backslash is the only thing that
+        // spells it back -- unless the part before it already wrote one they
+        // share, which is what keeps `"\n"` from growing a backslash a round.
+        let shares_previous = matches!(previous, Some(WordPart::Escaped(b'\\')))
+            && !protected.contains(&byte)
+            && byte != b'\\';
+        if !shares_previous && (byte != b'\\' || escapes_next(next, protected)) {
             self.out.push(b'\\');
         }
         self.out.push(byte);
@@ -983,7 +1030,13 @@ impl<'a> Printer<'a> {
         if expands || matches!(kind, QuoteKind::Double | QuoteKind::DollarDouble) {
             self.out.push(b'"');
             for (at, part) in region.iter().enumerate() {
-                self.part(part, region.get(at + 1), Quoting::Double, indent);
+                self.part(
+                    part,
+                    at.checked_sub(1).and_then(|before| region.get(before)),
+                    region.get(at + 1),
+                    Quoting::Double,
+                    indent,
+                );
             }
             self.out.push(b'"');
             return;
