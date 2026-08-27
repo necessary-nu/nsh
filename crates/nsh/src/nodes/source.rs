@@ -57,6 +57,10 @@ enum Quoting {
     Word,
     /// Inside a `"` this printer opened.
     Double,
+    /// Inside the `[...]` of an assignment word, where the brackets make
+    /// blanks and shell operators the subscript's own bytes and only the
+    /// closing bracket ends it.
+    Subscript,
     /// Inside a `${...}` operand that no quoting encloses. The braces make
     /// blanks and shell operators inert, so only the bytes that would end or
     /// reopen the expansion need protecting there.
@@ -533,7 +537,7 @@ impl<'a> Printer<'a> {
         self.out.extend_from_slice(assignment.name.as_bstr());
         if let Some(subscript) = &assignment.subscript {
             self.out.push(b'[');
-            self.word(subscript, indent);
+            self.parsed_word(&subscript.word, Quoting::Subscript, indent);
             self.out.push(b']');
         }
         self.out
@@ -556,7 +560,7 @@ impl<'a> Printer<'a> {
     fn array_element(&mut self, element: &BashArrayElement, indent: usize) {
         if let Some(subscript) = &element.subscript {
             self.out.push(b'[');
-            self.word(subscript, indent);
+            self.parsed_word(&subscript.word, Quoting::Subscript, indent);
             self.out.push(b']');
             self.out.extend_from_slice(operator_text(element.operator));
         }
@@ -711,7 +715,7 @@ impl<'a> Printer<'a> {
                 let end = closing_quote(parts, at + 1);
                 let region = &parts[at + 1..end];
                 match quoting {
-                    Quoting::Word | Quoting::Parameter => {
+                    Quoting::Word | Quoting::Parameter | Quoting::Subscript => {
                         self.quoted_region(region, kind, indent);
                     }
                     Quoting::DoubleParameter
@@ -731,6 +735,7 @@ impl<'a> Printer<'a> {
                     quoting,
                     Quoting::Word
                         | Quoting::Parameter
+                        | Quoting::Subscript
                         | Quoting::DoubleParameter
                         | Quoting::DoubleProtectedParameter
                         | Quoting::DoubleTruncatedParameter
@@ -938,6 +943,7 @@ impl<'a> Printer<'a> {
             }
             Quoting::Double => b"\"\\$`",
             Quoting::Parameter => b"'\"\\$`}",
+            Quoting::Subscript => b"'\"\\$`]",
             Quoting::DoubleParameter | Quoting::DoubleTruncatedParameter => b"\"\\$`",
             Quoting::DoubleProtectedParameter => b"'\"\\$`",
             Quoting::HereDocument => b"\\$`",
@@ -968,7 +974,7 @@ impl<'a> Printer<'a> {
         quoting: Quoting,
     ) {
         let protected: &[u8] = match quoting {
-            Quoting::Word | Quoting::Parameter => {
+            Quoting::Word | Quoting::Parameter | Quoting::Subscript => {
                 self.out.push(b'\\');
                 self.out.push(byte);
                 return;
@@ -1128,7 +1134,7 @@ impl<'a> Printer<'a> {
                 // Inside a `"` this printer opened, the operand is already
                 // protected and may not open a quote of its own.
                 let inner = match quoting {
-                    Quoting::Word | Quoting::Parameter => Quoting::Parameter,
+                    Quoting::Word | Quoting::Parameter | Quoting::Subscript => Quoting::Parameter,
                     Quoting::Double
                     | Quoting::DoubleParameter
                     | Quoting::DoubleProtectedParameter
