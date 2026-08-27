@@ -22,8 +22,16 @@ pub(crate) struct ParsedWord {
 pub(crate) enum WordPart {
     /// Bytes that have no additional quoting protection.
     Literal(BString),
-    /// One byte protected by a shell escape.
+    /// One byte a backslash escaped: the source wrote `\byte`, and the
+    /// backslash is spelling rather than data.
     Escaped(u8),
+    /// One byte the quoting around it protected, which no backslash of its
+    /// own put there. `"a=b"` marks the `=` so the word cannot be read as an
+    /// assignment, and a backslash inside `"` that escapes nothing is a byte
+    /// like any other. Both are data, and writing a backslash for either
+    /// would spell a word the source did not.
+    // [spec:nsh:req:idiom.printable-ast]
+    Protected(u8),
     /// A complete locale multibyte character, with its quoting protection.
     Multibyte { bytes: BString, escaped: bool },
     /// A quoting boundary.
@@ -44,6 +52,7 @@ pub(crate) enum WordPart {
 pub(crate) enum WordToken {
     Literal(u8),
     Escaped(u8),
+    Protected(u8),
     Multibyte {
         bytes: BString,
         escaped: bool,
@@ -222,6 +231,7 @@ impl ParsedWord {
                     escaped: false,
                 } => bytes.as_slice(),
                 WordPart::Escaped(_)
+                | WordPart::Protected(_)
                 | WordPart::Multibyte { escaped: true, .. }
                 | WordPart::Quote(_)
                 | WordPart::Parameter(_)
@@ -307,6 +317,7 @@ impl ParsedWord {
                     output.push(b'\\');
                     output.push(*byte);
                 }
+                WordPart::Protected(byte) => output.push(*byte),
                 WordPart::Quote(_) => output.push(b'"'),
                 WordPart::Command(_) => output.extend_from_slice(b"$(...)"),
                 WordPart::Arithmetic(expression) => {
@@ -388,6 +399,7 @@ impl TokenDecoder<'_> {
             match token {
                 WordToken::Literal(byte) => push_literal(&mut parts, *byte),
                 WordToken::Escaped(byte) => parts.push(WordPart::Escaped(*byte)),
+                WordToken::Protected(byte) => parts.push(WordPart::Protected(*byte)),
                 WordToken::Multibyte { bytes, escaped } => {
                     parts.push(WordPart::Multibyte {
                         bytes: bytes.clone(),
@@ -453,7 +465,7 @@ impl ParsedWord {
                     WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => {
                         output.extend_from_slice(bytes)
                     }
-                    WordPart::Escaped(byte) => output.push(*byte),
+                    WordPart::Escaped(byte) | WordPart::Protected(byte) => output.push(*byte),
                     WordPart::Quote(_) => {}
                     WordPart::Command(_) => output.extend_from_slice(b"$(...)"),
                     WordPart::Arithmetic(expression) => {

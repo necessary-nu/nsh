@@ -1688,7 +1688,10 @@ fn read_word_token(
                             || lexer.current_syntax().double_quoted
                             || lexer.current_syntax().variable_depth != 0
                         {
-                            lexer.push_escaped(lexer.input.expect_byte());
+                            // The quoting is what protects this byte; no
+                            // backslash put it here.
+                            // [spec:nsh:req:idiom.printable-ast]
+                            lexer.push_protected(lexer.input.expect_byte());
                         } else {
                             lexer.push_literal(lexer.input.expect_byte());
                         }

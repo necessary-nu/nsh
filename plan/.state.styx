@@ -2030,8 +2030,6 @@ impl_evidence (
         idiom.word-ir
     ), covered_claims (
         {impl_name nsh-library, rule idiom.word-ir}
-    ), rule_versions_seen (
-        {id idiom.word-ir, version 0}
     )}
     {id make-ast-structural, covered_rules (
         idiom.structural-ast

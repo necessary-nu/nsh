@@ -749,13 +749,7 @@ impl<'a> Printer<'a> {
                     continue;
                 }
             }
-            self.part(
-                &parts[at],
-                at.checked_sub(1).and_then(|before| parts.get(before)),
-                parts.get(at + 1),
-                quoting,
-                indent,
-            );
+            self.part(&parts[at], parts.get(at + 1), quoting, indent);
             at += 1;
         }
     }
@@ -777,13 +771,7 @@ impl<'a> Printer<'a> {
             quoting == Quoting::DoubleProtectedParameter || parts_contain_literal(region, b'}');
         if !quoted {
             for (at, part) in region.iter().enumerate() {
-                self.part(
-                    part,
-                    at.checked_sub(1).and_then(|before| region.get(before)),
-                    region.get(at + 1),
-                    quoting,
-                    indent,
-                );
+                self.part(part, region.get(at + 1), quoting, indent);
             }
             return;
         }
@@ -797,13 +785,7 @@ impl<'a> Printer<'a> {
         };
         self.out.push(mark);
         for (at, part) in region.iter().enumerate() {
-            self.part(
-                part,
-                at.checked_sub(1).and_then(|before| region.get(before)),
-                region.get(at + 1),
-                Quoting::Double,
-                indent,
-            );
+            self.part(part, region.get(at + 1), Quoting::Double, indent);
         }
         self.out.push(mark);
     }
@@ -812,7 +794,6 @@ impl<'a> Printer<'a> {
         for (at, part) in region.iter().enumerate() {
             self.part(
                 part,
-                at.checked_sub(1).and_then(|before| region.get(before)),
                 region.get(at + 1),
                 Quoting::HereDocumentProtectedParameter,
                 indent,
@@ -830,14 +811,10 @@ impl<'a> Printer<'a> {
                         .copied()
                         .filter(|byte| !matches!(byte, b'\'' | b'"')),
                 ),
-                WordPart::Escaped(b'\'' | b'"') | WordPart::Quote(_) => {}
-                _ => self.part(
-                    part,
-                    at.checked_sub(1).and_then(|before| region.get(before)),
-                    region.get(at + 1),
-                    Quoting::Arithmetic,
-                    indent,
-                ),
+                WordPart::Escaped(b'\'' | b'"')
+                | WordPart::Protected(b'\'' | b'"')
+                | WordPart::Quote(_) => {}
+                _ => self.part(part, region.get(at + 1), Quoting::Arithmetic, indent),
             }
         }
     }
@@ -846,14 +823,7 @@ impl<'a> Printer<'a> {
     ///
     /// `next` is the part that will follow it, which decides whether a
     /// parameter may be written as `$name` or needs `${name}`.
-    fn part(
-        &mut self,
-        part: &WordPart,
-        previous: Option<&WordPart>,
-        next: Option<&WordPart>,
-        quoting: Quoting,
-        indent: usize,
-    ) {
+    fn part(&mut self, part: &WordPart, next: Option<&WordPart>, quoting: Quoting, indent: usize) {
         match part {
             WordPart::Literal(bytes) => self.literal(bytes, next, quoting),
             WordPart::Multibyte { bytes, escaped } => {
@@ -863,7 +833,18 @@ impl<'a> Printer<'a> {
                     self.literal(bytes, next, quoting);
                 }
             }
-            WordPart::Escaped(byte) => self.escaped(*byte, previous, next, quoting),
+            // The mark says the source spelled this byte with a backslash,
+            // so writing the backslash back is the whole rule. Arithmetic is
+            // the exception: Bash discards quote bytes before evaluating, so
+            // one written there would become part of the expression.
+            // [spec:nsh:req:idiom.printable-ast]
+            WordPart::Escaped(byte) => {
+                if quoting != Quoting::Arithmetic {
+                    self.out.push(b'\\');
+                }
+                self.out.push(*byte);
+            }
+            WordPart::Protected(byte) => self.protected(*byte, next, quoting),
             // A `"` inside a `${...}` operand toggles the quoting the word
             // arrived in, and the parser records the toggle rather than a
             // region. Dropping it silently reopens the parameter grammar to
@@ -899,7 +880,7 @@ impl<'a> Printer<'a> {
         let protected: &[u8] = match quoting {
             Quoting::Word => {
                 for (at, &byte) in bytes.iter().enumerate() {
-                    if byte == b'$' && !opens_expansion(bytes.get(at + 1).copied(), next, quoting) {
+                    if byte == b'$' && !opens_expansion(bytes.get(at + 1).copied(), next) {
                         self.out.push(byte);
                         continue;
                     }
@@ -956,7 +937,7 @@ impl<'a> Printer<'a> {
         };
         for (at, &byte) in bytes.iter().enumerate() {
             if protected.contains(&byte)
-                && (byte != b'$' || opens_expansion(bytes.get(at + 1).copied(), next, quoting))
+                && (byte != b'$' || opens_expansion(bytes.get(at + 1).copied(), next))
             {
                 self.out.push(b'\\');
             }
@@ -970,47 +951,34 @@ impl<'a> Printer<'a> {
     /// itself only when the byte after it would otherwise read as an escape,
     /// and protecting it anyway spells the same bytes with an extra part.
     // [spec:nsh:req:idiom.printable-ast]
-    fn escaped(
-        &mut self,
-        byte: u8,
-        previous: Option<&WordPart>,
-        next: Option<&WordPart>,
-        quoting: Quoting,
-    ) {
+    /// One byte the quoting protected, written as the byte it is.
+    ///
+    /// No backslash put it there, so writing one spells a word the source did
+    /// not -- unless the enclosing quoting would read the byte as something
+    /// other than itself, which is the one thing a backslash is for. The
+    /// backslash is that byte's own case: inside quotes it protects the next
+    /// one, so it needs protecting exactly when something follows that it
+    /// would otherwise take.
+    // [spec:nsh:req:idiom.printable-ast]
+    fn protected(&mut self, byte: u8, next: Option<&WordPart>, quoting: Quoting) {
         let protected: &[u8] = match quoting {
+            // No quoting encloses the byte here, so only its own backslash
+            // keeps it from ending the word or being read as syntax -- a
+            // trailing one above all, which would take the newline that ends
+            // the printed command.
             Quoting::Word | Quoting::Parameter | Quoting::Subscript => {
                 self.out.push(b'\\');
                 self.out.push(byte);
                 return;
             }
-            Quoting::Arithmetic | Quoting::Double | Quoting::DoubleParameter => b"\"\\$`",
+            Quoting::Arithmetic => b"",
+            Quoting::Double | Quoting::DoubleParameter => b"\"\\$`",
             Quoting::DoubleInertParameter => b"\"\\$`}",
             Quoting::DoubleProtectedParameter => b"'\"\\$`",
             Quoting::HereDocument => b"\\$`",
             Quoting::HereDocumentParameter | Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
         };
-        // Inside a quoted run the mark means the run protected the byte, and
-        // the quotes still do -- so only what the quoting itself would read
-        // needs a backslash. Inside a `${...}` operand there are no quotes
-        // around the byte and the escape is a part of the operand, which only
-        // its own backslash spells back.
-        //
-        // Either way a backslash is written once when two parts share it,
-        // which is what keeps `"\n"` from growing one a round.
-        // An inert operand's bytes were never protected by a backslash the
-        // source wrote, so the mark on them is the quoting's rather than a
-        // part of the operand.
-        let operand = matches!(
-            quoting,
-            Quoting::DoubleParameter | Quoting::DoubleProtectedParameter
-        );
-        let shares_previous = matches!(previous, Some(WordPart::Escaped(b'\\')))
-            && !protected.contains(&byte)
-            && byte != b'\\';
-        if (operand || protected.contains(&byte))
-            && !shares_previous
-            && (byte != b'\\' || escapes_next(next, protected))
-        {
+        if protected.contains(&byte) && (byte != b'\\' || takes_next(next, protected)) {
             self.out.push(b'\\');
         }
         self.out.push(byte);
@@ -1038,7 +1006,7 @@ impl<'a> Printer<'a> {
                     WordPart::Literal(text) | WordPart::Multibyte { bytes: text, .. } => {
                         bytes.extend_from_slice(text);
                     }
-                    WordPart::Escaped(byte) => bytes.push(*byte),
+                    WordPart::Escaped(byte) | WordPart::Protected(byte) => bytes.push(*byte),
                     _ => {}
                 }
             }
@@ -1053,13 +1021,7 @@ impl<'a> Printer<'a> {
         if expands || matches!(kind, QuoteKind::Double | QuoteKind::DollarDouble) {
             self.out.push(b'"');
             for (at, part) in region.iter().enumerate() {
-                self.part(
-                    part,
-                    at.checked_sub(1).and_then(|before| region.get(before)),
-                    region.get(at + 1),
-                    Quoting::Double,
-                    indent,
-                );
+                self.part(part, region.get(at + 1), Quoting::Double, indent);
             }
             self.out.push(b'"');
             return;
@@ -1070,7 +1032,7 @@ impl<'a> Printer<'a> {
                 WordPart::Literal(text) | WordPart::Multibyte { bytes: text, .. } => {
                     bytes.extend_from_slice(text);
                 }
-                WordPart::Escaped(byte) => bytes.push(*byte),
+                WordPart::Escaped(byte) | WordPart::Protected(byte) => bytes.push(*byte),
                 WordPart::Quote(_)
                 | WordPart::Parameter(_)
                 | WordPart::Command(_)
@@ -1291,7 +1253,7 @@ fn unterminated_array_word(word: &ParsedWord) -> bool {
 /// byte following it inside the same literal run, and `next` the part that
 /// follows the run when there is no such byte.
 // [spec:nsh:req:idiom.printable-ast]
-fn opens_expansion(after: Option<u8>, next: Option<&WordPart>, quoting: Quoting) -> bool {
+fn opens_expansion(after: Option<u8>, next: Option<&WordPart>) -> bool {
     if let Some(byte) = after {
         return matches!(
             byte,
@@ -1305,28 +1267,29 @@ fn opens_expansion(after: Option<u8>, next: Option<&WordPart>, quoting: Quoting)
         Some(WordPart::Quote(QuoteBoundary::Open(_))) => true,
         Some(WordPart::Quote(QuoteBoundary::Close)) | None => false,
         Some(WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. }) => {
-            opens_expansion(bytes.first().copied(), None, quoting)
+            opens_expansion(bytes.first().copied(), None)
         }
-        // An escape written in a command word always carries its backslash,
-        // and a `$` against a backslash starts nothing.
-        Some(WordPart::Escaped(_)) if quoting == Quoting::Word => false,
-        Some(WordPart::Escaped(byte)) => opens_expansion(Some(*byte), None, quoting),
+        // An escape carries its own backslash, and a `$` against a backslash
+        // starts nothing.
+        Some(WordPart::Escaped(_)) => false,
+        Some(WordPart::Protected(byte)) => opens_expansion(Some(*byte), None),
     }
 }
 
-/// Whether a protected backslash has to protect itself rather than `next`.
+/// Whether a backslash written here would take the part after it.
 ///
-/// `\\` always reads back as one protected backslash, so it is the safe
-/// spelling everywhere. A lone backslash only reads back as one when the part
-/// after it is protected too and prints bare: then the two share the single
-/// backslash the source wrote, which is how `"\n"` holds two parts and two
-/// bytes with one backslash between them.
+/// Inside quotes a backslash protects only the few bytes the quoting reads,
+/// so before anything else it is data and needs no backslash of its own.
 // [spec:nsh:req:idiom.printable-ast]
-fn escapes_next(next: Option<&WordPart>, protected: &[u8]) -> bool {
-    !matches!(
-        next,
-        Some(WordPart::Escaped(byte)) if !protected.contains(byte) && *byte != b'\\'
-    )
+fn takes_next(next: Option<&WordPart>, protected: &[u8]) -> bool {
+    match next {
+        Some(WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. }) => {
+            bytes.first().is_none_or(|byte| protected.contains(byte))
+        }
+        Some(WordPart::Protected(byte)) => protected.contains(byte),
+        Some(WordPart::Escaped(_)) => true,
+        _ => false,
+    }
 }
 
 /// Whether every quote the operand opened was closed again.
@@ -1424,6 +1387,7 @@ fn word_contains_invalid_parameter(word: &ParsedWord) -> bool {
         WordPart::Arithmetic(expression) => word_contains_invalid_parameter(expression),
         WordPart::Literal(_)
         | WordPart::Escaped(_)
+        | WordPart::Protected(_)
         | WordPart::Multibyte { .. }
         | WordPart::Quote(_)
         | WordPart::Command(_) => false,
@@ -1438,7 +1402,7 @@ fn parts_contain_literal(parts: &[WordPart], needle: u8) -> bool {
             .as_deref()
             .is_some_and(|operand| parts_contain_literal(operand.parts(), needle)),
         WordPart::Arithmetic(expression) => parts_contain_literal(expression.parts(), needle),
-        WordPart::Escaped(byte) => *byte == needle,
+        WordPart::Escaped(byte) | WordPart::Protected(byte) => *byte == needle,
         WordPart::Quote(_) | WordPart::Command(_) => false,
     })
 }

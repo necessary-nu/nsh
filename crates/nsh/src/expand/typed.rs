@@ -320,7 +320,7 @@ fn expand_parts(
                     &mut assignment_equal_available,
                 );
             }
-            WordPart::Escaped(byte) => {
+            WordPart::Escaped(byte) | WordPart::Protected(byte) => {
                 result.append(Expansion::one(Field::from_bytes(
                     &[*byte],
                     true,

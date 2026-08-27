@@ -54,6 +54,10 @@ impl WordLexer<'_> {
         }
     }
 
+    pub(super) fn push_protected(&mut self, byte: u8) {
+        self.output.push(WordToken::Protected(byte));
+    }
+
     pub(super) fn push_escaped(&mut self, byte: u8) {
         self.output.push(WordToken::Escaped(byte));
     }
@@ -84,7 +88,10 @@ impl WordLexer<'_> {
                     .output
                     .iter()
                     .position(|token| {
-                        matches!(token, WordToken::Literal(0) | WordToken::Escaped(0))
+                        matches!(
+                            token,
+                            WordToken::Literal(0) | WordToken::Escaped(0) | WordToken::Protected(0)
+                        )
                     })
                     .unwrap_or(self.output.len());
                 self.output.truncate(end);
@@ -124,11 +131,18 @@ impl WordLexer<'_> {
 pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     lexer.input = read_input_unit(shell)?;
     if lexer.input == InputUnit::EndOfInput {
-        lexer.push_escaped(b'\\');
+        // A backslash with nothing after it escaped nothing, so it is a byte.
+        lexer.push_protected(b'\\');
         unread_input_unit(shell);
         return Ok(());
     }
 
+    /* Inside double quotes a backslash only escapes the four bytes that mean
+     * something there; before anything else it is data, and so is what
+     * follows it. Which of the two happened is the difference between a
+     * spelling and a byte, and only the parser knows it. */
+    // [spec:nsh:req:idiom.printable-ast]
+    let mut escapes = true;
     if (lexer.current_syntax().double_quoted
         || lexer.current_syntax().backquote != BackquoteContext::None)
         && !lexer.input.is(b'\\')
@@ -138,7 +152,8 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             || (!lexer.delimiter.is_none() && lexer.current_syntax().variable_depth == 0))
         && (!lexer.input.is(b'}') || lexer.current_syntax().variable_depth == 0)
     {
-        lexer.push_escaped(b'\\');
+        lexer.push_protected(b'\\');
+        escapes = false;
     }
     lexer.quoted = true;
 
@@ -147,7 +162,12 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             lexer.push_multibyte(bytes, escaped);
         }
         MultibyteInput::SingleByte | MultibyteInput::FieldBoundary => {
-            lexer.push_escaped(lexer.input.expect_byte());
+            let byte = lexer.input.expect_byte();
+            if escapes {
+                lexer.push_escaped(byte);
+            } else {
+                lexer.push_protected(byte);
+            }
         }
     }
     Ok(())
