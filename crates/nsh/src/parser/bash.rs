@@ -22,7 +22,9 @@ use crate::nodes::{
     FileRedirectionOperator, Node, NodeText, WordNode,
 };
 use crate::options::{BashShopt, Dialect};
-use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, WordPart, WordToken, WordUnit};
+use crate::word::{
+    ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordPart, WordToken, WordUnit,
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Quote {
@@ -800,7 +802,7 @@ fn matching_bracket(units: &[WordUnit], open: usize) -> Option<usize> {
     let mut quoted = false;
     while index < units.len() {
         match &units[index] {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open)) => {
+            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => {
                 quoted = true;
                 index += 1;
             }
@@ -988,7 +990,7 @@ pub(super) fn locale_quote(
     lexer.output.truncate(substitution_start);
     lexer.current_syntax_mut().syntax = SyntaxContext::DoubleQuoted;
     lexer.current_syntax_mut().double_quoted = true;
-    lexer.record_quote_boundary(QuoteBoundary::Open, true);
+    lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::DollarDouble), true);
     true
 }
 

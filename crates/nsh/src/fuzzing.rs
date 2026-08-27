@@ -268,9 +268,11 @@ EOF
         assert!(canonical_source(&mut shell, BStr::new(b"a[[${ ]]}")).is_err());
     }
 
-    /// Inside `"` an apostrophe is an ordinary byte, so a backslash before
-    /// one stays in the operand rather than protecting it. Printing that
-    /// backslash back as an escape grew the word by two bytes a round.
+    /// Inside `"` an apostrophe is an ordinary byte, so the backslash before
+    /// one protects nothing and the two spell themselves. Writing a second
+    /// backslash for the first grew the word by two bytes a round and
+    /// expanded to one more backslash each time.
+    // [spec:nsh:req:idiom.printable-ast/test]
     #[test]
     fn canonical_source_keeps_an_escaped_apostrophe_fixed() {
         let source = b"\"${a+\\'}\"";
@@ -279,7 +281,7 @@ EOF
         let twice =
             canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
 
-        assert_eq!(once, BString::from(b"\"${a+\\\\'}\"\n".as_slice()));
+        assert_eq!(once, BString::from(b"\"${a+\\'}\"\n".as_slice()));
         assert_eq!(once, twice);
     }
 
@@ -334,54 +336,80 @@ EOF
         );
     }
 
-    /// A `}` inside a quoted operand is dropped along with everything after
-    /// it, and the wreckage prints as a stable program that means something
-    /// else -- which is why the fixed-point property never reported it.
+    /// A `"` inside a `${...}` operand toggles the quoting the word arrived
+    /// in. Dropping the toggle used to reopen the parameter grammar to the
+    /// `}` it was protecting, which printed a stable program that ran
+    /// differently -- the corruption the fixed-point property could not see.
     // [spec:nsh:req:idiom.printable-ast/test]
     #[test]
-    fn printing_still_loses_a_braced_quoted_operand() {
+    fn printing_keeps_a_braced_quoted_operand() {
         let mut shell = shell();
         let source = b"echo \"${a+\"a}b\"}\"";
-        let verdict = printing_is_reversible(&mut shell, BStr::new(source));
-        let Reversibility::Changed { printed } = verdict else {
-            panic!("expected the known loss, got {verdict:?}");
-        };
-        assert_eq!(printed, BString::from(b"echo \"${a+a}b}\"\n".as_slice()));
+        assert_eq!(
+            printing_is_reversible(&mut shell, BStr::new(source)),
+            Reversibility::Reversible {
+                printed: BString::from(b"echo \"${a+\"a}b\"}\"\n".as_slice()),
+            },
+        );
     }
 
-    /// How a definition was introduced is in the tree and is not printed:
-    /// `f() { ... }` and `function f { ... }` both come back wearing the one
-    /// spelling this renderer knows.
+    /// The three ways to introduce a definition are three trees, so a
+    /// renderer that picks one hands the next parse a definition it was not
+    /// given. `declare -f` still normalises, the way Bash's does.
     // [spec:nsh:req:idiom.printable-ast/test]
     #[test]
-    fn printing_still_loses_a_definition_style() {
+    fn printing_keeps_a_definition_style() {
         let mut shell = shell();
-        for source in [b"f() { echo one; }".as_slice(), b"function f { echo one; }"] {
-            let verdict = printing_is_reversible(&mut shell, BStr::new(source));
-            let Reversibility::Changed { printed } = verdict else {
-                panic!(
-                    "expected the known loss for {:?}, got {verdict:?}",
-                    BStr::new(source)
-                );
-            };
+        for (source, printed) in [
+            (
+                b"f() { echo one; }".as_slice(),
+                b"f () \n{ \n    echo one\n}\n".as_slice(),
+            ),
+            (
+                b"function f { echo one; }",
+                b"function f \n{ \n    echo one\n}\n",
+            ),
+            (
+                b"function f () { echo one; }",
+                b"function f () \n{ \n    echo one\n}\n",
+            ),
+        ] {
             assert_eq!(
-                printed,
-                BString::from(b"function f () \n{ \n    echo one\n}\n".as_slice()),
+                printing_is_reversible(&mut shell, BStr::new(source)),
+                Reversibility::Reversible {
+                    printed: BString::from(printed)
+                },
+                "{:?}",
+                BStr::new(source),
             );
         }
     }
 
-    /// Which quote opened a run is not in the tree, so a run that expands
-    /// nothing comes back in apostrophes however it was written.
+    /// `'a'` and `"a"` protect the same byte, so which one was written is
+    /// not recoverable from the run and the parser records it. A backslash
+    /// inside the run is the same question one level down: it spells itself
+    /// only when the part after it is protected too.
     // [spec:nsh:req:idiom.printable-ast/test]
     #[test]
-    fn printing_still_respells_a_quoted_word() {
+    fn printing_keeps_a_run_in_its_own_quote() {
         let mut shell = shell();
-        let verdict = printing_is_reversible(&mut shell, BStr::new(b"printf \"%s\\n\" hi"));
-        let Reversibility::Changed { printed } = verdict else {
-            panic!("expected the known loss, got {verdict:?}");
-        };
-        assert_eq!(printed, BString::from(b"printf '%s\\n' hi\n".as_slice()));
+        for source in [
+            b"printf \"%s\\n\" hi".as_slice(),
+            b"printf '%s\\n' hi",
+            b"echo \"a  b\"",
+            b"echo 'a  b'",
+            b"echo \"a\\\\b\"",
+            b"echo $\"hello\"",
+        ] {
+            assert_eq!(
+                printing_is_reversible(&mut shell, BStr::new(source)),
+                Reversibility::Reversible {
+                    printed: BString::from([source, b"\n"].concat()),
+                },
+                "{:?}",
+                BStr::new(source),
+            );
+        }
     }
 
     /// Every shape the round-trip fuzzer found before

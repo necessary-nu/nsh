@@ -71,8 +71,26 @@ pub(crate) enum WordUnit {
 /// Whether a quoting region opens or closes at this position.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum QuoteBoundary {
-    Open,
+    Open(QuoteKind),
     Close,
+}
+
+/// Which quote opened a run.
+///
+/// The run's bytes do not say: `'a'` and `"a"` protect the same byte and
+/// differ only in what else they would have protected. Printing has to put
+/// back the one the source used, so the parser records it.
+// [spec:nsh:req:idiom.printable-ast]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum QuoteKind {
+    /// `'...'`
+    Single,
+    /// `"..."`
+    Double,
+    /// `$'...'`, whose escapes the lexer has already decoded.
+    DollarSingle,
+    /// `$"..."`, Bash's locale-translated run.
+    DollarDouble,
 }
 
 /// A parameter expansion and its optional word operand.
@@ -147,7 +165,7 @@ impl ParsedWord {
     pub(crate) fn quoted_parameter(name: impl Into<BString>) -> Self {
         let mut word = Self {
             parts: vec![
-                WordPart::Quote(QuoteBoundary::Open),
+                WordPart::Quote(QuoteBoundary::Open(QuoteKind::Double)),
                 WordPart::Parameter(ParameterExpansion {
                     name: name.into(),
                     operation: ParameterOperation::Value,
@@ -455,7 +473,7 @@ mod tests {
     fn typed_tokens_build_nested_word_parts() {
         let word = ParsedWord::from_tokens(vec![
             WordToken::Literal(b'a'),
-            WordToken::Quote(QuoteBoundary::Open),
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
             WordToken::ParameterStart {
                 name: BString::from("x"),
                 operation: ParameterOperation::Default,
@@ -471,7 +489,7 @@ mod tests {
         assert!(matches!(word.parts()[0], WordPart::Literal(_)));
         assert!(matches!(
             word.parts()[1],
-            WordPart::Quote(QuoteBoundary::Open)
+            WordPart::Quote(QuoteBoundary::Open(QuoteKind::Double))
         ));
         let WordPart::Parameter(parameter) = &word.parts()[2] else {
             panic!("parameter part expected");
@@ -513,7 +531,7 @@ mod tests {
             WordToken::Literal(b'b'),
         ]);
         let quoted_name = ParsedWord::from_tokens(vec![
-            WordToken::Quote(QuoteBoundary::Open),
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
             WordToken::Literal(b'a'),
             WordToken::Quote(QuoteBoundary::Close),
             WordToken::Literal(b'='),

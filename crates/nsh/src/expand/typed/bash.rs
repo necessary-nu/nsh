@@ -861,7 +861,7 @@ fn scan_units(
     let mut conditionals = 0usize;
     for (index, unit) in units.iter().enumerate() {
         match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open)) => quoted = true,
+            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
             WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
             WordUnit::Literal(byte) if !quoted => match *byte {
                 b'(' | b'[' if arithmetic => depth += 1,

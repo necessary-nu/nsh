@@ -338,7 +338,7 @@ fn expand_parts(
                 )));
                 tilde = TildePosition::None;
             }
-            WordPart::Quote(QuoteBoundary::Open) => {
+            WordPart::Quote(QuoteBoundary::Open(..)) => {
                 let close = matching_quote(parts, at);
                 let inner = &parts[at + 1..close];
                 /* `""` is written text and keeps its empty field; a pair of
@@ -429,7 +429,7 @@ fn matching_quote(parts: &[WordPart], open: usize) -> usize {
     let mut depth = 1;
     for (offset, part) in parts[open + 1..].iter().enumerate() {
         match part {
-            WordPart::Quote(QuoteBoundary::Open) => depth += 1,
+            WordPart::Quote(QuoteBoundary::Open(..)) => depth += 1,
             WordPart::Quote(QuoteBoundary::Close) => {
                 depth -= 1;
                 if depth == 0 {

@@ -24,7 +24,7 @@ use crate::nodes::{
     NodeText, Pipeline, Redirection, SimpleCommand, SourceLine, TimedCommand, WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
-use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, WordToken};
+use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordToken};
 
 /// `MB_LEN_MAX` from `<limits.h>` (16 on the platforms dash targets).
 const MAX_MULTIBYTE_LENGTH: usize = 16;
@@ -1671,12 +1671,12 @@ fn read_word_token(
                 SyntaxClass::Backslash => word_lexer::read_backslash(shell, &mut lexer)?,
                 SyntaxClass::SingleQuote => {
                     lexer.current_syntax_mut().syntax = SyntaxContext::SingleQuoted;
-                    lexer.record_quote_boundary(QuoteBoundary::Open, false);
+                    lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::Single), false);
                 }
                 SyntaxClass::DoubleQuote => {
                     lexer.current_syntax_mut().syntax = SyntaxContext::DoubleQuoted;
                     lexer.current_syntax_mut().double_quoted = true;
-                    lexer.record_quote_boundary(QuoteBoundary::Open, true);
+                    lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::Double), true);
                 }
                 SyntaxClass::EndQuote => lexer.close_quote(),
                 SyntaxClass::Variable => parse_parameter_expansion(shell, &mut lexer)?,
@@ -2074,7 +2074,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         lexer.output.truncate(substitution_start);
         lexer.dollar_single_quoted = true;
         lexer.current_syntax_mut().syntax = SyntaxContext::SingleQuoted;
-        lexer.record_quote_boundary(QuoteBoundary::Open, false);
+        lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::DollarSingle), false);
         return Ok(());
     } else if bash::locale_quote(shell, lexer, nested_syntax, substitution_start)
         || bash::arithmetic_bracket(shell, lexer, substitution_start)

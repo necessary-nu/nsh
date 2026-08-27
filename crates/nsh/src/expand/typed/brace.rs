@@ -119,7 +119,7 @@ fn opening_brace(units: &[WordUnit], from: usize) -> Option<usize> {
     let mut quoted = false;
     for (index, unit) in units.iter().enumerate() {
         match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open)) => quoted = true,
+            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
             WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
             WordUnit::Literal(b'{') if !quoted && index >= from => return Some(index),
             _ => {}
@@ -135,7 +135,7 @@ fn closing_brace(units: &[WordUnit], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (index, unit) in units.iter().enumerate().skip(open + 1) {
         match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open)) => quoted = true,
+            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
             WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
             WordUnit::Literal(b'}') if !quoted && depth == 0 => return Some(index),
             WordUnit::Literal(b'}') if !quoted => depth -= 1,
@@ -158,7 +158,7 @@ fn comma_separated(
     let mut depth = 0usize;
     for (index, unit) in amble.iter().enumerate() {
         match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open)) => quoted = true,
+            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
             WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
             WordUnit::Literal(b'{') if !quoted => depth += 1,
             WordUnit::Literal(b'}') if !quoted => depth = depth.saturating_sub(1),
