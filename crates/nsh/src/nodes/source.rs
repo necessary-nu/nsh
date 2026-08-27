@@ -730,9 +730,17 @@ impl<'a> Printer<'a> {
                     Quoting::HereDocumentParameter => {
                         self.here_document_parameter_quoted_region(region, indent);
                     }
-                    Quoting::Double
-                    | Quoting::HereDocument
-                    | Quoting::HereDocumentProtectedParameter => {}
+                    // A pattern operand reads its quotes even in a body where
+                    // they are otherwise ordinary bytes, so the run keeps them.
+                    Quoting::HereDocumentProtectedParameter => {
+                        self.double_parameter_quoted_region(
+                            region,
+                            kind,
+                            Quoting::DoubleProtectedParameter,
+                            indent,
+                        );
+                    }
+                    Quoting::Double | Quoting::HereDocument => {}
                 }
                 if matches!(
                     quoting,
@@ -744,6 +752,7 @@ impl<'a> Printer<'a> {
                         | Quoting::DoubleInertParameter
                         | Quoting::Arithmetic
                         | Quoting::HereDocumentParameter
+                        | Quoting::HereDocumentProtectedParameter
                 ) {
                     at = end.saturating_add(1);
                     continue;
@@ -767,8 +776,9 @@ impl<'a> Printer<'a> {
         quoting: Quoting,
         indent: usize,
     ) {
-        let quoted =
-            quoting == Quoting::DoubleProtectedParameter || parts_contain_literal(region, b'}');
+        let quoted = quoting == Quoting::DoubleProtectedParameter
+            || region.is_empty()
+            || parts_contain_literal(region, b'}');
         if !quoted {
             for (at, part) in region.iter().enumerate() {
                 self.part(part, region.get(at + 1), quoting, indent);
