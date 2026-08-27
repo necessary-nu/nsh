@@ -475,6 +475,32 @@ EOF
         }
     }
 
+    /// The braces are not decoration: they decide what a redirection or a
+    /// `&` after them attaches to, so a list that lost them is a different
+    /// program. `{ a;}<f` used to print as `a < f`, which redirects the
+    /// command rather than the group.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_keeps_a_brace_group() {
+        let mut shell = shell();
+        for source in [
+            b"{ a;}<f".as_slice(),
+            b"{ a; b; } && c",
+            b"a && { b || c; }",
+            b"{ a; } &",
+            b"time { a; b; }",
+            b"f() { a; }",
+            b"f() ( a )",
+        ] {
+            let verdict = printing_is_reversible(&mut shell, BStr::new(source));
+            assert!(
+                matches!(verdict, Reversibility::Reversible { .. }),
+                "{:?} printed to something else: {verdict:?}",
+                BStr::new(source),
+            );
+        }
+    }
+
     /// Every shape the round-trip fuzzer found before
     /// [`spec:nsh:req:idiom.printable-ast`] existed, paired with the artifact
     /// it was reduced from.

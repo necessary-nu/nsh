@@ -96,7 +96,12 @@ fn bash_function_retains_owned_body() {
     };
     assert_eq!(function.name.as_bstr(), BStr::new(b"bash-name"));
     assert_eq!(function.style, BashFunctionStyle::FunctionParens);
-    assert!(matches!(function.body.as_ref(), Node::Command(_)));
+    // The braces are the body's own node now, because they decide what a
+    // redirection or a `&` after them attaches to.
+    let Node::Group(group) = function.body.as_ref() else {
+        panic!("a braced body keeps its braces");
+    };
+    assert!(matches!(group.command.as_ref(), Node::Command(_)));
 
     let bare = parse(b"function slash/name { :; }\n", true).unwrap();
     let Node::Bash(BashNode::Function(bare)) = bare else {
@@ -104,7 +109,10 @@ fn bash_function_retains_owned_body() {
     };
     assert_eq!(bare.name.as_bstr(), BStr::new(b"slash/name"));
     assert_eq!(bare.style, BashFunctionStyle::Function);
-    assert!(matches!(bare.body.as_ref(), Node::Command(_)));
+    let Node::Group(bare_body) = bare.body.as_ref() else {
+        panic!("a braced body keeps its braces");
+    };
+    assert!(matches!(bare_body.command.as_ref(), Node::Command(_)));
 
     let baseline = parse(b"function bash-name\n", false).unwrap();
     assert!(matches!(baseline, Node::Command(_)));

@@ -1463,6 +1463,12 @@ fn render_node(node: Option<&Node>, text: &mut BString) {
             push_command_text(b")", text);
             render_redirections(&command.redirections, text);
         }
+        Node::Group(command) => {
+            push_command_text(b"{ ", text);
+            render_node(Some(command.command.as_ref()), text);
+            push_command_text(b"; }", text);
+            render_redirections(&command.redirections, text);
+        }
         Node::While(command) | Node::Until(command) => {
             push_command_text(
                 if matches!(node, Node::While(_)) {

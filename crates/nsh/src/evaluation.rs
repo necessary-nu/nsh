@@ -645,7 +645,7 @@ pub fn evaluate_tree(
         shell.display_history = true;
         // [spec:nsh:req:idiom.structural-ast]
         status = match node {
-            Node::Redirect(redirection) => {
+            Node::Redirect(redirection) | Node::Group(redirection) => {
                 record_command_line(shell, redirection.line.get());
                 let expanded_redirections = expand_redirections(shell, &redirection.redirections)?;
                 let outcome = crate::resource::with_resources(shell, |shell, resources| {
@@ -2341,7 +2341,10 @@ fn prehash_tree(shell: &mut Shell, node: Option<&Node>) -> Result<Flow, Error> {
                 flow!(prehash_tree(shell, Some(command)));
             }
         }
-        Node::Redirect(command) | Node::Background(command) | Node::Subshell(command) => {
+        Node::Redirect(command)
+        | Node::Background(command)
+        | Node::Subshell(command)
+        | Node::Group(command) => {
             flow!(prehash_tree(shell, Some(command.command.as_ref())));
         }
         Node::And(binary)

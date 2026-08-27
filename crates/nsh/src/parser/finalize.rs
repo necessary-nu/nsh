@@ -55,7 +55,10 @@ fn here_documents(node: &mut Node, bodies: &mut VecDeque<WordNode>) -> Result<()
                 here_documents(command, bodies)?;
             }
         }
-        Node::Redirect(command) | Node::Background(command) | Node::Subshell(command) => {
+        Node::Redirect(command)
+        | Node::Background(command)
+        | Node::Subshell(command)
+        | Node::Group(command) => {
             here_documents(&mut command.command, bodies)?;
             redirections(&mut command.redirections, bodies)?;
         }

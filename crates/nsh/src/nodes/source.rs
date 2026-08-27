@@ -93,6 +93,12 @@ pub(crate) fn function_definition(
     push_function_name(&mut printer.out, name);
     printer.out.extend_from_slice(b" () \n{ ");
     printer.newline(STEP);
+    // Bash writes one brace group here whatever the body was, so a body that
+    // is already a group contributes its list rather than a second pair.
+    let body = match body {
+        Node::Group(group) if group.redirections.is_empty() => group.command.as_ref(),
+        body => body,
+    };
     printer.list(body, STEP);
     printer.newline(0);
     printer.out.push(b'}');
@@ -205,16 +211,6 @@ impl<'a> Printer<'a> {
         self.out.push(b'}');
     }
 
-    /// A command in a surrounding grammar form, braced when that form would
-    /// otherwise bind to only part of it.
-    fn grouped(&mut self, node: &Node, indent: usize) {
-        if needs_braces(node) {
-            self.brace_group(node, indent);
-        } else {
-            self.command(node, indent);
-        }
-    }
-
     // -----------------------------------------------------------------
     // commands
     // -----------------------------------------------------------------
@@ -224,7 +220,7 @@ impl<'a> Printer<'a> {
             Node::Command(command) => self.simple_command(command, indent),
             Node::Pipeline(pipeline) => self.pipeline(pipeline, indent),
             Node::Redirect(command) => {
-                self.grouped(&command.command, indent);
+                self.command(&command.command, indent);
                 self.redirections(&command.redirections, indent);
             }
             Node::Background(command) => {
@@ -237,6 +233,10 @@ impl<'a> Printer<'a> {
                 self.out.extend_from_slice(b" &");
             }
             Node::Subshell(command) => self.subshell(command, indent),
+            Node::Group(command) => {
+                self.brace_group(&command.command, indent);
+                self.redirections(&command.redirections, indent);
+            }
             Node::And(command) => self.binary(command, b" && ", indent),
             Node::Or(command) => self.binary(command, b" || ", indent),
             Node::Sequence(_) => self.list(node, indent),
@@ -251,7 +251,7 @@ impl<'a> Printer<'a> {
                     self.out.extend_from_slice(b"-p ");
                 }
                 if let Some(inner) = &command.command {
-                    self.grouped(inner, indent);
+                    self.command(inner, indent);
                 }
             }
             Node::Case(command) => self.case_command(command, indent),
@@ -303,7 +303,7 @@ impl<'a> Printer<'a> {
             if position > 0 {
                 self.out.extend_from_slice(b" | ");
             }
-            self.grouped(command, indent);
+            self.command(command, indent);
         }
         if pipeline.background {
             self.out.extend_from_slice(b" &");
@@ -311,9 +311,9 @@ impl<'a> Printer<'a> {
     }
 
     fn binary(&mut self, command: &BinaryCommand, operator: &[u8], indent: usize) {
-        self.grouped(&command.left, indent);
+        self.command(&command.left, indent);
         self.out.extend_from_slice(operator);
-        self.grouped(&command.right, indent);
+        self.command(&command.right, indent);
     }
 
     fn subshell(&mut self, command: &CompoundCommand, indent: usize) {
@@ -424,7 +424,15 @@ impl<'a> Printer<'a> {
         }
         self.out.extend_from_slice(b" \n");
         self.out.extend(core::iter::repeat_n(b' ', indent));
-        self.brace_group(body, indent);
+        // The braces belong to the body when the body is a group, and a body
+        // that is some other compound has none to print. `function_definition`
+        // does normalise, the way Bash's `declare -f` does.
+        match body {
+            Node::Group(group) if group.redirections.is_empty() => {
+                self.brace_group(&group.command, indent);
+            }
+            body => self.command(body, indent),
+        }
     }
 
     fn bash_command(&mut self, node: &BashNode, indent: usize) {
@@ -1405,20 +1413,6 @@ fn flatten<'a>(node: &'a Node, items: &mut Vec<&'a Node>) {
     } else {
         items.push(node);
     }
-}
-
-/// Whether a redirection would bind to the wrong part of this command
-/// unless braces hold it together.
-const fn needs_braces(node: &Node) -> bool {
-    matches!(
-        node,
-        Node::Sequence(_)
-            | Node::And(_)
-            | Node::Or(_)
-            | Node::Pipeline(_)
-            | Node::Background(_)
-            | Node::Not(_)
-    )
 }
 
 /// Whether `&` would attach only to the final command unless braces

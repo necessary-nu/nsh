@@ -806,7 +806,13 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         }));
         closing_token = Some(TokenKind::RightParen);
     } else if token == TokenKind::LeftBrace {
-        parsed_command = list(shell, ListMode::Compound)?.into_node();
+        parsed_command = list(shell, ListMode::Compound)?.into_node().map(|inner| {
+            Node::Group(CompoundCommand {
+                line: SourceLine::new(saved_line_number),
+                command: Box::new(inner),
+                redirections: Vec::new(),
+            })
+        });
         closing_token = Some(TokenKind::RightBrace);
     } else if token == TokenKind::Word || token == TokenKind::Redirection {
         shell.input.token_pushed_back = true;
@@ -839,6 +845,10 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
             Some(Node::Subshell(mut wrapper)) => {
                 wrapper.redirections = redirections;
                 Node::Subshell(wrapper)
+            }
+            Some(Node::Group(mut wrapper)) => {
+                wrapper.redirections = redirections;
+                Node::Group(wrapper)
             }
             Some(command) => Node::Redirect(CompoundCommand {
                 line: SourceLine::new(saved_line_number),

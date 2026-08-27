@@ -310,6 +310,13 @@ pub enum Node {
     Redirect(CompoundCommand),
     Background(CompoundCommand),
     Subshell(CompoundCommand),
+    /// `{ list; }` -- a list run in this shell, held together by braces.
+    ///
+    /// The braces are not decoration: they decide what a redirection or a
+    /// `&` after them attaches to, and a list that lost them is a different
+    /// program from the one that was written.
+    // [spec:nsh:req:idiom.printable-ast]
+    Group(CompoundCommand),
     And(BinaryCommand),
     Or(BinaryCommand),
     Sequence(BinaryCommand),
