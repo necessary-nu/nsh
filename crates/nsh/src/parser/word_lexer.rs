@@ -139,6 +139,15 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         return Ok(());
     }
 
+    /* Bash discards a backslash inside `$(( ))` before it evaluates, so
+     * `$((\$))` and `$(($))` are one expression and the byte is data. */
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
+        lexer.quoted = true;
+        lexer.push_literal(lexer.input.expect_byte());
+        return Ok(());
+    }
+
     /* Inside double quotes a backslash only escapes the four bytes that mean
      * something there; before anything else it is data, and so is what
      * follows it. Which of the two happened is the difference between a

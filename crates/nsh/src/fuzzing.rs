@@ -139,6 +139,20 @@ mod tests {
             .expect("shell")
     }
 
+    /// Assert each source prints as the text beside it.
+    fn assert_prints_as(shell: &mut Shell, cases: &[(&[u8], &[u8])]) {
+        for (source, printed) in cases {
+            assert_eq!(
+                printing_is_reversible(shell, BStr::new(source)),
+                Reversibility::Reversible {
+                    printed: BString::from(*printed),
+                },
+                "{:?}",
+                BStr::new(source),
+            );
+        }
+    }
+
     /// Assert each source prints as itself, one line per program.
     fn assert_prints_itself(shell: &mut Shell, sources: &[&[u8]]) {
         for source in sources {
@@ -378,29 +392,23 @@ EOF
     #[test]
     fn printing_keeps_a_definition_style() {
         let mut shell = shell();
-        for (source, printed) in [
-            (
-                b"f() { echo one; }".as_slice(),
-                b"f () \n{ \n    echo one\n}\n".as_slice(),
-            ),
-            (
-                b"function f { echo one; }",
-                b"function f \n{ \n    echo one\n}\n",
-            ),
-            (
-                b"function f () { echo one; }",
-                b"function f () \n{ \n    echo one\n}\n",
-            ),
-        ] {
-            assert_eq!(
-                printing_is_reversible(&mut shell, BStr::new(source)),
-                Reversibility::Reversible {
-                    printed: BString::from(printed)
-                },
-                "{:?}",
-                BStr::new(source),
-            );
-        }
+        assert_prints_as(
+            &mut shell,
+            &[
+                (
+                    b"f() { echo one; }".as_slice(),
+                    b"f () \n{ \n    echo one\n}\n".as_slice(),
+                ),
+                (
+                    b"function f { echo one; }",
+                    b"function f \n{ \n    echo one\n}\n",
+                ),
+                (
+                    b"function f () { echo one; }",
+                    b"function f () \n{ \n    echo one\n}\n",
+                ),
+            ],
+        );
     }
 
     /// `'a'` and `"a"` protect the same byte, so which one was written is
@@ -433,23 +441,17 @@ EOF
     #[test]
     fn printing_keeps_a_here_document_delimiter() {
         let mut shell = shell();
-        for (source, printed) in [
-            (
-                b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
-                b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
-            ),
-            (b"cat <<'Q'\nbody\nQ\n", b"cat <<'Q'\nbody\nQ\n"),
-            (b"<<a\nx", b" <<a\nx\na\n"),
-        ] {
-            assert_eq!(
-                printing_is_reversible(&mut shell, BStr::new(source)),
-                Reversibility::Reversible {
-                    printed: BString::from(printed)
-                },
-                "{:?}",
-                BStr::new(source),
-            );
-        }
+        assert_prints_as(
+            &mut shell,
+            &[
+                (
+                    b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
+                    b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
+                ),
+                (b"cat <<'Q'\nbody\nQ\n", b"cat <<'Q'\nbody\nQ\n"),
+                (b"<<a\nx", b" <<a\nx\na\n"),
+            ],
+        );
     }
 
     /// A `$` that starts nothing is an ordinary byte. Protecting it anyway
@@ -541,6 +543,8 @@ EOF
                 b"\"${a-=}\"",
                 b"\"${a-\\=}\"",
                 b"''$\\\\",
+                b"$[())]",
+                b"${x-${(M)y}}",
             ],
         );
     }
@@ -557,6 +561,26 @@ EOF
             Reversibility::Reversible {
                 printed: BString::from(b"echo a\n".as_slice()),
             },
+        );
+    }
+
+    /// Two spellings the shell reads as one thing are one tree, so the
+    /// parser records the one meaning and the printer is free to write
+    /// either. Bash discards a backslash inside `$(( ))` before evaluating,
+    /// and `$[ ]` is its own older spelling of the same expansion -- the one
+    /// that can hold an expression whose parentheses do not balance, which
+    /// `$(( ))` cannot and which used to print as `$((0))`.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_settles_on_one_arithmetic_spelling() {
+        let mut shell = shell();
+        assert_prints_as(
+            &mut shell,
+            &[
+                (b"$((\\$))".as_slice(), b"$(($))\n".as_slice()),
+                (b"$[1]", b"$((1))\n"),
+                (b"$[())]", b"$[())]\n"),
+            ],
         );
     }
 

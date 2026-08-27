@@ -860,16 +860,19 @@ impl<'a> Printer<'a> {
             WordPart::Quote(_) => {}
             WordPart::Parameter(parameter) => self.parameter(parameter, next, quoting, indent),
             WordPart::Command(command) => self.command_substitution(command.as_deref(), indent),
+            // `$(( ))` ends on a matching `))`, so an expression whose own
+            // parentheses do not balance cannot be written inside one. Bash's
+            // older `$[ ]` ends on the bracket and can, and the tree does not
+            // record which of the two the source wrote, so either spells the
+            // same expansion. Writing `$((0))` there spelled a different one.
+            // [spec:nsh:req:idiom.printable-ast]
             WordPart::Arithmetic(expression) => {
-                if arithmetic_delimiters_balanced(expression.as_bstr())
-                    && !word_contains_invalid_parameter(expression)
-                {
-                    self.out.extend_from_slice(b"$((");
-                    self.parsed_word(expression, Quoting::Arithmetic, indent);
-                    self.out.extend_from_slice(b"))");
-                } else {
-                    self.out.extend_from_slice(b"$((0))");
-                }
+                let parenthesised = arithmetic_delimiters_balanced(expression.as_bstr());
+                self.out
+                    .extend_from_slice(if parenthesised { b"$((" } else { b"$[" });
+                self.parsed_word(expression, Quoting::Arithmetic, indent);
+                self.out
+                    .extend_from_slice(if parenthesised { b"))" } else { b"]" });
             }
         }
     }
@@ -897,7 +900,6 @@ impl<'a> Printer<'a> {
                     if matches!(
                         byte,
                         b' ' | b'\t'
-                            | b'\r'
                             | b'"'
                             | b'#'
                             | b'$'
@@ -1092,13 +1094,7 @@ impl<'a> Printer<'a> {
         }
         self.out.extend_from_slice(parameter.operation.operator());
         if let Some(operand) = parameter.operand.as_ref() {
-            if word_contains_invalid_parameter(operand) {
-                // The invalid expansion itself is omitted, but a retained
-                // `]` may still close an array-shaped word around it.
-                if parts_contain_literal(operand.parts(), b']') {
-                    self.out.push(b']');
-                }
-            } else if !operand.is_empty() {
+            if !operand.is_empty() {
                 // Inside a `"` this printer opened, the operand is already
                 // protected and may not open a quote of its own.
                 let inner = match quoting {
@@ -1373,25 +1369,6 @@ fn arithmetic_delimiters_balanced(expression: &[u8]) -> bool {
         }
     }
     parentheses == 0 && brackets == 0
-}
-
-fn word_contains_invalid_parameter(word: &ParsedWord) -> bool {
-    word.parts().iter().any(|part| match part {
-        WordPart::Parameter(parameter) => {
-            parameter.operation == ParameterOperation::Invalid
-                || parameter
-                    .operand
-                    .as_deref()
-                    .is_some_and(word_contains_invalid_parameter)
-        }
-        WordPart::Arithmetic(expression) => word_contains_invalid_parameter(expression),
-        WordPart::Literal(_)
-        | WordPart::Escaped(_)
-        | WordPart::Protected(_)
-        | WordPart::Multibyte { .. }
-        | WordPart::Quote(_)
-        | WordPart::Command(_) => false,
-    })
 }
 
 fn parts_contain_literal(parts: &[WordPart], needle: u8) -> bool {
