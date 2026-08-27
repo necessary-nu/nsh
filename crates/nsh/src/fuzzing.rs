@@ -461,6 +461,8 @@ EOF
             b"echo \"$x\"",
             b"echo $((1))",
             b"echo $'a'",
+            b"echo a!b",
+            b"! true",
         ] {
             assert_eq!(
                 printing_is_reversible(&mut shell, BStr::new(source)),

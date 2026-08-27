@@ -856,7 +856,6 @@ impl<'a> Printer<'a> {
                         byte,
                         b' ' | b'\t'
                             | b'\r'
-                            | b'!'
                             | b'"'
                             | b'#'
                             | b'$'
