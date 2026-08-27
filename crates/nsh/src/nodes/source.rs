@@ -1060,6 +1060,7 @@ impl<'a> Printer<'a> {
             if parameter.indirect {
                 self.out.push(b'!');
             }
+            self.out.extend_from_slice(&parameter.invalid_marker);
             self.out.extend_from_slice(&parameter.name);
             self.out.extend_from_slice(&parameter.invalid_prefix);
             if let Some(operand) = parameter.operand.as_ref() {

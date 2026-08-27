@@ -63,8 +63,12 @@ pub(crate) enum WordToken {
         operation: ParameterOperation,
         colon: bool,
         indirect: bool,
-        /// The bytes that made an invalid expansion invalid, which the name
-        /// cannot hold and the operand starts after.
+        /// The markers an invalid expansion wore before its name -- `!` and
+        /// `#`, which the name cannot hold.
+        // [spec:nsh:req:idiom.printable-ast]
+        invalid_marker: BString,
+        /// The byte that made an invalid expansion invalid, which sits after
+        /// the name and before the operand.
         // [spec:nsh:req:idiom.printable-ast]
         invalid_prefix: BString,
     },
@@ -116,11 +120,16 @@ pub(crate) struct ParameterExpansion {
     // [spec:nsh:req:compat.bash.expansion-globbing]
     pub(crate) indirect: bool,
     pub(crate) operand: Option<Box<ParsedWord>>,
-    /// The bytes that made an invalid expansion invalid.
+    /// The markers an invalid expansion wore before its name.
+    ///
+    /// `${!#a}` is refused on the `!` and `${#a }` on the `#`, and neither is
+    /// a name byte, so nothing else in the expansion holds them.
+    // [spec:nsh:req:idiom.printable-ast]
+    pub(crate) invalid_marker: BString,
+    /// The byte that made an invalid expansion invalid.
     ///
     /// `${(M)x}` fails on the `(`, which is neither a name nor part of the
-    /// operand after it, so nothing else in the expansion holds it. Printing
-    /// without it spells a different failure.
+    /// operand after it. Printing without it spells a different failure.
     // [spec:nsh:req:idiom.printable-ast]
     pub(crate) invalid_prefix: BString,
 }
@@ -192,6 +201,7 @@ impl ParsedWord {
                     colon: false,
                     indirect: false,
                     operand: None,
+                    invalid_marker: BString::new(Vec::new()),
                     invalid_prefix: BString::new(Vec::new()),
                 }),
                 WordPart::Quote(QuoteBoundary::Close),
@@ -412,6 +422,7 @@ impl TokenDecoder<'_> {
                     operation,
                     colon,
                     indirect,
+                    invalid_marker,
                     invalid_prefix,
                 } => {
                     let operand = (*operation != ParameterOperation::Value)
@@ -422,6 +433,7 @@ impl TokenDecoder<'_> {
                         colon: *colon,
                         indirect: *indirect,
                         operand,
+                        invalid_marker: invalid_marker.clone(),
                         invalid_prefix: invalid_prefix.clone(),
                     }));
                 }
@@ -516,6 +528,7 @@ mod tests {
                 operation: ParameterOperation::Default,
                 colon: true,
                 indirect: false,
+                invalid_marker: BString::new(Vec::new()),
                 invalid_prefix: BString::new(Vec::new()),
             },
             WordToken::Literal(b'y'),
