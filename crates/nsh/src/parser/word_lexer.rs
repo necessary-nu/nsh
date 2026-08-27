@@ -131,8 +131,10 @@ impl WordLexer<'_> {
 pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     lexer.input = read_input_unit(shell)?;
     if lexer.input == InputUnit::EndOfInput {
-        // A backslash with nothing after it escaped nothing, so it is a byte.
-        lexer.push_protected(b'\\');
+        /* A backslash with nothing after it is a line continuation joining to
+         * nothing, and Bash drops it: `echo a\` over end of input writes `a`.
+         * Keeping the byte wrote a word the source never had. */
+        // [spec:nsh:req:compat.bash.expansion-globbing]
         unread_input_unit(shell);
         return Ok(());
     }

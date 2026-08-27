@@ -545,6 +545,21 @@ EOF
         );
     }
 
+    /// A backslash with nothing after it is a line continuation joining to
+    /// nothing, which Bash drops: `echo a\` over end of input writes `a`.
+    /// Keeping the byte spelled a word the source never had.
+    // [spec:nsh:req:idiom.printable-ast/test]
+    #[test]
+    fn printing_drops_a_continuation_that_joins_nothing() {
+        let mut shell = shell();
+        assert_eq!(
+            printing_is_reversible(&mut shell, BStr::new(b"echo a\\")),
+            Reversibility::Reversible {
+                printed: BString::from(b"echo a\n".as_slice()),
+            },
+        );
+    }
+
     /// Every shape the round-trip fuzzer found before
     /// [`spec:nsh:req:idiom.printable-ast`] existed, paired with the artifact
     /// it was reduced from.
