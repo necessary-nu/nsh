@@ -138,9 +138,17 @@ pub fn parse_escape(input: &[u8], single_quoted: bool) -> EscapeChunk {
             }
             EscapeChunk::one(value as u8, 1 + digits)
         }
+        /* Same rule as `\x` above, and found by the same target four
+         * minutes after that one was fixed: with no hexadecimal digit
+         * after it this is not an escape, and both Bash and dash leave
+         * the two bytes as written. */
+        // [spec:nsh:req:compat.bash.builtins-special-variables]
         b'u' | b'U' => {
             let maximum_digits = if character == b'u' { 4 } else { 8 };
             let (value, digits) = hexadecimal_value(&input[1..], maximum_digits);
+            if digits == 0 {
+                return EscapeChunk::one(b'\\', 0);
+            }
             unicode_bytes(value, 1 + digits)
         }
         b'0'..=b'7' => {
@@ -294,5 +302,14 @@ mod tests {
         assert_eq!(parse_escape(b"xg", false).consumed, 0);
         assert_eq!(parse_escape(b"x4", false).bytes(), &[4]);
         assert_eq!(parse_escape(b"x41", false).bytes(), b"A");
+        /* `\u` and `\U` say the same thing, and the four-minute rerun
+         * found them four minutes after `\x` was fixed. */
+        assert_eq!(parse_escape(b"u", false).bytes(), b"\\");
+        assert_eq!(parse_escape(b"u", false).consumed, 0);
+        assert_eq!(parse_escape(b"uZ", false).bytes(), b"\\");
+        assert_eq!(parse_escape(b"U", false).bytes(), b"\\");
+        assert_eq!(parse_escape(b"UZ", false).consumed, 0);
+        assert_eq!(parse_escape(b"u41", false).bytes(), b"A");
+        assert_eq!(parse_escape(b"u4", false).bytes(), &[4]);
     }
 }
