@@ -7177,6 +7177,7 @@ children (
                                 title "Replace the tree comparison with a byte comparison"
                                 kind @test
                                 deps (print-by-emitting-tokens)
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-28T00:04:46.315086775Z
@@ -7204,6 +7205,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "CAMPAIGN, THE SECOND ONE: 3628 seconds, 0 crashes, 0 timeouts, 0 OOMs, 0 artifacts left behind. Coverage rose from 5617 to 5627 edges and the corpus from 2330 to 2490 entries over the run -- so it was still inventing shapes it had not seen, and none of them broke the property. That is the acceptance the node asked for, and it is worth reading against the first campaign against the same property, which produced 95 crashes in twenty minutes. Both numbers are the same property; the difference is two fixes.\n\nFINAL: workspace 735 green, `--features fuzzing` 380 green, 4020 corpus inputs retained."
+                                    }
+
+                                    {
+                                        at 2026-08-28T14:58:24.933796593Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
