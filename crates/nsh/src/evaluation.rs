@@ -781,6 +781,10 @@ pub fn evaluate_tree(
                     flow!(prehash_tree(shell, Some(function.body.as_ref())));
                 }
                 let definition = FunctionDefinition {
+                    /* The same function under the other spelling, so it
+                     * keeps the run it was actually written as. */
+                    // [spec:nsh:def:idiom.token-stream]
+                    tokens: function.tokens.clone(),
                     line: function.line,
                     name: function.name.clone(),
                     body: function.body.clone(),

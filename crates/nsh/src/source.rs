@@ -441,6 +441,7 @@ impl Shell {
             // expansion after a run spuriously return no fields.
             shell.input.token_pushed_back = false;
             shell.input.begin_parse(shell.options.dialect());
+            let mark = crate::parser::tokens::mark(shell);
             let t = crate::parser::read_token(shell, crate::parser::TokenContext::NONE)?;
             if t.kind != crate::parser::TokenKind::Word {
                 /* An empty word is the honest answer for empty input, and
@@ -448,7 +449,7 @@ impl Shell {
                  * than a word — a `;` or a `|` cannot be expanded. */
                 return Ok(Vec::new());
             }
-            let node = crate::parser::make_name_node(shell);
+            let node = crate::parser::make_name_node(shell, mark);
             let mut fields = crate::expand::ExpandedFields::new();
             crate::expand::expand_argument(shell, &node, Some(&mut fields), mode)?;
             Ok(fields.fields.into_iter().map(|field| field.text).collect())

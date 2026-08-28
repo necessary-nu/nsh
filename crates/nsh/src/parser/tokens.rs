@@ -15,6 +15,8 @@
 
 use bstr::{BStr, BString};
 
+use crate::context::Shell;
+
 /// What a run of consumed bytes was read as.
 ///
 /// The distinctions are the reader's, not a second grammar: each variant
@@ -39,6 +41,25 @@ pub(crate) enum SourceTokenKind {
     HereDocument,
 }
 
+impl SourceTokenKind {
+    /// Whether this run is between tokens rather than one of them.
+    ///
+    /// Trivia has no grammar position of its own, so it is claimed by the
+    /// node that follows it rather than by the one it trails. That is what
+    /// makes two consecutive nodes' runs meet instead of leaving the blank
+    /// between them owned by nobody.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) const fn is_trivia(self) -> bool {
+        matches!(
+            self,
+            SourceTokenKind::Blank
+                | SourceTokenKind::Comment
+                | SourceTokenKind::LineContinuation
+                | SourceTokenKind::Newline
+        )
+    }
+}
+
 /// One run of consumed bytes, owned.
 ///
 /// Owned rather than a span because there is no single buffer to span
@@ -54,20 +75,13 @@ pub(crate) struct SourceToken {
 
 impl SourceToken {
     /// What the reader was doing when it consumed these bytes.
-    ///
-    /// Nothing outside the property test reads a retained token yet: the
-    /// tree gains its token field in `carry-tokens-into-the-tree` and the
-    /// renderer emits them in `print-by-emitting-tokens`. Retaining them
-    /// and draining them are separate changes, and this is the first.
     // [spec:nsh:def:idiom.token-stream]
-    #[cfg(test)]
     pub(crate) const fn kind(&self) -> SourceTokenKind {
         self.kind
     }
 
     /// The bytes themselves, exactly as they were read.
     // [spec:nsh:def:idiom.token-stream]
-    #[cfg(test)]
     pub(crate) fn text(&self) -> &BStr {
         BStr::new(self.text.as_slice())
     }
@@ -88,6 +102,13 @@ pub(crate) struct TokenLog {
     pending: Vec<u8>,
     /// The input frame being recorded, while a parse is in progress.
     frame: Option<usize>,
+    /// Where the token the reader last returned begins.
+    ///
+    /// The end of the log when that token consumed no bytes, which is
+    /// what end of input is, and what a token the parser pushed back and
+    /// was handed again is. Push-back cannot be undone by counting back
+    /// one token, because those two cut nothing to count back over.
+    returned: usize,
 }
 
 impl TokenLog {
@@ -97,6 +118,7 @@ impl TokenLog {
             tokens: Vec::new(),
             pending: Vec::new(),
             frame: None,
+            returned: 0,
         }
     }
 
@@ -106,6 +128,7 @@ impl TokenLog {
         self.tokens.clear();
         self.pending.clear();
         self.frame = Some(frame);
+        self.returned = 0;
     }
 
     /// Stop recording, keeping whatever the parse got through.
@@ -206,8 +229,17 @@ impl TokenLog {
     /// The kind is the reader's own answer relabelled, not a second
     /// reading of the bytes: everything that is not a word or a newline
     /// reached the parser as an operator or a reserved word.
+    ///
+    /// `replayed` says the reader handed back a token the parser had
+    /// pushed on again rather than reading one. It consumed no bytes and
+    /// is already in the log, so it does not move where the last token
+    /// begins; a fresh read that consumed no bytes -- end of input --
+    /// does, because there is no token of it to point at.
     // [spec:nsh:def:idiom.token-stream]
-    pub(crate) fn cut_token(&mut self, kind: crate::parser::TokenKind) {
+    pub(crate) fn cut_token(&mut self, kind: crate::parser::TokenKind, replayed: bool) {
+        if !replayed {
+            self.returned = self.tokens.len();
+        }
         self.cut(match kind {
             crate::parser::TokenKind::Word => SourceTokenKind::Word,
             crate::parser::TokenKind::Newline => SourceTokenKind::Newline,
@@ -221,10 +253,70 @@ impl TokenLog {
         self.pending.len()
     }
 
-    /// The tokens of the parse that just ran.
+    /// The tokens of the parse that just ran, all of them.
+    ///
+    /// A node is given the run it was parsed from and nothing shipping
+    /// wants the whole log, so the callers are the property tests that
+    /// check the log against the input frame's own cursor.
     // [spec:nsh:def:idiom.token-stream]
     #[cfg(test)]
     pub(crate) fn tokens(&self) -> &[SourceToken] {
         &self.tokens
     }
+
+    /// Close the pending bytes as one token and hand back that token.
+    ///
+    /// A here-document's body is the one thing read outside the order the
+    /// grammar reads in -- at the newline that ends the redirection's
+    /// line, and not where the redirection was -- so it is the one node
+    /// whose run is the token just cut rather than everything since a
+    /// mark.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn cut_run(&mut self, kind: SourceTokenKind) -> crate::nodes::SourceTokens {
+        self.cut(kind);
+        crate::nodes::SourceTokens::new(self.tokens.last().map_or(&[], core::slice::from_ref))
+    }
+}
+
+/// A position in a [`TokenLog`], taken before a node is parsed.
+///
+/// Opaque because the only thing a caller may do with one is hand it back
+/// to [`run`]; arithmetic on it would be a second opinion about where a
+/// node begins.
+// [spec:nsh:def:idiom.token-stream]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TokenMark(usize);
+
+/// Where the node about to be parsed begins.
+///
+/// A token the parser read as lookahead and pushed back will be handed to
+/// that node, so the mark sits behind it -- at where the reader's last
+/// token begins, which is not one token back from the end: end of input
+/// cuts nothing to count back over, and a token pushed back twice is
+/// already in the log. It sits behind the trivia in front of it too,
+/// because a blank belongs to what follows it, which is what makes two
+/// consecutive nodes' runs meet rather than leave it owned by nobody.
+// [spec:nsh:def:idiom.token-stream]
+pub(crate) fn mark(shell: &Shell) -> TokenMark {
+    let log = &shell.input.tokens;
+    let mut at = if shell.input.token_pushed_back {
+        log.returned.min(log.tokens.len())
+    } else {
+        log.tokens.len()
+    };
+    while at > 0 && log.tokens[at - 1].kind().is_trivia() {
+        at -= 1;
+    }
+    TokenMark(at)
+}
+
+/// The run of tokens the node just parsed was read from.
+///
+/// The end is [`mark`] again: whatever the parser has pushed back belongs
+/// to what is parsed next, and so does the trivia in front of it.
+// [spec:nsh:def:idiom.token-stream]
+pub(crate) fn run(shell: &Shell, start: TokenMark) -> crate::nodes::SourceTokens {
+    let TokenMark(start) = start;
+    let TokenMark(end) = mark(shell);
+    crate::nodes::SourceTokens::new(&shell.input.tokens.tokens[start.min(end)..end])
 }

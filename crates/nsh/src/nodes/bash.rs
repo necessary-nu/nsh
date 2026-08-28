@@ -9,7 +9,7 @@
     reason = "Bash syntax is parsed ahead of the paused evaluator implementation"
 )]
 
-use super::{Node, NodeText, SourceLine, WordNode};
+use super::{Node, NodeText, SourceLine, SourceTokens, WordNode};
 
 /// Bash-only syntax in the shell's owned parse tree.
 // [spec:nsh:req:idiom.structural-ast]
@@ -24,9 +24,30 @@ pub(crate) enum BashNode {
     ProcessSubstitution(BashProcessSubstitution),
 }
 
+impl BashNode {
+    /// Give a Bash node the run of tokens it was parsed from.
+    ///
+    /// The counterpart of [`super::Node::with_tokens`], reached the same
+    /// way and for the same reason.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn set_tokens(&mut self, tokens: SourceTokens) {
+        match self {
+            BashNode::Conditional(node) => node.tokens = tokens,
+            BashNode::ArithmeticCommand(node) => node.tokens = tokens,
+            BashNode::ArithmeticFor(node) => node.tokens = tokens,
+            BashNode::Function(node) => node.tokens = tokens,
+            BashNode::ArrayAssignment(node) => node.tokens = tokens,
+            BashNode::ProcessSubstitution(node) => node.tokens = tokens,
+        }
+    }
+}
+
 /// A `[[ expression ]]` command.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashConditional {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) tokens: SourceTokens,
     pub(crate) line: SourceLine,
     pub(crate) expression: BashConditionalExpr,
 }
@@ -54,6 +75,9 @@ pub(crate) enum BashConditionalExpr {
 /// A `(( expression ))` command.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashArithmeticCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) tokens: SourceTokens,
     pub(crate) line: SourceLine,
     pub(crate) expression: NodeText,
 }
@@ -61,6 +85,9 @@ pub(crate) struct BashArithmeticCommand {
 /// A `for (( init; test; update )); do ...; done` command.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashArithmeticFor {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) tokens: SourceTokens,
     pub(crate) line: SourceLine,
     pub(crate) init: NodeText,
     pub(crate) test: NodeText,
@@ -78,6 +105,9 @@ pub(crate) enum BashFunctionStyle {
 /// A function introduced by Bash's `function` reserved word.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashFunction {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) tokens: SourceTokens,
     pub(crate) line: SourceLine,
     pub(crate) name: NodeText,
     pub(crate) style: BashFunctionStyle,
@@ -94,6 +124,9 @@ pub(crate) enum BashAssignmentOperator {
 /// An indexed or compound array assignment.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashArrayAssignment {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) tokens: SourceTokens,
     pub(crate) name: NodeText,
     pub(crate) subscript: Option<WordNode>,
     pub(crate) operator: BashAssignmentOperator,
@@ -125,6 +158,9 @@ pub(crate) enum BashProcessDirection {
 /// An owned `<(list)` or `>(list)` embedded in a word.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct BashProcessSubstitution {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) tokens: SourceTokens,
     pub(crate) direction: BashProcessDirection,
     pub(crate) body: Option<Box<Node>>,
 }

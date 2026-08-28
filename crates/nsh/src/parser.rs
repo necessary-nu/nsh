@@ -21,7 +21,8 @@ use crate::nodes::{
     BinaryCommand, CaseClause, CaseCommand, CompoundCommand, DescriptorRedirection,
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
     ForCommand, FunctionDefinition, HereDocument, HereString, IfCommand, NegatedCommand, Node,
-    NodeText, Pipeline, Redirection, SimpleCommand, SourceLine, TimedCommand, WordNode,
+    NodeText, Pipeline, Redirection, SimpleCommand, SourceLine, SourceTokens, TimedCommand,
+    WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
 use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordToken};
@@ -516,7 +517,12 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
     let mut token: TokenKind;
 
     parsed_command = None;
+    /* Where the whole list began, so a `Sequence` covers every command in
+     * it and not only the two it joins. */
+    // [spec:nsh:def:idiom.token-stream]
+    let mut list_mark: Option<TokenMark> = None;
     loop {
+        let command_mark = tokens::mark(shell);
         token = read_token(shell, newline_context.with(TokenContext::COMMAND_START))?.kind;
         match token {
             TokenKind::Newline => {
@@ -557,9 +563,15 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
          * records the line its contents record. */
         let saved_line_number = crate::input::current_input_frame(&mut shell.input).line_number;
 
+        let list_mark = *list_mark.get_or_insert(command_mark);
         let mut next = parse_and_or(shell)?.ok_or_else(|| expected_token_error(shell, None))?;
         token = read_token(shell, TokenContext::NONE)?.kind;
         if token == TokenKind::Background {
+            /* The `&` is part of what was read, so every shape the
+             * backgrounding takes is re-tagged rather than only the one
+             * built here. */
+            // [spec:nsh:def:idiom.token-stream]
+            let backgrounded = tokens::run(shell, command_mark);
             next = match next {
                 Node::Pipeline(mut pipeline) => {
                     pipeline.background = true;
@@ -567,14 +579,17 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
                 }
                 Node::Redirect(wrapper) => Node::Background(wrapper),
                 command => Node::Background(CompoundCommand {
+                    tokens: SourceTokens::none(),
                     line: SourceLine::new(saved_line_number),
                     command: Box::new(command),
                     redirections: Vec::new(),
                 }),
-            };
+            }
+            .with_tokens(backgrounded);
         }
         if let Some(left) = parsed_command.take() {
             parsed_command = Some(Node::Sequence(BinaryCommand {
+                tokens: tokens::run(shell, list_mark),
                 left: Box::new(left),
                 right: Box::new(next),
             }));
@@ -612,6 +627,7 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
 fn parse_and_or(shell: &mut Shell) -> Result<Option<Node>, Error> {
     let mut parsed_command: Option<Node>;
 
+    let start = tokens::mark(shell);
     parsed_command = pipeline(shell, TokenContext::NONE)?;
     loop {
         let operator: fn(BinaryCommand) -> Node = match read_token(shell, TokenContext::NONE)?.kind
@@ -629,6 +645,7 @@ fn parse_and_or(shell: &mut Shell) -> Result<Option<Node>, Error> {
         let right = pipeline(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
             .ok_or_else(|| expected_token_error(shell, None))?;
         parsed_command = Some(operator(BinaryCommand {
+            tokens: tokens::run(shell, start),
             left: Box::new(left),
             right: Box::new(right),
         }));
@@ -641,6 +658,7 @@ fn parse_and_or(shell: &mut Shell) -> Result<Option<Node>, Error> {
 // [spec:posix:syn:cmd.pipeline-format]
 // [spec:posix:req:cmd.pipeline-bang-subshell-separation]
 fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error> {
+    let start = tokens::mark(shell);
     let line = crate::input::current_input_frame(&mut shell.input).line_number;
     let first = read_token(shell, context)?.kind;
     /* `time` prefixes the whole pipeline, `!` included -- `time ! true`
@@ -652,10 +670,12 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
     // [spec:nsh:req:compat.bash.select-time-grammar]
     if first == TokenKind::Time {
         let posix_format = keywords::timed_posix_format(shell)?;
+        let timed = keywords::timed_pipeline(shell)?.map(Box::new);
         return Ok(Some(Node::Timed(TimedCommand {
+            tokens: tokens::run(shell, start),
             line: SourceLine::new(line),
             posix_format,
-            command: keywords::timed_pipeline(shell)?.map(Box::new),
+            command: timed,
         })));
     }
     let mut parsed_command: Option<Node>;
@@ -681,16 +701,21 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
         shell.input.token_pushed_back = true;
         TokenContext::NONE
     };
+    /* `!` is the negation's, not the pipe sequence's: `! a | b` negates
+     * a two-command pipeline whose own run starts at `a`. */
+    // [spec:nsh:def:idiom.token-stream]
+    let sequence_start = tokens::mark(shell);
     parsed_command = keywords::nested_command(shell, command_context)?;
+    let mut render_command_list: Vec<Node> = Vec::new();
     if read_token(shell, TokenContext::NONE)?.kind == TokenKind::Pipe {
         /* Every `stalloc(sizeof(struct nodelist))` the C does here is one
          * `Vec` slot; the list is built front to back either way, and
          * `command()?` cannot return NULL without having raised first. */
-        let mut render_command_list: Vec<Node> = vec![
+        render_command_list.push(
             parsed_command
                 .take()
                 .ok_or_else(|| expected_token_error(shell, None))?,
-        ];
+        );
         loop {
             render_command_list.push(
                 keywords::nested_command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
@@ -700,15 +725,22 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
                 break;
             }
         }
+    }
+    /* The token that ended the sequence goes back before either wrapper
+     * takes its run, so neither claims the `;` that follows it. */
+    // [spec:nsh:def:idiom.token-stream]
+    shell.input.token_pushed_back = true;
+    if !render_command_list.is_empty() {
         parsed_command = Some(Node::Pipeline(Pipeline {
+            tokens: tokens::run(shell, sequence_start),
             background: false,
             commands: render_command_list,
         }));
     }
-    shell.input.token_pushed_back = true;
     if negate {
         let command = parsed_command.ok_or_else(|| expected_token_error(shell, None))?;
         Ok(Some(Node::Not(NegatedCommand {
+            tokens: tokens::run(shell, start),
             command: Box::new(command),
         })))
     } else {
@@ -739,6 +771,7 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
 fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error> {
     let mut parsed_command: Option<Node>;
     let closing_token: Option<TokenKind>;
+    let start = tokens::mark(shell);
     let saved_line_number = crate::input::current_input_frame(&mut shell.input).line_number;
 
     let token = read_token(shell, context)?.kind;
@@ -747,7 +780,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         parsed_command = Some(bash_node);
         closing_token = None;
     } else if token == TokenKind::If {
-        parsed_command = keywords::if_command(shell)?;
+        parsed_command = keywords::if_command(shell, start)?;
         closing_token = Some(TokenKind::Fi);
     } else if token == TokenKind::While || token == TokenKind::Until {
         let constructor: fn(BinaryCommand) -> Node = if shell.input.last_token == TokenKind::While {
@@ -764,6 +797,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         let parsed = list(shell, ListMode::Compound)?;
         let right_command = required_compound_node(shell, parsed, TokenKind::Done)?;
         parsed_command = Some(constructor(BinaryCommand {
+            tokens: SourceTokens::none(),
             left: Box::new(left_command),
             right: Box::new(right_command),
         }));
@@ -784,6 +818,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
                 shell,
                 saved_line_number,
                 var_token,
+                start,
             )?)));
         }
         closing_token = (!arithmetic_form).then_some(TokenKind::Done);
@@ -796,6 +831,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
             shell,
             saved_line_number,
             var_token,
+            start,
         )?)));
         closing_token = Some(TokenKind::Done);
     } else if token == TokenKind::Case {
@@ -805,6 +841,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         let parsed = list(shell, ListMode::Compound)?;
         let inner = required_compound_node(shell, parsed, TokenKind::RightParen)?;
         parsed_command = Some(Node::Subshell(CompoundCommand {
+            tokens: SourceTokens::none(),
             line: SourceLine::new(saved_line_number),
             command: Box::new(inner),
             redirections: Vec::new(),
@@ -813,6 +850,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
     } else if token == TokenKind::LeftBrace {
         parsed_command = list(shell, ListMode::Compound)?.into_node().map(|inner| {
             Node::Group(CompoundCommand {
+                tokens: SourceTokens::none(),
                 line: SourceLine::new(saved_line_number),
                 command: Box::new(inner),
                 redirections: Vec::new(),
@@ -832,6 +870,12 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         }
     }
 
+    /* Every compound form ends at a closing token the branch above left
+     * to the check just made, so the run is taken here rather than where
+     * the node was built, where it would stop a token short. */
+    // [spec:nsh:def:idiom.token-stream]
+    parsed_command = parsed_command.map(|node| node.with_tokens(tokens::run(shell, start)));
+
     /* Now check for redirection which may follow command */
     let mut redirections: Vec<Redirection> = Vec::new();
     let mut redirection_context = TokenContext::COMMAND_START;
@@ -846,22 +890,26 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
     }
     shell.input.token_pushed_back = true;
     if !redirections.is_empty() {
-        parsed_command = Some(match parsed_command.take() {
-            Some(Node::Subshell(mut wrapper)) => {
-                wrapper.redirections = redirections;
-                Node::Subshell(wrapper)
+        parsed_command = Some(
+            match parsed_command.take() {
+                Some(Node::Subshell(mut wrapper)) => {
+                    wrapper.redirections = redirections;
+                    Node::Subshell(wrapper)
+                }
+                Some(Node::Group(mut wrapper)) => {
+                    wrapper.redirections = redirections;
+                    Node::Group(wrapper)
+                }
+                Some(command) => Node::Redirect(CompoundCommand {
+                    tokens: SourceTokens::none(),
+                    line: SourceLine::new(saved_line_number),
+                    command: Box::new(command),
+                    redirections,
+                }),
+                None => return Err(expected_token_error(shell, None)),
             }
-            Some(Node::Group(mut wrapper)) => {
-                wrapper.redirections = redirections;
-                Node::Group(wrapper)
-            }
-            Some(command) => Node::Redirect(CompoundCommand {
-                line: SourceLine::new(saved_line_number),
-                command: Box::new(command),
-                redirections,
-            }),
-            None => return Err(expected_token_error(shell, None)),
-        });
+            .with_tokens(tokens::run(shell, start)),
+        );
     }
 
     Ok(parsed_command)
@@ -885,12 +933,16 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
     let mut variables: Vec<Node> = Vec::new();
     let mut redirections: Vec<Redirection> = Vec::new();
     let mut word_context = TokenContext::ALIASES;
+    let start = tokens::mark(shell);
     let saved_line_number = crate::input::current_input_frame(&mut shell.input).line_number;
     loop {
+        let word_mark = tokens::mark(shell);
         let token = read_token(shell, word_context)?.kind;
         if token == TokenKind::Word {
             let ordinary_assignment = shell.input.word.is_assignment(&shell.locale);
+            let tokens = tokens::run(shell, word_mark);
             let mut node = Node::Word(WordNode {
+                tokens,
                 word: mem::take(&mut shell.input.word),
             });
             if bash::active(shell)
@@ -952,6 +1004,7 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
                     keywords::nested_command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
                         .ok_or_else(|| expected_token_error(shell, None))?;
                 return Ok(Some(Node::Function(FunctionDefinition {
+                    tokens: tokens::run(shell, start),
                     line: SourceLine::new(line_number),
                     name: NodeText::new(BString::from(word.word.as_bstr())),
                     body: Box::new(body),
@@ -963,6 +1016,7 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
     }
     /* out: */
     Ok(Some(Node::Command(Box::new(SimpleCommand {
+        tokens: tokens::run(shell, start),
         line: SourceLine::new(saved_line_number),
         assignments: variables,
         arguments: args,
@@ -971,8 +1025,9 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
 }
 
 // [spec:dash:sem:parser.makename-fn]
-pub(crate) fn make_name_node(shell: &mut Shell) -> Node {
+pub(crate) fn make_name_node(shell: &mut Shell, mark: TokenMark) -> Node {
     Node::Word(WordNode {
+        tokens: tokens::run(shell, mark),
         word: mem::take(&mut shell.input.word),
     })
 }
@@ -991,6 +1046,7 @@ fn parse_redirection_target(
     pending: PendingRedirection,
 ) -> Result<Redirection, Error> {
     let is_here_document = matches!(pending, PendingRedirection::HereDocument { .. });
+    let target_mark = tokens::mark(shell);
     let token = read_token(
         shell,
         if is_here_document {
@@ -1014,7 +1070,10 @@ fn parse_redirection_target(
             Redirection::HereDocument(HereDocument {
                 descriptor,
                 expand,
+                /* Replaced wholesale once the body has been read, at the
+                 * newline that ends this line. */
                 body: WordNode {
+                    tokens: SourceTokens::none(),
                     word: ParsedWord::new(),
                 },
                 delimiter,
@@ -1023,6 +1082,7 @@ fn parse_redirection_target(
         PendingRedirection::HereString { descriptor } => Redirection::HereString(HereString {
             descriptor,
             word: WordNode {
+                tokens: tokens::run(shell, target_mark),
                 word: mem::take(&mut shell.input.word),
             },
         }),
@@ -1041,6 +1101,7 @@ fn parse_redirection_target(
                 DescriptorTarget::Close
             } else {
                 DescriptorTarget::Word(WordNode {
+                    tokens: tokens::run(shell, target_mark),
                     word: mem::take(&mut shell.input.word),
                 })
             };
@@ -1057,6 +1118,7 @@ fn parse_redirection_target(
             operator,
             descriptor,
             target: WordNode {
+                tokens: tokens::run(shell, target_mark),
                 word: mem::take(&mut shell.input.word),
             },
         }),
@@ -1120,11 +1182,13 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
         if !word.is_empty() && !word.as_bstr().ends_with(b"\n") {
             word.push_literal_byte(b'\n');
         }
-        let body = WordNode { word };
         /* The body and the delimiter line that ended it were read here,
          * far from the redirection that named them. */
         // [spec:nsh:def:idiom.token-stream]
-        shell.input.tokens.cut(SourceTokenKind::HereDocument);
+        let body = WordNode {
+            tokens: shell.input.tokens.cut_run(SourceTokenKind::HereDocument),
+            word,
+        };
         shell.input.completed_here_documents.push(body);
     }
     Ok(())
@@ -1147,9 +1211,10 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
     let mut token: Token;
 
     loop {
+        let replayed = shell.input.token_pushed_back;
         token = read_next_token(shell, &context)?;
         // [spec:nsh:def:idiom.token-stream]
-        shell.input.tokens.cut_token(token.kind);
+        shell.input.tokens.cut_token(token.kind, replayed);
 
         /*
          * eat newlines
@@ -1159,9 +1224,10 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
             /* The alias bit is dropped with the rest: dash clears the
              * whole of `checkkwd` here, and the bit lived in it. */
             shell.input.clear_alias_boundary();
+            let replayed = shell.input.token_pushed_back;
             token = read_next_token(shell, &context)?;
             // [spec:nsh:def:idiom.token-stream]
-            shell.input.tokens.cut_token(token.kind);
+            shell.input.tokens.cut_token(token.kind, replayed);
         }
 
         /* `popstring` sets this while `xxreadtoken` runs. The bit belongs
@@ -1423,11 +1489,11 @@ fn read_unit_for_syntax(shell: &mut Shell, stack: &SyntaxFrame) -> Result<InputU
 
 mod multibyte;
 mod syntax_stack;
-mod tokens;
+pub(crate) mod tokens;
 mod word_lexer;
 
 pub(crate) use multibyte::MultibyteMode;
-pub(crate) use tokens::{SourceTokenKind, TokenLog};
+pub(crate) use tokens::{SourceToken, SourceTokenKind, TokenLog, TokenMark};
 use word_lexer::{ParenthesisOutcome, WordPosition, close_parenthesis};
 
 /// Result of decoding the input unit at the current lexer position.
@@ -2562,7 +2628,11 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
                 false,
             )?;
 
+            /* Expanded and thrown away rather than kept in a tree, so
+             * there is nothing for a run to be printed back from. */
+            // [spec:nsh:req:idiom.printable-ast+2]
             let node = Node::Word(WordNode {
+                tokens: SourceTokens::none(),
                 word: mem::take(&mut shell.input.word),
             });
 

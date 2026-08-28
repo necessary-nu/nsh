@@ -10,8 +10,9 @@ use bstr::{BStr, BString};
 
 use super::{
     CaseClause, CaseCommand, Error, ForCommand, IfCommand, ListMode, Node, NodeText, ParsedWord,
-    Shell, SourceLine, Token, TokenContext, TokenKind, WordNode, command, expected_token_error,
-    is_valid_name, list, mem, pipeline, read_token, required_compound_node, syntax_error,
+    Shell, SourceLine, SourceTokens, Token, TokenContext, TokenKind, TokenMark, WordNode, command,
+    expected_token_error, is_valid_name, list, mem, pipeline, read_token, required_compound_node,
+    syntax_error,
 };
 
 /// How deeply one parse unit may nest commands.
@@ -71,14 +72,14 @@ pub(super) fn nested_command(
 /// frame whether taken or not, and this one's clause vector was part of
 /// why a nesting level cost 41 KiB. See `MAX_COMMAND_DEPTH`.
 // [spec:posix:syn:grammar.if-clause]
-pub(super) fn if_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
+pub(super) fn if_command(shell: &mut Shell, start: TokenMark) -> Result<Option<Node>, Error> {
     /* The C threads the elif chain through `elsepart` on the way down,
      * writing each new nif into its parent before parsing it.  An owned
      * tree cannot hand out that parent pointer, so the clauses are
      * collected in parse order and folded back up afterwards; the
      * sequence of `list(0)?` calls — and so of everything they read — is
      * unchanged. */
-    let mut clauses: Vec<(Node, Node)> = Vec::new();
+    let mut clauses: Vec<(TokenMark, Node, Node)> = Vec::new();
     let parsed = list(shell, ListMode::Compound)?;
     let test = required_compound_node(shell, parsed, TokenKind::Then)?;
     if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
@@ -86,8 +87,15 @@ pub(super) fn if_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
     }
     let parsed = list(shell, ListMode::Compound)?;
     let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
-    clauses.push((test, then_branch));
-    while read_token(shell, TokenContext::NONE)?.kind == TokenKind::Elif {
+    clauses.push((start, test, then_branch));
+    /* Each `elif` opens a nested `if`, so each clause keeps the mark its
+     * own reserved word sits at; they all end at the one `fi`. */
+    // [spec:nsh:def:idiom.token-stream]
+    loop {
+        let elif_mark = super::tokens::mark(shell);
+        if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Elif {
+            break;
+        }
         let parsed = list(shell, ListMode::Compound)?;
         let test = required_compound_node(shell, parsed, TokenKind::Then)?;
         if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
@@ -95,7 +103,7 @@ pub(super) fn if_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
         }
         let parsed = list(shell, ListMode::Compound)?;
         let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
-        clauses.push((test, then_branch));
+        clauses.push((elif_mark, test, then_branch));
     }
     let mut else_branch: Option<Node> = if shell.input.last_token == TokenKind::Else {
         list(shell, ListMode::Compound)?.into_node()
@@ -103,8 +111,9 @@ pub(super) fn if_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
         shell.input.token_pushed_back = true;
         None
     };
-    for (test, then_branch) in clauses.into_iter().rev() {
+    for (mark, test, then_branch) in clauses.into_iter().rev() {
         else_branch = Some(Node::If(IfCommand {
+            tokens: super::tokens::run(shell, mark),
             condition: Box::new(test),
             then_branch: Box::new(then_branch),
             else_branch: else_branch.map(Box::new),
@@ -119,10 +128,12 @@ pub(super) fn if_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
 /// nested token loop that every other branch of `command` was paying for.
 // [spec:posix:syn:grammar.case-clause]
 pub(super) fn case_command(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+    let word_mark = super::tokens::mark(shell);
     if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Word {
         return Err(expected_token_error(shell, Some(TokenKind::Word)));
     }
     let expr = Node::Word(WordNode {
+        tokens: super::tokens::run(shell, word_mark),
         word: mem::take(&mut shell.input.word),
     });
     if read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind != TokenKind::In {
@@ -134,11 +145,14 @@ pub(super) fn case_command(shell: &mut Shell, line: i32) -> Result<Node, Error> 
         // Rule 4 applies here, before an optional `(`, and nowhere in
         // the pattern loop below: words after `(` or `|` stay patterns
         // even when their spelling is otherwise a reserved word.
+        let clause_mark = super::tokens::mark(shell);
         let mut token = read_token(shell, TokenContext::RESERVED_WORDS_AFTER_NEWLINES)?.kind;
         if token == TokenKind::Esac {
             break;
         }
+        let mut pattern_mark = clause_mark;
         if shell.input.last_token == TokenKind::LeftParen {
+            pattern_mark = super::tokens::mark(shell);
             read_token(shell, TokenContext::NONE)?;
         }
         let mut pattern: Vec<Node> = Vec::new();
@@ -147,11 +161,13 @@ pub(super) fn case_command(shell: &mut Shell, line: i32) -> Result<Node, Error> 
                 return Err(expected_token_error(shell, Some(TokenKind::Word)));
             }
             pattern.push(Node::Word(WordNode {
+                tokens: super::tokens::run(shell, pattern_mark),
                 word: mem::take(&mut shell.input.word),
             }));
             if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Pipe {
                 break;
             }
+            pattern_mark = super::tokens::mark(shell);
             read_token(shell, TokenContext::NONE)?;
         }
         if shell.input.last_token != TokenKind::RightParen {
@@ -160,6 +176,7 @@ pub(super) fn case_command(shell: &mut Shell, line: i32) -> Result<Node, Error> 
         let body = list(shell, ListMode::StopAtTerminator)?.into_node();
         token = read_token(shell, TokenContext::RESERVED_WORDS_AFTER_NEWLINES)?.kind;
         cases.push(CaseClause {
+            tokens: super::tokens::run(shell, clause_mark),
             patterns: pattern,
             body: body.map(Box::new),
             fallthrough: token == TokenKind::FallThrough,
@@ -173,6 +190,7 @@ pub(super) fn case_command(shell: &mut Shell, line: i32) -> Result<Node, Error> 
         }
     }
     Ok(Node::Case(CaseCommand {
+        tokens: SourceTokens::none(),
         line: SourceLine::new(line),
         word: Box::new(expr),
         clauses: cases,
@@ -190,6 +208,7 @@ pub(super) fn iteration_command(
     shell: &mut Shell,
     line: i32,
     var_token: Token,
+    start: TokenMark,
 ) -> Result<ForCommand, Error> {
     if var_token.kind != TokenKind::Word
         || var_token.quoted
@@ -202,8 +221,13 @@ pub(super) fn iteration_command(
     let variable = NodeText::from(shell.input.word_text());
     let mut words: Vec<Node> = Vec::new();
     if read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind == TokenKind::In {
-        while read_token(shell, TokenContext::NONE)?.kind == TokenKind::Word {
+        loop {
+            let word_mark = super::tokens::mark(shell);
+            if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Word {
+                break;
+            }
             words.push(Node::Word(WordNode {
+                tokens: super::tokens::run(shell, word_mark),
                 word: mem::take(&mut shell.input.word),
             }));
         }
@@ -215,7 +239,11 @@ pub(super) fn iteration_command(
     } else {
         /* The implicit `"$@"` of a `for` with no `in` is syntax,
          * so construct the structural word directly. */
+        /* Syntax the grammar supplies rather than text the source wrote,
+         * so it carries no run and a renderer has to spell it. */
+        // [spec:nsh:req:idiom.printable-ast+2]
         words.push(Node::Word(WordNode {
+            tokens: SourceTokens::none(),
             word: ParsedWord::quoted_parameter(BString::from(b"@".as_slice())),
         }));
         /*
@@ -232,6 +260,7 @@ pub(super) fn iteration_command(
     let parsed = list(shell, ListMode::Compound)?;
     let body = required_compound_node(shell, parsed, TokenKind::Done)?;
     Ok(ForCommand {
+        tokens: super::tokens::run(shell, start),
         line: SourceLine::new(line),
         words,
         body: Box::new(body),

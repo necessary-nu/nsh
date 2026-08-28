@@ -6,8 +6,8 @@ use core::mem;
 use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{
-    InputUnit, ListMode, SyntaxClass, SyntaxContext, TokenContext, TokenKind, WordLexer, command,
-    consume_newline_without_prompt, expected_token_error, finalize, is_valid_name, list,
+    InputUnit, ListMode, SyntaxClass, SyntaxContext, TokenContext, TokenKind, TokenMark, WordLexer,
+    command, consume_newline_without_prompt, expected_token_error, finalize, is_valid_name, list,
     parse_here_documents, read_input_unit, read_token, read_unit_skipping_line_continuations,
     set_input_string, syntax_error, syntax_stack, unread_input_unit,
 };
@@ -19,7 +19,7 @@ use crate::nodes::{
     BashArithmeticCommand, BashArithmeticFor, BashArrayAssignment, BashArrayElement,
     BashArrayValue, BashAssignmentOperator, BashConditional, BashConditionalExpr, BashFunction,
     BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution,
-    FileRedirectionOperator, Node, NodeText, WordNode,
+    FileRedirectionOperator, Node, NodeText, SourceTokens, WordNode,
 };
 use crate::options::{BashShopt, Dialect};
 use crate::word::{
@@ -68,7 +68,11 @@ pub(super) fn command_prefix(
 pub(super) fn arithmetic_command(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
     let expression = arithmetic_text(shell)?;
     Ok(Node::Bash(BashNode::ArithmeticCommand(
-        BashArithmeticCommand { line, expression },
+        BashArithmeticCommand {
+            tokens: SourceTokens::none(),
+            line,
+            expression,
+        },
     )))
 }
 
@@ -103,6 +107,7 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: SourceLine) -> Result<Node
     }
     Ok(Node::Bash(BashNode::ArithmeticFor(Box::new(
         BashArithmeticFor {
+            tokens: SourceTokens::none(),
             line,
             init,
             test,
@@ -141,7 +146,11 @@ fn conditional_expression(shell: &mut Shell, line: SourceLine) -> Result<Node, E
     }
 
     Ok(Node::Bash(BashNode::Conditional(Box::new(
-        BashConditional { line, expression },
+        BashConditional {
+            tokens: SourceTokens::none(),
+            line,
+            expression,
+        },
     ))))
 }
 
@@ -183,6 +192,7 @@ pub(super) fn function(shell: &mut Shell, line: SourceLine) -> Result<Node, Erro
         .ok_or_else(|| expected_token_error(shell, None))?;
 
     Ok(Node::Bash(BashNode::Function(BashFunction {
+        tokens: SourceTokens::none(),
         line,
         name,
         style,
@@ -215,6 +225,11 @@ pub(super) fn array_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode>
     };
 
     let assignment = BashArrayAssignment {
+        /* The reader cut one word here; the name, the subscript and the
+         * value are this parser's reading of it, not the reader's cuts,
+         * so the run belongs to the assignment and the parts carry none. */
+        // [spec:nsh:def:idiom.token-stream]
+        tokens: arg.tokens.clone(),
         name: NodeText::from(name.as_bstr()),
         subscript: Some(arg_part(&arg, open + 1, close)),
         operator,
@@ -244,6 +259,7 @@ fn append_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode> {
     let value = arg_part(&arg, plus + 2, units.len());
     Ok(Node::Bash(BashNode::ArrayAssignment(Box::new(
         BashArrayAssignment {
+            tokens: arg.tokens,
             name: NodeText::from(name.as_bstr()),
             subscript: None,
             operator: BashAssignmentOperator::Append,
@@ -305,6 +321,7 @@ pub(super) fn compound_array(
         compound_prefix(shell, previous).expect("the candidate predicate and conversion agree");
     let mut elements = Vec::new();
     loop {
+        let element_mark = super::tokens::mark(shell);
         let token = read_token(shell, TokenContext::SKIP_NEWLINES)?;
         if token.kind == TokenKind::RightParen {
             break;
@@ -312,7 +329,7 @@ pub(super) fn compound_array(
         if token.kind != TokenKind::Word {
             return Err(syntax_error(shell, b"invalid compound array assignment"));
         }
-        let arg = take_word(shell, token.quoted).arg;
+        let arg = take_word(shell, token.quoted, element_mark).arg;
         elements.push(array_element(arg));
     }
     assignment.value = BashArrayValue::Compound(elements);
@@ -357,6 +374,12 @@ pub(super) fn process_substitutions(
 
         lexer.output.push(WordToken::Command(Some(Node::Bash(
             BashNode::ProcessSubstitution(BashProcessSubstitution {
+                /* `<(list)` is inside a word, and the reader cuts words
+                 * whole: the run that spells this is the enclosing
+                 * word's, and cutting a second one for it would record
+                 * the same bytes twice. */
+                // [spec:nsh:def:idiom.token-stream]
+                tokens: SourceTokens::none(),
                 direction,
                 body: body.map(Box::new),
             }),
@@ -557,6 +580,7 @@ fn conditional_and(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
 }
 
 fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
+    let first_mark = super::tokens::mark(shell);
     let token = read_token(shell, TokenContext::NONE)?;
     if token.kind == TokenKind::LeftParen {
         let expression = conditional_or(shell)?;
@@ -569,13 +593,14 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
         return Err(syntax_error(shell, b"expected conditional expression"));
     }
 
-    let first = take_word(shell, token.quoted);
+    let first = take_word(shell, token.quoted, first_mark);
     if !first.quoted && first.arg.word.as_bstr() == BStr::new(b"!") {
         return Ok(BashConditionalExpr::Not(Box::new(conditional_primary(
             shell,
         )?)));
     }
     if !first.quoted && unary_operator(first.arg.word.as_bstr()) {
+        let operand_mark = super::tokens::mark(shell);
         let operand_token = read_token(shell, TokenContext::NONE)?;
         if operand_token.kind != TokenKind::Word
             || closes_conditional(shell, operand_token.kind, operand_token.quoted)
@@ -584,7 +609,7 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
         }
         return Ok(BashConditionalExpr::Unary {
             operator: NodeText::from(first.arg.word.as_bstr()),
-            operand: take_word(shell, operand_token.quoted).arg,
+            operand: take_word(shell, operand_token.quoted, operand_mark).arg,
         });
     }
 
@@ -638,6 +663,7 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
         &mut shell.input.parsing_conditional,
         matches_a_pattern(operator.as_bstr()),
     );
+    let right_mark = super::tokens::mark(shell);
     let right_token = read_token(shell, context);
     shell.input.parsing_conditional = enclosing;
     let right_token = right_token?;
@@ -649,7 +675,7 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
     Ok(BashConditionalExpr::Binary {
         left: first.arg,
         operator,
-        right: take_word(shell, right_token.quoted).arg,
+        right: take_word(shell, right_token.quoted, right_mark).arg,
     })
 }
 
@@ -716,9 +742,10 @@ fn binary_operator(operator: &BStr) -> bool {
     )
 }
 
-fn take_word(shell: &mut Shell, quoted: bool) -> ConditionalWord {
+fn take_word(shell: &mut Shell, quoted: bool, mark: TokenMark) -> ConditionalWord {
     ConditionalWord {
         arg: WordNode {
+            tokens: super::tokens::run(shell, mark),
             word: mem::take(&mut shell.input.word),
         },
         quoted,
@@ -745,10 +772,12 @@ fn compound_prefix(shell: &Shell, node: Node) -> Option<BashArrayAssignment> {
                 return None;
             }
             Some(BashArrayAssignment {
+                tokens: arg.tokens.clone(),
                 name: NodeText::from(name.as_bstr()),
                 subscript: None,
                 operator,
                 value: BashArrayValue::Word(WordNode {
+                    tokens: SourceTokens::none(),
                     word: ParsedWord::new(),
                 }),
             })
@@ -847,6 +876,7 @@ fn arg_part(arg: &WordNode, start: usize, end: usize) -> WordNode {
     // [spec:nsh:def:idiom.word-ir]
     let units = arg.word.units();
     WordNode {
+        tokens: SourceTokens::none(),
         word: ParsedWord::from_units(units.get(start..end).unwrap_or_default()),
     }
 }

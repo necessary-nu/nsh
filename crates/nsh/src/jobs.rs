@@ -1732,11 +1732,14 @@ pub(crate) fn job_exit_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nodes::{CaseClause, CaseCommand, SimpleCommand, SourceLine, WordNode};
+    use crate::nodes::{
+        CaseClause, CaseCommand, SimpleCommand, SourceLine, SourceTokens, WordNode,
+    };
     use crate::word::ParsedWord;
 
     fn word(text: &[u8]) -> Node {
         Node::Word(WordNode {
+            tokens: SourceTokens::none(),
             word: ParsedWord::literal(BString::from(text)),
         })
     }
@@ -1842,6 +1845,7 @@ mod tests {
     #[test]
     fn job_text_includes_assignment_only_commands() {
         let command = Node::Command(Box::new(SimpleCommand {
+            tokens: SourceTokens::none(),
             line: SourceLine::new(1),
             assignments: vec![word(b"answer=42")],
             arguments: Vec::new(),
@@ -1856,11 +1860,14 @@ mod tests {
     #[test]
     fn job_text_includes_every_case_pattern() {
         let command = Node::Case(CaseCommand {
+            tokens: SourceTokens::none(),
             line: SourceLine::new(1),
             word: Box::new(word(b"value")),
             clauses: vec![CaseClause {
+                tokens: SourceTokens::none(),
                 patterns: vec![word(b"first"), word(b"second")],
                 body: Some(Box::new(Node::Command(Box::new(SimpleCommand {
+                    tokens: SourceTokens::none(),
                     line: SourceLine::new(1),
                     assignments: Vec::new(),
                     arguments: vec![word(b"echo")],

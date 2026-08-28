@@ -33,9 +33,13 @@
 //! `copynode` — has a counterpart here, so the port of that generator went
 //! with the layout it described.
 
+use core::fmt;
+use std::sync::Arc;
+
 use bstr::{BStr, BString};
 
 use crate::descriptors::LogicalDescriptor;
+use crate::parser::SourceToken;
 use crate::word::ParsedWord;
 
 mod bash;
@@ -91,6 +95,87 @@ impl From<&BStr> for NodeText {
     }
 }
 
+/// The tokens a node was parsed from.
+///
+/// The reader's cuts are coarser than the grammar -- `echo $(true)` is
+/// read as `echo`, a blank, `$(true` and `)` -- so what a node holds is a
+/// run of the log rather than one token, and a parent's run contains its
+/// children's. A node the shell built rather than parsed holds an empty
+/// run, which is what [`SourceTokens::none`] says.
+///
+/// The bytes are shared rather than copied down the nesting, because
+/// every level of a tree holds the run of every level under it and a
+/// function definition is cloned for each call.
+///
+/// EQUALITY IS THE POINT. Comparing two trees as programs must ignore
+/// their tokens, so this compares equal to everything and the derived
+/// `PartialEq` of every node that holds one is unaffected by spelling.
+/// Comparing as text is [`SourceTokens::same_text`], which is a named
+/// operation precisely so that no `==` can be mistaken for it.
+// [spec:nsh:req:idiom.canonical-tree+1]
+// [spec:nsh:def:idiom.token-stream]
+#[derive(Clone, Eq)]
+pub struct SourceTokens(Arc<[SourceToken]>);
+
+impl SourceTokens {
+    /// Take a copy of the log run a node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn new(run: &[SourceToken]) -> SourceTokens {
+        SourceTokens(Arc::from(run))
+    }
+
+    /// The empty run, for a node the shell built rather than parsed.
+    ///
+    /// [`spec:nsh:req:idiom.printable-ast+2`] makes this the one case a
+    /// renderer has to spell a construct itself, so it is stated rather
+    /// than left as a default that could be reached by forgetting.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    pub(crate) fn none() -> SourceTokens {
+        SourceTokens(Arc::from([] as [SourceToken; 0]))
+    }
+
+    /// The tokens themselves, in the order they were read.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn tokens(&self) -> &[SourceToken] {
+        &self.0
+    }
+
+    /// The bytes of the run, concatenated.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn text(&self) -> BString {
+        let mut text = BString::from(Vec::new());
+        for token in self.tokens() {
+            text.extend_from_slice(token.text());
+        }
+        text
+    }
+}
+
+/// A run shows as the source it stands for.
+///
+/// The derived form would print the cut points, which are the reader's
+/// business and not a reader-of-a-dump's; what a node was parsed from is
+/// the text.
+// [spec:nsh:def:idiom.token-stream]
+impl fmt::Debug for SourceTokens {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{:?}", self.text())
+    }
+}
+
+/// Two nodes that differ only in how they were spelled are one program.
+///
+/// The same shape as [`SourceLine`]'s, and for the same reason: a fact
+/// the tree records but that identity does not depend on. The warning is
+/// the same too -- an equality that ignores a field is invisible at the
+/// call site -- which is why the text comparison has a name.
+// [spec:nsh:req:idiom.canonical-tree+1]
+impl PartialEq for SourceTokens {
+    fn eq(&self, _: &SourceTokens) -> bool {
+        true
+    }
+}
+
 /// The input line a grammar form was parsed on.
 ///
 /// A position is provenance, not identity: two forms that differ only in
@@ -128,6 +213,9 @@ impl From<i32> for SourceLine {
 // [spec:nsh:req:idiom.structural-ast]
 #[derive(Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub line: SourceLine,
     pub assignments: Vec<Node>,
     pub arguments: Vec<Node>,
@@ -137,6 +225,9 @@ pub struct SimpleCommand {
 /// A pipeline of commands.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Pipeline {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub background: bool,
     pub commands: Vec<Node>,
 }
@@ -144,6 +235,9 @@ pub struct Pipeline {
 /// A command wrapped by redirection, background execution, or a subshell.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CompoundCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub line: SourceLine,
     pub command: Box<Node>,
     pub redirections: Vec<Redirection>,
@@ -152,6 +246,9 @@ pub struct CompoundCommand {
 /// The two children of a binary grammar form.
 #[derive(Clone, PartialEq, Eq)]
 pub struct BinaryCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub left: Box<Node>,
     pub right: Box<Node>,
 }
@@ -159,6 +256,9 @@ pub struct BinaryCommand {
 /// An if command.
 #[derive(Clone, PartialEq, Eq)]
 pub struct IfCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub condition: Box<Node>,
     pub then_branch: Box<Node>,
     pub else_branch: Option<Box<Node>>,
@@ -167,6 +267,9 @@ pub struct IfCommand {
 /// A for command.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ForCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub line: SourceLine,
     pub words: Vec<Node>,
     pub body: Box<Node>,
@@ -176,6 +279,9 @@ pub struct ForCommand {
 /// A pipeline the shell reports the duration of.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TimedCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub line: SourceLine,
     /// `time -p`, which reports seconds to two places instead of Bash's
     /// `real\t0m0.000s`.
@@ -187,6 +293,9 @@ pub struct TimedCommand {
 /// A case command.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CaseCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub line: SourceLine,
     pub word: Box<Node>,
     pub clauses: Vec<CaseClause>,
@@ -195,6 +304,9 @@ pub struct CaseCommand {
 /// One case clause.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CaseClause {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub patterns: Vec<Node>,
     pub body: Option<Box<Node>>,
     pub fallthrough: bool,
@@ -203,6 +315,9 @@ pub struct CaseClause {
 /// A shell function definition.
 #[derive(Clone, PartialEq, Eq)]
 pub struct FunctionDefinition {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub line: SourceLine,
     pub name: NodeText,
     pub body: Box<Node>,
@@ -211,6 +326,9 @@ pub struct FunctionDefinition {
 /// A parsed word stored in the syntax tree.
 #[derive(Clone, PartialEq, Eq)]
 pub struct WordNode {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub word: ParsedWord,
 }
 
@@ -298,6 +416,9 @@ pub struct HereString {
 /// A negated command.
 #[derive(Clone, PartialEq, Eq)]
 pub struct NegatedCommand {
+    /// The tokens this node was parsed from.
+    // [spec:nsh:def:idiom.token-stream]
+    pub tokens: SourceTokens,
     pub command: Box<Node>,
 }
 
@@ -337,6 +458,41 @@ pub enum Node {
     Bash(BashNode),
 }
 
+impl Node {
+    /// Give a node the run of tokens it was parsed from.
+    ///
+    /// A compound form ends at a closing token its own branch of the
+    /// parser does not read -- `done`, `fi`, `esac`, `)` are all consumed
+    /// by the dispatch that called it -- so the run cannot be taken where
+    /// the node is built without stopping one token short. It is taken
+    /// where the construct actually ends and handed back here.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn with_tokens(mut self, tokens: SourceTokens) -> Node {
+        match &mut self {
+            Node::Command(command) => command.tokens = tokens,
+            Node::Pipeline(pipeline) => pipeline.tokens = tokens,
+            Node::Redirect(wrapper)
+            | Node::Background(wrapper)
+            | Node::Subshell(wrapper)
+            | Node::Group(wrapper) => wrapper.tokens = tokens,
+            Node::And(binary)
+            | Node::Or(binary)
+            | Node::Sequence(binary)
+            | Node::While(binary)
+            | Node::Until(binary) => binary.tokens = tokens,
+            Node::If(command) => command.tokens = tokens,
+            Node::For(command) | Node::Select(command) => command.tokens = tokens,
+            Node::Timed(command) => command.tokens = tokens,
+            Node::Case(command) => command.tokens = tokens,
+            Node::Function(definition) => definition.tokens = tokens,
+            Node::Word(word) => word.tokens = tokens,
+            Node::Not(negation) => negation.tokens = tokens,
+            Node::Bash(node) => node.set_tokens(tokens),
+        }
+        self
+    }
+}
+
 // ---------------------------------------------------------------------
 // Shell names are bytes rather than UTF-8 text.
 // ---------------------------------------------------------------------
@@ -363,6 +519,7 @@ mod tests {
         // `copyfunc` is why this matters: a function definition outlives
         // the text it was parsed from, so `copynode` called `nodesavestr`.
         let node = Node::Word(WordNode {
+            tokens: SourceTokens::none(),
             word: ParsedWord::literal(BString::from("$x")),
         });
         let copy = node.clone();
@@ -385,10 +542,12 @@ mod tests {
     fn grammar_forms_are_distinct_variants() {
         let command = || {
             Box::new(Node::Word(WordNode {
+                tokens: SourceTokens::none(),
                 word: ParsedWord::literal(BString::from("command")),
             }))
         };
         let child = BinaryCommand {
+            tokens: SourceTokens::none(),
             left: command(),
             right: command(),
         };
