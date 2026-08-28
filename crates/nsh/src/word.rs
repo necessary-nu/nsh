@@ -18,30 +18,53 @@ pub(crate) struct ParsedWord {
 }
 
 /// One structural part of a parsed shell word.
+///
+/// What the program is, never how it was spelled. `echo 'a'`, `echo "a"`
+/// and `echo \a` are one word here and differ only in the run the node
+/// was read as, which is where [`dec:nsh:tokens-are-the-truth`] put the
+/// spelling. Four ways to say "this byte, inert" were four shapes of one
+/// program, and a representation that admits two forms of one program is
+/// not a syntax tree of it.
+// [spec:nsh:req:idiom.canonical-tree+1]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum WordPart {
-    /// Bytes that have no additional quoting protection.
-    Literal(BString),
-    /// One byte a backslash escaped: the source wrote `\byte`, and the
-    /// backslash is spelling rather than data.
-    Escaped(u8),
-    /// One byte the quoting around it protected, which no backslash of its
-    /// own put there. `"a=b"` marks the `=` so the word cannot be read as an
-    /// assignment, and a backslash inside `"` that escapes nothing is a byte
-    /// like any other. Both are data, and writing a backslash for either
-    /// would spell a word the source did not.
-    // [spec:nsh:req:idiom.printable-ast]
-    Protected(u8),
-    /// A complete locale multibyte character, with its quoting protection.
-    Multibyte { bytes: BString, escaped: bool },
-    /// A quoting boundary.
-    Quote(QuoteBoundary),
+    /// A run of bytes, and whether the source made them inert.
+    ///
+    /// One flag covers every way a byte becomes data -- inside `'`,
+    /// inside `"`, inside `$'...'`, behind a `\` -- because nothing the
+    /// program does distinguishes them. An empty run is `''`: a word
+    /// where no run at all is not a word.
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    Text { bytes: BString, quoted: bool },
     /// A parameter expansion.
     Parameter(ParameterExpansion),
     /// A command substitution embedded at its lexical position.
-    Command(Option<Box<Node>>),
+    Command {
+        command: Option<Box<Node>>,
+        quoted: bool,
+    },
     /// An arithmetic expansion.
-    Arithmetic(Box<ParsedWord>),
+    Arithmetic {
+        expression: Box<ParsedWord>,
+        quoted: bool,
+    },
+}
+
+impl WordPart {
+    /// Whether the source made this part inert.
+    ///
+    /// For a run of bytes that is whether they are data; for an expansion
+    /// it is whether its result splits and globs. One question, because
+    /// one thing put it there.
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    pub(crate) const fn quoted(&self) -> bool {
+        match self {
+            WordPart::Text { quoted, .. }
+            | WordPart::Command { quoted, .. }
+            | WordPart::Arithmetic { quoted, .. } => *quoted,
+            WordPart::Parameter(expansion) => expansion.quoted,
+        }
+    }
 }
 
 /// Typed events emitted by the lexer while it constructs a nested word.
@@ -71,9 +94,13 @@ pub(crate) enum WordToken {
 }
 
 /// One sliceable top-level word unit used by Bash-only array syntax.
+///
+/// A byte carries its run's inertness with it, because slicing a run in
+/// half must not make either half ordinary.
+// [spec:nsh:req:idiom.canonical-tree+1]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum WordUnit {
-    Literal(u8),
+    Literal { byte: u8, quoted: bool },
     Part(WordPart),
 }
 
@@ -119,6 +146,10 @@ pub(crate) struct ParameterExpansion {
     // [spec:nsh:req:compat.bash.expansion-globbing]
     pub(crate) indirect: bool,
     pub(crate) operand: Option<Box<ParsedWord>>,
+    /// Whether the source quoted the expansion, so its result is one
+    /// field rather than several.
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    pub(crate) quoted: bool,
 }
 
 /// The operation selected by a parameter expansion.
@@ -169,7 +200,10 @@ impl ParsedWord {
         let parts = if bytes.is_empty() {
             Vec::new()
         } else {
-            vec![WordPart::Literal(bytes.clone())]
+            vec![WordPart::Text {
+                bytes: bytes.clone(),
+                quoted: false,
+            }]
         };
         Self {
             parts,
@@ -180,17 +214,14 @@ impl ParsedWord {
     /// Construct a quoted parameter expansion without legacy marker bytes.
     pub(crate) fn quoted_parameter(name: impl Into<BString>) -> Self {
         let mut word = Self {
-            parts: vec![
-                WordPart::Quote(QuoteBoundary::Open(QuoteKind::Double)),
-                WordPart::Parameter(ParameterExpansion {
-                    name: name.into(),
-                    operation: ParameterOperation::Value,
-                    colon: false,
-                    indirect: false,
-                    operand: None,
-                }),
-                WordPart::Quote(QuoteBoundary::Close),
-            ],
+            parts: vec![WordPart::Parameter(ParameterExpansion {
+                name: name.into(),
+                operation: ParameterOperation::Value,
+                colon: false,
+                indirect: false,
+                operand: None,
+                quoted: true,
+            })],
             spelling: BString::new(Vec::new()),
         };
         word.render_spelling();
@@ -220,18 +251,14 @@ impl ParsedWord {
 
         for part in &self.parts {
             let bytes = match part {
-                WordPart::Literal(bytes) => bytes.as_slice(),
-                WordPart::Multibyte {
+                WordPart::Text {
                     bytes,
-                    escaped: false,
+                    quoted: false,
                 } => bytes.as_slice(),
-                WordPart::Escaped(_)
-                | WordPart::Protected(_)
-                | WordPart::Multibyte { escaped: true, .. }
-                | WordPart::Quote(_)
+                WordPart::Text { quoted: true, .. }
                 | WordPart::Parameter(_)
-                | WordPart::Command(_)
-                | WordPart::Arithmetic(_) => return false,
+                | WordPart::Command { .. }
+                | WordPart::Arithmetic { .. } => return false,
             };
 
             for &byte in bytes {
@@ -259,12 +286,7 @@ impl ParsedWord {
 
     /// Append one literal byte, keeping the spelling cache in step.
     pub(crate) fn push_literal_byte(&mut self, byte: u8) {
-        match self.parts.last_mut() {
-            Some(WordPart::Literal(bytes)) => bytes.push(byte),
-            _ => self
-                .parts
-                .push(WordPart::Literal(BString::from(vec![byte]))),
-        }
+        push_text(&mut self.parts, &[byte], false);
         self.spelling.push(byte);
     }
 
@@ -272,12 +294,20 @@ impl ParsedWord {
         &self.parts
     }
 
+    /// Split the word into sliceable units.
+    ///
+    /// An empty run has no bytes to spread out and stays one unit, so
+    /// that slicing cannot silently drop the `''` it stands for.
+    // [spec:nsh:req:idiom.canonical-tree+1]
     pub(crate) fn units(&self) -> Vec<WordUnit> {
         let mut units = Vec::new();
         for part in &self.parts {
             match part {
-                WordPart::Literal(bytes) => {
-                    units.extend(bytes.iter().copied().map(WordUnit::Literal));
+                WordPart::Text { bytes, quoted } if !bytes.is_empty() => {
+                    units.extend(bytes.iter().map(|byte| WordUnit::Literal {
+                        byte: *byte,
+                        quoted: *quoted,
+                    }));
                 }
                 part => units.push(WordUnit::Part(part.clone())),
             }
@@ -289,7 +319,10 @@ impl ParsedWord {
         let mut parts = Vec::new();
         for unit in units {
             match unit {
-                WordUnit::Literal(byte) => push_literal(&mut parts, *byte),
+                WordUnit::Literal { byte, quoted } => push_text(&mut parts, &[*byte], *quoted),
+                WordUnit::Part(WordPart::Text { bytes, quoted }) => {
+                    push_text(&mut parts, bytes, *quoted);
+                }
                 WordUnit::Part(part) => parts.push(part.clone()),
             }
         }
@@ -300,7 +333,7 @@ impl ParsedWord {
     pub(crate) fn render(&self, output: &mut BString) {
         for part in &self.parts {
             match part {
-                WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => {
+                WordPart::Text { bytes, .. } => {
                     for &byte in bytes.iter() {
                         if matches!(byte, b'\'' | b'\\' | b'"' | b'$') {
                             output.push(b'\\');
@@ -308,14 +341,8 @@ impl ParsedWord {
                         output.push(byte);
                     }
                 }
-                WordPart::Escaped(byte) => {
-                    output.push(b'\\');
-                    output.push(*byte);
-                }
-                WordPart::Protected(byte) => output.push(*byte),
-                WordPart::Quote(_) => output.push(b'"'),
-                WordPart::Command(_) => output.extend_from_slice(b"$(...)"),
-                WordPart::Arithmetic(expression) => {
+                WordPart::Command { .. } => output.extend_from_slice(b"$(...)"),
+                WordPart::Arithmetic { expression, .. } => {
                     output.extend_from_slice(b"$((");
                     expression.render(output);
                     output.extend_from_slice(b"))");
@@ -386,22 +413,38 @@ struct TokenDecoder<'a> {
 }
 
 impl TokenDecoder<'_> {
+    /// Un-flatten the lexer's events into the canonical parts.
+    ///
+    /// Quoting is a depth here rather than a pair of parts: what a run's
+    /// inertness is, the tree records; which quote opened it, the node's
+    /// run does. A quote that closes over nothing written leaves an empty
+    /// inert run behind, because `''` is a word and nothing is not.
+    // [spec:nsh:req:idiom.canonical-tree+1]
     fn word_until(&mut self, boundary: TokenBoundary) -> ParsedWord {
         let mut parts = Vec::new();
+        let mut depth = 0usize;
+        let mut opened: Vec<(usize, usize)> = Vec::new();
         while self.at < self.tokens.len() {
             let token = &self.tokens[self.at];
             self.at += 1;
             match token {
-                WordToken::Literal(byte) => push_literal(&mut parts, *byte),
-                WordToken::Escaped(byte) => parts.push(WordPart::Escaped(*byte)),
-                WordToken::Protected(byte) => parts.push(WordPart::Protected(*byte)),
-                WordToken::Multibyte { bytes, escaped } => {
-                    parts.push(WordPart::Multibyte {
-                        bytes: bytes.clone(),
-                        escaped: *escaped,
-                    });
+                WordToken::Literal(byte) => push_text(&mut parts, &[*byte], depth > 0),
+                WordToken::Escaped(byte) | WordToken::Protected(byte) => {
+                    push_text(&mut parts, &[*byte], true);
                 }
-                WordToken::Quote(quote) => parts.push(WordPart::Quote(*quote)),
+                WordToken::Multibyte { bytes, escaped } => {
+                    push_text(&mut parts, bytes, *escaped || depth > 0);
+                }
+                WordToken::Quote(QuoteBoundary::Open(_)) => {
+                    depth += 1;
+                    opened.push(written_so_far(&parts));
+                }
+                WordToken::Quote(QuoteBoundary::Close) => {
+                    depth = depth.saturating_sub(1);
+                    if opened.pop() == Some(written_so_far(&parts)) {
+                        push_text(&mut parts, &[], true);
+                    }
+                }
                 WordToken::ParameterStart {
                     name,
                     operation,
@@ -416,14 +459,22 @@ impl TokenDecoder<'_> {
                         colon: *colon,
                         indirect: *indirect,
                         operand,
+                        quoted: depth > 0,
                     }));
                 }
                 WordToken::Command(command) => {
-                    parts.push(WordPart::Command(command.clone().map(Box::new)));
+                    parts.push(WordPart::Command {
+                        command: command.clone().map(Box::new),
+                        quoted: depth > 0,
+                    });
                 }
-                WordToken::ArithmeticStart => parts.push(WordPart::Arithmetic(Box::new(
-                    self.word_until(TokenBoundary::Arithmetic),
-                ))),
+                WordToken::ArithmeticStart => {
+                    let expression = Box::new(self.word_until(TokenBoundary::Arithmetic));
+                    parts.push(WordPart::Arithmetic {
+                        expression,
+                        quoted: depth > 0,
+                    });
+                }
                 WordToken::ParameterEnd if boundary == TokenBoundary::Parameter => break,
                 WordToken::ArithmeticEnd if boundary == TokenBoundary::Arithmetic => break,
                 WordToken::ParameterEnd | WordToken::ArithmeticEnd => break,
@@ -433,15 +484,52 @@ impl TokenDecoder<'_> {
     }
 }
 
-fn push_literal(parts: &mut Vec<WordPart>, byte: u8) {
-    if let Some(WordPart::Literal(bytes)) = parts.last_mut() {
-        bytes.push(byte);
-    } else {
-        parts.push(WordPart::Literal(BString::from(vec![byte])));
+/// How much of the word has been built, for telling `""` from `"a"`.
+///
+/// A quote that closes with this unchanged wrote nothing, and an empty
+/// inert run is what stands for it. Counting parts alone is not enough:
+/// a byte written into the run already there moves nothing else.
+// [spec:nsh:req:idiom.canonical-tree+1]
+fn written_so_far(parts: &[WordPart]) -> (usize, usize) {
+    let last = match parts.last() {
+        Some(WordPart::Text { bytes, .. }) => bytes.len(),
+        _ => 0,
+    };
+    (parts.len(), last)
+}
+
+/// Append bytes to the run being built, or start a new one.
+///
+/// Runs of equal inertness merge, which is what makes the shape
+/// canonical: `a'b'` and `'ab'` differ, `ab` written as two literal
+/// pushes does not. An empty run merges into a neighbour of the same
+/// inertness and survives beside one of the other, which is exactly when
+/// `''` is a word of its own.
+// [spec:nsh:req:idiom.canonical-tree+1]
+fn push_text(parts: &mut Vec<WordPart>, bytes: &[u8], quoted: bool) {
+    if let Some(WordPart::Text {
+        bytes: run,
+        quoted: run_quoted,
+    }) = parts.last_mut()
+        && *run_quoted == quoted
+    {
+        run.extend_from_slice(bytes);
+        return;
     }
+    parts.push(WordPart::Text {
+        bytes: BString::from(bytes),
+        quoted,
+    });
 }
 
 fn finish(parts: Vec<WordPart>) -> ParsedWord {
+    /* An empty run that nothing quoted is not a run. An empty run that
+     * something did is `''`, which is a word. */
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    let mut parts = parts;
+    parts.retain(
+        |part| !matches!(part, WordPart::Text { bytes, quoted: false } if bytes.is_empty()),
+    );
     let mut word = ParsedWord {
         parts,
         spelling: BString::new(Vec::new()),
@@ -455,13 +543,9 @@ impl ParsedWord {
         fn append(word: &ParsedWord, output: &mut BString) {
             for part in &word.parts {
                 match part {
-                    WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => {
-                        output.extend_from_slice(bytes)
-                    }
-                    WordPart::Escaped(byte) | WordPart::Protected(byte) => output.push(*byte),
-                    WordPart::Quote(_) => {}
-                    WordPart::Command(_) => output.extend_from_slice(b"$(...)"),
-                    WordPart::Arithmetic(expression) => {
+                    WordPart::Text { bytes, .. } => output.extend_from_slice(bytes),
+                    WordPart::Command { .. } => output.extend_from_slice(b"$(...)"),
+                    WordPart::Arithmetic { expression, .. } => {
                         output.extend_from_slice(b"$((");
                         append(expression, output);
                         output.extend_from_slice(b"))");
@@ -516,18 +600,88 @@ mod tests {
             WordToken::Command(None),
         ]);
 
-        assert!(matches!(word.parts()[0], WordPart::Literal(_)));
         assert!(matches!(
-            word.parts()[1],
-            WordPart::Quote(QuoteBoundary::Open(QuoteKind::Double))
+            word.parts()[0],
+            WordPart::Text { quoted: false, .. }
         ));
-        let WordPart::Parameter(parameter) = &word.parts()[2] else {
+        let WordPart::Parameter(parameter) = &word.parts()[1] else {
             panic!("parameter part expected");
         };
         assert_eq!(parameter.operation, ParameterOperation::Default);
         assert!(parameter.colon);
+        assert!(parameter.quoted, "the expansion was written inside quotes");
         assert_eq!(parameter.name, BString::from("x"));
-        assert!(matches!(word.parts()[4], WordPart::Command(None)));
+        assert!(matches!(
+            word.parts()[2],
+            WordPart::Command {
+                command: None,
+                quoted: false
+            }
+        ));
+    }
+
+    /// One program, one shape. The three spellings differ in the run the
+    /// word was read as and in nothing the tree records.
+    // [spec:nsh:req:idiom.canonical-tree+1/test]
+    #[test]
+    fn one_inert_byte_has_one_shape() {
+        let apostrophes = ParsedWord::from_tokens(vec![
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
+            WordToken::Literal(b'a'),
+            WordToken::Quote(QuoteBoundary::Close),
+        ]);
+        let quotes = ParsedWord::from_tokens(vec![
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
+            WordToken::Literal(b'a'),
+            WordToken::Quote(QuoteBoundary::Close),
+        ]);
+        let backslash = ParsedWord::from_tokens(vec![WordToken::Escaped(b'a')]);
+        assert!(apostrophes == quotes, "'a' and \"a\" are one program");
+        assert!(quotes == backslash, "\"a\" and \\a are one program");
+        assert!(matches!(
+            apostrophes.parts(),
+            [WordPart::Text { bytes, quoted: true }] if bytes == "a"
+        ));
+    }
+
+    /// `''` is a word and nothing is not, so an inert run survives being
+    /// empty where an ordinary one does not.
+    // [spec:nsh:req:idiom.canonical-tree+1/test]
+    #[test]
+    fn an_empty_inert_run_is_a_word() {
+        let empty = ParsedWord::from_tokens(vec![
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
+            WordToken::Quote(QuoteBoundary::Close),
+        ]);
+        assert!(!empty.is_empty());
+        assert!(matches!(
+            empty.parts(),
+            [WordPart::Text { bytes, quoted: true }] if bytes.is_empty()
+        ));
+        assert!(ParsedWord::from_tokens(Vec::new()).is_empty());
+    }
+
+    /// Runs of one inertness join, so a word has one shape however the
+    /// lexer happened to cut it.
+    // [spec:nsh:req:idiom.canonical-tree+1/test]
+    #[test]
+    fn runs_of_one_inertness_join() {
+        let split = ParsedWord::from_tokens(vec![
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
+            WordToken::Literal(b'a'),
+            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
+            WordToken::Literal(b'b'),
+            WordToken::Quote(QuoteBoundary::Close),
+        ]);
+        let whole = ParsedWord::from_tokens(vec![
+            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
+            WordToken::Literal(b'a'),
+            WordToken::Literal(b'b'),
+            WordToken::Quote(QuoteBoundary::Close),
+        ]);
+        assert!(split == whole, "one run however the lexer cut it");
+        assert_eq!(split.parts().len(), 1);
     }
 
     #[test]
@@ -543,8 +697,11 @@ mod tests {
         ]);
         let units = word.units();
         let sliced = ParsedWord::from_units(&units[1..]);
-        assert!(matches!(sliced.parts()[0], WordPart::Escaped(b'*')));
-        assert!(matches!(sliced.parts()[1], WordPart::Arithmetic(_)));
+        assert!(matches!(
+            &sliced.parts()[0],
+            WordPart::Text { bytes, quoted: true } if bytes == "*"
+        ));
+        assert!(matches!(sliced.parts()[1], WordPart::Arithmetic { .. }));
     }
 
     #[test]

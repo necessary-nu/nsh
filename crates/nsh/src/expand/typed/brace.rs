@@ -10,7 +10,7 @@ use bstr::{BString, ByteSlice as _};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::options::Dialect;
-use crate::word::{ParsedWord, QuoteBoundary, WordPart, WordUnit};
+use crate::word::{ParsedWord, WordUnit};
 
 /// The most words one brace expansion may build.
 ///
@@ -116,30 +116,40 @@ fn expanded_or_self(
 
 /// The next unquoted `{` at or after `from`.
 fn opening_brace(units: &[WordUnit], from: usize) -> Option<usize> {
-    let mut quoted = false;
-    for (index, unit) in units.iter().enumerate() {
-        match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
-            WordUnit::Literal(b'{') if !quoted && index >= from => return Some(index),
-            _ => {}
-        }
-    }
-    None
+    units
+        .iter()
+        .enumerate()
+        .skip(from)
+        .find_map(|(index, unit)| {
+            matches!(
+                unit,
+                WordUnit::Literal {
+                    byte: b'{',
+                    quoted: false
+                }
+            )
+            .then_some(index)
+        })
 }
 
 /// The unquoted `}` that closes the brace at `open`, counting the braces
 /// nested inside it.
 fn closing_brace(units: &[WordUnit], open: usize) -> Option<usize> {
-    let mut quoted = false;
     let mut depth = 0usize;
     for (index, unit) in units.iter().enumerate().skip(open + 1) {
         match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
-            WordUnit::Literal(b'}') if !quoted && depth == 0 => return Some(index),
-            WordUnit::Literal(b'}') if !quoted => depth -= 1,
-            WordUnit::Literal(b'{') if !quoted => depth += 1,
+            WordUnit::Literal {
+                byte: b'}',
+                quoted: false,
+            } if depth == 0 => return Some(index),
+            WordUnit::Literal {
+                byte: b'}',
+                quoted: false,
+            } => depth -= 1,
+            WordUnit::Literal {
+                byte: b'{',
+                quoted: false,
+            } => depth += 1,
             _ => {}
         }
     }
@@ -154,15 +164,21 @@ fn comma_separated(
 ) -> Result<Option<Vec<Vec<WordUnit>>>, TooManyWords> {
     let mut parts = Vec::new();
     let mut start = 0;
-    let mut quoted = false;
     let mut depth = 0usize;
     for (index, unit) in amble.iter().enumerate() {
         match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
-            WordUnit::Literal(b'{') if !quoted => depth += 1,
-            WordUnit::Literal(b'}') if !quoted => depth = depth.saturating_sub(1),
-            WordUnit::Literal(b',') if !quoted && depth == 0 => {
+            WordUnit::Literal {
+                byte: b'{',
+                quoted: false,
+            } => depth += 1,
+            WordUnit::Literal {
+                byte: b'}',
+                quoted: false,
+            } => depth = depth.saturating_sub(1),
+            WordUnit::Literal {
+                byte: b',',
+                quoted: false,
+            } if depth == 0 => {
                 parts.push(&amble[start..index]);
                 start = index + 1;
             }
@@ -212,7 +228,14 @@ fn sequence(
     Ok(Some(
         items
             .into_iter()
-            .map(|item| item.iter().copied().map(WordUnit::Literal).collect())
+            .map(|item| {
+                item.iter()
+                    .map(|byte| WordUnit::Literal {
+                        byte: *byte,
+                        quoted: false,
+                    })
+                    .collect()
+            })
             .collect(),
     ))
 }
@@ -329,8 +352,11 @@ fn literal_text(units: &[WordUnit]) -> Option<BString> {
     units
         .iter()
         .map(|unit| match unit {
-            WordUnit::Literal(byte) => Some(*byte),
-            WordUnit::Part(_) => None,
+            WordUnit::Literal {
+                byte,
+                quoted: false,
+            } => Some(*byte),
+            WordUnit::Literal { .. } | WordUnit::Part(_) => None,
         })
         .collect::<Option<Vec<_>>>()
         .map(BString::from)

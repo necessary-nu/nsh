@@ -194,7 +194,10 @@ fn process_substitutions_own_their_commands() {
             .parts()
             .iter()
             .find_map(|part| match part {
-                WordPart::Command(Some(command)) => Some(command.as_ref()),
+                WordPart::Command {
+                    command: Some(command),
+                    ..
+                } => Some(command.as_ref()),
                 _ => None,
             })
             .unwrap();

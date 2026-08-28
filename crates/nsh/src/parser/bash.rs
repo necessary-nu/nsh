@@ -22,9 +22,7 @@ use crate::nodes::{
     FileRedirectionOperator, Node, NodeText, SourceTokens, WordNode,
 };
 use crate::options::{BashShopt, Dialect};
-use crate::word::{
-    ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordPart, WordToken, WordUnit,
-};
+use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordToken, WordUnit};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Quote {
@@ -204,7 +202,7 @@ pub(super) fn array_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode>
     let units = arg.word.units();
     let Some(open) = units
         .iter()
-        .position(|unit| matches!(unit, WordUnit::Literal(b'[')))
+        .position(|unit| matches!(unit, WordUnit::Literal { byte: b'[', .. }))
     else {
         // `name+=value` and `name+=` are assignments too, but the POSIX
         // recogniser cannot see them: `+` is not a name byte, so the
@@ -243,11 +241,16 @@ fn append_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode> {
     let units = arg.word.units();
     let Some(plus) = units
         .iter()
-        .position(|unit| matches!(unit, WordUnit::Literal(b'+')))
+        .position(|unit| matches!(unit, WordUnit::Literal { byte: b'+', .. }))
     else {
         return Err(arg);
     };
-    if plus == 0 || !matches!(units.get(plus + 1), Some(WordUnit::Literal(b'='))) {
+    if plus == 0
+        || !matches!(
+            units.get(plus + 1),
+            Some(WordUnit::Literal { byte: b'=', .. })
+        )
+    {
         return Err(arg);
     }
     let Some(name) = literal_bytes(&units[..plus]) else {
@@ -791,10 +794,14 @@ fn plain_prefix(arg: &WordNode) -> Option<(BString, BashAssignmentOperator)> {
     let units = arg.word.units();
     let (name_end, operator) = if matches!(
         units.as_slice(),
-        [.., WordUnit::Literal(b'+'), WordUnit::Literal(b'=')]
+        [
+            ..,
+            WordUnit::Literal { byte: b'+', .. },
+            WordUnit::Literal { byte: b'=', .. }
+        ]
     ) {
         (units.len() - 2, BashAssignmentOperator::Append)
-    } else if matches!(units.last(), Some(WordUnit::Literal(b'='))) {
+    } else if matches!(units.last(), Some(WordUnit::Literal { byte: b'=', .. })) {
         (units.len() - 1, BashAssignmentOperator::Set)
     } else {
         return None;
@@ -807,7 +814,7 @@ fn plain_prefix(arg: &WordNode) -> Option<(BString, BashAssignmentOperator)> {
 
 fn array_element(arg: WordNode) -> BashArrayElement {
     let units = arg.word.units();
-    if matches!(units.first(), Some(WordUnit::Literal(b'['))) {
+    if matches!(units.first(), Some(WordUnit::Literal { byte: b'[', .. })) {
         if let Some(close) = matching_bracket(&units, 0) {
             if let Some((operator, value_start)) = assignment_operator(&units, close + 1) {
                 return BashArrayElement {
@@ -828,22 +835,19 @@ fn array_element(arg: WordNode) -> BashArrayElement {
 fn matching_bracket(units: &[WordUnit], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut index = open;
-    let mut quoted = false;
     while index < units.len() {
         match &units[index] {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => {
-                quoted = true;
-                index += 1;
-            }
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => {
-                quoted = false;
-                index += 1;
-            }
-            WordUnit::Literal(b'[') if !quoted => {
+            WordUnit::Literal {
+                byte: b'[',
+                quoted: false,
+            } => {
                 depth += 1;
                 index += 1;
             }
-            WordUnit::Literal(b']') if !quoted => {
+            WordUnit::Literal {
+                byte: b']',
+                quoted: false,
+            } => {
                 depth = depth.checked_sub(1)?;
                 if depth == 0 {
                     return Some(index);
@@ -862,10 +866,13 @@ fn assignment_operator(
 ) -> Option<(BashAssignmentOperator, usize)> {
     if matches!(
         units.get(start..start + 2),
-        Some([WordUnit::Literal(b'+'), WordUnit::Literal(b'=')])
+        Some([
+            WordUnit::Literal { byte: b'+', .. },
+            WordUnit::Literal { byte: b'=', .. }
+        ])
     ) {
         Some((BashAssignmentOperator::Append, start + 2))
-    } else if matches!(units.get(start), Some(WordUnit::Literal(b'='))) {
+    } else if matches!(units.get(start), Some(WordUnit::Literal { byte: b'=', .. })) {
         Some((BashAssignmentOperator::Set, start + 1))
     } else {
         None
@@ -885,8 +892,15 @@ fn literal_bytes(units: &[WordUnit]) -> Option<BString> {
     units
         .iter()
         .map(|unit| match unit {
-            WordUnit::Literal(byte) => Some(*byte),
-            WordUnit::Part(_) => None,
+            /* A quoted byte is not a name byte: `"a"[0]=1` names
+             * nothing, the way it did when quoting was a part of its
+             * own and stopped this walk. */
+            // [spec:nsh:req:idiom.canonical-tree+1]
+            WordUnit::Literal {
+                byte,
+                quoted: false,
+            } => Some(*byte),
+            WordUnit::Literal { .. } | WordUnit::Part(_) => None,
         })
         .collect::<Option<Vec<_>>>()
         .map(BString::from)

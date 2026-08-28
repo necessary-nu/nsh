@@ -24,7 +24,7 @@ use super::{
     ForCommand, HereDocument, HereString, IfCommand, Node, Pipeline, Redirection, SimpleCommand,
     WordNode,
 };
-use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
+use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, WordPart};
 
 /// Bash indents a printed body by four columns per level.
 const STEP: usize = 4;
@@ -689,39 +689,38 @@ impl<'a> Printer<'a> {
     /// written by anyone.
     // [spec:nsh:req:idiom.printable-ast+2]
     fn spelled(&mut self, word: &ParsedWord, indent: usize) {
-        let mut run = InertRun::default();
         if word.parts().is_empty() {
             self.out.extend_from_slice(b"''");
             return;
         }
         for part in word.parts() {
+            if let WordPart::Text { bytes, quoted } = part {
+                if *quoted {
+                    push_single_quoted(&mut self.out, bytes);
+                } else {
+                    self.out.extend_from_slice(bytes);
+                }
+                continue;
+            }
+            if part.quoted() {
+                self.out.push(b'"');
+            }
             match part {
-                WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => {
-                    run.push(&mut self.out, bytes, false);
-                }
-                WordPart::Escaped(byte) | WordPart::Protected(byte) => {
-                    run.push(&mut self.out, &[*byte], true);
-                }
-                WordPart::Quote(QuoteBoundary::Open(_)) => run.open(&mut self.out),
-                WordPart::Quote(QuoteBoundary::Close) => run.close(&mut self.out),
-                WordPart::Parameter(parameter) => {
-                    run.before_expansion(&mut self.out);
-                    self.spelled_parameter(parameter, indent);
-                }
-                WordPart::Command(command) => {
-                    run.before_expansion(&mut self.out);
+                WordPart::Parameter(parameter) => self.spelled_parameter(parameter, indent),
+                WordPart::Command { command, .. } => {
                     self.command_substitution(command.as_deref(), indent);
                 }
-                WordPart::Arithmetic(expression) => {
-                    run.before_expansion(&mut self.out);
+                WordPart::Arithmetic { expression, .. } => {
                     self.out.extend_from_slice(b"$((");
                     self.spelled(expression, indent);
                     self.out.extend_from_slice(b"))");
                 }
+                WordPart::Text { .. } => unreachable!("a text run was written above"),
             }
-            run.after_expansion(&mut self.out, part);
+            if part.quoted() {
+                self.out.push(b'"');
+            }
         }
-        run.finish(&mut self.out);
     }
 
     /// Spell an expansion from its fields, for a word nothing read.
@@ -784,11 +783,9 @@ fn empty_simple_command(node: &Node) -> bool {
                 return false;
             };
             !word.word.parts().is_empty()
-                && word
-                    .word
-                    .parts()
-                    .iter()
-                    .all(|part| matches!(part, WordPart::Quote(QuoteBoundary::Close)))
+                && word.word.parts().iter().all(|part| {
+                    matches!(part, WordPart::Text { bytes, quoted: true } if bytes.is_empty())
+                })
         })
 }
 
@@ -825,7 +822,13 @@ fn reserved_command_word(node: &Node) -> Option<&[u8]> {
     let Node::Word(word) = node else {
         return None;
     };
-    let [WordPart::Literal(bytes)] = word.word.parts() else {
+    let [
+        WordPart::Text {
+            bytes,
+            quoted: false,
+        },
+    ] = word.word.parts()
+    else {
         return None;
     };
     matches!(
@@ -884,86 +887,6 @@ const fn operator_text(operator: BashAssignmentOperator) -> &'static [u8] {
     match operator {
         BashAssignmentOperator::Set => b"=",
         BashAssignmentOperator::Append => b"+=",
-    }
-}
-
-/// One run of bytes being spelled for a word nothing read.
-///
-/// Inertness is a property of the run rather than of a byte, so the run
-/// is what accumulates: bytes join it until something changes whether
-/// they are data, and then it is written under the one rule that keeps
-/// them so.
-// [spec:nsh:req:idiom.printable-ast+2]
-#[derive(Default)]
-struct InertRun {
-    bytes: BString,
-    inert: bool,
-    /// How many quotes the word opened around this position.
-    depth: usize,
-    /// Whether the open quote this run sits in has written anything, so
-    /// an empty quoted run is spelled and an emptied one is not.
-    filled: bool,
-}
-
-impl InertRun {
-    fn push(&mut self, out: &mut BString, bytes: &[u8], escaped: bool) {
-        let inert = escaped || self.depth > 0;
-        if !self.bytes.is_empty() && self.inert != inert {
-            self.flush(out);
-        }
-        self.inert = inert;
-        self.bytes.extend_from_slice(bytes);
-    }
-
-    fn open(&mut self, out: &mut BString) {
-        self.flush(out);
-        self.depth += 1;
-        self.filled = false;
-    }
-
-    fn close(&mut self, out: &mut BString) {
-        let empty = self.bytes.is_empty() && !self.filled;
-        self.flush(out);
-        if empty {
-            out.extend_from_slice(b"''");
-        }
-        self.depth = self.depth.saturating_sub(1);
-        self.inert = self.depth > 0;
-    }
-
-    fn before_expansion(&mut self, out: &mut BString) {
-        self.flush(out);
-        if self.depth > 0 {
-            out.push(b'"');
-        }
-    }
-
-    fn after_expansion(&mut self, out: &mut BString, part: &WordPart) {
-        if matches!(
-            part,
-            WordPart::Parameter(_) | WordPart::Command(_) | WordPart::Arithmetic(_)
-        ) && self.depth > 0
-        {
-            out.push(b'"');
-            self.filled = true;
-        }
-    }
-
-    fn flush(&mut self, out: &mut BString) {
-        if self.bytes.is_empty() {
-            return;
-        }
-        if self.inert {
-            push_single_quoted(out, &self.bytes);
-        } else {
-            out.extend_from_slice(&self.bytes);
-        }
-        self.bytes.clear();
-        self.filled = true;
-    }
-
-    fn finish(&mut self, out: &mut BString) {
-        self.flush(out);
     }
 }
 

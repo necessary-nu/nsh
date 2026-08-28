@@ -18,7 +18,7 @@ use crate::options::{Dialect, OPTION_SPECS, ShellOption};
 // [spec:nsh:def:idiom.shell-options]
 use crate::pattern::Pattern;
 use crate::variables::value::VariableValue;
-use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
+use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, WordPart};
 
 mod bash;
 mod brace;
@@ -309,7 +309,10 @@ fn expand_parts(
 
     while at < parts.len() {
         match &parts[at] {
-            WordPart::Literal(bytes) => {
+            WordPart::Text {
+                bytes,
+                quoted: false,
+            } => {
                 append_literal(
                     shell,
                     &mut result,
@@ -320,46 +323,46 @@ fn expand_parts(
                     &mut assignment_equal_available,
                 );
             }
-            WordPart::Escaped(byte) | WordPart::Protected(byte) => {
-                result.append(Expansion::one(Field::from_bytes(
-                    &[*byte],
-                    true,
-                    false,
-                    context.quoted,
-                )));
-                tilde = TildePosition::None;
-            }
-            WordPart::Multibyte { bytes, escaped } => {
-                result.append(Expansion::one(Field::from_bytes(
-                    bytes,
-                    context.protects() || *escaped,
-                    context.literal_splits() && !escaped,
-                    context.quoted,
-                )));
-                tilde = TildePosition::None;
-            }
-            WordPart::Quote(QuoteBoundary::Open(..)) => {
-                let close = matching_quote(parts, at);
-                let inner = &parts[at + 1..close];
-                /* `""` is written text and keeps its empty field; a pair of
-                 * quotes around an expansion that yielded nothing is not. */
-                let quoted = if inner.is_empty() {
+            /* A quoted run is data: it protects, it does not split, and
+             * `''` is written text that keeps its empty field where an
+             * expansion yielding nothing does not. Which quote made it so
+             * is the node's run and not the tree's business. */
+            // [spec:nsh:req:idiom.canonical-tree+1]
+            WordPart::Text {
+                bytes,
+                quoted: true,
+            } => {
+                let mut quoted = if bytes.is_empty() {
                     Expansion::anchored_empty()
                 } else {
-                    let mut expanded = expand_parts(shell, inner, context.quoted())?;
-                    expanded.preserve_empty();
-                    expanded
+                    let mut inner = Expansion::none();
+                    let mut no_tilde = TildePosition::None;
+                    let mut no_assignment = false;
+                    append_literal(
+                        shell,
+                        &mut inner,
+                        bytes,
+                        context.quoted(),
+                        at + 1 < parts.len(),
+                        &mut no_tilde,
+                        &mut no_assignment,
+                    );
+                    inner
                 };
+                quoted.preserve_empty();
                 result.append(quoted);
-                at = close;
                 tilde = TildePosition::None;
             }
-            WordPart::Quote(QuoteBoundary::Close) => {}
             WordPart::Parameter(parameter) => {
-                result.append(expand_parameter(shell, parameter, context)?);
+                let inner = quoting(context, parameter.quoted);
+                let mut expanded = expand_parameter(shell, parameter, inner)?;
+                if parameter.quoted {
+                    expanded.preserve_empty();
+                }
+                result.append(expanded);
                 tilde = TildePosition::None;
             }
-            WordPart::Command(command) => {
+            WordPart::Command { command, quoted } => {
                 /* `$(list)` contributes the bytes the list wrote, and they
                  * are the list's data: unquoted, they split and they glob.
                  * Bash's `<(list)` and `>(list)` occupy the same lexical
@@ -367,28 +370,28 @@ fn expand_parts(
                  * shell chose for a pipe the list is still using. That name
                  * is not data, so an `IFS` containing `/` leaves it whole. */
                 // [spec:nsh:req:compat.bash.process-substitution]
+                let inner = quoting(context, *quoted);
                 let field = match command.as_deref() {
                     Some(Node::Bash(crate::nodes::BashNode::ProcessSubstitution(substitution))) => {
                         let name = crate::evaluation::bash_process_substitution::substitute(
                             shell,
                             substitution,
                         )?;
-                        Field::from_bytes(&name, true, false, context.quoted)
+                        Field::from_bytes(&name, true, false, inner.quoted)
                     }
                     command => {
                         let bytes = command_substitution(shell, command)?;
-                        Field::from_bytes(
-                            &bytes,
-                            context.protects(),
-                            context.splits(),
-                            context.quoted,
-                        )
+                        Field::from_bytes(&bytes, inner.protects(), inner.splits(), inner.quoted)
                     }
                 };
-                result.append(Expansion::one(field));
+                let mut expanded = Expansion::one(field);
+                if *quoted {
+                    expanded.preserve_empty();
+                }
+                result.append(expanded);
                 tilde = TildePosition::None;
             }
-            WordPart::Arithmetic(expression) => {
+            WordPart::Arithmetic { expression, quoted } => {
                 let arithmetic_context = Context {
                     quoted: false,
                     full: false,
@@ -398,16 +401,21 @@ fn expand_parts(
                     tilde_after_equal: false,
                     tilde_after_colon: false,
                 };
+                let inner = quoting(context, *quoted);
                 let expression =
                     expand_parts(shell, expression.parts(), arithmetic_context)?.collapse();
                 let number = crate::arithmetic::evaluate(shell, expression.bytes.as_bstr())?;
                 let rendered = number.to_string();
-                result.append(Expansion::one(Field::from_bytes(
+                let mut expanded = Expansion::one(Field::from_bytes(
                     rendered.as_bytes(),
-                    context.protects(),
-                    context.splits(),
-                    context.quoted,
-                )));
+                    inner.protects(),
+                    inner.splits(),
+                    inner.quoted,
+                ));
+                if *quoted {
+                    expanded.preserve_empty();
+                }
+                result.append(expanded);
                 tilde = TildePosition::None;
             }
         }
@@ -425,21 +433,13 @@ enum TildePosition {
     Assignment,
 }
 
-fn matching_quote(parts: &[WordPart], open: usize) -> usize {
-    let mut depth = 1;
-    for (offset, part) in parts[open + 1..].iter().enumerate() {
-        match part {
-            WordPart::Quote(QuoteBoundary::Open(..)) => depth += 1,
-            WordPart::Quote(QuoteBoundary::Close) => {
-                depth -= 1;
-                if depth == 0 {
-                    return open + offset + 1;
-                }
-            }
-            _ => {}
-        }
-    }
-    parts.len()
+/// The context a part expands in, given whether the source quoted it.
+///
+/// Quoting used to be a pair of parts around a region and is a flag on
+/// the part now, so the region walk is a question asked once per part.
+// [spec:nsh:req:idiom.canonical-tree+1]
+fn quoting(context: Context, quoted: bool) -> Context {
+    if quoted { context.quoted() } else { context }
 }
 
 // [spec:posix:sem:expand.tilde-no-further-expansion]

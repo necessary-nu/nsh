@@ -13,9 +13,7 @@ use crate::error::Error;
 use crate::nodes::{FileRedirectionOperator, Node, Redirection, WordNode};
 use crate::options::{BashShopt, Dialect};
 use crate::pattern::{Pattern, PatternOptions};
-use crate::word::{
-    ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart, WordUnit,
-};
+use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, WordUnit};
 
 /// Pattern options for `case` and `[[ … ]]`, which read `nocasematch`.
 // [spec:nsh:req:compat.bash.expansion-globbing]
@@ -479,8 +477,8 @@ pub(super) fn substitute(
         None => (units.as_slice(), &units[units.len()..]),
     };
     let anchor = match pattern_units.first() {
-        Some(WordUnit::Literal(b'#')) => Anchor::Start,
-        Some(WordUnit::Literal(b'%')) => Anchor::End,
+        Some(WordUnit::Literal { byte: b'#', .. }) => Anchor::Start,
+        Some(WordUnit::Literal { byte: b'%', .. }) => Anchor::End,
         _ => Anchor::None,
     };
     if anchor != Anchor::None {
@@ -856,25 +854,30 @@ fn scan_units(
     skip_first: bool,
     arithmetic: bool,
 ) -> Option<usize> {
-    let mut quoted = false;
     let mut depth = 0usize;
     let mut conditionals = 0usize;
     for (index, unit) in units.iter().enumerate() {
-        match unit {
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Open(..))) => quoted = true,
-            WordUnit::Part(WordPart::Quote(QuoteBoundary::Close)) => quoted = false,
-            WordUnit::Literal(byte) if !quoted => match *byte {
-                b'(' | b'[' if arithmetic => depth += 1,
-                b')' | b']' if arithmetic => depth = depth.saturating_sub(1),
-                b'?' if arithmetic => conditionals += 1,
-                byte if byte == separator && depth == 0 && conditionals == 0 => {
-                    if !(skip_first && index == 0) {
-                        return Some(index);
-                    }
+        /* A quoted separator is the operand's own byte and not a place
+         * to cut, which is a question about the unit now rather than
+         * about a boundary part some way behind it. */
+        // [spec:nsh:req:idiom.canonical-tree+1]
+        let WordUnit::Literal {
+            byte,
+            quoted: false,
+        } = unit
+        else {
+            continue;
+        };
+        match *byte {
+            b'(' | b'[' if arithmetic => depth += 1,
+            b')' | b']' if arithmetic => depth = depth.saturating_sub(1),
+            b'?' if arithmetic => conditionals += 1,
+            byte if byte == separator && depth == 0 && conditionals == 0 => {
+                if !(skip_first && index == 0) {
+                    return Some(index);
                 }
-                byte if byte == separator && conditionals != 0 => conditionals -= 1,
-                _ => {}
-            },
+            }
+            byte if byte == separator && conditionals != 0 => conditionals -= 1,
             _ => {}
         }
     }
