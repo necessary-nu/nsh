@@ -1195,6 +1195,11 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
              * word it points at is the parser's own, not the alias's. */
             let name = shell.input.word_text().to_owned();
             if let Some(value) = shell.aliases.lookup(BStr::new(name.as_slice()), true) {
+                // [spec:nsh:def:idiom.token-stream]
+                shell
+                    .input
+                    .tokens
+                    .retract_alias_name(BStr::new(name.as_slice()));
                 if !value.is_empty() {
                     push_string_input(shell, BStr::new(value.as_slice()), Some(name));
                 }

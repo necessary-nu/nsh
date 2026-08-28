@@ -211,3 +211,26 @@ const SHAPES: &[&[u8]] = &[
     b"",
     b"echo a\n# tail comment with no newline",
 ];
+
+/// Alias substitution replaces text before the parser sees it, so the
+/// tokens are the expansion rather than what was typed. Recording the
+/// pre-expansion bytes as well is a further decision that has not been
+/// taken; recording both, which is what keeping the name would do, is not
+/// one of the choices.
+// [spec:nsh:def:idiom.token-stream/test]
+#[test]
+fn an_expanded_alias_records_what_was_parsed() {
+    let mut shell = shell(false);
+    shell
+        .run(crate::Source::bytes(b"alias hi='echo hello'".to_vec()))
+        .expect("alias definition");
+    crate::input::set_input_string(&mut shell, BStr::new(b"hi there\n"));
+    crate::parser::parse_command(&mut shell, false).expect("parse");
+
+    let mut read = BString::new(Vec::new());
+    for token in shell.input.tokens.tokens() {
+        read.extend_from_slice(token.text());
+    }
+
+    assert_eq!(read, BString::from(b"echo hello there\n".as_slice()));
+}

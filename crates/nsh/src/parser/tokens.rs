@@ -13,9 +13,7 @@
 //! which applies. The reader appends bytes; the parser says where the cuts
 //! fall.
 
-#[cfg(test)]
-use bstr::BStr;
-use bstr::BString;
+use bstr::{BStr, BString};
 
 /// What a run of consumed bytes was read as.
 ///
@@ -154,6 +152,29 @@ impl TokenLog {
             let keep = self.pending.len().saturating_sub(remaining);
             remaining -= self.pending.len() - keep;
             self.pending.truncate(keep);
+        }
+    }
+
+    /// Drop the token holding an alias name the input has replaced.
+    ///
+    /// The expansion is pushed onto the input and read like any other
+    /// text, so keeping the name too would record the same command twice:
+    /// once as written and once as substituted. Which of the two the
+    /// tokens are is settled -- they are the expansion, and reproducing
+    /// what was typed is a further decision that has not been taken.
+    ///
+    /// Declined unless the last token really is that name, because a token
+    /// the parser pushed back and read again consumed no bytes and left an
+    /// unrelated token last.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn retract_alias_name(&mut self, name: &BStr) {
+        let matches = self.pending.is_empty()
+            && self
+                .tokens
+                .last()
+                .is_some_and(|last| last.kind == SourceTokenKind::Word && last.text == name);
+        if matches {
+            self.tokens.pop();
         }
     }
 
