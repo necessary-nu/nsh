@@ -11,10 +11,28 @@ use crate::nodes::Node;
 
 /// A word after lexical parsing and before expansion.
 // [spec:nsh:def:idiom.word-ir]
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, Eq)]
 pub(crate) struct ParsedWord {
     parts: Vec<WordPart>,
+    /// The parts flattened to bytes, for the grammar checks that want a
+    /// name rather than a structure.
+    ///
+    /// Derived, and kept only because the parser asks for it once per
+    /// token and wants to borrow it. It is a function of the parts, so
+    /// it answers no question they do not.
     spelling: BString,
+}
+
+/// Two words are equal when they are the same program.
+///
+/// The spelling cache is derived from the parts, so comparing it as well
+/// would ask the same question twice -- and a cache that ever drifted
+/// would then decide equality, which is not a thing a cache may do.
+// [spec:nsh:req:idiom.canonical-tree+1]
+impl PartialEq for ParsedWord {
+    fn eq(&self, other: &ParsedWord) -> bool {
+        self.parts == other.parts
+    }
 }
 
 /// One structural part of a parsed shell word.

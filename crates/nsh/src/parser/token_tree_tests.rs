@@ -67,12 +67,14 @@ fn run_of(node: &Node) -> &SourceTokens {
 /// Sources that spell one program two ways.
 ///
 /// Each pair is a distinction [`dec:nsh:no-equivalent-forms`] names as
-/// one the structure does not carry: whitespace, a comment, the default
-/// descriptor of a redirection, a separator written as a newline, the
-/// optional `(` of a case pattern, and the `in "$@"` a bare `for`
-/// implies.
+/// one the structure does not carry: which quote or escape made a byte
+/// inert, whitespace, a comment, the default descriptor of a
+/// redirection, a separator written as a newline, the optional `(` of a
+/// case pattern, and the `in "$@"` a bare `for` implies.
 // [spec:nsh:req:idiom.canonical-tree+1/test]
 const EQUIVALENT: &[(&[u8], &[u8])] = &[
+    (b"echo 'a'", b"echo \"a\""),
+    (b"echo 'a'", b"echo \\a"),
     (b"echo a", b"echo    a"),
     (b"if a; then b; fi", b"if a # what it tests\nthen b; fi"),
     (b"cat >f", b"cat 1>f"),
@@ -219,5 +221,37 @@ fn a_here_document_body_hangs_off_its_word() {
     assert_eq!(
         here.body.tokens.text(),
         BString::from(b"body\nEOF\n".as_slice())
+    );
+}
+
+/// One inert byte, three spellings, one word.
+///
+/// This node's own property, stated where the parser can be asked it
+/// rather than where the word IR can. `Escaped`, `Protected`,
+/// `QuoteKind` and `Multibyte.escaped` were four structural answers to a
+/// question with one answer, and the three sources below are the three
+/// that used to reach three of them.
+// [spec:nsh:req:idiom.canonical-tree+1/test]
+#[test]
+fn three_spellings_of_one_inert_byte_agree() {
+    let spellings: &[&[u8]] = &[b"echo 'a'", b"echo \"a\"", b"echo \\a", b"echo $'a'"];
+    let mut runs = Vec::new();
+    let first = parse(spellings[0]);
+    for source in spellings {
+        let parsed = parse(source);
+        assert!(
+            parsed == first,
+            "{:?} is the same program as {:?} and parsed to a different word",
+            BStr::new(source),
+            BStr::new(spellings[0])
+        );
+        runs.push(run_of(&parsed).text());
+    }
+    runs.sort();
+    runs.dedup();
+    assert_eq!(
+        runs.len(),
+        spellings.len(),
+        "each spelling kept its own run"
     );
 }
