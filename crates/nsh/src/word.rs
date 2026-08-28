@@ -85,20 +85,35 @@ impl WordPart {
     }
 }
 
-/// Typed events emitted by the lexer while it constructs a nested word.
+/// What the reader emits while it builds a word, before nesting.
+///
+/// Flat and byte-indexed on purpose: this is the reader's undo log, not a
+/// second model of a word. Ten sites rewind it -- a `${` that turned out
+/// not to open an expansion, a `$(` `(` that turned out to be arithmetic,
+/// a `$'...'` cut short by a NUL, a name whose bytes are retyped as one
+/// `ParameterStart` -- and a rewind is a truncation to a position, which
+/// a tree of merged runs cannot offer. It carries the same vocabulary the
+/// tree does, so neither admits two shapes of one program.
 ///
 /// Start/end events are enum variants rather than byte values, so every
 /// possible input byte remains ordinary shell data.
+// [spec:nsh:req:idiom.canonical-tree+1]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum WordToken {
+    /// One byte as the source wrote it.
     Literal(u8),
-    Escaped(u8),
-    Protected(u8),
-    Multibyte {
+    /// One byte the source made inert, however it did so.
+    Inert(u8),
+    /// One complete locale character, and whether it is inert.
+    Character {
         bytes: BString,
-        escaped: bool,
+        inert: bool,
     },
-    Quote(QuoteBoundary),
+    /// A quote opening: a depth, not a kind. Which quote it was is the
+    /// node's run.
+    QuoteOpen,
+    /// The quote closing again.
+    QuoteClose,
     ParameterStart {
         name: BString,
         operation: ParameterOperation,
@@ -120,31 +135,6 @@ pub(crate) enum WordToken {
 pub(crate) enum WordUnit {
     Literal { byte: u8, quoted: bool },
     Part(WordPart),
-}
-
-/// Whether a quoting region opens or closes at this position.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum QuoteBoundary {
-    Open(QuoteKind),
-    Close,
-}
-
-/// Which quote opened a run.
-///
-/// The run's bytes do not say: `'a'` and `"a"` protect the same byte and
-/// differ only in what else they would have protected. Printing has to put
-/// back the one the source used, so the parser records it.
-// [spec:nsh:req:idiom.printable-ast]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum QuoteKind {
-    /// `'...'`
-    Single,
-    /// `"..."`
-    Double,
-    /// `$'...'`, whose escapes the lexer has already decoded.
-    DollarSingle,
-    /// `$"..."`, Bash's locale-translated run.
-    DollarDouble,
 }
 
 /// A parameter expansion and its optional word operand.
@@ -447,17 +437,15 @@ impl TokenDecoder<'_> {
             self.at += 1;
             match token {
                 WordToken::Literal(byte) => push_text(&mut parts, &[*byte], depth > 0),
-                WordToken::Escaped(byte) | WordToken::Protected(byte) => {
-                    push_text(&mut parts, &[*byte], true);
+                WordToken::Inert(byte) => push_text(&mut parts, &[*byte], true),
+                WordToken::Character { bytes, inert } => {
+                    push_text(&mut parts, bytes, *inert || depth > 0);
                 }
-                WordToken::Multibyte { bytes, escaped } => {
-                    push_text(&mut parts, bytes, *escaped || depth > 0);
-                }
-                WordToken::Quote(QuoteBoundary::Open(_)) => {
+                WordToken::QuoteOpen => {
                     depth += 1;
                     opened.push(written_so_far(&parts));
                 }
-                WordToken::Quote(QuoteBoundary::Close) => {
+                WordToken::QuoteClose => {
                     depth = depth.saturating_sub(1);
                     if opened.pop() == Some(written_so_far(&parts)) {
                         push_text(&mut parts, &[], true);
@@ -605,7 +593,7 @@ mod tests {
     fn typed_tokens_build_nested_word_parts() {
         let word = ParsedWord::from_tokens(vec![
             WordToken::Literal(b'a'),
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
+            WordToken::QuoteOpen,
             WordToken::ParameterStart {
                 name: BString::from("x"),
                 operation: ParameterOperation::Default,
@@ -614,7 +602,7 @@ mod tests {
             },
             WordToken::Literal(b'y'),
             WordToken::ParameterEnd,
-            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::QuoteClose,
             WordToken::Command(None),
         ]);
 
@@ -644,16 +632,16 @@ mod tests {
     #[test]
     fn one_inert_byte_has_one_shape() {
         let apostrophes = ParsedWord::from_tokens(vec![
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
+            WordToken::QuoteOpen,
             WordToken::Literal(b'a'),
-            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::QuoteClose,
         ]);
         let quotes = ParsedWord::from_tokens(vec![
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
+            WordToken::QuoteOpen,
             WordToken::Literal(b'a'),
-            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::QuoteClose,
         ]);
-        let backslash = ParsedWord::from_tokens(vec![WordToken::Escaped(b'a')]);
+        let backslash = ParsedWord::from_tokens(vec![WordToken::Inert(b'a')]);
         assert!(apostrophes == quotes, "'a' and \"a\" are one program");
         assert!(quotes == backslash, "\"a\" and \\a are one program");
         assert!(matches!(
@@ -667,10 +655,7 @@ mod tests {
     // [spec:nsh:req:idiom.canonical-tree+1/test]
     #[test]
     fn an_empty_inert_run_is_a_word() {
-        let empty = ParsedWord::from_tokens(vec![
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
-            WordToken::Quote(QuoteBoundary::Close),
-        ]);
+        let empty = ParsedWord::from_tokens(vec![WordToken::QuoteOpen, WordToken::QuoteClose]);
         assert!(!empty.is_empty());
         assert!(matches!(
             empty.parts(),
@@ -685,18 +670,18 @@ mod tests {
     #[test]
     fn runs_of_one_inertness_join() {
         let split = ParsedWord::from_tokens(vec![
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
+            WordToken::QuoteOpen,
             WordToken::Literal(b'a'),
-            WordToken::Quote(QuoteBoundary::Close),
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
+            WordToken::QuoteClose,
+            WordToken::QuoteOpen,
             WordToken::Literal(b'b'),
-            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::QuoteClose,
         ]);
         let whole = ParsedWord::from_tokens(vec![
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Single)),
+            WordToken::QuoteOpen,
             WordToken::Literal(b'a'),
             WordToken::Literal(b'b'),
-            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::QuoteClose,
         ]);
         assert!(split == whole, "one run however the lexer cut it");
         assert_eq!(split.parts().len(), 1);
@@ -706,7 +691,7 @@ mod tests {
     fn top_level_units_slice_without_serializing() {
         let word = ParsedWord::from_tokens(vec![
             WordToken::Literal(b'a'),
-            WordToken::Escaped(b'*'),
+            WordToken::Inert(b'*'),
             WordToken::ArithmeticStart,
             WordToken::Literal(b'1'),
             WordToken::Literal(b'+'),
@@ -732,13 +717,13 @@ mod tests {
         ]);
         let escaped_equal = ParsedWord::from_tokens(vec![
             WordToken::Literal(b'a'),
-            WordToken::Escaped(b'='),
+            WordToken::Inert(b'='),
             WordToken::Literal(b'b'),
         ]);
         let quoted_name = ParsedWord::from_tokens(vec![
-            WordToken::Quote(QuoteBoundary::Open(QuoteKind::Double)),
+            WordToken::QuoteOpen,
             WordToken::Literal(b'a'),
-            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::QuoteClose,
             WordToken::Literal(b'='),
             WordToken::Literal(b'b'),
         ]);

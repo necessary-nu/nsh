@@ -3,7 +3,7 @@ use super::{
     SyntaxFrame, WordLexer, read_input_unit, read_multibyte_character, read_unit_for_syntax,
     read_unit_skipping_line_continuations, syntax_stack, unread_input_unit,
 };
-use crate::word::{QuoteBoundary, WordToken};
+use crate::word::WordToken;
 use bstr::BString;
 
 impl WordLexer<'_> {
@@ -17,16 +17,26 @@ impl WordLexer<'_> {
         self.syntax_frames.last_mut().unwrap()
     }
 
+    /// Record a quote opening or closing.
+    ///
+    /// A depth and not a kind: which quote it was is the node's run, and
+    /// nothing below this ever asked. The four kinds were written by four
+    /// callers and read by nobody once the printer stopped re-spelling.
+    // [spec:nsh:req:idiom.canonical-tree+1]
     pub(super) fn record_quote_boundary(
         &mut self,
-        boundary: QuoteBoundary,
+        opening: bool,
         toggle_nested_double_quote: bool,
     ) {
         if toggle_nested_double_quote && self.current_syntax().variable_depth != 0 {
             self.current_syntax_mut().inner_double_quote ^= true;
         }
         if self.delimiter.is_none() {
-            self.output.push(WordToken::Quote(boundary));
+            self.output.push(if opening {
+                WordToken::QuoteOpen
+            } else {
+                WordToken::QuoteClose
+            });
         }
     }
 
@@ -54,16 +64,18 @@ impl WordLexer<'_> {
         }
     }
 
-    pub(super) fn push_protected(&mut self, byte: u8) {
-        self.output.push(WordToken::Protected(byte));
+    /// Record a byte the source made inert.
+    ///
+    /// One method where there were two. A byte behind a backslash and a
+    /// byte the quoting around it protected are the same byte and the
+    /// same data; which of the two the source wrote is its run.
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    pub(super) fn push_inert(&mut self, byte: u8) {
+        self.output.push(WordToken::Inert(byte));
     }
 
-    pub(super) fn push_escaped(&mut self, byte: u8) {
-        self.output.push(WordToken::Escaped(byte));
-    }
-
-    pub(super) fn push_multibyte(&mut self, bytes: BString, escaped: bool) {
-        self.output.push(WordToken::Multibyte { bytes, escaped });
+    pub(super) fn push_character(&mut self, bytes: BString, inert: bool) {
+        self.output.push(WordToken::Character { bytes, inert });
     }
 
     pub(super) fn literal_bytes(&self, range: core::ops::Range<usize>) -> Option<BString> {
@@ -87,12 +99,7 @@ impl WordLexer<'_> {
                 let end = self
                     .output
                     .iter()
-                    .position(|token| {
-                        matches!(
-                            token,
-                            WordToken::Literal(0) | WordToken::Escaped(0) | WordToken::Protected(0)
-                        )
-                    })
+                    .position(|token| matches!(token, WordToken::Literal(0) | WordToken::Inert(0)))
                     .unwrap_or(self.output.len());
                 self.output.truncate(end);
                 self.dollar_single_quoted = false;
@@ -103,7 +110,7 @@ impl WordLexer<'_> {
         }
 
         self.quoted = true;
-        self.record_quote_boundary(QuoteBoundary::Close, self.input.is(b'"'));
+        self.record_quote_boundary(false, self.input.is(b'"'));
     }
 
     pub(super) fn close_parameter_expansion(&mut self) {
@@ -153,7 +160,6 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
      * follows it. Which of the two happened is the difference between a
      * spelling and a byte, and only the parser knows it. */
     // [spec:nsh:req:idiom.printable-ast]
-    let mut escapes = true;
     if (lexer.current_syntax().double_quoted
         || lexer.current_syntax().backquote != BackquoteContext::None)
         && !lexer.input.is(b'\\')
@@ -163,22 +169,16 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             || (!lexer.delimiter.is_none() && lexer.current_syntax().variable_depth == 0))
         && (!lexer.input.is(b'}') || lexer.current_syntax().variable_depth == 0)
     {
-        lexer.push_protected(b'\\');
-        escapes = false;
+        lexer.push_inert(b'\\');
     }
     lexer.quoted = true;
 
     match read_multibyte_character(shell, lexer.input, MultibyteMode::Escaped)? {
         MultibyteInput::Character { bytes, escaped } => {
-            lexer.push_multibyte(bytes, escaped);
+            lexer.push_character(bytes, escaped);
         }
         MultibyteInput::SingleByte | MultibyteInput::FieldBoundary => {
-            let byte = lexer.input.expect_byte();
-            if escapes {
-                lexer.push_escaped(byte);
-            } else {
-                lexer.push_protected(byte);
-            }
+            lexer.push_inert(lexer.input.expect_byte());
         }
     }
     Ok(())

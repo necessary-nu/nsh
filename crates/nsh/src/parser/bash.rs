@@ -22,7 +22,7 @@ use crate::nodes::{
     FileRedirectionOperator, Node, NodeText, SourceTokens, WordNode,
 };
 use crate::options::{BashShopt, Dialect};
-use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordToken, WordUnit};
+use crate::word::{ParameterOperation, ParsedWord, WordToken, WordUnit};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Quote {
@@ -1034,7 +1034,7 @@ pub(super) fn locale_quote(
     lexer.output.truncate(substitution_start);
     lexer.current_syntax_mut().syntax = SyntaxContext::DoubleQuoted;
     lexer.current_syntax_mut().double_quoted = true;
-    lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::DollarDouble), true);
+    lexer.record_quote_boundary(true, true);
     true
 }
 

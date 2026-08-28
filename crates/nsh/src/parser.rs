@@ -25,7 +25,7 @@ use crate::nodes::{
     WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
-use crate::word::{ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordToken};
+use crate::word::{ParameterOperation, ParsedWord, WordToken};
 
 /// `MB_LEN_MAX` from `<limits.h>` (16 on the platforms dash targets).
 const MAX_MULTIBYTE_LENGTH: usize = 16;
@@ -1760,7 +1760,7 @@ fn read_word_token(
                     break 'word;
                 }
                 MultibyteInput::Character { bytes, escaped } => {
-                    lexer.push_multibyte(bytes, escaped);
+                    lexer.push_character(bytes, escaped);
                     lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
                     continue;
                 }
@@ -1793,10 +1793,10 @@ fn read_word_token(
                             || lexer.current_syntax().double_quoted
                             || lexer.current_syntax().variable_depth != 0
                         {
-                            // The quoting is what protects this byte; no
-                            // backslash put it here.
-                            // [spec:nsh:req:idiom.printable-ast]
-                            lexer.push_protected(lexer.input.expect_byte());
+                            // The quoting is what makes this byte data,
+                            // and being data is all the tree records.
+                            // [spec:nsh:req:idiom.canonical-tree+1]
+                            lexer.push_inert(lexer.input.expect_byte());
                         } else {
                             lexer.push_literal(lexer.input.expect_byte());
                         }
@@ -1805,12 +1805,12 @@ fn read_word_token(
                 SyntaxClass::Backslash => word_lexer::read_backslash(shell, &mut lexer)?,
                 SyntaxClass::SingleQuote => {
                     lexer.current_syntax_mut().syntax = SyntaxContext::SingleQuoted;
-                    lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::Single), false);
+                    lexer.record_quote_boundary(true, false);
                 }
                 SyntaxClass::DoubleQuote => {
                     lexer.current_syntax_mut().syntax = SyntaxContext::DoubleQuoted;
                     lexer.current_syntax_mut().double_quoted = true;
-                    lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::Double), true);
+                    lexer.record_quote_boundary(true, true);
                 }
                 SyntaxClass::EndQuote => lexer.close_quote(),
                 SyntaxClass::Variable => parse_parameter_expansion(shell, &mut lexer)?,
@@ -2211,7 +2211,7 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         lexer.output.truncate(substitution_start);
         lexer.dollar_single_quoted = true;
         lexer.current_syntax_mut().syntax = SyntaxContext::SingleQuoted;
-        lexer.record_quote_boundary(QuoteBoundary::Open(QuoteKind::DollarSingle), false);
+        lexer.record_quote_boundary(true, false);
         return Ok(());
     } else if bash::locale_quote(shell, lexer, nested_syntax, substitution_start)
         || bash::arithmetic_bracket(shell, lexer, substitution_start)
