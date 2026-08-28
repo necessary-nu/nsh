@@ -6984,7 +6984,7 @@ children (
                                 id measure-tree-canonicity
                                 title "Fail when two spellings of one program build two trees"
                                 kind @test
-                                deps (carry-tokens-into-the-tree)
+                                deps (canonicalize-word-parts)
                                 log (
                                     {
                                         at 2026-08-27T23:01:18.209874331Z
@@ -6999,6 +6999,13 @@ children (
                                         kind @note
                                         text "Re-ordered behind `carry-tokens-into-the-tree`. The earlier note said to build this oracle before the change so the change would be measurable; that was right when the plan was to delete spelling from the word, and wrong now. Canonicity under [dec:nsh:tokens-are-the-truth] is a statement about the structure with the tokens set aside, so the comparison it needs does not exist until the tokens are somewhere to set aside.\n\nIt does not become redundant. `prove-byte-exact-round-trip` checks that printing returns what was read, which a tree holding two structural shapes for one program would pass -- both shapes carry their own tokens and both print back exactly. Byte-exactness says nothing about whether `echo 'a'` and `echo \"a\"` are the same program, and that is the half `[spec:nsh:req:idiom.canonical-tree+1]` asks for.\n\nSo the two properties divide the rule between them: text equality is the round trip, program equality is this. A tree that passes one and fails the other is the specific failure each is there to name.\n\nSHAPE, UNCHANGED. A corpus of equivalence classes -- `echo 'a'` / `echo \"a\"` / `echo \\a`, `a[ ]` / `a[\\ ]` -- asserted to parse to one structure, and a fuzz target that derives a class mechanically by emitting two valid spellings of one parsed word and requiring one structure. The second is what finds the classes nobody thought of."
                                     }
+
+                                    {
+                                        at 2026-08-28T09:59:32.042383309Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Re-ordered again, behind `canonicalize-word-parts` rather than in front of it. `carry-tokens-into-the-tree` established the rule's own example is not yet testable: `echo 'a'` and `echo \"a\"` still parse to different `ParsedWord`s, so the canonicity property cannot pass until the word structure collapses.\n\nThe earlier note said this node should land failing, with `canonicalize-word-parts` making it pass. That is incoherent with what a dependency means here -- a node is not Done until it is green -- so the intent is recorded rather than encoded: write the property first if it helps, but it closes after the collapse, not before.\n\nIts independent value is unchanged and is not covered by the byte-exact round trip. A tree holding two structural shapes for one program passes that property, because both shapes carry their own tokens and both print back exactly. Text equality is the round trip; program equality is this."
+                                    }
                                 )
                             }
 
@@ -7009,7 +7016,7 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:idiom.canonical-tree+1])
                                 }
-                                deps (measure-tree-canonicity carry-tokens-into-the-tree)
+                                deps (carry-tokens-into-the-tree)
                                 log (
                                     {
                                         at 2026-08-27T23:01:32.667065472Z
@@ -7030,6 +7037,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Retargeted. The earlier note said the four spellings collapse into bytes plus an inert flag and the spelling is discarded. Under [dec:nsh:tokens-are-the-truth] the spelling is not discarded, it moves: the structure keeps what changes the program, the tokens keep what the source said.\n\nSTRUCTURE. Runs of bytes with an inert flag, the three expansion parts, and two markers that carry meaning rather than spelling -- an empty quoted run, since `a=''` and `a=` are different programs, and `$\"...\"`, since locale translation is behaviour. `Escaped`, `Protected`, `QuoteKind` and `Multibyte.escaped` stop being structural alternatives, so `echo 'a'`, `echo \"a\"` and `echo \\a` have one shape.\n\nTOKENS. Which quote opened the run and which byte wore a backslash, held on the word as the tokens it was read as, not as a choice between parts.\n\nSTILL TRUE FROM BEFORE. `WordToken`, `TokenDecoder`, `from_tokens` and `lexer.output` go -- but now because `retain-the-token-stream` replaces them with a stream that is kept, not because the flat shape is deleted unreplaced. `ParsedWord.spelling` stops being a stored field taking part in equality.\n\nCONSUMERS TO CARRY. `parser/word_lexer.rs` stops choosing between `push_escaped` and `push_protected` and records inertness. `expand.rs`, `ParsedWord::is_assignment`, `units`/`from_units` and the Bash array-assignment path in `parser/bash.rs` all match on the old variants. `ansi_c_quote` stops being a parse-time re-encoding; `$'...'` keeps its source spelling in its tokens and its decoded value in the structure, which is the split this node exists to make."
+                                    }
+
+                                    {
+                                        at 2026-08-28T09:59:37.094732353Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }

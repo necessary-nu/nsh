@@ -24,9 +24,7 @@ use super::{
     ForCommand, HereDocument, HereString, IfCommand, Node, Pipeline, Redirection, SimpleCommand,
     WordNode,
 };
-use crate::word::{
-    ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, QuoteKind, WordPart,
-};
+use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
 
 /// Bash indents a printed body by four columns per level.
 const STEP: usize = 4;
@@ -44,51 +42,6 @@ enum DefinitionStyle {
 
 /// The base name a synthesised here-document delimiter starts from.
 const HERE_DELIMITER: &[u8] = b"EOF";
-
-/// Which quoting rules apply to the word being written.
-///
-/// A word is not one language: the operand of `${x:-...}` inside double
-/// quotes may not open a quote of its own, an arithmetic expression is
-/// already a quoting context, and a here-document body is protected by
-/// its delimiter rather than by quotes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Quoting {
-    /// An ordinary command word, free to open its own quotes.
-    Word,
-    /// Inside a `"` this printer opened.
-    Double,
-    /// Inside the `[...]` of an assignment word, where the brackets make
-    /// blanks and shell operators the subscript's own bytes and only the
-    /// closing bracket ends it.
-    Subscript,
-    /// Inside a `${...}` operand that no quoting encloses. The braces make
-    /// blanks and shell operators inert, so only the bytes that would end or
-    /// reopen the expansion need protecting there.
-    Parameter,
-    /// Inside a `${...}` operand nested in a `"` this printer opened.
-    DoubleParameter,
-    /// A pattern or arithmetic `${...}` operand nested in a `"` this printer
-    /// opened. The parser reads an apostrophe there as a quote even though
-    /// the enclosing double quotes have already made it an ordinary byte.
-    DoubleProtectedParameter,
-    /// A `${...}` operand inside a `"` that will never expand -- because a
-    /// NUL ended the parse inside it, or because the expansion around it is
-    /// one the shell refuses. Its bytes are inert text, so the only one that
-    /// still matters is the `}` that ends the expansion, and a toggle in it
-    /// cannot be written back: the last one would leave the operand quoted at
-    /// that `}`.
-    DoubleInertParameter,
-    /// Inside `$(( ))`.
-    Arithmetic,
-    /// A here-document body that still expands.
-    HereDocument,
-    /// A `${...}` operand inside an expanding here-document. Quotes are
-    /// syntax here even though they are ordinary bytes in the surrounding body.
-    HereDocumentParameter,
-    /// A pattern or arithmetic `${...}` operand in an expanding here-document,
-    /// where an apostrophe must be protected from the parameter grammar.
-    HereDocumentProtectedParameter,
-}
 
 /// Print `name`'s definition the way `declare -f` does.
 pub(crate) fn function_definition(
@@ -540,7 +493,7 @@ impl<'a> Printer<'a> {
         self.out.extend_from_slice(assignment.name.as_bstr());
         if let Some(subscript) = &assignment.subscript {
             self.out.push(b'[');
-            self.parsed_word(&subscript.word, Quoting::Subscript, indent);
+            self.word(subscript, indent);
             self.out.push(b']');
         }
         self.out
@@ -563,7 +516,7 @@ impl<'a> Printer<'a> {
     fn array_element(&mut self, element: &BashArrayElement, indent: usize) {
         if let Some(subscript) = &element.subscript {
             self.out.push(b'[');
-            self.parsed_word(&subscript.word, Quoting::Subscript, indent);
+            self.word(subscript, indent);
             self.out.push(b']');
             self.out.extend_from_slice(operator_text(element.operator));
         }
@@ -649,12 +602,27 @@ impl<'a> Printer<'a> {
     /// The tree keeps the body but not the delimiter the source spelled,
     /// so one is chosen that no line of the body can be mistaken for.
     fn here_document(&mut self, document: &HereDocument, indent: usize) {
-        let mut body = Self::new(self.locale);
-        if document.expand {
-            body.parsed_word(&document.body.word, Quoting::HereDocument, indent);
-        } else {
-            body.out.extend_from_slice(document.body.word.as_bstr());
+        /* The body's run is the body and the delimiter line that ended
+         * it, read together at the newline after this redirection. When
+         * there is one it is the whole document, terminator included, and
+         * the delimiter below is the one the source wrote. */
+        // [spec:nsh:req:idiom.printable-ast+2]
+        let read = document.body.tokens.text();
+        if !read.is_empty() && !document.delimiter.as_bstr().is_empty() {
+            self.descriptor_prefix(document.descriptor.index(), 0);
+            self.out.extend_from_slice(b"<<");
+            if document.expand {
+                self.out.extend_from_slice(document.delimiter.as_bstr());
+            } else {
+                self.out.push(b'\'');
+                self.out.extend_from_slice(document.delimiter.as_bstr());
+                self.out.push(b'\'');
+            }
+            self.pending.push(read);
+            return;
         }
+        let mut body = Self::new(self.locale);
+        body.spelled(&document.body.word, indent);
         let mut body = body.out;
         if !body.is_empty() && body.last() != Some(&b'\n') {
             body.push(b'\n');
@@ -692,421 +660,77 @@ impl<'a> Printer<'a> {
     // words
     // -----------------------------------------------------------------
 
+    /// Write a word as the source it was read from.
+    ///
+    /// A parsed word carries its own run, so nothing here decides how to
+    /// spell one: the bytes that were read are the bytes that go back.
+    /// This is where the printer kept its second copy of the grammar --
+    /// eleven quoting contexts, nine byte-sets, and a per-byte opinion
+    /// about when a `$` opens an expansion -- all of it re-deriving what
+    /// the reader had already answered.
+    // [spec:nsh:req:idiom.printable-ast+2]
     fn word(&mut self, word: &WordNode, indent: usize) {
-        if unterminated_array_word(&word.word) {
-            push_single_quoted(&mut self.out, word.word.as_bstr());
+        let run = word.tokens.written();
+        if run.is_empty() {
+            self.spelled(&word.word, indent);
         } else {
-            self.parsed_word(&word.word, Quoting::Word, indent);
+            self.out.extend_from_slice(&run);
         }
     }
 
-    fn parsed_word(&mut self, word: &ParsedWord, quoting: Quoting, indent: usize) {
-        let parts = word.parts();
-        if parts.is_empty() {
-            if quoting == Quoting::Word {
-                self.out.extend_from_slice(b"''");
-            }
-            return;
-        }
-        self.parsed_parts(parts, quoting, indent);
-    }
-
-    fn parsed_parts(&mut self, parts: &[WordPart], quoting: Quoting, indent: usize) {
-        let mut at = 0;
-        while at < parts.len() {
-            if let WordPart::Quote(QuoteBoundary::Open(kind)) = parts[at] {
-                let end = closing_quote(parts, at + 1);
-                let region = &parts[at + 1..end];
-                match quoting {
-                    Quoting::Word | Quoting::Parameter | Quoting::Subscript => {
-                        self.quoted_region(region, kind, indent);
-                    }
-                    Quoting::DoubleParameter
-                    | Quoting::DoubleProtectedParameter
-                    | Quoting::DoubleInertParameter => {
-                        self.double_parameter_quoted_region(region, kind, quoting, indent);
-                    }
-                    Quoting::Arithmetic => self.arithmetic_quoted_region(region, indent),
-                    Quoting::HereDocumentParameter => {
-                        self.here_document_parameter_quoted_region(region, indent);
-                    }
-                    // A pattern operand reads its quotes even in a body where
-                    // they are otherwise ordinary bytes, so the run keeps them.
-                    Quoting::HereDocumentProtectedParameter => {
-                        self.double_parameter_quoted_region(
-                            region,
-                            kind,
-                            Quoting::DoubleProtectedParameter,
-                            indent,
-                        );
-                    }
-                    Quoting::Double | Quoting::HereDocument => {}
-                }
-                if matches!(
-                    quoting,
-                    Quoting::Word
-                        | Quoting::Parameter
-                        | Quoting::Subscript
-                        | Quoting::DoubleParameter
-                        | Quoting::DoubleProtectedParameter
-                        | Quoting::DoubleInertParameter
-                        | Quoting::Arithmetic
-                        | Quoting::HereDocumentParameter
-                        | Quoting::HereDocumentProtectedParameter
-                ) {
-                    at = end.saturating_add(1);
-                    continue;
-                }
-            }
-            self.part(&parts[at], parts.get(at + 1), quoting, indent);
-            at += 1;
-        }
-    }
-
-    /// Preserve an operand quote that protects a `}` from ending `${...}`.
+    /// Spell a word the shell built rather than read.
     ///
-    /// That `}` is the only thing left for it to protect: the `"` this
-    /// printer opened already covers the rest, and a quote reopened inside
-    /// that `"` does not come back as one. A pattern operand keeps its
-    /// quotes regardless, because there the parser reads them as syntax.
-    fn double_parameter_quoted_region(
-        &mut self,
-        region: &[WordPart],
-        kind: QuoteKind,
-        quoting: Quoting,
-        indent: usize,
-    ) {
-        let quoted = quoting == Quoting::DoubleProtectedParameter
-            || region.is_empty()
-            || parts_contain_literal(region, b'}');
-        if !quoted {
-            for (at, part) in region.iter().enumerate() {
-                self.part(part, region.get(at + 1), quoting, indent);
-            }
+    /// The obligation is only that what it writes parses back to a
+    /// structurally equal word, so it picks one rule and applies it
+    /// everywhere: an inert run goes inside single quotes, an ordinary
+    /// run goes as it is, and an expansion keeps the quoting it was
+    /// under. Choosing per byte is what the deleted grammar was for, and
+    /// choosing at all is only sound because the bytes here were never
+    /// written by anyone.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    fn spelled(&mut self, word: &ParsedWord, indent: usize) {
+        let mut run = InertRun::default();
+        if word.parts().is_empty() {
+            self.out.extend_from_slice(b"''");
             return;
         }
-        // An apostrophe is a quote to the parser only where the operand is a
-        // pattern; anywhere else it is a byte, and a run written with one has
-        // to come back inside the quotes that will still be read as quotes.
-        let mark = if kind == QuoteKind::Single && quoting == Quoting::DoubleProtectedParameter {
-            b'\''
-        } else {
-            b'"'
-        };
-        self.out.push(mark);
-        if mark == b'\'' {
-            // Single quotes protect everything between them, so nothing in
-            // the run needs a backslash and one written here would be a byte.
-            // [spec:nsh:req:idiom.printable-ast]
-            for part in region {
-                match part {
-                    WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => {
-                        self.out.extend_from_slice(bytes);
-                    }
-                    WordPart::Escaped(byte) | WordPart::Protected(byte) => self.out.push(*byte),
-                    _ => {}
-                }
-            }
-        } else {
-            for (at, part) in region.iter().enumerate() {
-                self.part(part, region.get(at + 1), Quoting::Double, indent);
-            }
-        }
-        self.out.push(mark);
-    }
-
-    fn here_document_parameter_quoted_region(&mut self, region: &[WordPart], indent: usize) {
-        for (at, part) in region.iter().enumerate() {
-            self.part(
-                part,
-                region.get(at + 1),
-                Quoting::HereDocumentProtectedParameter,
-                indent,
-            );
-        }
-    }
-
-    /// Bash discards quote bytes before evaluating arithmetic.
-    fn arithmetic_quoted_region(&mut self, region: &[WordPart], indent: usize) {
-        for (at, part) in region.iter().enumerate() {
+        for part in word.parts() {
             match part {
-                WordPart::Literal(bytes) => self.out.extend(
-                    bytes
-                        .iter()
-                        .copied()
-                        .filter(|byte| !matches!(byte, b'\'' | b'"')),
-                ),
-                WordPart::Escaped(b'\'' | b'"')
-                | WordPart::Protected(b'\'' | b'"')
-                | WordPart::Quote(_) => {}
-                _ => self.part(part, region.get(at + 1), Quoting::Arithmetic, indent),
+                WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => {
+                    run.push(&mut self.out, bytes, false);
+                }
+                WordPart::Escaped(byte) | WordPart::Protected(byte) => {
+                    run.push(&mut self.out, &[*byte], true);
+                }
+                WordPart::Quote(QuoteBoundary::Open(_)) => run.open(&mut self.out),
+                WordPart::Quote(QuoteBoundary::Close) => run.close(&mut self.out),
+                WordPart::Parameter(parameter) => {
+                    run.before_expansion(&mut self.out);
+                    self.spelled_parameter(parameter, indent);
+                }
+                WordPart::Command(command) => {
+                    run.before_expansion(&mut self.out);
+                    self.command_substitution(command.as_deref(), indent);
+                }
+                WordPart::Arithmetic(expression) => {
+                    run.before_expansion(&mut self.out);
+                    self.out.extend_from_slice(b"$((");
+                    self.spelled(expression, indent);
+                    self.out.extend_from_slice(b"))");
+                }
             }
+            run.after_expansion(&mut self.out, part);
         }
+        run.finish(&mut self.out);
     }
 
-    /// Write one part in whichever quoting the caller has already opened.
+    /// Spell an expansion from its fields, for a word nothing read.
     ///
-    /// `next` is the part that will follow it, which decides whether a
-    /// parameter may be written as `$name` or needs `${name}`.
-    fn part(&mut self, part: &WordPart, next: Option<&WordPart>, quoting: Quoting, indent: usize) {
-        match part {
-            WordPart::Literal(bytes) => self.literal(bytes, next, quoting),
-            WordPart::Multibyte { bytes, escaped } => {
-                if *escaped && quoting == Quoting::Word {
-                    push_single_quoted(&mut self.out, bytes);
-                } else {
-                    self.literal(bytes, next, quoting);
-                }
-            }
-            // The mark says the source spelled this byte with a backslash,
-            // so writing the backslash back is the whole rule. Arithmetic is
-            // the exception: Bash discards quote bytes before evaluating, so
-            // one written there would become part of the expression.
-            // [spec:nsh:req:idiom.printable-ast]
-            WordPart::Escaped(byte) => {
-                if quoting != Quoting::Arithmetic {
-                    self.out.push(b'\\');
-                }
-                self.out.push(*byte);
-            }
-            WordPart::Protected(byte) => self.protected(*byte, next, quoting),
-            // A `"` inside a `${...}` operand toggles the quoting the word
-            // arrived in, and the parser records the toggle rather than a
-            // region. Dropping it silently reopens the parameter grammar to
-            // whatever the operand was protecting -- a `}` above all.
-            WordPart::Quote(_)
-                if matches!(
-                    quoting,
-                    Quoting::DoubleParameter | Quoting::DoubleProtectedParameter
-                ) =>
-            {
-                self.out.push(b'"');
-            }
-            WordPart::Quote(_) => {}
-            WordPart::Parameter(parameter) => self.parameter(parameter, next, quoting, indent),
-            WordPart::Command(command) => self.command_substitution(command.as_deref(), indent),
-            // `$(( ))` ends on a matching `))`, so an expression whose own
-            // parentheses do not balance cannot be written inside one. Bash's
-            // older `$[ ]` ends on the bracket and can, and the tree does not
-            // record which of the two the source wrote, so either spells the
-            // same expansion. Writing `$((0))` there spelled a different one.
-            // [spec:nsh:req:idiom.printable-ast]
-            WordPart::Arithmetic(expression) => {
-                let parenthesised = arithmetic_delimiters_balanced(expression.as_bstr());
-                self.out
-                    .extend_from_slice(if parenthesised { b"$((" } else { b"$[" });
-                self.parsed_word(expression, Quoting::Arithmetic, indent);
-                self.out
-                    .extend_from_slice(if parenthesised { b"))" } else { b"]" });
-            }
-        }
-    }
-
-    /// Bytes the source left unprotected, or protected by the enclosing
-    /// quoting this printer has already opened.
-    fn literal(&mut self, bytes: &[u8], next: Option<&WordPart>, quoting: Quoting) {
-        let protected: &[u8] = match quoting {
-            Quoting::Word => {
-                for (at, &byte) in bytes.iter().enumerate() {
-                    if byte == b'$' && !opens_expansion(bytes.get(at + 1).copied(), next) {
-                        self.out.push(byte);
-                        continue;
-                    }
-                    // A `#` opens a comment only where a word begins, which
-                    // is a question about what was written last.
-                    // [spec:nsh:req:idiom.printable-ast]
-                    let begins_word = self.out.last().is_none_or(|byte| {
-                        matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(')
-                    });
-                    if byte == b'#' && !begins_word {
-                        self.out.push(byte);
-                        continue;
-                    }
-                    if matches!(
-                        byte,
-                        b' ' | b'\t'
-                            | b'"'
-                            | b'#'
-                            | b'$'
-                            | b'&'
-                            | b'\''
-                            | b'('
-                            | b')'
-                            | b';'
-                            | b'<'
-                            | b'>'
-                            | b'\\'
-                            | b'`'
-                            | b'|'
-                    ) {
-                        self.out.push(b'\\');
-                    } else if byte == b'\n' {
-                        push_single_quoted(&mut self.out, &[byte]);
-                        continue;
-                    }
-                    self.out.push(byte);
-                }
-                return;
-            }
-            Quoting::Arithmetic => {
-                self.out.extend_from_slice(bytes);
-                return;
-            }
-            Quoting::Double => b"\"\\$`",
-            Quoting::Parameter => b"'\"\\$`}",
-            Quoting::Subscript => b"'\"\\$`]",
-            Quoting::DoubleParameter => b"\"\\$`",
-            Quoting::DoubleInertParameter => b"\"\\$`}",
-            Quoting::DoubleProtectedParameter => b"'\"\\$`",
-            Quoting::HereDocument => b"\\$`",
-            Quoting::HereDocumentParameter => b"\"\\$`}",
-            Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
-        };
-        for (at, &byte) in bytes.iter().enumerate() {
-            if protected.contains(&byte)
-                && (byte != b'$' || opens_expansion(bytes.get(at + 1).copied(), next))
-            {
-                self.out.push(b'\\');
-            }
-            self.out.push(byte);
-        }
-    }
-
-    /// One byte the source protected with a backslash.
-    ///
-    /// `next` decides the backslash's own case: inside quotes it protects
-    /// itself only when the byte after it would otherwise read as an escape,
-    /// and protecting it anyway spells the same bytes with an extra part.
-    // [spec:nsh:req:idiom.printable-ast]
-    /// One byte the quoting protected, written as the byte it is.
-    ///
-    /// No backslash put it there, so writing one spells a word the source did
-    /// not -- unless the enclosing quoting would read the byte as something
-    /// other than itself, which is the one thing a backslash is for. The
-    /// backslash is that byte's own case: inside quotes it protects the next
-    /// one, so it needs protecting exactly when something follows that it
-    /// would otherwise take.
-    // [spec:nsh:req:idiom.printable-ast]
-    fn protected(&mut self, byte: u8, next: Option<&WordPart>, quoting: Quoting) {
-        let protected: &[u8] = match quoting {
-            // No quoting encloses the byte here, so only its own backslash
-            // keeps it from ending the word or being read as syntax -- a
-            // trailing one above all, which would take the newline that ends
-            // the printed command.
-            Quoting::Word | Quoting::Parameter | Quoting::Subscript => {
-                self.out.push(b'\\');
-                self.out.push(byte);
-                return;
-            }
-            Quoting::Arithmetic => b"",
-            Quoting::Double | Quoting::DoubleParameter => b"\"\\$`",
-            Quoting::DoubleInertParameter => b"\"\\$`}",
-            Quoting::DoubleProtectedParameter => b"'\"\\$`",
-            Quoting::HereDocument => b"\\$`",
-            Quoting::HereDocumentParameter | Quoting::HereDocumentProtectedParameter => b"'\"\\$`}",
-        };
-        if protected.contains(&byte) && (byte != b'\\' || takes_next(next, protected)) {
-            self.out.push(b'\\');
-        }
-        self.out.push(byte);
-    }
-
-    /// One quoted run, in the quote the source opened it with.
-    ///
-    /// `'a'` and `"a"` protect the same byte, so which one was written is not
-    /// recoverable from the region and the parser records it instead. A run
-    /// that expands can only be spelled with double quotes whatever the
-    /// source said, and one written `$'...'` is reproduced from bytes whose
-    /// escapes are already decoded, so both come back as the plainer form.
-    // [spec:nsh:req:idiom.printable-ast]
-    fn quoted_region(&mut self, region: &[WordPart], kind: QuoteKind, indent: usize) {
-        let expands = region.iter().any(|part| {
-            matches!(
-                part,
-                WordPart::Parameter(_) | WordPart::Command(_) | WordPart::Arithmetic(_)
-            )
-        });
-        if kind == QuoteKind::DollarSingle && !expands {
-            let mut bytes = BString::new(Vec::new());
-            for part in region {
-                match part {
-                    WordPart::Literal(text) | WordPart::Multibyte { bytes: text, .. } => {
-                        bytes.extend_from_slice(text);
-                    }
-                    WordPart::Escaped(byte) | WordPart::Protected(byte) => bytes.push(*byte),
-                    _ => {}
-                }
-            }
-            let quoted =
-                crate::escape::bash::ansi_c_quote(self.locale, BStr::new(bytes.as_slice()));
-            self.out.extend_from_slice(&quoted);
-            return;
-        }
-        if kind == QuoteKind::DollarDouble {
-            self.out.push(b'$');
-        }
-        if expands || matches!(kind, QuoteKind::Double | QuoteKind::DollarDouble) {
-            self.out.push(b'"');
-            for (at, part) in region.iter().enumerate() {
-                self.part(part, region.get(at + 1), Quoting::Double, indent);
-            }
-            self.out.push(b'"');
-            return;
-        }
-        let mut bytes = BString::new(Vec::new());
-        for part in region {
-            match part {
-                WordPart::Literal(text) | WordPart::Multibyte { bytes: text, .. } => {
-                    bytes.extend_from_slice(text);
-                }
-                WordPart::Escaped(byte) | WordPart::Protected(byte) => bytes.push(*byte),
-                WordPart::Quote(_)
-                | WordPart::Parameter(_)
-                | WordPart::Command(_)
-                | WordPart::Arithmetic(_) => {}
-            }
-        }
-        push_single_quoted(&mut self.out, &bytes);
-    }
-
-    fn parameter(
-        &mut self,
-        parameter: &ParameterExpansion,
-        next: Option<&WordPart>,
-        quoting: Quoting,
-        indent: usize,
-    ) {
-        if parameter.operation == ParameterOperation::Invalid {
-            // The expansion fails, but it fails on bytes the source wrote and
-            // the tree still holds. Printing `${}` in their place spelled a
-            // different failure and lost whatever the braces were around.
-            // [spec:nsh:req:idiom.printable-ast]
-            self.out.extend_from_slice(b"${");
-            if parameter.indirect {
-                self.out.push(b'!');
-            }
-            self.out.extend_from_slice(&parameter.invalid_marker);
-            self.out.extend_from_slice(&parameter.name);
-            self.out.extend_from_slice(&parameter.invalid_prefix);
-            if let Some(operand) = parameter.operand.as_ref() {
-                let inert = match quoting {
-                    Quoting::Word | Quoting::Parameter | Quoting::Subscript => Quoting::Parameter,
-                    Quoting::Double
-                    | Quoting::DoubleParameter
-                    | Quoting::DoubleProtectedParameter
-                    | Quoting::DoubleInertParameter => Quoting::DoubleInertParameter,
-                    quoting => quoting,
-                };
-                self.parsed_parts(operand.parts(), inert, indent);
-            }
-            self.out.push(b'}');
-            return;
-        }
-        if bare_parameter(parameter, next) {
-            self.out.push(b'$');
-            self.out.extend_from_slice(&parameter.name);
-            return;
-        }
+    /// An expansion the shell refused never reaches here: the parser is
+    /// the only thing that builds one, and a parsed word is written as
+    /// its run.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    fn spelled_parameter(&mut self, parameter: &ParameterExpansion, indent: usize) {
         self.out.extend_from_slice(b"${");
         if parameter.operation == ParameterOperation::Length {
             self.out.push(b'#');
@@ -1119,37 +743,8 @@ impl<'a> Printer<'a> {
             self.out.push(b':');
         }
         self.out.extend_from_slice(parameter.operation.operator());
-        if let Some(operand) = parameter.operand.as_ref() {
-            if !operand.is_empty() {
-                // Inside a `"` this printer opened, the operand is already
-                // protected and may not open a quote of its own.
-                let inner = match quoting {
-                    Quoting::Word | Quoting::Parameter | Quoting::Subscript => Quoting::Parameter,
-                    Quoting::Double
-                    | Quoting::DoubleParameter
-                    | Quoting::DoubleProtectedParameter
-                    | Quoting::DoubleInertParameter => {
-                        if !operand_quoting_closed(operand) {
-                            Quoting::DoubleInertParameter
-                        } else if operand_needs_apostrophe_protection(parameter.operation) {
-                            Quoting::DoubleProtectedParameter
-                        } else {
-                            Quoting::DoubleParameter
-                        }
-                    }
-                    Quoting::Arithmetic => Quoting::Arithmetic,
-                    Quoting::HereDocument
-                    | Quoting::HereDocumentParameter
-                    | Quoting::HereDocumentProtectedParameter => {
-                        if operand_needs_apostrophe_protection(parameter.operation) {
-                            Quoting::HereDocumentProtectedParameter
-                        } else {
-                            Quoting::HereDocumentParameter
-                        }
-                    }
-                };
-                self.parsed_parts(operand.parts(), inner, indent);
-            }
+        if let Some(operand) = &parameter.operand {
+            self.spelled(operand, indent);
         }
         self.out.push(b'}');
     }
@@ -1226,130 +821,6 @@ fn push_function_name(out: &mut BString, name: &BStr) {
     }
 }
 
-/// A NUL can end parsing after an assignment-shaped word has opened a
-/// subscript. Quote that inert prefix so printing it cannot reopen the grammar.
-///
-/// An expansion inside the prefix does not rescue it: the word was cut short
-/// before its `]`, so nothing in it will ever expand, and printing it as
-/// written asks the next parse for a bracket the source never had.
-fn unterminated_array_word(word: &ParsedWord) -> bool {
-    let bytes = word.as_bstr();
-    let Some(open) = bytes.iter().position(|byte| *byte == b'[') else {
-        return false;
-    };
-    if open == 0
-        || !bytes[..open]
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
-    {
-        return false;
-    }
-
-    let mut bracket_depth = 0isize;
-    let mut quote_depth = 0usize;
-    for part in word.parts() {
-        match part {
-            WordPart::Quote(QuoteBoundary::Open(..)) => quote_depth += 1,
-            WordPart::Quote(QuoteBoundary::Close) => {
-                quote_depth = quote_depth.saturating_sub(1);
-            }
-            WordPart::Literal(bytes) if quote_depth == 0 => {
-                for byte in bytes.iter() {
-                    match *byte {
-                        b'[' => bracket_depth += 1,
-                        b']' => bracket_depth -= 1,
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    bracket_depth != 0
-}
-
-/// Whether a `$` written before these would start an expansion.
-///
-/// A `$` that starts nothing is an ordinary byte, and protecting it anyway
-/// spells the same byte with a part the source never wrote. `after` is the
-/// byte following it inside the same literal run, and `next` the part that
-/// follows the run when there is no such byte.
-// [spec:nsh:req:idiom.printable-ast]
-fn opens_expansion(after: Option<u8>, next: Option<&WordPart>) -> bool {
-    if let Some(byte) = after {
-        return matches!(
-            byte,
-            b'{' | b'(' | b'_' | b'@' | b'*' | b'#' | b'?' | b'-' | b'$' | b'!'
-        ) || byte.is_ascii_alphanumeric();
-    }
-    match next {
-        Some(WordPart::Parameter(_) | WordPart::Command(_) | WordPart::Arithmetic(_)) => true,
-        // `$'...'` and `$"..."` are expansions of their own, so a `$` written
-        // against the quote that opens one has to be held off it.
-        Some(WordPart::Quote(QuoteBoundary::Open(_))) => true,
-        Some(WordPart::Quote(QuoteBoundary::Close)) | None => false,
-        Some(WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. }) => {
-            opens_expansion(bytes.first().copied(), None)
-        }
-        // An escape carries its own backslash, and a `$` against a backslash
-        // starts nothing.
-        Some(WordPart::Escaped(_)) => false,
-        Some(WordPart::Protected(byte)) => opens_expansion(Some(*byte), None),
-    }
-}
-
-/// Whether a backslash written here would take the part after it.
-///
-/// Inside quotes a backslash protects only the few bytes the quoting reads,
-/// so before anything else it is data and needs no backslash of its own.
-// [spec:nsh:req:idiom.printable-ast]
-fn takes_next(next: Option<&WordPart>, protected: &[u8]) -> bool {
-    match next {
-        Some(WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. }) => {
-            bytes.first().is_none_or(|byte| protected.contains(byte))
-        }
-        Some(WordPart::Protected(byte)) => protected.contains(byte),
-        Some(WordPart::Escaped(_)) => true,
-        _ => false,
-    }
-}
-
-/// Whether every quote the operand opened was closed again.
-///
-/// A NUL can end the parse inside an operand, leaving one toggle unmatched.
-/// The bytes it was protecting are still the operand's, but the toggle cannot
-/// be written back: it would leave the operand quoted at the `}` that ends it.
-// [spec:nsh:req:idiom.printable-ast]
-fn operand_quoting_closed(operand: &ParsedWord) -> bool {
-    operand
-        .parts()
-        .iter()
-        .filter(|part| matches!(part, WordPart::Quote(_)))
-        .count()
-        % 2
-        == 0
-}
-
-/// Whether the parser reads this operation's operand as a pattern, where an
-/// apostrophe is a quote rather than one of the operand's own bytes.
-const fn operand_needs_apostrophe_protection(operation: ParameterOperation) -> bool {
-    matches!(
-        operation,
-        ParameterOperation::Substring
-            | ParameterOperation::RemoveSmallestSuffix
-            | ParameterOperation::RemoveLargestSuffix
-            | ParameterOperation::RemoveSmallestPrefix
-            | ParameterOperation::RemoveLargestPrefix
-            | ParameterOperation::SubstituteFirst
-            | ParameterOperation::SubstituteAll
-            | ParameterOperation::UpperFirst
-            | ParameterOperation::UpperAll
-            | ParameterOperation::LowerFirst
-            | ParameterOperation::LowerAll
-            | ParameterOperation::Transform
-    )
-}
-
 fn reserved_command_word(node: &Node) -> Option<&[u8]> {
     let Node::Word(word) = node else {
         return None;
@@ -1378,79 +849,6 @@ fn reserved_command_word(node: &Node) -> Option<&[u8]> {
             | b"}"
     )
     .then_some(bytes.as_slice())
-}
-
-fn arithmetic_delimiters_balanced(expression: &[u8]) -> bool {
-    let mut parentheses = 0usize;
-    let mut brackets = 0usize;
-    for &byte in expression {
-        match byte {
-            b'(' => parentheses += 1,
-            b')' if parentheses == 0 => return false,
-            b')' => parentheses -= 1,
-            b'[' => brackets += 1,
-            b']' if brackets == 0 => return false,
-            b']' => brackets -= 1,
-            _ => {}
-        }
-    }
-    parentheses == 0 && brackets == 0
-}
-
-fn parts_contain_literal(parts: &[WordPart], needle: u8) -> bool {
-    parts.iter().any(|part| match part {
-        WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. } => bytes.contains(&needle),
-        WordPart::Parameter(parameter) => parameter
-            .operand
-            .as_deref()
-            .is_some_and(|operand| parts_contain_literal(operand.parts(), needle)),
-        WordPart::Arithmetic(expression) => parts_contain_literal(expression.parts(), needle),
-        WordPart::Escaped(byte) | WordPart::Protected(byte) => *byte == needle,
-        WordPart::Quote(_) | WordPart::Command(_) => false,
-    })
-}
-
-/// Whether `$name` says what `${name}` would.
-///
-/// Only a plain value expansion can drop its braces, and only when the
-/// byte that follows cannot be read as more of the name. The lookahead
-/// is deliberately pessimistic about anything above ASCII, because
-/// whether such a byte continues a name is the locale's business and
-/// this printer has no locale.
-fn bare_parameter(parameter: &ParameterExpansion, next: Option<&WordPart>) -> bool {
-    if parameter.indirect
-        || parameter.colon
-        || parameter.operand.is_some()
-        || parameter.operation != ParameterOperation::Value
-    {
-        return false;
-    }
-    match parameter.name.as_slice() {
-        // A special parameter, or one positional digit: neither can
-        // swallow the byte after it.
-        [byte] if !byte.is_ascii_alphabetic() && *byte != b'_' => true,
-        name if name
-            .first()
-            .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
-            && name
-                .iter()
-                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_') =>
-        {
-            !starts_name_byte(next)
-        }
-        _ => false,
-    }
-}
-
-/// Whether the next part could continue a name written without braces.
-fn starts_name_byte(next: Option<&WordPart>) -> bool {
-    let bytes = match next {
-        Some(WordPart::Literal(bytes) | WordPart::Multibyte { bytes, .. }) => bytes.as_slice(),
-        _ => return false,
-    };
-    bytes
-        .first()
-        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte >= 0x80)
 }
 
 /// A stored expression without the blanks the grammar left around it.
@@ -1489,12 +887,84 @@ const fn operator_text(operator: BashAssignmentOperator) -> &'static [u8] {
     }
 }
 
-/// The index of the boundary that closes a quoted run, or the end.
-fn closing_quote(parts: &[WordPart], from: usize) -> usize {
-    parts[from..]
-        .iter()
-        .position(|part| matches!(part, WordPart::Quote(QuoteBoundary::Close)))
-        .map_or(parts.len(), |offset| from + offset)
+/// One run of bytes being spelled for a word nothing read.
+///
+/// Inertness is a property of the run rather than of a byte, so the run
+/// is what accumulates: bytes join it until something changes whether
+/// they are data, and then it is written under the one rule that keeps
+/// them so.
+// [spec:nsh:req:idiom.printable-ast+2]
+#[derive(Default)]
+struct InertRun {
+    bytes: BString,
+    inert: bool,
+    /// How many quotes the word opened around this position.
+    depth: usize,
+    /// Whether the open quote this run sits in has written anything, so
+    /// an empty quoted run is spelled and an emptied one is not.
+    filled: bool,
+}
+
+impl InertRun {
+    fn push(&mut self, out: &mut BString, bytes: &[u8], escaped: bool) {
+        let inert = escaped || self.depth > 0;
+        if !self.bytes.is_empty() && self.inert != inert {
+            self.flush(out);
+        }
+        self.inert = inert;
+        self.bytes.extend_from_slice(bytes);
+    }
+
+    fn open(&mut self, out: &mut BString) {
+        self.flush(out);
+        self.depth += 1;
+        self.filled = false;
+    }
+
+    fn close(&mut self, out: &mut BString) {
+        let empty = self.bytes.is_empty() && !self.filled;
+        self.flush(out);
+        if empty {
+            out.extend_from_slice(b"''");
+        }
+        self.depth = self.depth.saturating_sub(1);
+        self.inert = self.depth > 0;
+    }
+
+    fn before_expansion(&mut self, out: &mut BString) {
+        self.flush(out);
+        if self.depth > 0 {
+            out.push(b'"');
+        }
+    }
+
+    fn after_expansion(&mut self, out: &mut BString, part: &WordPart) {
+        if matches!(
+            part,
+            WordPart::Parameter(_) | WordPart::Command(_) | WordPart::Arithmetic(_)
+        ) && self.depth > 0
+        {
+            out.push(b'"');
+            self.filled = true;
+        }
+    }
+
+    fn flush(&mut self, out: &mut BString) {
+        if self.bytes.is_empty() {
+            return;
+        }
+        if self.inert {
+            push_single_quoted(out, &self.bytes);
+        } else {
+            out.extend_from_slice(&self.bytes);
+        }
+        self.bytes.clear();
+        self.filled = true;
+    }
+
+    fn finish(&mut self, out: &mut BString) {
+        self.flush(out);
+    }
 }
 
 /// Wrap bytes so that every one of them survives as data.

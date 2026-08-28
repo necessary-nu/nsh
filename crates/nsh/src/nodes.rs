@@ -151,6 +151,27 @@ impl SourceTokens {
         self.text() == other.text()
     }
 
+    /// The bytes of the run, less the trivia it was reached through.
+    ///
+    /// A run begins behind the blanks, comments and line continuations in
+    /// front of its first token, because that is what makes two nodes'
+    /// runs meet rather than leave the space between them owned by
+    /// nobody. A renderer that lays out its own whitespace wants what was
+    /// written, not how it was reached.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    pub(crate) fn written(&self) -> BString {
+        let mut text = BString::from(Vec::new());
+        let from = self
+            .0
+            .iter()
+            .position(|token| !token.kind().is_trivia())
+            .unwrap_or(self.0.len());
+        for token in &self.0[from..] {
+            text.extend_from_slice(token.text());
+        }
+        text
+    }
+
     /// The bytes of the run, concatenated.
     // [spec:nsh:def:idiom.token-stream]
     pub(crate) fn text(&self) -> BString {

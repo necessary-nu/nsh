@@ -1398,7 +1398,11 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.reference-profile}
     )}
-    {id canonicalize-word-parts}
+    {id canonicalize-word-parts, covered_rules (
+        idiom.canonical-tree
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.canonical-tree}
+    )}
     {id contain-descriptor-materialization, covered_rules (
         idiom.descriptor-materialization
     ), covered_claims (
