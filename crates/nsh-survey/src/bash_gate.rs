@@ -170,7 +170,17 @@ struct Findings {
 
 // [spec:nsh:req:compat.bash.survey-closure]
 fn gate(root: &Path, shell: &Path) -> Result<bool> {
-    require_bash_basename(shell)?;
+    /* Resolve first, then insist on the name. The runner canonicalizes
+     * the shell before running it, so a symlink called `bash` pointing at
+     * some other file is executed under that file's name -- and nsh reads
+     * its own name to decide whether Bash mode is on. Checking the name
+     * given rather than the name run let a link called `bash` score nsh
+     * in POSIX mode against a Bash suite, which is where the 793 in the
+     * log came from. */
+    // [spec:nsh:req:compat.bash.survey-closure]
+    let shell = fs::canonicalize(shell)?;
+    require_bash_basename(&shell)?;
+    let shell = shell.as_path();
     let root = fs::canonicalize(root)?;
     let register = read_register(&root)?;
     let lock = crate::read_lock(&root)?;
@@ -473,5 +483,37 @@ mod tests {
             "the gate reported the same verdict for a shell that passed everything \
              and one that failed everything",
         );
+    }
+    /// The name that matters is the name the shell runs under.
+    ///
+    /// The runner canonicalizes the shell before executing it, and nsh
+    /// reads its own name to decide whether Bash mode is on. So a link
+    /// called `bash` pointing at `nsh` satisfies a check on the name
+    /// given and then runs with the dialect off, scoring a POSIX shell
+    /// against a Bash suite. That is where the 793 in this node's log
+    /// came from: 80 of 873 eligible cases passing, reported as a
+    /// measurement of Bash compatibility.
+    // [spec:nsh:req:compat.bash.survey-closure/test]
+    #[test]
+    fn a_link_named_bash_over_another_shell_fails() {
+        let scratch =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/nsh-survey-gate-name");
+        drop(fs::remove_dir_all(&scratch));
+        fs::create_dir_all(&scratch).unwrap();
+        let target = scratch.join("nsh");
+        fs::write(&target, b"#!/bin/sh\nexit 0\n").unwrap();
+        let link = scratch.join("bash");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        // The name as given is `bash`, which is what used to be checked.
+        assert!(require_bash_basename(&link).is_ok());
+        // The name it resolves to is not, and that is the one that runs.
+        let resolved = fs::canonicalize(&link).unwrap();
+        assert!(
+            require_bash_basename(&resolved).is_err(),
+            "a link called bash resolving to {} was accepted",
+            resolved.display(),
+        );
+        drop(fs::remove_dir_all(&scratch));
     }
 }
