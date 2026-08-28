@@ -80,6 +80,28 @@ pub(crate) fn command(locale: &nsh_platform::Locale, node: &Node) -> BString {
     printer.out
 }
 
+/// Spell a whole tree from its structure, ignoring every run in it.
+///
+/// The same printer as [`command`], with the three places that replay a
+/// node's source bytes switched off. That is deliberate reuse rather than
+/// convenience: deciding how to spell something is the one job this file
+/// has, and a second speller written to disagree with it would be
+/// measuring itself. What it returns is therefore a *different* spelling
+/// of the same program -- the parser was handed one, this is the other --
+/// which is what makes an equivalence class derivable instead of listed.
+// [spec:nsh:req:idiom.canonical-tree+1]
+#[cfg(any(feature = "fuzzing", test))]
+pub(crate) fn respelled(locale: &nsh_platform::Locale, node: &Node) -> BString {
+    let mut printer = Printer::new(locale);
+    printer.ignore_runs = true;
+    /* The semicolon list, not the one-per-line list: what goes in is one
+     * parse unit and what comes out has to be one too, or the comparison
+     * would be against a different number of programs. */
+    printer.list(node, 0);
+    printer.finish();
+    printer.out
+}
+
 /// The output buffer and the here-document bodies owed to the next line.
 struct Printer<'a> {
     /// Needed to spell a `$'...'` run back: which bytes are one character
@@ -89,6 +111,13 @@ struct Printer<'a> {
     /// Bodies that must be written at column zero after the next newline,
     /// each already terminated by its own delimiter line.
     pending: Vec<BString>,
+    /// Spell from structure even where a run is available.
+    ///
+    /// Replaying a run is how this printer keeps what the operator wrote.
+    /// Switching it off is how [`respelled`] gets a second spelling of one
+    /// program without a second thing that knows how to spell.
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    ignore_runs: bool,
 }
 
 impl<'a> Printer<'a> {
@@ -97,6 +126,7 @@ impl<'a> Printer<'a> {
             locale,
             out: BString::new(Vec::new()),
             pending: Vec::new(),
+            ignore_runs: false,
         }
     }
 
@@ -117,7 +147,7 @@ impl<'a> Printer<'a> {
     }
 
     /// Pay any here-document bodies owed by the final command.
-    #[cfg(test)]
+    #[cfg(any(feature = "fuzzing", test))]
     fn finish(&mut self) {
         if !self.pending.is_empty() {
             self.newline(0);
@@ -181,7 +211,7 @@ impl<'a> Printer<'a> {
          * from. What follows this is the fallback, and it only ever sees
          * nodes the shell synthesized. */
         // [spec:nsh:req:idiom.printable-ast+2]
-        if let Some(source) = super::emit::emitted(node) {
+        if let Some(source) = super::emit::emitted(node).filter(|_| !self.ignore_runs) {
             /* This renderer wrote the indent itself, so the blank the
              * statement was reached through is not its to write again. */
             let run = node.tokens();
@@ -620,7 +650,7 @@ impl<'a> Printer<'a> {
          * the delimiter below is the one the source wrote. */
         // [spec:nsh:req:idiom.printable-ast+2]
         let read = document.body.tokens.text();
-        if !read.is_empty() && !document.delimiter.as_bstr().is_empty() {
+        if !self.ignore_runs && !read.is_empty() && !document.delimiter.as_bstr().is_empty() {
             self.descriptor_prefix(document.descriptor.index(), 0);
             self.out.extend_from_slice(b"<<");
             if document.expand {
@@ -634,7 +664,8 @@ impl<'a> Printer<'a> {
             return;
         }
         let mut body = Self::new(self.locale);
-        body.spelled(&document.body.word, indent);
+        body.ignore_runs = self.ignore_runs;
+        body.spelled_body(&document.body.word, document.expand, indent);
         let mut body = body.out;
         if !body.is_empty() && body.last() != Some(&b'\n') {
             body.push(b'\n');
@@ -683,7 +714,7 @@ impl<'a> Printer<'a> {
     // [spec:nsh:req:idiom.printable-ast+2]
     fn word(&mut self, word: &WordNode, indent: usize) {
         let run = word.tokens.written();
-        if run.is_empty() {
+        if self.ignore_runs || run.is_empty() {
             self.spelled(&word.word, indent);
         } else {
             self.out.extend_from_slice(&run);
@@ -735,6 +766,48 @@ impl<'a> Printer<'a> {
         }
     }
 
+    /// Spell a word as the body of a here-document.
+    ///
+    /// A body is not a shell word and cannot be spelled as one. Nothing
+    /// quotes there: a `'` is a `'`, so the single quotes [`spelled`] puts
+    /// around an inert run would be two more bytes of body, and the `"` it
+    /// puts around an expansion likewise. What makes a run inert here is
+    /// the delimiter, and that is already decided by `expand`.
+    ///
+    /// So the two cases are spelled by what the delimiter says. A body
+    /// that does not expand is written exactly as it is, because its
+    /// delimiter is quoted and every byte is already data. A body that
+    /// does expand writes its expansions bare and backslash-escapes the
+    /// three bytes that would otherwise start one.
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    fn spelled_body(&mut self, word: &ParsedWord, expand: bool, indent: usize) {
+        for part in word.parts() {
+            match part {
+                WordPart::Text { bytes, .. } => {
+                    if expand {
+                        for byte in bytes.iter() {
+                            if matches!(byte, b'\\' | b'$' | b'`') {
+                                self.out.push(b'\\');
+                            }
+                            self.out.push(*byte);
+                        }
+                    } else {
+                        self.out.extend_from_slice(bytes);
+                    }
+                }
+                WordPart::Parameter(parameter) => self.spelled_parameter(parameter, indent),
+                WordPart::Command { command, .. } => {
+                    self.command_substitution(command.as_deref(), indent);
+                }
+                WordPart::Arithmetic { expression, .. } => {
+                    self.out.extend_from_slice(b"$((");
+                    self.spelled(expression, indent);
+                    self.out.extend_from_slice(b"))");
+                }
+            }
+        }
+    }
+
     /// Spell an expansion from its fields, for a word nothing read.
     ///
     /// An expansion the shell refused never reaches here: the parser is
@@ -754,8 +827,15 @@ impl<'a> Printer<'a> {
             self.out.push(b':');
         }
         self.out.extend_from_slice(parameter.operation.operator());
+        /* An operand that is there and empty is spelled by the operator
+         * alone: `${a-}` is the empty operand, and the `''` that
+         * [`spelled`] writes for a word with no parts would be two bytes
+         * of operand rather than none. */
+        // [spec:nsh:req:idiom.canonical-tree+1]
         if let Some(operand) = &parameter.operand {
-            self.spelled(operand, indent);
+            if !operand.parts().is_empty() {
+                self.spelled(operand, indent);
+            }
         }
         self.out.push(b'}');
     }

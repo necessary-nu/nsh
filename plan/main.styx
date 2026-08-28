@@ -7006,6 +7006,13 @@ children (
                                         kind @note
                                         text "Re-ordered again, behind `canonicalize-word-parts` rather than in front of it. `carry-tokens-into-the-tree` established the rule's own example is not yet testable: `echo 'a'` and `echo \"a\"` still parse to different `ParsedWord`s, so the canonicity property cannot pass until the word structure collapses.\n\nThe earlier note said this node should land failing, with `canonicalize-word-parts` making it pass. That is incoherent with what a dependency means here -- a node is not Done until it is green -- so the intent is recorded rather than encoded: write the property first if it helps, but it closes after the collapse, not before.\n\nIts independent value is unchanged and is not covered by the byte-exact round trip. A tree holding two structural shapes for one program passes that property, because both shapes carry their own tokens and both print back exactly. Text equality is the round trip; program equality is this."
                                     }
+
+                                    {
+                                        at 2026-08-28T15:26:43.860653752Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 

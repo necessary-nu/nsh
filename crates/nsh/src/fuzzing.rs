@@ -176,6 +176,139 @@ fn is_only_trivia(unit: &[u8]) -> bool {
     true
 }
 
+/// The commands of a sequence, in order, with the sequence itself gone.
+///
+/// A `;` and a newline between two commands are one program spelled two
+/// ways, and only one of them nests. Flattening is what lets the
+/// comparison ignore that without ignoring anything else.
+// [spec:nsh:req:idiom.canonical-tree+1]
+#[cfg(any(feature = "fuzzing", test))]
+fn flattened<'tree>(node: &'tree crate::nodes::Node, out: &mut Vec<&'tree crate::nodes::Node>) {
+    if let crate::nodes::Node::Sequence(list) = node {
+        flattened(&list.left, out);
+        flattened(&list.right, out);
+        return;
+    }
+    out.push(node);
+}
+
+/// What comparing a program against a respelling of itself found.
+///
+/// Distinct from [`RoundTrip`] because it is a different question about a
+/// different thing. That one compares *text*: it emits the runs a node
+/// kept and requires the source back byte for byte. This one compares
+/// *programs*, with the runs deliberately set aside -- and a tree holding
+/// two shapes for one program passes the first and fails this, because
+/// both shapes carry their own tokens and both print back exactly.
+// [spec:nsh:req:idiom.canonical-tree+1]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Canonicity {
+    /// The source did not parse, so there was no tree to respell. Not a
+    /// finding.
+    NotParsed,
+    /// An alias replaced text before the parser saw it. The bytes read
+    /// are not the bytes written, so the two spellings are not a pair.
+    Aliased,
+    /// Both spellings built one program.
+    OneTree,
+    /// They did not: the same program, written two ways, parsed to two
+    /// structures. This is the finding the node exists for.
+    TwoTrees { respelled: BString },
+    /// The respelling could not be read back at all, which is the
+    /// speller's defect rather than the parser's, and is reported apart
+    /// from `TwoTrees` so a sweep does not confuse the two.
+    Unreadable { respelled: BString },
+}
+
+/// Whether two spellings of one program build one tree.
+///
+/// [`spec:nsh:req:idiom.canonical-tree+1`] made checkable, and the
+/// mechanical half of it: the equivalence class is *derived* rather than
+/// listed. The source is one spelling; `nodes::source::respelled` renders
+/// the parsed tree from its structure, ignoring every run in it, which is
+/// the other. Requiring the two to parse equal is canonicity, and it
+/// reaches classes no hand-written list contains -- which is the whole
+/// reason to prefer it, twice over, after a corpus rather than a property
+/// turned out to be the limit in two consecutive nodes.
+///
+/// The comparison ignores runs and positions, because `SourceTokens` and
+/// `SourceLine` compare equal unconditionally by design. That is what
+/// makes this a question about programs; `same_text` is the named
+/// operation for asking about bytes, and this must not use it.
+///
+/// WHAT A FAILURE MEANS. Either the parser built two structures for one
+/// program, or the speller wrote a different program. The property cannot
+/// tell them apart and does not pretend to: it hands back the respelling
+/// so the reduction can.
+// [spec:nsh:req:idiom.canonical-tree+1]
+pub fn builds_one_tree_per_program(shell: &mut Shell, source: &BStr) -> Canonicity {
+    let read = crate::resource::with_resources(shell, |shell, _resources| {
+        crate::input::set_input_string(shell, source);
+        let mut units = Vec::new();
+        loop {
+            let outcome = crate::parser::parse_command(shell, false);
+            if shell.input.tokens.expanded_alias() {
+                return Err(Canonicity::Aliased);
+            }
+            match outcome {
+                Err(_) => return Err(Canonicity::NotParsed),
+                Ok(crate::parser::ParseResult::Eof) => break,
+                Ok(crate::parser::ParseResult::Tree(None)) => {}
+                Ok(crate::parser::ParseResult::Tree(Some(node))) => {
+                    let text = crate::nodes::source::respelled(&shell.locale, &node);
+                    units.push((node, text));
+                }
+            }
+        }
+        Ok(units)
+    });
+    let units = match read {
+        Ok(units) => units,
+        Err(verdict) => return verdict,
+    };
+    for (node, respelled) in units {
+        let again = crate::resource::with_resources(shell, |shell, _resources| {
+            crate::input::set_input_string(shell, BStr::new(respelled.as_slice()));
+            let mut trees = Vec::new();
+            loop {
+                let outcome = crate::parser::parse_command(shell, false);
+                if shell.input.tokens.expanded_alias() {
+                    return Err(Canonicity::Aliased);
+                }
+                match outcome {
+                    Err(_) => return Ok(None),
+                    Ok(crate::parser::ParseResult::Eof) => break,
+                    Ok(crate::parser::ParseResult::Tree(None)) => {}
+                    Ok(crate::parser::ParseResult::Tree(Some(tree))) => trees.push(tree),
+                }
+            }
+            Ok(Some(trees))
+        });
+        match again {
+            Err(verdict) => return verdict,
+            Ok(None) => return Canonicity::Unreadable { respelled },
+            /* Compared as a flat run of commands, because how a program
+             * is divided into parse units is spelling too: `a; b` is one
+             * unit holding a sequence, and the same program written on
+             * two lines is two units holding one command each. Requiring
+             * the same division would fail them for being spelled
+             * differently, which is the opposite of the question. */
+            Ok(Some(trees)) => {
+                let mut want = Vec::new();
+                flattened(&node, &mut want);
+                let mut got = Vec::new();
+                for tree in &trees {
+                    flattened(tree, &mut got);
+                }
+                if want != got {
+                    return Canonicity::TwoTrees { respelled };
+                }
+            }
+        }
+    }
+    Canonicity::OneTree
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -852,6 +985,43 @@ pub(crate) mod tests {
 
     /// One construct of each shape, held to the bytes it went in as.
     ///
+    /// One of every construct a shell has, shared by the properties that
+    /// need breadth rather than depth.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
+    pub(crate) const CONSTRUCTS: &[&[u8]] = &[
+        b"echo a b",
+        b"a=1 b=2 cmd x",
+        b"a && b || ! c",
+        b"a | b | c",
+        b"a; b& c",
+        b"(a; b)",
+        b"{ a; b; }",
+        b"if a; then b; elif c; then d; else e; fi",
+        b"while a; do b; done",
+        b"until a; do b; done",
+        b"for x in 1 2 3; do echo $x; done",
+        b"select x in a b; do echo $x; done",
+        b"case $x in a|b) c ;; (d) e ;& *) f ;; esac",
+        b"f() { a; }",
+        b"function g { a; }",
+        b"function h () { a; }",
+        b"time -p a | b",
+        b"cat <f >g 2>&1 <&0 >>h",
+        b"cat <<A <<'B'\n1\nA\n2\nB\n",
+        b"cat <<<'here'",
+        b"echo $x ${y} ${z:-d} ${#a} ${b#c} ${d/e/f}",
+        b"echo $(true) `false` $((1 + 2)) $[3]",
+        b"echo 'a' \"b\" \\c $'d' $\"e\"",
+        b"[[ a == b* && c != d ]]",
+        b"((x = 1 + 2))",
+        b"for ((i = 0; i < 2; i++)); do echo $i; done",
+        b"declare -A m=([k]=v [l]=w)",
+        b"a[1]=x b+=y",
+        b"echo <(true) >(false)",
+        b"echo a  #  trailing",
+        b"echo a \\\n  b",
+    ];
+
     /// Breadth rather than depth: the corpus below is what the fuzzer
     /// found, and this is what a shell is made of, so a construct that
     /// stops coming back says which construct rather than which artifact.
@@ -859,42 +1029,7 @@ pub(crate) mod tests {
     #[test]
     fn one_of_every_construct_comes_back() {
         let mut shell = shell();
-        assert_prints_itself(
-            &mut shell,
-            &[
-                b"echo a b".as_slice(),
-                b"a=1 b=2 cmd x",
-                b"a && b || ! c",
-                b"a | b | c",
-                b"a; b& c",
-                b"(a; b)",
-                b"{ a; b; }",
-                b"if a; then b; elif c; then d; else e; fi",
-                b"while a; do b; done",
-                b"until a; do b; done",
-                b"for x in 1 2 3; do echo $x; done",
-                b"select x in a b; do echo $x; done",
-                b"case $x in a|b) c ;; (d) e ;& *) f ;; esac",
-                b"f() { a; }",
-                b"function g { a; }",
-                b"function h () { a; }",
-                b"time -p a | b",
-                b"cat <f >g 2>&1 <&0 >>h",
-                b"cat <<A <<'B'\n1\nA\n2\nB\n",
-                b"cat <<<'here'",
-                b"echo $x ${y} ${z:-d} ${#a} ${b#c} ${d/e/f}",
-                b"echo $(true) `false` $((1 + 2)) $[3]",
-                b"echo 'a' \"b\" \\c $'d' $\"e\"",
-                b"[[ a == b* && c != d ]]",
-                b"((x = 1 + 2))",
-                b"for ((i = 0; i < 2; i++)); do echo $i; done",
-                b"declare -A m=([k]=v [l]=w)",
-                b"a[1]=x b+=y",
-                b"echo <(true) >(false)",
-                b"echo a  #  trailing",
-                b"echo a \\\n  b",
-            ],
-        );
+        assert_prints_itself(&mut shell, CONSTRUCTS);
     }
 
     /// The two root causes the first byte-exact campaign found, reduced.
@@ -938,6 +1073,82 @@ pub(crate) mod tests {
     /// Every shape at once rather than one test each: a failure should say
     /// which shapes came back, not which single shape came back first.
     // [spec:nsh:req:idiom.printable-ast+2/test]
+    /// Two spellings of one program build one tree.
+    ///
+    /// [`spec:nsh:req:idiom.canonical-tree+1`] over one of every
+    /// construct a shell has, with the second spelling *derived* rather
+    /// than listed: the source is one, and rendering the parsed tree from
+    /// its structure is the other. A hand-written list of pairs is a
+    /// corpus, and two nodes running have now shown the corpus to be the
+    /// limit rather than the property.
+    ///
+    /// The breadth is the same corpus the byte-exact property uses, and
+    /// for the same reason: a construct that stops being canonical says
+    /// which construct rather than which artifact.
+    // [spec:nsh:req:idiom.canonical-tree+1/test]
+    #[test]
+    fn two_spellings_of_one_program_build_one_tree() {
+        let mut shell = shell();
+        for source in CONSTRUCTS {
+            match builds_one_tree_per_program(&mut shell, BStr::new(source)) {
+                Canonicity::OneTree | Canonicity::NotParsed | Canonicity::Aliased => {}
+                Canonicity::TwoTrees { respelled } => panic!(
+                    "{:?} and {:?} are one program and parsed to two trees",
+                    BStr::new(source),
+                    respelled
+                ),
+                Canonicity::Unreadable { respelled } => panic!(
+                    "{:?} was respelled as {:?}, which does not parse",
+                    BStr::new(source),
+                    respelled
+                ),
+            }
+        }
+    }
+
+    /// The fallback speller cannot yet spell every tree, and this counts it.
+    ///
+    /// A number rather than silence. Holding the fallback to arbitrary
+    /// parsed trees goes well past what it was written for -- its
+    /// contract is nodes the shell built, which are simple -- and over
+    /// the corpus the byte-exact campaigns reduced to, it writes a
+    /// different program for 53 of 101. Every one of them is the
+    /// speller's, not the parser's: no input yet found makes the parser
+    /// build two trees for one program.
+    ///
+    /// THE CLASSES, so a fix can be aimed rather than searched for. An
+    /// operand inside `${...}` is spelled with quotes that a
+    /// here-document body reads as bytes. A literal `$` before an inert
+    /// run spells as `$'...'`, which reads back as one ANSI-C quote
+    /// rather than two parts. A NUL byte is dropped. An empty arithmetic
+    /// expansion spells its empty word as `''`. `$[...]` is respelled
+    /// `$((...))`, and an array subscript can be truncated.
+    ///
+    /// THIS IS ALSO THE PROPERTY'S NON-VACUITY. The test above would pass
+    /// just as happily against a comparison that returned `OneTree` for
+    /// everything; these 53 are the evidence that it does not.
+    // [spec:nsh:req:idiom.canonical-tree+1/test]
+    #[test]
+    fn the_fallback_speller_is_not_yet_total() {
+        let mut shell = shell();
+        let failures = ROUNDTRIP_CORPUS
+            .iter()
+            .filter(|(_, source)| {
+                !matches!(
+                    builds_one_tree_per_program(&mut shell, BStr::new(source)),
+                    Canonicity::OneTree | Canonicity::NotParsed | Canonicity::Aliased
+                )
+            })
+            .count();
+        assert_eq!(
+            failures,
+            53,
+            "the fallback speller writes a different program for {failures} of {} shapes, not 53 -- \
+             if that is fewer, lower the number and say which class went; if more, something regressed",
+            ROUNDTRIP_CORPUS.len()
+        );
+    }
+
     #[test]
     fn the_round_trip_corpus_comes_back_exactly() {
         let mut shell = shell();
