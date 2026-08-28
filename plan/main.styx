@@ -7049,6 +7049,13 @@ children (
                                         kind @note
                                         text "The lexer already produces tokens and throws them away. `lexer.output: Vec<WordToken>` is consumed by `ParsedWord::from_tokens` at `parser.rs:1823` -- one consumer, one line after it is filled -- and every byte outside a word (a keyword, an operator, a blank, a comment, a newline, a line continuation) is read and never recorded at all.\n\nWHAT LOSSLESS MEANS HERE. Concatenating a parse's tokens reproduces the bytes the parser read. That includes the ones nothing currently keeps: the blanks between words, `#` comments, `\\` line continuations, and the newlines that separate commands. Those are what make the round-trip property byte-exact rather than approximately-exact, and they are the part of this change that touches the most code.\n\nNOT A SEPARATE PASS. Shell cannot be tokenized ahead of parsing: a here-document body, a `${...}` operand and a `=~` operand each have their own lexical rules, and which applies depends on what is being parsed. `read_word_token(shell, firstc, SyntaxContext, mark, ...)` is already a mode-driven lexer that the parser drives, which is the right shape. This node keeps its output; it does not restructure when it runs.\n\nOWNED BYTES, NOT SPANS. There is no single buffer to span into. `input.rs` supplies bytes from strings, files, terminals and alias expansions, interleaved, and a here-document body is read at a different time from the redirection that named it. Tokens own their bytes.\n\nWATCH FOR. Alias expansion substitutes text before the parser sees it, so tokens record the expanded form; that is accepted in [dec:nsh:tokens-are-the-truth] and is the one place the byte-exact property does not hold against the typed source. `input.rs` is 1329 lines and is where the boundary between \"read\" and \"recorded\" actually lives.\n\nDONE WHEN. A parse can be asked for its tokens, and concatenating them equals the input the parser consumed, for the whole round-trip corpus and for every construct in the survey suites."
                                     }
+
+                                    {
+                                        at 2026-08-28T00:16:40.558994791Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 

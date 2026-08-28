@@ -237,6 +237,13 @@ pub struct InputStack {
     pub(crate) standard_input_is_terminal: Option<bool>,
     /// See [`InputStack::take_alias_boundary`].
     alias_boundary: bool,
+    /// Every byte the parse in progress has consumed, cut into tokens.
+    ///
+    /// The reader is the only place that knows what was actually read --
+    /// input arrives here from strings, files, terminals and alias
+    /// expansions interleaved -- so it is where the record is kept.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) tokens: crate::parser::TokenLog,
 }
 
 impl InputStack {
@@ -270,6 +277,7 @@ impl InputStack {
             prompt: None,
             standard_input_is_terminal: None,
             alias_boundary: false,
+            tokens: crate::parser::TokenLog::new(),
         }
     }
 
@@ -281,6 +289,11 @@ impl InputStack {
     /// Begin a parser entry with the shell's current dialect snapshot.
     pub(crate) fn begin_parse(&mut self, dialect: crate::options::Dialect) {
         self.parse_dialect = dialect;
+        /* Bound to the frame the parse starts on, so that a string pushed
+         * underneath it -- the text `parsebackq` re-reads a legacy
+         * backquote from -- is not recorded a second time. */
+        // [spec:nsh:def:idiom.token-stream]
+        self.tokens.begin(self.current);
     }
 
     /// The immutable dialect for the parser entry now in progress.
@@ -592,14 +605,12 @@ fn read_input_unit_with_mode(
         input_frame = current_input_frame(&mut shell.input);
     }
 
-    'read_next_unit: loop {
+    let unit = 'read_next_unit: loop {
         if input_frame.unread_count != 0 {
             let unread_count = input_frame.unread_count;
             input_frame.unread_count -= 1;
 
-            return Ok(InputUnit::Byte(
-                text(input_frame)[input_frame.position - unread_count],
-            ));
+            break InputUnit::Byte(text(input_frame)[input_frame.position - unread_count]);
         }
 
         if input_frame.line_remaining > 0 {
@@ -617,8 +628,17 @@ fn read_input_unit_with_mode(
             input = refill_input_buffer(shell, preserve_nul)?;
         }
 
-        return Ok(input);
+        break input;
+    };
+
+    /* The one place a byte crosses from the input sources into the parser,
+     * and so the one place the record of what was read can be complete. */
+    // [spec:nsh:def:idiom.token-stream]
+    if let InputUnit::Byte(byte) = unit {
+        let frame = shell.input.current;
+        shell.input.tokens.record(frame, byte);
     }
+    Ok(unit)
 }
 
 // [spec:dash:sem:input.pgetc-eoa-fn]
@@ -964,6 +984,9 @@ fn refill_input_buffer(
 // [spec:dash:sem:input.pungetn-fn]
 pub fn unread_input_units(shell: &mut Shell, count: usize) {
     current_input_frame(&mut shell.input).unread_count += count;
+    // [spec:nsh:def:idiom.token-stream]
+    let frame = shell.input.current;
+    shell.input.tokens.unrecord(frame, count);
 }
 
 /*

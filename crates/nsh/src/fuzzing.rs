@@ -126,7 +126,7 @@ fn print_program(shell: &Shell, program: &[Node]) -> BString {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::Streams;
 
@@ -600,7 +600,7 @@ EOF
     /// coming back. When the printer prints what it parsed, this list is
     /// checked with [`printing_is_reversible`] instead, and the fixed point
     /// stops needing its own assertion because reversibility implies it.
-    const ROUNDTRIP_CORPUS: &[(&str, &[u8])] = &[
+    pub(crate) const ROUNDTRIP_CORPUS: &[(&str, &[u8])] = &[
         ("00128129edeba44b19fa00f4544cd649b211579e", b"\"${1='f}\""),
         ("010ba1fccf3af318153989abf14f81cc45ac74ae", b"<<t\n${a-'}"),
         (

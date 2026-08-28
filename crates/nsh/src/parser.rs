@@ -482,7 +482,12 @@ pub fn parse_command(shell: &mut Shell, interactive: bool) -> Result<ParseResult
         select_prompt(shell, PromptKind::Primary)?;
     }
     shell.input.prompt_needed = false;
-    let mut result = list(shell, ListMode::TopLevel)?;
+    let parsed = list(shell, ListMode::TopLevel);
+    /* Sealed whether the parse succeeded or not: a rejected parse still
+     * consumed bytes, and a log that dropped them would claim otherwise. */
+    // [spec:nsh:def:idiom.token-stream]
+    shell.input.tokens.seal();
+    let mut result = parsed?;
     let bodies = core::mem::take(&mut shell.input.completed_here_documents);
     finalize::parse_result(shell, &mut result, bodies)?;
     Ok(result)
@@ -1116,6 +1121,10 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
             word.push_literal_byte(b'\n');
         }
         let body = WordNode { word };
+        /* The body and the delimiter line that ended it were read here,
+         * far from the redirection that named them. */
+        // [spec:nsh:def:idiom.token-stream]
+        shell.input.tokens.cut(SourceTokenKind::HereDocument);
         shell.input.completed_here_documents.push(body);
     }
     Ok(())
@@ -1139,18 +1148,20 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
 
     loop {
         token = read_next_token(shell, &context)?;
+        // [spec:nsh:def:idiom.token-stream]
+        shell.input.tokens.cut_token(token.kind);
 
         /*
          * eat newlines
          */
-        if context.skip_newlines {
-            while token.kind == TokenKind::Newline {
-                parse_here_documents(shell)?;
-                /* The alias bit is dropped with the rest: dash clears the
-                 * whole of `checkkwd` here, and the bit lived in it. */
-                shell.input.clear_alias_boundary();
-                token = read_next_token(shell, &context)?;
-            }
+        while context.skip_newlines && token.kind == TokenKind::Newline {
+            parse_here_documents(shell)?;
+            /* The alias bit is dropped with the rest: dash clears the
+             * whole of `checkkwd` here, and the bit lived in it. */
+            shell.input.clear_alias_boundary();
+            token = read_next_token(shell, &context)?;
+            // [spec:nsh:def:idiom.token-stream]
+            shell.input.tokens.cut_token(token.kind);
         }
 
         /* `popstring` sets this while `xxreadtoken` runs. The bit belongs
@@ -1249,9 +1260,28 @@ fn read_next_token(shell: &mut Shell, context: &TokenContext) -> Result<Token, E
     }
     loop {
         /* until token or start of word found */
+        let before_skip = shell.input.tokens.pending_length();
         input = read_unit_skipping_line_continuations(shell)?;
+        /* The continuations a token is reached through are read by the call
+         * that reads its first byte, so the cut between them lands behind
+         * the reader's position. Only when nothing was already pending is
+         * the leading run known to be trivia and nothing else. */
+        // [spec:nsh:def:idiom.token-stream]
+        let leading = shell
+            .input
+            .tokens
+            .pending_length()
+            .saturating_sub(usize::from(input.byte().is_some()));
+        if before_skip == 0 {
+            shell
+                .input
+                .tokens
+                .cut_head(leading, SourceTokenKind::LineContinuation);
+        }
         if input.is(b' ') || input.is(b'\t') {
             shell.input.last_token_after_blank = true;
+            // [spec:nsh:def:idiom.token-stream]
+            shell.input.tokens.cut(SourceTokenKind::Blank);
             continue;
         } else if input.is(b'#') && !regex_operand {
             loop {
@@ -1261,6 +1291,8 @@ fn read_next_token(shell: &mut Shell, context: &TokenContext) -> Result<Token, E
                 }
             }
             unread_input_unit(shell);
+            // [spec:nsh:def:idiom.token-stream]
+            shell.input.tokens.cut(SourceTokenKind::Comment);
             continue;
         } else if input.is(b'\n') {
             consume_newline_without_prompt(shell);
@@ -1386,9 +1418,11 @@ fn read_unit_for_syntax(shell: &mut Shell, stack: &SyntaxFrame) -> Result<InputU
 
 mod multibyte;
 mod syntax_stack;
+mod tokens;
 mod word_lexer;
 
 pub(crate) use multibyte::MultibyteMode;
+pub(crate) use tokens::{SourceTokenKind, TokenLog};
 use word_lexer::{ParenthesisOutcome, WordPosition, close_parenthesis};
 
 /// Result of decoding the input unit at the current lexer position.
@@ -2676,3 +2710,6 @@ mod bash_ast_tests;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod token_stream_tests;

@@ -5331,7 +5331,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.job-storage, version 0}
     )}
-    {id retain-the-token-stream}
+    {id retain-the-token-stream, covered_rules (
+        idiom.token-stream
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.token-stream}
+    )}
     {id retire-port-topology-contracts, covered_rules (
         idiom.port-provenance
     ), covered_claims (
