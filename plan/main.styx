@@ -6926,7 +6926,7 @@ children (
 
                     {
                         id canonicalize-the-syntax-tree
-                        title "Give a program exactly one tree"
+                        title "Carry the tokens into the tree and print them back"
                         kind @refactor
                         deps (make-printing-reversible)
                         children (
@@ -6997,12 +6997,12 @@ children (
 
                             {
                                 id canonicalize-word-parts
-                                title "Have the lexer build one canonical word, not two shapes of the same one"
+                                title "Split the word into a canonical structure and the tokens it was read as"
                                 kind @refactor
                                 implements {
-                                    nsh-library ([spec:nsh:req:idiom.canonical-tree])
+                                    nsh-library ([spec:nsh:req:idiom.canonical-tree+1])
                                 }
-                                deps (measure-tree-canonicity)
+                                deps (measure-tree-canonicity carry-tokens-into-the-tree)
                                 log (
                                     {
                                         at 2026-08-27T23:01:32.667065472Z
@@ -7017,27 +7017,12 @@ children (
                                         kind @note
                                         text "Widened after the canonicity decision. There is no tokenization here to keep, so the collapse and the deletion are one change and not two.\n\n`WordToken` is `WordPart` flattened. Ten variants against eight, differing only in that nesting is spelled `ParameterStart`/`ParameterEnd` and `ArithmeticStart`/`ArithmeticEnd` instead of recursion, and that `Literal` carries one byte instead of a run. `TokenDecoder::word_until` re-nests it. Checked: outside its own definition and tests, `WordToken` appears only in `parser/word_lexer.rs`, `parser.rs` and `parser/bash.rs`, and the whole stream has exactly one consumer -- `ParsedWord::from_tokens` at `parser.rs:1823`, fed from `mem::take(&mut lexer.output)`.\n\nSo it is not a token stream that anything parses. It is the same data model emitted flat and immediately un-flattened, and it carries the same spelling the tree does, so both layers admit the same equivalent forms. Splitting this from the collapse would leave a half-migrated state where one shape is canonical and the other is not.\n\nTARGET. The lexer builds the canonical word directly. `WordToken`, `TokenDecoder`, `from_tokens` and `lexer.output` go. The word becomes runs of bytes with an inert flag, the expansion parts, and two markers that carry meaning rather than spelling: an empty quoted run, because `a=''` and `a=` are different programs, and `$\"...\"`, because locale translation is behaviour. `Escaped`, `Protected`, `QuoteKind` and `Multibyte.escaped` fold into the flag. `ParsedWord.spelling` stops being a stored field taking part in equality.\n\nORDER WITHIN THE NODE. `invalid_marker` and `invalid_prefix` are removed last, and only once the diagnostics they serve have somewhere else to read from -- see the decision on `decide-tree-canonicity`. Removing them first would make a rejected expansion's message worse in order to make the tree cleaner, which is the trade this decision did not make.\n\nCONSUMERS TO CARRY. `parser/word_lexer.rs` stops choosing between `push_escaped` and `push_protected` and records inertness instead. `expand.rs`, `ParsedWord::is_assignment`, `units`/`from_units` and the Bash array-assignment path in `parser/bash.rs` all match on the old variants. `ansi_c_quote` becomes a printer-side spelling choice rather than a parse-time re-encoding."
                                     }
-                                )
-                            }
-
-                            {
-                                id derive-printer-quoting
-                                title "Make the printer ask the lexer's syntax table, not its own copy of it"
-                                kind @refactor
-                                deps (canonicalize-word-parts)
-                                log (
-                                    {
-                                        at 2026-08-27T23:01:45.846597574Z
-                                        author "brendan@necessary.nu"
-                                        kind @note
-                                        text "What the collapse pays for: deleting the table the fuzzer keeps walking.\n\n`Quoting` is eleven named variants, there are four region printers, and the protection rule is a hand-maintained set of bytes per variant:\n\n    Double                          \"\\$`\n    DoubleParameter                 \"\\$`\n    DoubleProtectedParameter       '\"\\$`\n    DoubleInertParameter            \"\\$`}\n    Parameter                      '\"\\$`}\n    Subscript                      '\"\\$`]\n    HereDocument                     \\$`\n    HereDocumentParameter           \"\\$`}\n    HereDocumentProtectedParameter '\"\\$`}\n\nThat is a cross-product of about five independent questions -- is an apostrophe a quote here, may a `\"` be written, does a `}` end something, does a `]`, does the context discard quote bytes before evaluating. Eleven named cells for thirty-two states, so a missing or inconsistent cell is invisible: `DoubleProtectedParameter` protects `'` but not `}` while its here-document twin protects both, and nothing in this shape says whether that is deliberate. Every one of the last 28 commits edited a cell, and a three-minute campaign still found 341 crashes.\n\nTARGET. The context becomes a small computed set of flags carried down the descent, and protection becomes one function of the byte, the flags, and the required inertness. Most of the table exists only to guess which of the four spellings the source used; once the tree no longer records that, the question is just \"emit a spelling that survives here\", which has one answer per byte.\n\n`operand_needs_apostrophe_protection` keyed on thirteen of eighteen `ParameterOperation`s is the same shape and goes the same way: whether an operand is a pattern is a property of the operation, so it belongs in the flags rather than in a match at every use.\n\nDONE WHEN. `nodes/source.rs` has no per-context byte table, `Quoting` is not an enum of named combinations, and a fresh campaign of at least an hour produces no new distinct root cause in the printer. The function count is a signal but not the goal: it was 73 at its peak and 64 after the last pass, and absorbing rules by deleting predicates is what has been working."
-                                    }
 
                                     {
-                                        at 2026-08-27T23:54:40.121289296Z
+                                        at 2026-08-28T00:04:58.09709395Z
                                         author "brendan@necessary.nu"
                                         kind @note
-                                        text "Rewritten. The earlier framing -- replace the eleven-variant enum with computed flags and one protection function -- was too weak, because a hand-written set of flags is a third private copy of the grammar rather than one fewer.\n\nTHE ACTUAL FAULT. `SyntaxContext::classify` in `crates/nsh/src/syntax.rs:106` already answers the printer's question, authoritatively, in the parser: given a context and a byte, is this byte syntax or is it data. The printer needs precisely its inverse -- to write byte B as data in context C, protect it exactly when `C.classify(B)` is not `Word` -- and instead carries nine hand-maintained byte-sets and an eleven-variant `Quoting` taxonomy against the lexer's five `SyntaxContext` variants. Two encodings of one grammar, obliged to agree, with nothing that makes them agree and only the fuzzer to notice when they do not.\n\nThey have already drifted. `Quoting::Double` protects `\" \\ $ ` `; `SyntaxContext::DoubleQuoted` classifies `\\n` and `}` as syntax too, and gives `! * - / : = ? [ ] ^ ~` their own `Control` class that the printer reconstructs through `Protected` marks and the `DoubleProtectedParameter`/`DoubleInertParameter` split. Neither table is wrong on its own terms. There is no way to tell, from either one, whether a difference between them is deliberate.\n\nThe eleven contexts are also a re-derivation of state the lexer already holds. `Parameter`, `DoubleParameter`, `DoubleInertParameter` and `HereDocumentParameter` are `variable_depth` -- which `parser/bash.rs` already reads as `lexer.current_syntax().variable_depth`. `HereDocument` is a body lexed under `SyntaxContext::DoubleQuoted`. `Subscript` is the bracket state `track_assignment_subscript` maintains. The printer invented names for combinations the parser tracks as values.\n\nTARGET. `Quoting` is deleted. The printer descends carrying the lexer's own context type and asks `classify`. Where the printer needs more than the classifier gives -- the depth, the bracket state -- it carries the same field the lexer carries rather than a name for a combination of them. The nine byte-sets, `protected`, `operand_needs_apostrophe_protection`, and the four region printers go with it.\n\nWHY A PRINTER STILL EXISTS AT ALL. `declare -f`, diagnostics and job display need one, and Bash has one for the same reasons. What it does not need is a grammar. After this it is a traversal that chooses layout and asks the parser what needs protecting.\n\nDONE WHEN. `nodes/source.rs` contains no table of bytes and no context enum of its own; the only answer to \"is this byte special here\" in the crate is `SyntaxContext::classify`; and an hour-long campaign produces no new distinct printer root cause."
+                                        text "Retargeted. The earlier note said the four spellings collapse into bytes plus an inert flag and the spelling is discarded. Under [dec:nsh:tokens-are-the-truth] the spelling is not discarded, it moves: the structure keeps what changes the program, the tokens keep what the source said.\n\nSTRUCTURE. Runs of bytes with an inert flag, the three expansion parts, and two markers that carry meaning rather than spelling -- an empty quoted run, since `a=''` and `a=` are different programs, and `$\"...\"`, since locale translation is behaviour. `Escaped`, `Protected`, `QuoteKind` and `Multibyte.escaped` stop being structural alternatives, so `echo 'a'`, `echo \"a\"` and `echo \\a` have one shape.\n\nTOKENS. Which quote opened the run and which byte wore a backslash, held on the word as the tokens it was read as, not as a choice between parts.\n\nSTILL TRUE FROM BEFORE. `WordToken`, `TokenDecoder`, `from_tokens` and `lexer.output` go -- but now because `retain-the-token-stream` replaces them with a stream that is kept, not because the flat shape is deleted unreplaced. `ParsedWord.spelling` stops being a stored field taking part in equality.\n\nCONSUMERS TO CARRY. `parser/word_lexer.rs` stops choosing between `push_escaped` and `push_protected` and records inertness. `expand.rs`, `ParsedWord::is_assignment`, `units`/`from_units` and the Bash array-assignment path in `parser/bash.rs` all match on the old variants. `ansi_c_quote` stops being a parse-time re-encoding; `$'...'` keeps its source spelling in its tokens and its decoded value in the structure, which is the split this node exists to make."
                                     }
                                 )
                             }
@@ -7052,6 +7037,72 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Replaces `record-what-the-printer-cannot-spell`, which the canonicity decision made wrong. That node claimed the tree could not hold the here-document delimiter or the arithmetic delimiter and had to grow representation for both. Measured against Bash, neither claim survives.\n\nTHE ARITHMETIC. Of the eight stored artifacts in this family, Bash parses six -- `$((]))`, `$(([))$()`, `$[]]`, `$[\\\\a]`, `$((\\\\a))`, `$((${a#'${'}))`. Their errors are at evaluation (\"operand expected\"), not at parse, so accepting them is correct. Every one is spellable in the form it was written, so there is no representation gap: the printer chooses a delimiter that changes the content. `$((]))` prints `$[]]`, and those are different programs -- Bash gives `0]` for the second, because `$[` ends at the first `]` while `$((` ends at `))`. That belongs to the printer and is already covered by `stop-the-printer-inventing`.\n\nThe remaining two are this node. Bash rejects `$[])a]` and `$[$(a+=)))` outright; nsh parses them and then cannot write them back. `[spec:nsh:req:idiom.canonical-tree]` says where no spelling of a construct exists the parser MUST reject it rather than admit a tree that cannot be written back, so these are parse bugs and the round-trip failure is the symptom that found them.\n\nTHE HERE-DOCUMENT DELIMITER. Also not representation. Bash accepts `<<\"\"` and `<<''` spells it; the printer emits the invented `EOF` instead. A delimiter holding a quote round-trips in Bash too -- `cat <<${a:''}` with `$a` in the body expands it and closes on the same bytes -- so the delimiter nsh holds is spellable and the printer mangles it. Also `stop-the-printer-inventing`.\n\nWHAT IS ACTUALLY LOST. Nothing that needs recording. `<<\"E\"` and `<<'E'` collapsing to one tree is what canonicity requires, not a defect.\n\nDONE WHEN. The two forms Bash rejects are refused with a diagnostic rather than parsed, and a test pins them against the reference rather than against a printed form."
+                                    }
+                                )
+                            }
+
+                            {
+                                id retain-the-token-stream
+                                title "Keep every byte the lexer reads as an owned token"
+                                kind @refactor
+                                implements {
+                                    nsh-library ([spec:nsh:def:idiom.token-stream])
+                                }
+                                deps (decide-tree-canonicity)
+                                log (
+                                    {
+                                        at 2026-08-28T00:04:04.290480519Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "The lexer already produces tokens and throws them away. `lexer.output: Vec<WordToken>` is consumed by `ParsedWord::from_tokens` at `parser.rs:1823` -- one consumer, one line after it is filled -- and every byte outside a word (a keyword, an operator, a blank, a comment, a newline, a line continuation) is read and never recorded at all.\n\nWHAT LOSSLESS MEANS HERE. Concatenating a parse's tokens reproduces the bytes the parser read. That includes the ones nothing currently keeps: the blanks between words, `#` comments, `\\` line continuations, and the newlines that separate commands. Those are what make the round-trip property byte-exact rather than approximately-exact, and they are the part of this change that touches the most code.\n\nNOT A SEPARATE PASS. Shell cannot be tokenized ahead of parsing: a here-document body, a `${...}` operand and a `=~` operand each have their own lexical rules, and which applies depends on what is being parsed. `read_word_token(shell, firstc, SyntaxContext, mark, ...)` is already a mode-driven lexer that the parser drives, which is the right shape. This node keeps its output; it does not restructure when it runs.\n\nOWNED BYTES, NOT SPANS. There is no single buffer to span into. `input.rs` supplies bytes from strings, files, terminals and alias expansions, interleaved, and a here-document body is read at a different time from the redirection that named it. Tokens own their bytes.\n\nWATCH FOR. Alias expansion substitutes text before the parser sees it, so tokens record the expanded form; that is accepted in [dec:nsh:tokens-are-the-truth] and is the one place the byte-exact property does not hold against the typed source. `input.rs` is 1329 lines and is where the boundary between \"read\" and \"recorded\" actually lives.\n\nDONE WHEN. A parse can be asked for its tokens, and concatenating them equals the input the parser consumed, for the whole round-trip corpus and for every construct in the survey suites."
+                                    }
+                                )
+                            }
+
+                            {
+                                id carry-tokens-into-the-tree
+                                title "Give every node the tokens it was parsed from"
+                                kind @refactor
+                                deps (retain-the-token-stream)
+                                log (
+                                    {
+                                        at 2026-08-28T00:04:18.071765453Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Every node holds the tokens it was parsed from: a `SimpleCommand` its words' tokens and the blanks between them, an `IfCommand` its `if`/`then`/`fi`, a `CaseClause` its `)` and its `;;`, a word its own run. A node built rather than parsed holds none, and renders through the fallback in `print-by-emitting-tokens`.\n\nWHAT THIS RETIRES. `ParameterExpansion.invalid_marker` and `.invalid_prefix` exist so a rejected expansion can be quoted back; the node's tokens are that, uniformly, for every construct rather than for one. `ParsedWord.spelling` is a derived cache of a lossy rendering; the tokens are the real thing. `NodeText` for the here-document delimiter is the delimiter's tokens.\n\nEQUALITY IS THE DELICATE PART. `[spec:nsh:req:idiom.canonical-tree+1]` says comparing trees as programs ignores tokens and comparing them as text considers nothing else. A derived `PartialEq` would do the opposite of what almost every caller wants, so the token field must not take part in it, and the byte comparison must be its own operation. `SourceLine`'s unconditional `eq` is the existing precedent and the existing warning: an equality that lies is easy to write and hard to notice.\n\nSCOPE. `nodes.rs` is 403 lines and `nodes/bash.rs` 130, but the arms are in `evaluation.rs`, `execution.rs`, `expand.rs`, `jobs.rs` and `parser/bash.rs`. Constructing a node gains a token argument everywhere the parser builds one; matching on a node does not change.\n\nDONE WHEN. Every node the parser builds carries its tokens, the three ad-hoc spelling fields are gone, and program equality demonstrably ignores tokens while text equality demonstrably does not."
+                                    }
+                                )
+                            }
+
+                            {
+                                id print-by-emitting-tokens
+                                title "Delete the printer's grammar and emit what was read"
+                                kind @refactor
+                                implements {
+                                    nsh-library ([spec:nsh:req:idiom.printable-ast+2])
+                                }
+                                deps (carry-tokens-into-the-tree)
+                                log (
+                                    {
+                                        at 2026-08-28T00:04:31.549435788Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Replaces `derive-printer-quoting`, which proposed to make the printer consult `SyntaxContext::classify` instead of its own byte table. That was still a printer that derives spelling, only from a better source. Deriving is the defect: the parser read the bytes, so any second computation of them can disagree, and only a fuzzer notices. Emitting what was read cannot disagree.\n\nWHAT GOES. `Quoting` and its eleven variants; the nine per-context byte-sets; `protected`; `operand_needs_apostrophe_protection` keyed on thirteen of eighteen operations; `quoted_region`, `double_parameter_quoted_region`, `here_document_parameter_quoted_region` and `arithmetic_quoted_region`; `arithmetic_delimiters_balanced`. All of it exists to re-derive what the tokens record. `nodes/source.rs` is 1537 lines and most of it is this.\n\nWHAT STAYS. A traversal, and a fallback for nodes carrying no tokens because the shell synthesized them rather than parsing them. That fallback is the only place anything decides how to spell a construct, and it is bounded by what the shell builds rather than by the grammar -- so it is small, and it is the one place the old defects could recur. It wants to be visibly separate from the emission path rather than mixed into it.\n\nWHAT THIS FIXES BY CONSTRUCTION. The three inventions -- `for a in \"$@\"` for an empty list, `<<'EOF'` for an empty delimiter, the arithmetic delimiter that truncates its content -- become unreachable, because there is nothing left to invent with. `stop-the-printer-inventing` fixes them before this lands, since it is four lines against a shipping `declare -f` defect and this is not.\n\nDONE WHEN. `nodes/source.rs` contains no table of bytes, no quoting enum, and no second answer to \"is this byte special here\". `declare -f` reproduces a function as written."
+                                    }
+                                )
+                            }
+
+                            {
+                                id prove-byte-exact-round-trip
+                                title "Replace the tree comparison with a byte comparison"
+                                kind @test
+                                deps (print-by-emitting-tokens)
+                                log (
+                                    {
+                                        at 2026-08-28T00:04:46.315086775Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "The oracle collapses. `print(parse(x)) == x` is a byte equality, so `printing_is_reversible`, the `Reversibility` verdict with its four arms, `parse_program`, `print_program` and every tree-comparison question the fuzz target asks are replaced by one comparison. `fuzz/fuzz_targets/roundtrip.rs` stops fingerprinting two printed forms and reports the first differing offset instead, which is a far better artifact to reduce.\n\nSTRICTLY STRONGER. The current property passes when a printed program reparses to the same tree, which is satisfiable by output that is not what was written -- that is how `declare -f` came to hand back a function that behaves differently. Byte equality has no such slack. Everything the old property caught, this catches; the 85 live artifacts and the 205 further minimal forms from the campaign are all inputs to it unchanged.\n\nTWO THINGS IT MUST NOT CLAIM. Alias substitution replaces text before the parser sees it, so an input containing an alias expansion round-trips to the expanded form; the target must exclude that rather than pretend. And a tree that was built rather than parsed has no bytes to be equal to -- that path is the fallback's, and wants the old tree-comparison property kept for it alone.\n\nRE-SWEEP. `fuzz/sweep.sh --prune` against the new target, and the count reported honestly: the corpus was 285 before the property was strengthened last time and 85 after, and a stronger property is expected to resurrect artifacts rather than only close them.\n\nDONE WHEN. The target is a byte comparison, the corpus has been swept against it, and an hour-long campaign is clean -- which is the first time that sentence has been meaningful, because it is the first property that can be satisfied."
                                     }
                                 )
                             }

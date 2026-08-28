@@ -41,25 +41,29 @@ undefined behavior.
 > outside the parsed tree rather than through `Cell`, `RefCell`, mutex slots, or
 > other delayed mutation of syntax.
 
-> [spec:nsh:req:idiom.canonical-tree]
-> A program MUST have exactly one tree. Sources that differ only in how they
-> spell the same program MUST parse to the same tree, and the tree MUST NOT
-> record which spelling was written: which quote opened a run, whether a byte
-> was made inert by a backslash or by the quoting around it, and which of two
-> interchangeable delimiters was used are spelling. A distinction that changes
-> what the program does is not spelling and MUST be represented. Where no
-> spelling of a construct exists, the parser MUST reject it rather than admit a
-> tree that cannot be written back.
+> [spec:nsh:def:idiom.token-stream]
+> Tokenizing MUST produce owned tokens that account for every byte the parser
+> consumes, including blanks, comments, line continuations, and the newlines
+> between commands. Concatenating the tokens of a parse MUST reproduce the input
+> the parser read. Tokenizing is mode-driven rather than a separate pass, because
+> a shell's lexical rules depend on the construct being parsed; the mode is the
+> lexer's own syntax context, and no consumer of tokens may hold a second one.
 
-> [spec:nsh:req:idiom.printable-ast+1]
-> Rendering a parsed syntax tree back as shell source and parsing that source
-> again MUST produce the same tree, apart from the source positions the render
-> relocates. A renderer MUST NOT substitute a different construct for one it
-> cannot spell, so every construct the parser accepts MUST be representable in
-> the tree together with whatever the renderer needs to spell it again. Spelling
-> and layout -- which quote, which escape, which of two interchangeable
-> delimiters, indentation, separators, and line breaks -- are not part of the
-> tree and are the renderer's to choose.
+> [spec:nsh:req:idiom.canonical-tree+1]
+> Sources that differ only in how they spell the same program MUST parse to the
+> same structure. Spelling MUST be recorded only as the tokens a node was read
+> as, never as a choice between structural forms: there MUST NOT be two shapes
+> of node or of word part for one program. Comparing two trees as programs MUST
+> ignore their tokens; comparing two trees as text MUST consider nothing else.
+
+> [spec:nsh:req:idiom.printable-ast+2]
+> Rendering a parsed syntax tree back as shell source MUST reproduce the bytes
+> it was parsed from, apart from alias substitution, which replaces source text
+> before the parser sees it. A renderer MUST emit the tokens the tree holds
+> rather than spell the construct again, so it has no grammar of its own and
+> cannot substitute a construct for one it cannot spell. A node carrying no
+> tokens, because it was built rather than parsed, MUST still render as source
+> that parses to a structurally equal node.
 
 > [spec:nsh:sem:idiom.typed-expansion]
 > Word expansion consumes Parsed Words and produces owned byte-string fields.

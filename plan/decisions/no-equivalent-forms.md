@@ -5,13 +5,13 @@ state @decided
 category @property
 scope {
     elements ([arch:nsh:shell-core])
-    rules ([spec:nsh:req:idiom.canonical-tree] [spec:nsh:req:idiom.printable-ast+1])
+    rules ([spec:nsh:req:idiom.canonical-tree+1])
 }
 author "brendan@necessary.nu"
 alternatives (
     {
-        option "Concrete syntax: the tree records exactly what was written, losslessly, and every normalization moves into the evaluator."
-        rejected_because "It makes printing trivially correct by making every consumer of the tree carry distinctions that do not affect behaviour. Evaluation, expansion, assignment classification and the Bash array path would each grow arms for which quote opened a run and whether a byte was made inert by a backslash or by the quoting around it -- none of which changes what the program does."
+        option "Concrete syntax: the structure itself records exactly what was written, so a quote's kind and a backslash's presence pick between node shapes."
+        rejected_because "It makes printing trivially correct by making every consumer of the tree carry distinctions that do not affect behaviour. Evaluation, expansion, assignment classification and the Bash array path would each grow arms for which quote opened a run and whether a byte was made inert by a backslash or by the quoting around it -- none of which changes what the program does. Recording the same facts as tokens beside a canonical structure buys the losslessness without the arms; see [dec:nsh:tokens-are-the-truth]."
     }
     {
         option "Keep the tree as it is and state the round-trip property modulo spelling: compare trees under an equality that ignores the spelling variants."
@@ -24,21 +24,21 @@ alternatives (
 )
 consequences {
     accepted (
-        "`declare -f` does not reproduce the operator's quoting. Already true and recorded in docs/divergences.md -- a quoted run is re-spelled, single quotes when nothing in it expands and double when something does -- verified behaviourally across 35 cases under both shells with byte-identical output. This makes it deliberate rather than incidental, and Bash does not promise it either."
+        "Canonicity is a property of the structure alone. Where the source said something the structure does not distinguish, that is recorded as the tokens the node was read as -- see [dec:nsh:tokens-are-the-truth] -- so nothing is lost by making the structure canonical, and `declare -f` reproduces the function as written."
         "`WordToken`, `TokenDecoder`, `from_tokens` and `lexer.output` are deleted rather than canonicalized alongside `WordPart`. `WordToken` is `WordPart` flattened -- ten variants against eight, differing only in that nesting is spelled with Start/End pairs instead of recursion -- and the whole stream has one consumer. Two shapes of one model, both carrying the same spelling, so both admit the same equivalent forms."
-        "`Escaped`, `Protected`, `QuoteKind` and `Multibyte.escaped` collapse into bytes plus an inert flag. Two markers survive because they carry meaning rather than spelling: an empty quoted run, since `a=''` and `a=` are different programs, and `$\"...\"`, since locale translation is behaviour."
+        "`Escaped`, `Protected`, `QuoteKind` and `Multibyte.escaped` stop being structural alternatives. What survives in the structure is what changes the program: whether a byte is inert, an empty quoted run since `a=''` and `a=` differ, and `$\"...\"` since locale translation is behaviour. Which quote and which escape wrote it are the node's tokens."
         "A construct with no spelling is a parse error, not a tree. Bash rejects `$[])a]` and `$[$(a+=)))`; nsh parses them and cannot write them back, and under this decision that is a parser defect rather than a printer one."
         "The round-trip property becomes well-posed. It was asking for a bijection an over-specified tree cannot provide, so five of its eighty-five failures were phantoms -- correct output failing an incoherent test -- and nothing distinguished them from the real ones."
     )
     deferred (
-        "A diagnostic that must show the bytes the operator typed has nowhere to read them once `ParameterExpansion.invalid_marker` and `.invalid_prefix` are gone. Those fields are the tree carrying source text so a rejected expansion can be quoted back. Replacing them means a span or slice into the input, which may not exist yet; until it does, they stay, and they are the last thing removed rather than the first."
+        "`ParameterExpansion.invalid_marker` and `.invalid_prefix` are the tree carrying source text so a rejected expansion can be quoted back. They stop being needed once the node holds its tokens, so they are removed with that change rather than before it."
         "`SourceLine::eq` still returns `true` unconditionally. Canonicity does not settle whether a position belongs in the tree at all -- only that spelling does not."
     )
 }
 edges {
     requires ([dec:nsh:owned-data])
 }
-codifies ([spec:nsh:req:idiom.canonical-tree])
+codifies ([spec:nsh:req:idiom.canonical-tree+1])
 ---
 
 ## Rationale
@@ -62,12 +62,13 @@ and `for a in "$@";` all collapse, and Bash collapses them identically. What
 does not collapse keeps its distinction: `;;` against `;&`, all three
 function-definition styles, `[[ ]]`, `until`, `&`.
 
-So the fault is the over-specification, and the fix is to remove it rather than
-to complete it. A program has one tree; spelling is the renderer's to choose,
-exactly as layout already is. The printer stops trying to recover which of four
-spellings the source used and instead emits one with the right inertness, which
-is a single function of the byte and its context rather than eleven named
-quoting contexts over a hand-maintained table of bytes to protect.
+So the fault is that one axis is smeared across the other, and the fix is to
+give each a home. Structure answers what the program is and is canonical: one
+shape per program. Tokens answer what the source said and are exact. Comparison
+picks the one it means -- programs ignore tokens, text considers nothing else --
+and neither question has to be asked of a representation that half-answers both.
+What that leaves for the renderer is emission, not choice; [dec:nsh:tokens-are-
+the-truth] carries that half.
 
 The honest accounting is that canonicity fixes five of the eighty-five open
 round-trip failures directly. That is not what it buys. It buys a property that
