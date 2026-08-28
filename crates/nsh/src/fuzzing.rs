@@ -2,127 +2,178 @@
 //! workspace.
 //!
 //! This module is public only with the `fuzzing` feature. It provides an
-//! opaque parse-and-print operation so the fuzzer can exercise the printer's
-//! semantic fixed-point without exposing the AST or parser as library API.
+//! opaque parse-and-print operation so the fuzzer can hold the renderer to
+//! the bytes it was given, without exposing the AST or parser as library
+//! API.
 
 use bstr::{BStr, BString};
 
 use crate::context::Shell;
-use crate::error::Error;
-use crate::nodes::Node;
 
-/// Parse `source` without executing it and return its canonical rendering.
+/// What comparing a printed program against its source found.
 ///
-/// The input frame and all parser-local resources are restored before this
-/// returns, including when parsing rejects the source. Calling this twice on
-/// its own output is the parse-and-print fuzzing property's fixed-point.
-pub fn canonical_source(shell: &mut Shell, source: &BStr) -> Result<BString, Error> {
-    crate::resource::with_resources(shell, |shell, _resources| {
-        crate::input::set_input_string(shell, source);
-        let mut rendered = BString::new(Vec::new());
-        loop {
-            match crate::parser::parse_command(shell, false)? {
-                crate::parser::ParseResult::Eof => break,
-                crate::parser::ParseResult::Tree(Some(node)) => {
-                    let command = crate::nodes::source::command(&shell.locale, &node);
-                    if command.is_empty() {
-                        continue;
-                    }
-                    rendered.extend_from_slice(&command);
-                    if command.last() != Some(&b'\n') {
-                        rendered.push(b'\n');
-                    }
-                }
-                crate::parser::ParseResult::Tree(None) => {}
-            }
-        }
-        Ok(rendered)
-    })
-}
-
-/// What printing a parsed program and reading it back again produced.
-///
-/// A verdict rather than a pair of trees: the property is what the fuzz
-/// workspace needs, and the syntax tree stays inside the crate that owns it.
+/// A verdict rather than a pair of texts: the property is what the fuzz
+/// workspace needs, and the syntax tree stays inside the crate that owns
+/// it.
 // [spec:nsh:req:idiom.printable-ast+2]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Reversibility {
-    /// The source did not parse, so there was nothing to print. An ordinary
-    /// answer to arbitrary bytes, and not a finding.
+pub enum RoundTrip {
+    /// The source did not parse, so there was nothing to print. An
+    /// ordinary answer to arbitrary bytes, and not a finding.
     NotParsed,
-    /// The printed program did not parse.
-    NotReparsed { printed: BString },
-    /// The printed program parsed as a different program.
-    Changed { printed: BString },
-    /// The printed program parsed as the same program.
-    Reversible { printed: BString },
+    /// An alias replaced text before the parser saw it, so the bytes it
+    /// read are not the bytes that were written. Carved out by the rule
+    /// rather than papered over.
+    Aliased,
+    /// Every byte came back.
+    Exact,
+    /// A byte did not, and `at` is the first offset where the printed
+    /// program and the source disagree. An offset reduces far better than
+    /// two whole texts.
+    Differed { at: usize, printed: BString },
+    /// The bytes came back and the marks into them did not agree with the
+    /// tree: a node's run is not inside the run of the node above it.
+    ///
+    /// Separate from `Differed` because it is a different failure and was
+    /// invisible to every property this replaces. Concatenating a tree's
+    /// bytes only ever reads the outermost run, so a child whose run is
+    /// empty, truncated, or pointing at someone else's tokens passes a
+    /// byte comparison and breaks anything that renders a subtree --
+    /// which is what `declare -f` does.
+    Misplaced { outer: BString, inner: BString },
 }
 
-/// Whether printing `source`'s program and parsing the result recovers it.
+/// Whether printing `source`'s program gives `source` back, byte for byte.
 ///
-/// This is [`spec:nsh:req:idiom.printable-ast`] made checkable. Source
-/// positions do not take part, because printing relocates every one of them
-/// and a position is provenance rather than identity -- see
-/// [`crate::nodes::SourceLine`].
+/// [`spec:nsh:req:idiom.printable-ast+2`] made checkable. The comparison
+/// is against the input itself and not against anything derived from the
+/// tree, which is what makes it able to fail: a run taken from the wrong
+/// place produces bytes that are not the ones that were read there.
+///
+/// Measured per parse unit, because a unit is what the parser consumes
+/// and what the input frame's own cursor can be asked about independently
+/// of the tree. A unit that produced no command contributes its own bytes
+/// and is required to be nothing but trivia -- otherwise a parser that
+/// silently dropped a command would satisfy this by having nothing to
+/// print.
 // [spec:nsh:req:idiom.printable-ast+2]
-pub fn printing_is_reversible(shell: &mut Shell, source: &BStr) -> Reversibility {
-    let Ok(program) = parse_program(shell, source) else {
-        return Reversibility::NotParsed;
-    };
-    let printed = print_program(shell, &program);
-    match parse_program(shell, printed.as_ref()) {
-        Err(_) => Reversibility::NotReparsed { printed },
-        Ok(reparsed) if reparsed != program => Reversibility::Changed { printed },
-        Ok(_) => Reversibility::Reversible { printed },
-    }
-}
-
-/// Parse every top-level command in `source` without executing any of them.
-///
-/// The input frame and all parser-local resources are restored before this
-/// returns, including when parsing rejects the source.
-///
-/// A top-level `;` produces a [`Node::Sequence`] while a newline produces two
-/// commands, and the two spell the same program: the separator is layout, so
-/// the sequence is flattened into the list it already is. Nothing below the
-/// top level is touched, where a sequence is a child rather than punctuation.
-fn parse_program(shell: &mut Shell, source: &BStr) -> Result<Vec<Node>, Error> {
+pub fn round_trips_byte_exactly(shell: &mut Shell, source: &BStr) -> RoundTrip {
     crate::resource::with_resources(shell, |shell, _resources| {
         crate::input::set_input_string(shell, source);
-        let mut program = Vec::new();
+        let mut printed = BString::new(Vec::new());
+        let mut consumed = 0usize;
         loop {
-            match crate::parser::parse_command(shell, false)? {
-                crate::parser::ParseResult::Eof => break,
-                crate::parser::ParseResult::Tree(Some(node)) => {
-                    push_command_sequence(&mut program, node);
+            let outcome = crate::parser::parse_command(shell, false);
+            if shell.input.tokens.expanded_alias() {
+                return RoundTrip::Aliased;
+            }
+            let frame = crate::input::current_input_frame(&mut shell.input);
+            let reached = frame
+                .position
+                .saturating_sub(frame.unread_count)
+                .min(source.len());
+            let unit = &source[consumed.min(reached)..reached];
+            consumed = reached;
+            match outcome {
+                Err(_) => return RoundTrip::NotParsed,
+                /* End of input still consumed whatever was in front of it
+                 * -- a comment on the last line, blanks after the last
+                 * command -- and those bytes are in no node, because
+                 * trivia goes to whatever follows it and here nothing
+                 * does. They are the unit's, so the unit contributes
+                 * them. */
+                Ok(crate::parser::ParseResult::Eof) => {
+                    if !is_only_trivia(unit) {
+                        return RoundTrip::Differed {
+                            at: printed.len(),
+                            printed,
+                        };
+                    }
+                    printed.extend_from_slice(unit);
+                    break;
                 }
-                crate::parser::ParseResult::Tree(None) => {}
+                Ok(crate::parser::ParseResult::Tree(None)) => {
+                    if !is_only_trivia(unit) {
+                        return RoundTrip::Differed {
+                            at: printed.len(),
+                            printed,
+                        };
+                    }
+                    printed.extend_from_slice(unit);
+                }
+                Ok(crate::parser::ParseResult::Tree(Some(node))) => {
+                    if let Some((outer, inner)) = crate::nodes::emit::misplaced_run(&node) {
+                        return RoundTrip::Misplaced {
+                            outer: outer.text(),
+                            inner: inner.text(),
+                        };
+                    }
+                    match crate::nodes::emit::emitted(&node) {
+                        Some(bytes) => printed.extend_from_slice(&bytes),
+                        /* A unit the parser produced always has bytes; a
+                         * node without them was built rather than read,
+                         * and that path is the fallback's. */
+                        None => {
+                            return RoundTrip::Differed {
+                                at: printed.len(),
+                                printed,
+                            };
+                        }
+                    }
+                }
             }
         }
-        Ok(program)
+        /* The reader can stop short of the end when the last thing in
+         * the file is trivia with no newline after it: end of input is
+         * not a token, so nothing moves the cursor past a trailing
+         * comment. Those bytes belong to the program and to no unit, and
+         * they still have to be trivia -- a truncation leaves something
+         * else there and is caught below. */
+        if consumed < source.len() {
+            let tail = &source[consumed..];
+            if !is_only_trivia(tail) {
+                return RoundTrip::Differed {
+                    at: printed.len(),
+                    printed,
+                };
+            }
+            printed.extend_from_slice(tail);
+        }
+        if printed == source {
+            return RoundTrip::Exact;
+        }
+        let at = printed
+            .iter()
+            .zip(source.iter())
+            .position(|(written, read)| written != read)
+            .unwrap_or_else(|| printed.len().min(source.len()));
+        RoundTrip::Differed { at, printed }
     })
 }
 
-fn push_command_sequence(program: &mut Vec<Node>, node: Node) {
-    match node {
-        Node::Sequence(sequence) => {
-            push_command_sequence(program, *sequence.left);
-            push_command_sequence(program, *sequence.right);
+/// Whether a parse unit that produced no command read nothing but layout.
+///
+/// Blank lines and comments are what a unit with no command is made of.
+/// Anything else means a command went missing, and the byte comparison
+/// would not notice, because a unit with no node contributes its own
+/// bytes.
+// [spec:nsh:req:idiom.printable-ast+2]
+fn is_only_trivia(unit: &[u8]) -> bool {
+    let mut at = 0;
+    while at < unit.len() {
+        match unit[at] {
+            b' ' | b'\t' | b'\n' | b'\r' => at += 1,
+            b'\\' if unit.get(at + 1) == Some(&b'\n') => at += 2,
+            b'#' => {
+                at += unit[at..]
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .unwrap_or(unit.len() - at);
+            }
+            _ => return false,
         }
-        node => program.push(node),
     }
-}
-
-fn print_program(shell: &Shell, program: &[Node]) -> BString {
-    let mut printed = BString::new(Vec::new());
-    for node in program {
-        let command = crate::nodes::source::command(&shell.locale, node);
-        printed.extend_from_slice(&command);
-        if command.last() != Some(&b'\n') {
-            printed.push(b'\n');
-        }
-    }
-    printed
+    true
 }
 
 #[cfg(test)]
@@ -140,179 +191,79 @@ pub(crate) mod tests {
     }
 
     /// Assert each source prints as the text beside it.
-    fn assert_prints_as(shell: &mut Shell, cases: &[(&[u8], &[u8])]) {
-        for (source, printed) in cases {
-            assert_eq!(
-                printing_is_reversible(shell, BStr::new(source)),
-                Reversibility::Reversible {
-                    printed: BString::from(*printed),
-                },
-                "{:?}",
-                BStr::new(source),
-            );
-        }
-    }
-
-    /// Assert each source prints as itself, one line per program.
+    /// Assert each source comes back byte for byte.
+    ///
+    /// There used to be a second column saying what the printer chose to
+    /// write. There is no choice now, so the answer is the source and a
+    /// column repeating it would be a second opinion about the one thing
+    /// this property exists to remove.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     fn assert_prints_itself(shell: &mut Shell, sources: &[&[u8]]) {
         for source in sources {
             assert_eq!(
-                printing_is_reversible(shell, BStr::new(source)),
-                Reversibility::Reversible {
-                    printed: BString::from([*source, b"\n"].concat()),
-                },
+                round_trips_byte_exactly(shell, BStr::new(source)),
+                RoundTrip::Exact,
                 "{:?}",
                 BStr::new(source),
             );
         }
     }
 
+    /// Assert one source comes back byte for byte, or was rejected.
+    ///
+    /// Rejecting the input is an ordinary answer to fuzzer bytes, and the
+    /// fuzz target returns on it too: there is nothing to compare until
+    /// something was read.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     fn assert_roundtrip_fixed(source: &[u8]) {
         let mut shell = shell();
-        // Rejecting the input is an ordinary answer to fuzzer bytes, and the
-        // fuzz target returns on it too: the property is about what the
-        // printer emits, so there is nothing to check until it emits something.
-        let Ok(once) = canonical_source(&mut shell, BStr::new(source)) else {
-            return;
-        };
-        let twice = canonical_source(&mut shell, BStr::new(&once))
-            .unwrap_or_else(|error| panic!("second canonicalization of {once:?}: {error:?}"));
-        assert_eq!(once, twice);
-    }
-
-    #[test]
-    fn canonical_source_is_a_fixed_point() {
-        let mut shell = shell();
-        let once = canonical_source(
-            &mut shell,
-            BStr::new(b"v=abc\nif [[ $v == a* ]]; then printf '%s\\n' \"$v\"; fi\n"),
-        )
-        .expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, twice);
-    }
-
-    #[test]
-    fn canonical_source_keeps_top_level_sequence_fixed() {
-        let mut shell = shell();
-        let once = canonical_source(&mut shell, BStr::new(b"false ; x=hi\n"))
-            .expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, BString::from(b"false\nx=hi\n".as_slice()));
-        assert_eq!(once, twice);
-    }
-
-    #[test]
-    fn canonical_source_keeps_backgrounded_sequence_fixed() {
-        let mut shell = shell();
-        let once = canonical_source(
-            &mut shell,
-            BStr::new(b"echo hi\n{ sleep 1 ; echo derp ; } &\necho bye\nwait"),
-        )
-        .expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(
-            once,
-            BString::from(b"echo hi\n{ sleep 1 ; echo derp ; } &\necho bye\nwait\n".as_slice())
+        let verdict = round_trips_byte_exactly(&mut shell, BStr::new(source));
+        assert!(
+            matches!(verdict, RoundTrip::Exact | RoundTrip::NotParsed),
+            "{:?} did not come back byte for byte: {verdict:?}",
+            BStr::new(source),
         );
-        assert_eq!(once, twice);
     }
 
-    #[test]
-    fn canonical_source_flushes_final_here_document() {
-        let mut shell = shell();
-        let source = BStr::new(
-            br#"cat <<EOF
-echo \\\$var
-EOF
-cat <<'EOF'
-echo \\\$var
-EOF
-"#,
-        );
-        let once = canonical_source(&mut shell, source).expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, source);
-        assert_eq!(once, twice);
-    }
-
-    #[test]
-    fn canonical_source_keeps_an_escaped_single_quote_fixed() {
-        let mut shell = shell();
-        let once = canonical_source(&mut shell, BStr::new(b"\\'")).expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, BString::from(b"\\'\n".as_slice()));
-        assert_eq!(once, twice);
-    }
-
-    /// An invalid expansion fails on bytes the source wrote, and the tree
-    /// still holds them. Printing `${}` in their place spelled a different
-    /// failure and threw away whatever the braces were around.
+    /// Shapes that used to print as a fixed point and now have to print as
+    /// themselves.
+    ///
+    /// A fixed point was the weaker question -- printing twice reaching the
+    /// same text says nothing about whether that text was what was written,
+    /// and `false ; x=hi` reached a fixed point as `false\nx=hi`, which is a
+    /// different spelling of the same program and no longer allowed.
     // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
-    fn canonical_source_keeps_an_invalid_parameter_fixed() {
-        let source = b"${(M)foo}";
+    fn former_fixed_points_now_come_back() {
         let mut shell = shell();
-        let once = canonical_source(&mut shell, BStr::new(source)).expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, BString::from(b"${(M)foo}\n".as_slice()));
-        assert_eq!(once, twice);
-    }
-
-    #[test]
-    fn canonical_source_keeps_a_brace_group_pipeline_fixed() {
-        let source = b"ty} | {  t  \n3#\n}\n# ";
-        let mut shell = shell();
-        let once = canonical_source(&mut shell, BStr::new(source)).expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, twice);
+        assert_prints_itself(
+            &mut shell,
+            &[
+                b"v=abc\nif [[ $v == a* ]]; then printf '%s\\n' \"$v\"; fi\n".as_slice(),
+                b"false ; x=hi\n",
+                b"echo hi\n{ sleep 1 ; echo derp ; } &\necho bye\nwait",
+                b"cat <<EOF\necho \\\\\\$var\nEOF\ncat <<'EOF'\necho \\\\\\$var\nEOF\n",
+                b"\\'",
+                b"${(M)foo}",
+                b"ty} | {  t  \n3#\n}\n# ",
+                b"a[${x:-]}]=y",
+                b"\"${a+\\'}\"",
+            ],
+        );
     }
 
     /// A `]` inside `${...}` is the expansion's own byte, so the subscript
     /// around it stays open. Counting it as the closing bracket left the
-    /// printer holding a word whose brackets it could not put back.
-    #[test]
-    fn canonical_source_keeps_a_subscript_open_across_parameters() {
-        let source = b"a[${x:-]}]=y";
-        let mut shell = shell();
-        let once = canonical_source(&mut shell, BStr::new(source)).expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, BString::from(b"a[${x:-]}]=y\n".as_slice()));
-        assert_eq!(once, twice);
-        assert!(canonical_source(&mut shell, BStr::new(b"a[[${ ]]}")).is_err());
-    }
-
-    /// Inside `"` an apostrophe is an ordinary byte, so the backslash before
-    /// one protects nothing and the two spell themselves. Writing a second
-    /// backslash for the first grew the word by two bytes a round and
-    /// expanded to one more backslash each time.
+    /// printer holding a word whose brackets it could not put back, and
+    /// the unbalanced form is still a parse error rather than a tree.
     // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
-    fn canonical_source_keeps_an_escaped_apostrophe_fixed() {
-        let source = b"\"${a+\\'}\"";
+    fn an_unclosed_subscript_is_refused() {
         let mut shell = shell();
-        let once = canonical_source(&mut shell, BStr::new(source)).expect("first canonicalization");
-        let twice =
-            canonical_source(&mut shell, BStr::new(&once)).expect("second canonicalization");
-
-        assert_eq!(once, BString::from(b"\"${a+\\'}\"\n".as_slice()));
-        assert_eq!(once, twice);
+        assert_eq!(
+            round_trips_byte_exactly(&mut shell, BStr::new(b"a[[${ ]]}")),
+            RoundTrip::NotParsed,
+        );
     }
 
     /// Two further reductions of the artifact behind
@@ -347,10 +298,10 @@ EOF
             b"{ echo one; echo two; } > /dev/null",
             b"echo $(( 1 + 2 ))",
         ] {
-            let verdict = printing_is_reversible(&mut shell, BStr::new(source));
+            let verdict = round_trips_byte_exactly(&mut shell, BStr::new(source));
             assert!(
-                matches!(verdict, Reversibility::Reversible { .. }),
-                "{:?} printed to something else: {verdict:?}",
+                verdict == RoundTrip::Exact,
+                "{:?} did not come back byte for byte: {verdict:?}",
                 BStr::new(source),
             );
         }
@@ -363,8 +314,8 @@ EOF
     fn printing_says_nothing_about_a_rejected_program() {
         let mut shell = shell();
         assert_eq!(
-            printing_is_reversible(&mut shell, BStr::new(b"if")),
-            Reversibility::NotParsed,
+            round_trips_byte_exactly(&mut shell, BStr::new(b"if")),
+            RoundTrip::NotParsed,
         );
     }
 
@@ -378,10 +329,8 @@ EOF
         let mut shell = shell();
         let source = b"echo \"${a+\"a}b\"}\"";
         assert_eq!(
-            printing_is_reversible(&mut shell, BStr::new(source)),
-            Reversibility::Reversible {
-                printed: BString::from(b"echo \"${a+\"a}b\"}\"\n".as_slice()),
-            },
+            round_trips_byte_exactly(&mut shell, BStr::new(source)),
+            RoundTrip::Exact,
         );
     }
 
@@ -393,18 +342,12 @@ EOF
     #[test]
     fn printing_keeps_a_definition_style() {
         let mut shell = shell();
-        assert_prints_as(
+        assert_prints_itself(
             &mut shell,
             &[
-                (
-                    b"f() { echo one; }".as_slice(),
-                    b"f() { echo one; }\n".as_slice(),
-                ),
-                (b"function f { echo one; }", b"function f { echo one; }\n"),
-                (
-                    b"function f () { echo one; }",
-                    b"function f () { echo one; }\n",
-                ),
+                b"f() { echo one; }".as_slice(),
+                b"function f { echo one; }",
+                b"function f () { echo one; }",
             ],
         );
     }
@@ -439,15 +382,12 @@ EOF
     #[test]
     fn printing_keeps_a_here_document_delimiter() {
         let mut shell = shell();
-        assert_prints_as(
+        assert_prints_itself(
             &mut shell,
             &[
-                (
-                    b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
-                    b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
-                ),
-                (b"cat <<'Q'\nbody\nQ\n", b"cat <<'Q'\nbody\nQ\n"),
-                (b"<<a\nx", b"<<a\nx\n"),
+                b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
+                b"cat <<'Q'\nbody\nQ\n",
+                b"<<a\nx",
             ],
         );
     }
@@ -494,10 +434,10 @@ EOF
             b"f() { a; }",
             b"f() ( a )",
         ] {
-            let verdict = printing_is_reversible(&mut shell, BStr::new(source));
+            let verdict = round_trips_byte_exactly(&mut shell, BStr::new(source));
             assert!(
-                matches!(verdict, Reversibility::Reversible { .. }),
-                "{:?} printed to something else: {verdict:?}",
+                verdict == RoundTrip::Exact,
+                "{:?} did not come back byte for byte: {verdict:?}",
                 BStr::new(source),
             );
         }
@@ -562,10 +502,8 @@ EOF
     fn a_continuation_that_joins_nothing_still_goes_back() {
         let mut shell = shell();
         assert_eq!(
-            printing_is_reversible(&mut shell, BStr::new(b"echo a\\")),
-            Reversibility::Reversible {
-                printed: BString::from(b"echo a\\\n".as_slice()),
-            },
+            round_trips_byte_exactly(&mut shell, BStr::new(b"echo a\\")),
+            RoundTrip::Exact,
         );
     }
 
@@ -579,14 +517,7 @@ EOF
     #[test]
     fn each_arithmetic_spelling_goes_back_as_written() {
         let mut shell = shell();
-        assert_prints_as(
-            &mut shell,
-            &[
-                (b"$((\\$))".as_slice(), b"$((\\$))\n".as_slice()),
-                (b"$[1]", b"$[1]\n"),
-                (b"$[())]", b"$[())]\n"),
-            ],
-        );
+        assert_prints_itself(&mut shell, &[b"$((\\$))".as_slice(), b"$[1]", b"$[())]"]);
     }
 
     /// Every shape the round-trip fuzzer found before
@@ -883,31 +814,110 @@ EOF
         ),
     ];
 
-    /// Printing the corpus twice reaches the same text every time.
+    /// One construct of each shape, held to the bytes it went in as.
+    ///
+    /// Breadth rather than depth: the corpus below is what the fuzzer
+    /// found, and this is what a shell is made of, so a construct that
+    /// stops coming back says which construct rather than which artifact.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
+    #[test]
+    fn one_of_every_construct_comes_back() {
+        let mut shell = shell();
+        assert_prints_itself(
+            &mut shell,
+            &[
+                b"echo a b".as_slice(),
+                b"a=1 b=2 cmd x",
+                b"a && b || ! c",
+                b"a | b | c",
+                b"a; b& c",
+                b"(a; b)",
+                b"{ a; b; }",
+                b"if a; then b; elif c; then d; else e; fi",
+                b"while a; do b; done",
+                b"until a; do b; done",
+                b"for x in 1 2 3; do echo $x; done",
+                b"select x in a b; do echo $x; done",
+                b"case $x in a|b) c ;; (d) e ;& *) f ;; esac",
+                b"f() { a; }",
+                b"function g { a; }",
+                b"function h () { a; }",
+                b"time -p a | b",
+                b"cat <f >g 2>&1 <&0 >>h",
+                b"cat <<A <<'B'\n1\nA\n2\nB\n",
+                b"cat <<<'here'",
+                b"echo $x ${y} ${z:-d} ${#a} ${b#c} ${d/e/f}",
+                b"echo $(true) `false` $((1 + 2)) $[3]",
+                b"echo 'a' \"b\" \\c $'d' $\"e\"",
+                b"[[ a == b* && c != d ]]",
+                b"((x = 1 + 2))",
+                b"for ((i = 0; i < 2; i++)); do echo $i; done",
+                b"declare -A m=([k]=v [l]=w)",
+                b"a[1]=x b+=y",
+                b"echo <(true) >(false)",
+                b"echo a  #  trailing",
+                b"echo a \\\n  b",
+            ],
+        );
+    }
+
+    /// The two root causes the first byte-exact campaign found, reduced.
+    ///
+    /// `<<E\nEO` is the recorder, not the renderer: a here-document line
+    /// that starts with the delimiter and then does not match it is
+    /// pushed back to be read again, and a pushed string stacks inside
+    /// the frame it was pushed on rather than becoming one of its own, so
+    /// the reader recorded those bytes twice and the log said `EOO`. The
+    /// token-stream property would have caught it and never saw the
+    /// shape; comparing a printed program against its source did, because
+    /// it is the same question asked of every input the fuzzer invents.
+    ///
+    /// `# x` with no newline after it is the other end: end of input is
+    /// not a token, so nothing moves the reader past a trailing comment
+    /// and those bytes belong to no unit at all.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
+    #[test]
+    fn the_shapes_the_first_campaign_reduced_to() {
+        let mut shell = shell();
+        assert_prints_itself(
+            &mut shell,
+            &[
+                b"<<E\nEO".as_slice(),
+                b"cat <<E\nEO",
+                b"<<E\nEOF\nE\n",
+                b"# x",
+                b"a\n# x",
+                b"a  ",
+            ],
+        );
+    }
+
+    /// Every shape in the corpus comes back as the bytes it went in as.
+    ///
+    /// This used to ask for a fixed point, which is the weaker question:
+    /// printing twice reaching the same text says nothing about whether
+    /// that text is what was written, and every shape here is an artifact
+    /// of the printer writing something else.
     ///
     /// Every shape at once rather than one test each: a failure should say
     /// which shapes came back, not which single shape came back first.
     // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
-    fn the_round_trip_corpus_prints_fixed_points() {
+    fn the_round_trip_corpus_comes_back_exactly() {
         let mut shell = shell();
-        let mut unstable = Vec::new();
+        let mut changed = Vec::new();
         for (artifact, source) in ROUNDTRIP_CORPUS {
-            // Rejecting the input is an ordinary answer, and the fuzz target
-            // returns on it too: there is nothing to check until the printer
-            // emits something.
-            let Ok(once) = canonical_source(&mut shell, BStr::new(source)) else {
-                continue;
-            };
-            match canonical_source(&mut shell, BStr::new(&once)) {
-                Ok(twice) if twice == once => {}
-                _ => unstable.push(*artifact),
+            match round_trips_byte_exactly(&mut shell, BStr::new(source)) {
+                /* Rejecting the input is an ordinary answer, and so is an
+                 * alias, which replaces text before the parser sees it. */
+                RoundTrip::Exact | RoundTrip::NotParsed | RoundTrip::Aliased => {}
+                _ => changed.push(*artifact),
             }
         }
         assert!(
-            unstable.is_empty(),
-            "{} of {} corpus shapes no longer print a fixed point: {unstable:?}",
-            unstable.len(),
+            changed.is_empty(),
+            "{} of {} corpus shapes did not come back: {changed:?}",
+            changed.len(),
             ROUNDTRIP_CORPUS.len(),
         );
     }

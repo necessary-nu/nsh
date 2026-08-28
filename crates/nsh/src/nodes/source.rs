@@ -65,12 +65,14 @@ pub(crate) fn function_definition(
     printer.out
 }
 
-/// Print one parsed command tree as canonical shell source.
+/// Spell a whole tree the shell built, as the fallback would.
 ///
-/// This is separate from [`function_definition`] because the fuzzing
-/// round-trip needs to render an arbitrary top-level command without first
-/// storing it as a function definition.
-#[cfg(feature = "fuzzing")]
+/// Separate from [`function_definition`] because what it renders is not a
+/// definition and has no frame around it. Its one caller is the property
+/// that holds the fallback to structure: a node with no bytes cannot be
+/// compared against any, so it is compared against the node its spelling
+/// parses back to.
+#[cfg(test)]
 pub(crate) fn command(locale: &nsh_platform::Locale, node: &Node) -> BString {
     let mut printer = Printer::new(locale);
     printer.top_level_list(node, 0);
@@ -115,7 +117,7 @@ impl<'a> Printer<'a> {
     }
 
     /// Pay any here-document bodies owed by the final command.
-    #[cfg(feature = "fuzzing")]
+    #[cfg(test)]
     fn finish(&mut self) {
         if !self.pending.is_empty() {
             self.newline(0);
@@ -132,7 +134,7 @@ impl<'a> Printer<'a> {
     }
 
     /// Write a top-level list, one command per line.
-    #[cfg(feature = "fuzzing")]
+    #[cfg(test)]
     fn top_level_list(&mut self, node: &Node, indent: usize) {
         self.list_with_separator(node, indent, false);
     }
@@ -180,7 +182,12 @@ impl<'a> Printer<'a> {
          * nodes the shell synthesized. */
         // [spec:nsh:req:idiom.printable-ast+2]
         if let Some(source) = super::emit::emitted(node) {
-            self.out.extend_from_slice(&source);
+            /* This renderer wrote the indent itself, so the blank the
+             * statement was reached through is not its to write again. */
+            let run = node.tokens();
+            let reached_through = run.text().len().saturating_sub(run.written().len());
+            self.out
+                .extend_from_slice(&source[reached_through.min(source.len())..]);
             return;
         }
         match node {
@@ -914,5 +921,72 @@ fn unused_delimiter(body: &[u8]) -> BString {
             return candidate;
         }
         suffix += 1;
+    }
+}
+
+// ---------------------------------------------------------------------
+// A node the shell built has no bytes to be equal to.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nodes::{SimpleCommand, SourceLine, SourceTokens, WordNode};
+    use crate::word::{ParsedWord, WordUnit};
+
+    /// What the fallback spells has to parse back to the same node.
+    ///
+    /// This is the seam, and this is the whole of what is asked on this
+    /// side of it. `nodes/emit.rs` writes what was read and is held to
+    /// bytes, because there are bytes to be held to. Here there are none,
+    /// so the obligation is the older one -- a structurally equal node --
+    /// and it is the only place left where a renderer decides anything.
+    ///
+    /// A word with no parts at all is left out, and is the one thing this
+    /// cannot satisfy: no source reads back as a word holding nothing, so
+    /// the fallback writes `''` and gets back a word holding one empty
+    /// inert run. The shell never builds one as an argument --
+    /// `ParsedWord::new()` is the placeholder a here-document body carries
+    /// until its body replaces it.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
+    #[test]
+    fn a_built_node_spells_itself_back_into_itself() {
+        let word = |word| {
+            Node::Word(WordNode {
+                tokens: SourceTokens::none(),
+                word,
+            })
+        };
+        let inert: Vec<WordUnit> = b"a b'c"
+            .iter()
+            .map(|byte| WordUnit::Literal {
+                byte: *byte,
+                quoted: true,
+            })
+            .collect();
+        let built = Node::Command(Box::new(SimpleCommand {
+            tokens: SourceTokens::none(),
+            line: SourceLine::new(1),
+            assignments: Vec::new(),
+            arguments: vec![
+                word(ParsedWord::literal("echo")),
+                word(ParsedWord::from_units(&inert)),
+                word(ParsedWord::quoted_parameter("@")),
+            ],
+            redirections: Vec::new(),
+        }));
+
+        let mut shell = crate::Shell::builder()
+            .streams(crate::Streams::capture().expect("captured streams"))
+            .build()
+            .expect("shell");
+        let spelled = command(&shell.locale, &built);
+        let reparsed = crate::resource::with_resources(&mut shell, |shell, _resources| {
+            crate::input::set_input_string(shell, BStr::new(&spelled));
+            match crate::parser::parse_command(shell, false) {
+                Ok(crate::parser::ParseResult::Tree(Some(node))) => node,
+                _ => panic!("{spelled:?} did not parse back"),
+            }
+        });
+        assert!(reparsed == built, "{spelled:?} parsed back to another node");
     }
 }

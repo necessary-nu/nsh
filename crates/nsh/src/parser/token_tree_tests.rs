@@ -207,12 +207,18 @@ fn a_node_the_grammar_supplied_holds_no_run() {
 // [spec:nsh:def:idiom.token-stream/test]
 #[test]
 fn a_here_document_body_hangs_off_its_word() {
-    let parsed = parse(b"cat <<EOF\nbody\nEOF\n");
+    /* Not the top node, whose run is the whole parse unit and so holds
+     * the body already. A command beside another one is where the gap
+     * shows: its own run stops at the redirection operator. */
+    let parsed = parse(b"cat <<EOF; :\nbody\nEOF\n");
+    let Node::Sequence(list) = &parsed else {
+        panic!("a sequence")
+    };
     assert_eq!(
-        run_of(&parsed).text(),
+        run_of(&list.left).text(),
         BString::from(b"cat <<EOF".as_slice())
     );
-    let Node::Command(command) = &parsed else {
+    let Node::Command(command) = list.left.as_ref() else {
         panic!("a simple command")
     };
     let [crate::nodes::Redirection::HereDocument(here)] = command.redirections.as_slice() else {
@@ -221,6 +227,13 @@ fn a_here_document_body_hangs_off_its_word() {
     assert_eq!(
         here.body.tokens.text(),
         BString::from(b"body\nEOF\n".as_slice())
+    );
+
+    /* The unit above it does hold the body, which is why emission has to
+     * ask rather than always append. */
+    assert_eq!(
+        run_of(&parsed).text(),
+        BString::from(b"cat <<EOF; :\nbody\nEOF\n".as_slice())
     );
 }
 

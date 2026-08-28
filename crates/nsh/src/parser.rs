@@ -489,6 +489,14 @@ pub fn parse_command(shell: &mut Shell, interactive: bool) -> Result<ParseResult
     // [spec:nsh:def:idiom.token-stream]
     shell.input.tokens.seal();
     let mut result = parsed?;
+    /* The unit's own bytes, which are more than its command's: the
+     * newline that ended it belongs to no node, because trivia goes to
+     * whatever follows it and at the end of a unit nothing does. */
+    // [spec:nsh:req:idiom.printable-ast+2]
+    if let ParseResult::Tree(Some(node)) = result {
+        let unit = shell.input.tokens.whole();
+        result = ParseResult::Tree(Some(node.with_tokens(unit)));
+    }
     let bodies = core::mem::take(&mut shell.input.completed_here_documents);
     finalize::parse_result(shell, &mut result, bodies)?;
     Ok(result)
@@ -1997,6 +2005,16 @@ fn finish_word_if_delimited(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Res
             if let Some((&first, rest)) = consumed.split_first() {
                 lexer.input = InputUnit::Byte(first);
                 if !rest.is_empty() {
+                    /* These bytes were read once already and are about to
+                     * be read again. A pushed string is not a frame of
+                     * its own -- `strpush` stacks inside the one it was
+                     * pushed on -- so the reader records them a second
+                     * time unless the first is taken back. The byte in
+                     * `lexer.input` is handed over rather than re-read,
+                     * so it is not one of them. */
+                    // [spec:nsh:def:idiom.token-stream]
+                    let frame = shell.input.current;
+                    shell.input.tokens.unrecord(frame, rest.len());
                     push_string_input(shell, BStr::new(rest), None);
                 }
             }

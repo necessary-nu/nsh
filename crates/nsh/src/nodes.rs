@@ -173,6 +173,17 @@ impl SourceTokens {
         text
     }
 
+    /// Whether the run is empty, which is what a node nothing read holds.
+    ///
+    /// Asked by the round-trip property, which is where the fuzz
+    /// workspace links; the shell itself asks whether there is a run by
+    /// trying to emit one.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// Whether this run already holds `other`'s tokens.
     ///
     /// A here-document's body is read at the newline that ends the

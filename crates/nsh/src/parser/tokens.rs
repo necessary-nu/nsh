@@ -102,6 +102,15 @@ pub(crate) struct TokenLog {
     pending: Vec<u8>,
     /// The input frame being recorded, while a parse is in progress.
     frame: Option<usize>,
+    /// Whether an alias expansion replaced text during this parse.
+    ///
+    /// The bytes recorded are then the expansion's rather than the ones
+    /// that were typed, which `[spec:nsh:req:idiom.printable-ast+2]`
+    /// carves out. A property comparing a printed tree with its source has
+    /// to know, rather than quietly compare against text the parser was
+    /// never shown.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    expanded_alias: bool,
     /// Where the token the reader last returned begins.
     ///
     /// The end of the log when that token consumed no bytes, which is
@@ -118,6 +127,7 @@ impl TokenLog {
             tokens: Vec::new(),
             pending: Vec::new(),
             frame: None,
+            expanded_alias: false,
             returned: 0,
         }
     }
@@ -128,6 +138,7 @@ impl TokenLog {
         self.tokens.clear();
         self.pending.clear();
         self.frame = Some(frame);
+        self.expanded_alias = false;
         self.returned = 0;
     }
 
@@ -198,6 +209,7 @@ impl TokenLog {
                 .is_some_and(|last| last.kind == SourceTokenKind::Word && last.text == name);
         if matches {
             self.tokens.pop();
+            self.expanded_alias = true;
         }
     }
 
@@ -222,6 +234,25 @@ impl TokenLog {
         let rest = self.pending.split_off(length.min(self.pending.len()));
         let text = BString::from(core::mem::replace(&mut self.pending, rest));
         self.tokens.push(SourceToken { kind, text });
+    }
+
+    /// Whether an alias replaced text during the parse that just ran.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    #[cfg(feature = "fuzzing")]
+    pub(crate) fn expanded_alias(&self) -> bool {
+        self.expanded_alias
+    }
+
+    /// Everything cut so far, as one run.
+    ///
+    /// The log holds exactly one parse unit, so this is the unit: the
+    /// command, the trivia it was reached through, and the newline that
+    /// ended it. A node's own run stops before that newline because
+    /// trivia belongs to whatever follows it, and at the end of a unit
+    /// nothing does -- so the unit has to be able to say so itself.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    pub(crate) fn whole(&self) -> crate::nodes::SourceTokens {
+        crate::nodes::SourceTokens::new(&self.tokens)
     }
 
     /// How many tokens have been cut so far.

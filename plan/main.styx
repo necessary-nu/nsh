@@ -7184,6 +7184,13 @@ children (
                                         kind @note
                                         text "The oracle collapses. `print(parse(x)) == x` is a byte equality, so `printing_is_reversible`, the `Reversibility` verdict with its four arms, `parse_program`, `print_program` and every tree-comparison question the fuzz target asks are replaced by one comparison. `fuzz/fuzz_targets/roundtrip.rs` stops fingerprinting two printed forms and reports the first differing offset instead, which is a far better artifact to reduce.\n\nSTRICTLY STRONGER. The current property passes when a printed program reparses to the same tree, which is satisfiable by output that is not what was written -- that is how `declare -f` came to hand back a function that behaves differently. Byte equality has no such slack. Everything the old property caught, this catches; the 85 live artifacts and the 205 further minimal forms from the campaign are all inputs to it unchanged.\n\nTWO THINGS IT MUST NOT CLAIM. Alias substitution replaces text before the parser sees it, so an input containing an alias expansion round-trips to the expanded form; the target must exclude that rather than pretend. And a tree that was built rather than parsed has no bytes to be equal to -- that path is the fallback's, and wants the old tree-comparison property kept for it alone.\n\nRE-SWEEP. `fuzz/sweep.sh --prune` against the new target, and the count reported honestly: the corpus was 285 before the property was strengthened last time and 85 after, and a stronger property is expected to resurrect artifacts rather than only close them.\n\nDONE WHEN. The target is a byte comparison, the corpus has been swept against it, and an hour-long campaign is clean -- which is the first time that sentence has been meaningful, because it is the first property that can be satisfied."
                                     }
+
+                                    {
+                                        at 2026-08-28T13:14:45.300947124Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
                         )

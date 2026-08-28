@@ -24,13 +24,21 @@ use bstr::BString;
 
 use super::{BashNode, HereDocument, Node, Redirection};
 
-/// Write `node` as the source it was parsed from.
+/// Write `node` as the source it was parsed from, every byte of it.
+///
+/// Including the trivia the node was reached through, because that is
+/// part of what was read and a byte comparison against the source has to
+/// account for it.
 ///
 /// `None` when the node was built rather than read, which is the caller's
 /// signal to spell it instead.
+///
+/// A renderer laying out its own whitespace wants the same bytes without
+/// the trivia in front of them, and asks [`SourceTokens::written`] how
+/// many of them that is rather than being given a second function here.
 // [spec:nsh:req:idiom.printable-ast+2]
 pub(crate) fn emitted(node: &Node) -> Option<BString> {
-    let mut out = node.tokens().written();
+    let mut out = node.tokens().text();
     if out.is_empty() {
         return None;
     }
@@ -53,91 +61,110 @@ pub(crate) fn emitted(node: &Node) -> Option<BString> {
 
 /// Collect every here-document in `node`, in the order they were read.
 ///
-/// Their bodies are the one part of a subtree that its own run does not
+/// Their bodies are the one part of a subtree that its own run may not
 /// contain, so this is the only walk emission needs.
 // [spec:nsh:req:idiom.printable-ast+2]
 fn here_documents<'a>(node: &'a Node, into: &mut Vec<&'a HereDocument>) {
+    for redirection in redirections(node) {
+        if let Redirection::HereDocument(document) = redirection {
+            into.push(document);
+        }
+    }
+    for child in children(node) {
+        here_documents(child, into);
+    }
+}
+
+/// The first node whose run is not inside the run of the node above it.
+///
+/// Runs nest by construction, so this asks whether the marks into the log
+/// agree with the tree they were taken for. A property over the bytes
+/// cannot see that: the log can be complete while the indices into it are
+/// wrong, which is how three defects reached a shipped renderer.
+///
+/// A here-document's body is exempt, because whether its run is inside
+/// its command's depends on where the newline that ended the line fell.
+// [spec:nsh:req:idiom.printable-ast+2]
+#[cfg(feature = "fuzzing")]
+pub(crate) fn misplaced_run(node: &Node) -> Option<(super::SourceTokens, super::SourceTokens)> {
+    let run = node.tokens();
+    for child in children(node) {
+        let inside = child.tokens();
+        if !run.is_empty() && !inside.is_empty() && !run.holds(inside) {
+            return Some((run.clone(), inside.clone()));
+        }
+        if let Some(found) = misplaced_run(child) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The redirections attached to `node`, which only two shapes carry.
+fn redirections(node: &Node) -> &[Redirection] {
     match node {
-        Node::Command(command) => {
-            for argument in command.assignments.iter().chain(&command.arguments) {
-                here_documents(argument, into);
-            }
-            redirections(&command.redirections, into);
-        }
-        Node::Pipeline(pipeline) => {
-            for command in &pipeline.commands {
-                here_documents(command, into);
-            }
-        }
+        Node::Command(command) => &command.redirections,
         Node::Redirect(wrapper)
         | Node::Background(wrapper)
         | Node::Subshell(wrapper)
-        | Node::Group(wrapper) => {
-            here_documents(&wrapper.command, into);
-            redirections(&wrapper.redirections, into);
-        }
+        | Node::Group(wrapper) => &wrapper.redirections,
+        _ => &[],
+    }
+}
+
+/// The nodes directly under `node`, in the order they were read.
+///
+/// A word is a leaf here: whatever was written inside it, command
+/// substitutions included, is in its own run.
+// [spec:nsh:req:idiom.printable-ast+2]
+fn children(node: &Node) -> Vec<&Node> {
+    match node {
+        Node::Command(command) => command
+            .assignments
+            .iter()
+            .chain(&command.arguments)
+            .collect(),
+        Node::Pipeline(pipeline) => pipeline.commands.iter().collect(),
+        Node::Redirect(wrapper)
+        | Node::Background(wrapper)
+        | Node::Subshell(wrapper)
+        | Node::Group(wrapper) => vec![wrapper.command.as_ref()],
         Node::And(binary)
         | Node::Or(binary)
         | Node::Sequence(binary)
         | Node::While(binary)
-        | Node::Until(binary) => {
-            here_documents(&binary.left, into);
-            here_documents(&binary.right, into);
-        }
+        | Node::Until(binary) => vec![binary.left.as_ref(), binary.right.as_ref()],
         Node::If(command) => {
-            here_documents(&command.condition, into);
-            here_documents(&command.then_branch, into);
-            if let Some(branch) = &command.else_branch {
-                here_documents(branch, into);
-            }
+            let mut under = vec![command.condition.as_ref(), command.then_branch.as_ref()];
+            under.extend(command.else_branch.as_deref());
+            under
         }
         Node::For(command) | Node::Select(command) => {
-            for word in &command.words {
-                here_documents(word, into);
-            }
-            here_documents(&command.body, into);
+            let mut under: Vec<&Node> = command.words.iter().collect();
+            under.push(command.body.as_ref());
+            under
         }
-        Node::Timed(command) => {
-            if let Some(command) = &command.command {
-                here_documents(command, into);
-            }
-        }
+        Node::Timed(command) => command.command.as_deref().into_iter().collect(),
         Node::Case(command) => {
-            here_documents(&command.word, into);
+            let mut under = vec![command.word.as_ref()];
             for clause in &command.clauses {
-                for pattern in &clause.patterns {
-                    here_documents(pattern, into);
-                }
-                if let Some(body) = &clause.body {
-                    here_documents(body, into);
-                }
+                under.extend(clause.patterns.iter());
+                under.extend(clause.body.as_deref());
             }
+            under
         }
-        Node::Function(definition) => here_documents(&definition.body, into),
-        Node::Not(negation) => here_documents(&negation.command, into),
-        Node::Bash(BashNode::ArithmeticFor(command)) => here_documents(&command.body, into),
-        Node::Bash(BashNode::Function(function)) => here_documents(&function.body, into),
+        Node::Function(definition) => vec![definition.body.as_ref()],
+        Node::Not(negation) => vec![negation.command.as_ref()],
+        Node::Bash(BashNode::ArithmeticFor(command)) => vec![command.body.as_ref()],
+        Node::Bash(BashNode::Function(function)) => vec![function.body.as_ref()],
         Node::Bash(BashNode::ProcessSubstitution(substitution)) => {
-            if let Some(body) = &substitution.body {
-                here_documents(body, into);
-            }
+            substitution.body.as_deref().into_iter().collect()
         }
-        /* A word's own run holds whatever was written inside it, command
-         * substitutions included, so there is nothing under one to
-         * collect. The remaining Bash nodes hold no redirection. */
         Node::Word(_)
         | Node::Bash(
             BashNode::Conditional(_)
             | BashNode::ArithmeticCommand(_)
             | BashNode::ArrayAssignment(_),
-        ) => {}
-    }
-}
-
-fn redirections<'a>(list: &'a [Redirection], into: &mut Vec<&'a HereDocument>) {
-    for redirection in list {
-        if let Redirection::HereDocument(document) = redirection {
-            into.push(document);
-        }
+        ) => Vec::new(),
     }
 }
