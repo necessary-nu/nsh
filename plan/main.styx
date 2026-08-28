@@ -7064,6 +7064,7 @@ children (
                                 title "Give every node the tokens it was parsed from"
                                 kind @refactor
                                 deps (retain-the-token-stream)
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-28T00:04:18.071765453Z
@@ -7091,6 +7092,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-08-28T01:29:40.234871523Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "FOUR THINGS THE NOTE DID NOT SAY, in descending order of what they cost.\n\nPUSH-BACK CANNOT BE UNDONE BY COUNTING BACK ONE TOKEN. The note has the log's cuts being coarser than the grammar, which is true, but the harder problem turned out to be where a run *starts*. The parser reads one token of lookahead and pushes it back, so the node about to be parsed will be handed a token already in the log -- and `token_pushed_back` is set in two situations that look identical and are not. A token read fresh and pushed back is in the log; end of input cut nothing, and a token pushed back, replayed and pushed back again cut nothing the second time either. `command()` does exactly the second before delegating to `parse_simple_command`, so `echo a b` came out as ` a b`. `TokenLog` now records where the token the reader last returned begins, and `cut_token` takes a `replayed` flag so a replay does not move it. Everything else here was mechanical; this was the whole of the difficulty.\n\nA COMPOUND FORM'S RUN CANNOT BE TAKEN WHERE THE NODE IS BUILT. `fi`, `done`, `esac`, `)` and `}` are read by the shared tail of `command()`, not by the branch that built the node, so a run taken in the branch stops one token short every time. That is why `Node::with_tokens` and `BashNode::set_tokens` exist. \"Constructing a node gains a token argument everywhere the parser builds one\" is not enough on its own.\n\nTHE HERE-DOCUMENT IS WORSE THAN NON-ADJACENT. The note says adjacency is the wrong answer for a here-document, which is right, but the body does not belong to the command's run at all: the body word is built in `parse_here_documents` and its run is exactly the one `HereDocument` token cut there. `cat <<EOF` holds `cat <<EOF` and nothing more. So `print-by-emitting-tokens` cannot treat a node's run as self-sufficient -- emitting a simple command means emitting its run and then descending into each here-document body -- and that is the one exception to the emit-the-run rule.\n\nTRIVIA BELONGS TO WHAT FOLLOWS IT, which is the association the note left to this node, and the consequence is asymmetric. A run starts behind the blanks, comments and newlines in front of its first token, so sibling runs meet and a parse unit's leading trivia is inside the top node's run. It ends before trailing trivia, so a unit's trailing trivia is in no node at all, and `echo a` and `echo a # tail` hold the same run. `prove-byte-exact-round-trip` has to account for that at the unit level rather than per node.\n\nALSO. The rule's own example is not yet testable. `echo 'a'` and `echo \"a\"` still parse to different words until `canonicalize-word-parts`, so the equality corpus here uses equivalences the tree already collapses: blanks, an interior comment, `1>` against `>`, a newline against `;`, a line continuation, a case pattern's optional `(`, and the `in \"$@\"` a bare `for` supplies. `measure-tree-canonicity` will meet this immediately.\n\nAND. Only two of the three gated readers ungated. `SourceToken::kind` is live (the trivia rule asks it) and `SourceToken::text` is live (a run prints as the source it stands for), but `TokenLog::tokens` stays behind `cfg(test)`: a node is handed a run, and nothing shipping wants the whole log.\n\nCOST OF THE SHAPE CHOSEN. A run is an owned `Arc<[SourceToken]>` covering the node's whole extent, so a parent's run repeats its children's and cloning a node is a refcount bump rather than a copy. Measured duplication over three realistic nested scripts: 3.0x, 4.6x and 3.3x the source bytes, held across the tree. An index range into a retained log would avoid that and cannot be used -- the log is cleared at the next `begin_parse` while a function definition outlives it, and the here-document above makes a command's run non-contiguous anyway. If the factor ever matters, the fix is sharing inside `SourceToken`, not a different shape."
+                                    }
+
+                                    {
+                                        at 2026-08-28T01:30:44.691673759Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

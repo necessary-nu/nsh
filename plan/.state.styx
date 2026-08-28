@@ -1368,7 +1368,7 @@ assertions (
     {id fuzz-the-shell, kind @complete, author "brendan@necessary.nu", at 2026-08-25T14:31:05.885569498Z}
     {id make-fuzz-runner-containment-aware, kind @doing, author "brendan@necessary.nu", at 2026-08-25T14:51:07.917246564Z}
     {id decide-tree-canonicity, kind @complete, author "brendan@necessary.nu", at 2026-08-27T23:20:26.878567937Z}
-    {id carry-tokens-into-the-tree, kind @doing, author "brendan@necessary.nu", at 2026-08-28T00:56:59.204140123Z}
+    {id carry-tokens-into-the-tree, kind @complete, author "brendan@necessary.nu", at 2026-08-28T01:30:44.691673759Z}
 )
 
 impl_evidence (
