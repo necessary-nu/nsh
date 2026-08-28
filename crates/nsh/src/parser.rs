@@ -2788,3 +2788,6 @@ mod tests;
 
 #[cfg(test)]
 mod token_stream_tests;
+
+#[cfg(test)]
+mod token_tree_tests;

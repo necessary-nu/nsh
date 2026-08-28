@@ -140,6 +140,17 @@ impl SourceTokens {
         &self.0
     }
 
+    /// Whether two runs are the same source text.
+    ///
+    /// The text question spelled out, because [`SourceTokens`] answers the
+    /// program question -- always yes -- to `==`. A comparison that means
+    /// text has to say so.
+    // [spec:nsh:req:idiom.canonical-tree+1]
+    #[cfg(test)]
+    pub(crate) fn same_text(&self, other: &SourceTokens) -> bool {
+        self.text() == other.text()
+    }
+
     /// The bytes of the run, concatenated.
     // [spec:nsh:def:idiom.token-stream]
     pub(crate) fn text(&self) -> BString {
