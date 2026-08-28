@@ -356,7 +356,16 @@ pub(super) fn substring(
         }
         value => {
             let text = super::value_bytes(shell, value, context);
-            let sliced = slice_characters(&shell.locale, &text, offset, length);
+            /* A negative length names an end position counted from the
+             * end, so it can name one in front of the start. Bash
+             * refuses that rather than returning nothing, and says so in
+             * the same words `select` already uses for an array. */
+            // [spec:nsh:req:compat.bash.expansion-parameter]
+            let Some(sliced) = slice_characters(&shell.locale, &text, offset, length) else {
+                let mut message = length.unwrap_or_default().to_string().into_bytes();
+                message.extend_from_slice(b": substring expression < 0");
+                return Err(shell.diagnostics().expansion_error_value(&message));
+            };
             Ok(Expansion::one(Field::from_bytes(
                 &sliced,
                 context.protects(),
@@ -442,20 +451,43 @@ fn slice_characters(
     text: &[u8],
     offset: i64,
     length: Option<i64>,
-) -> BString {
+) -> Option<BString> {
     let boundaries = super::character_boundaries(locale, text);
     let count = boundaries.len() as i64 - 1;
     let start = if offset < 0 {
-        (count + offset).max(0)
+        /* A negative offset counts back from the end, and one that
+         * reaches past the front selects nothing at all rather than
+         * being clamped to the front. `select` says the same of an
+         * array and has always done it; only the scalar clamped. */
+        // [spec:nsh:req:compat.bash.expansion-parameter]
+        let from_end = count + offset;
+        if from_end < 0 {
+            return Some(BString::default());
+        }
+        from_end
+    } else if offset > count {
+        /* An offset past the end selects nothing, and Bash decides that
+         * before it ever looks at the length -- which is why `${x:3:-1}`
+         * on two characters is empty where `${x:2:-1}` is refused. */
+        // [spec:nsh:req:compat.bash.expansion-parameter]
+        return Some(BString::default());
     } else {
-        offset.min(count)
+        offset
     };
     let end = match length {
         None => count,
-        Some(length) if length < 0 => (count + length).max(start),
+        Some(length) if length < 0 => {
+            let end = count + length;
+            if end < start {
+                return None;
+            }
+            end
+        }
         Some(length) => (start + length).min(count),
     };
-    BString::from(&text[boundaries[start as usize]..boundaries[end.max(start) as usize]])
+    Some(BString::from(
+        &text[boundaries[start as usize]..boundaries[end.max(start) as usize]],
+    ))
 }
 
 /// `${name/pattern/replacement}` and its global, anchored, and
@@ -894,4 +926,45 @@ fn arithmetic_operand(
         return Ok(0);
     }
     crate::arithmetic::evaluate(shell, text.as_bstr())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A substring offset past either end selects nothing.
+    ///
+    /// Derived from the pinned Bash 5.3 build over every offset and
+    /// length in range, including a value whose bytes are not valid
+    /// UTF-8. Two rules, and the order between them matters: an offset
+    /// reaching past the front or past the end selects nothing, and Bash
+    /// decides that *before* it looks at the length, which is why
+    /// `${x:3:-1}` on two characters is empty where `${x:2:-1}` is
+    /// refused for naming an end in front of its start.
+    ///
+    /// `select` has said the same of an array since it was written. Only
+    /// the scalar clamped to the front, which is what the sixth
+    /// parameter artifact was -- not the invalid UTF-8 it looked like.
+    // [spec:nsh:req:compat.bash.expansion-parameter/test]
+    #[test]
+    fn a_substring_offset_past_the_end_selects_nothing() {
+        let locale = nsh_platform::Locale::c().expect("the C locale");
+        let slice = |text: &[u8], offset: i64, length: Option<i64>| {
+            slice_characters(&locale, text, offset, length).map(|got| got.to_vec())
+        };
+        assert_eq!(slice(b"abcdef", -6, Some(3)), Some(b"abc".to_vec()));
+        assert_eq!(slice(b"abcdef", -7, Some(3)), Some(Vec::new()));
+        assert_eq!(slice(b"ab", -8, Some(14)), Some(Vec::new()));
+        assert_eq!(slice(b"ab", -8, None), Some(Vec::new()));
+        assert_eq!(slice(b"abcdef", 2, Some(2)), Some(b"cd".to_vec()));
+        assert_eq!(slice(b"ab", 3, Some(1)), Some(Vec::new()));
+        /* The ordering: past the end wins over a backwards length. */
+        assert_eq!(slice(b"ab", 3, Some(-1)), Some(Vec::new()));
+        assert_eq!(slice(b"ab", 1, Some(-1)), Some(Vec::new()));
+        assert_eq!(slice(b"ab", 2, Some(-1)), None);
+        assert_eq!(slice(b"abcdef", 0, Some(-1)), Some(b"abcde".to_vec()));
+        /* Bytes that are not valid UTF-8 are still bytes to count. */
+        assert_eq!(slice(b"\x8b\xab", -8, Some(14)), Some(Vec::new()));
+        assert_eq!(slice(b"\x8b\xab", 0, Some(14)), Some(b"\x8b\xab".to_vec()));
+    }
 }
