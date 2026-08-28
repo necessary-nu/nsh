@@ -108,10 +108,16 @@ pub use crate::source::{Source, Startup};
 pub use crate::status::{ExitStatus, Signal};
 pub use crate::streams::Streams;
 
-// This is enabled only by the cargo-fuzz workspace. It keeps the normal
+// Public only for the cargo-fuzz workspace, which is what keeps the normal
 // library surface closed while letting the round-trip property exercise the
 // parser and printer without executing the generated program text.
-#[cfg(feature = "fuzzing")]
+//
+// Compiled under `cfg(test)` as well, so that `cargo test` runs that
+// property rather than skipping the strongest thing the crate asserts.
+// It was skipping it: eight round-trip tests failed for a whole node
+// while a plain `cargo test --workspace` reported everything green.
+// [spec:nsh:req:idiom.printable-ast+2]
+#[cfg(any(feature = "fuzzing", test))]
 #[doc(hidden)]
 pub mod fuzzing;
 

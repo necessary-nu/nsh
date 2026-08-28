@@ -238,7 +238,7 @@ impl TokenLog {
 
     /// Whether an alias replaced text during the parse that just ran.
     // [spec:nsh:req:idiom.printable-ast+2]
-    #[cfg(feature = "fuzzing")]
+    #[cfg(any(feature = "fuzzing", test))]
     pub(crate) fn expanded_alias(&self) -> bool {
         self.expanded_alias
     }

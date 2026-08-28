@@ -179,7 +179,7 @@ impl SourceTokens {
     /// workspace links; the shell itself asks whether there is a run by
     /// trying to emit one.
     // [spec:nsh:req:idiom.printable-ast+2]
-    #[cfg(feature = "fuzzing")]
+    #[cfg(any(feature = "fuzzing", test))]
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

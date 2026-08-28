@@ -85,7 +85,7 @@ fn here_documents<'a>(node: &'a Node, into: &mut Vec<&'a HereDocument>) {
 /// A here-document's body is exempt, because whether its run is inside
 /// its command's depends on where the newline that ended the line fell.
 // [spec:nsh:req:idiom.printable-ast+2]
-#[cfg(feature = "fuzzing")]
+#[cfg(any(feature = "fuzzing", test))]
 pub(crate) fn misplaced_run(node: &Node) -> Option<(super::SourceTokens, super::SourceTokens)> {
     let run = node.tokens();
     for child in children(node) {
