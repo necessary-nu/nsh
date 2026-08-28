@@ -63,14 +63,6 @@ pub(crate) enum WordToken {
         operation: ParameterOperation,
         colon: bool,
         indirect: bool,
-        /// The markers an invalid expansion wore before its name -- `!` and
-        /// `#`, which the name cannot hold.
-        // [spec:nsh:req:idiom.printable-ast]
-        invalid_marker: BString,
-        /// The byte that made an invalid expansion invalid, which sits after
-        /// the name and before the operand.
-        // [spec:nsh:req:idiom.printable-ast]
-        invalid_prefix: BString,
     },
     ParameterEnd,
     Command(Option<Node>),
@@ -111,6 +103,13 @@ pub(crate) enum QuoteKind {
 }
 
 /// A parameter expansion and its optional word operand.
+///
+/// What the expansion does, and not how it was written. An expansion the
+/// shell refuses is `Invalid` and nothing more: the `!`, the `#` and the
+/// byte that made it invalid were kept here so a rejected `${(M)x}` could
+/// be written back as the failure the source spelled, and the word's run
+/// is that now -- for every construct rather than for this one.
+// [spec:nsh:req:idiom.canonical-tree+1]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ParameterExpansion {
     pub(crate) name: BString,
@@ -120,18 +119,6 @@ pub(crate) struct ParameterExpansion {
     // [spec:nsh:req:compat.bash.expansion-globbing]
     pub(crate) indirect: bool,
     pub(crate) operand: Option<Box<ParsedWord>>,
-    /// The markers an invalid expansion wore before its name.
-    ///
-    /// `${!#a}` is refused on the `!` and `${#a }` on the `#`, and neither is
-    /// a name byte, so nothing else in the expansion holds them.
-    // [spec:nsh:req:idiom.printable-ast]
-    pub(crate) invalid_marker: BString,
-    /// The byte that made an invalid expansion invalid.
-    ///
-    /// `${(M)x}` fails on the `(`, which is neither a name nor part of the
-    /// operand after it. Printing without it spells a different failure.
-    // [spec:nsh:req:idiom.printable-ast]
-    pub(crate) invalid_prefix: BString,
 }
 
 /// The operation selected by a parameter expansion.
@@ -201,8 +188,6 @@ impl ParsedWord {
                     colon: false,
                     indirect: false,
                     operand: None,
-                    invalid_marker: BString::new(Vec::new()),
-                    invalid_prefix: BString::new(Vec::new()),
                 }),
                 WordPart::Quote(QuoteBoundary::Close),
             ],
@@ -422,8 +407,6 @@ impl TokenDecoder<'_> {
                     operation,
                     colon,
                     indirect,
-                    invalid_marker,
-                    invalid_prefix,
                 } => {
                     let operand = (*operation != ParameterOperation::Value)
                         .then(|| Box::new(self.word_until(TokenBoundary::Parameter)));
@@ -433,8 +416,6 @@ impl TokenDecoder<'_> {
                         colon: *colon,
                         indirect: *indirect,
                         operand,
-                        invalid_marker: invalid_marker.clone(),
-                        invalid_prefix: invalid_prefix.clone(),
                     }));
                 }
                 WordToken::Command(command) => {
@@ -528,8 +509,6 @@ mod tests {
                 operation: ParameterOperation::Default,
                 colon: true,
                 indirect: false,
-                invalid_marker: BString::new(Vec::new()),
-                invalid_prefix: BString::new(Vec::new()),
             },
             WordToken::Literal(b'y'),
             WordToken::ParameterEnd,

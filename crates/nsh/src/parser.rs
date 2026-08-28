@@ -2105,8 +2105,6 @@ fn parse_parameter_operator(
     bad_substitution: bool,
     parameter_syntax: &mut ParameterSyntax,
     nested_syntax: &mut SyntaxContext,
-    invalid_marker: &mut BString,
-    invalid_prefix: &mut BString,
 ) -> Result<(), Error> {
     if bad_substitution {
         unread_input_unit(shell);
@@ -2169,21 +2167,15 @@ fn parse_parameter_operator(
                     *nested_syntax = SyntaxContext::Base;
                     ParameterOperation::Substring
                 }
-                _ => {
-                    // The byte that is not an operator is still the source's,
-                    // and nothing else in the expansion will hold it.
-                    // [spec:nsh:req:idiom.printable-ast]
-                    if let Some(byte) = lexer.input.byte() {
-                        invalid_prefix.push(byte);
-                    }
-                    ParameterOperation::Invalid
-                }
+                // The byte that is not an operator is the source's, and
+                // the word's run is where the source is kept.
+                // [spec:nsh:req:idiom.canonical-tree+1]
+                _ => ParameterOperation::Invalid,
             };
         }
     } else {
         if parameter_syntax.operation == ParameterOperation::Length && !lexer.input.is(b'}') {
             parameter_syntax.operation = ParameterOperation::Invalid;
-            invalid_marker.push(b'#');
         }
         unread_input_unit(shell);
     }
@@ -2240,13 +2232,6 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         let indirection = bash::parameter_indirection(shell, lexer, parameter_syntax.braced)?;
         let indirect = indirection == bash::Indirection::Present;
         let mut bad_substitution = indirection == bash::Indirection::Invalid;
-        let mut invalid_prefix = BString::new(Vec::new());
-        let mut invalid_marker = BString::new(Vec::new());
-        if bad_substitution {
-            // `${!#a}` is refused on the `!`, which is not a name byte.
-            // [spec:nsh:req:idiom.printable-ast]
-            invalid_marker.push(b'!');
-        }
         let name_start = lexer.output.len();
         'assignment_name: loop {
             if bad_substitution {
@@ -2304,14 +2289,6 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                 if !current_unit.is_special_parameter() {
                     if parameter_syntax.operation == ParameterOperation::Length {
                         parameter_syntax.operation = ParameterOperation::Invalid;
-                        invalid_marker.push(b'#');
-                    }
-                    // The byte that made this invalid is neither a name byte
-                    // nor part of the operand that starts after it, so the
-                    // expansion carries it or nothing does.
-                    // [spec:nsh:req:idiom.printable-ast]
-                    if let Some(byte) = current_unit.byte() {
-                        invalid_prefix.push(byte);
                     }
                     bad_substitution = true;
                     break 'assignment_name;
@@ -2340,8 +2317,6 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             bad_substitution,
             &mut parameter_syntax,
             &mut nested_syntax,
-            &mut invalid_marker,
-            &mut invalid_prefix,
         )?;
 
         if nested_syntax == SyntaxContext::Arithmetic {
@@ -2374,8 +2349,6 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
                 operation: parameter_syntax.operation,
                 colon: parameter_syntax.colon,
                 indirect,
-                invalid_marker,
-                invalid_prefix,
             });
         }
     } else {
