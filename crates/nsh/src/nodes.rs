@@ -43,6 +43,7 @@ use crate::parser::SourceToken;
 use crate::word::ParsedWord;
 
 mod bash;
+pub(crate) mod emit;
 pub(crate) mod source;
 
 pub(crate) use bash::{
@@ -172,6 +173,19 @@ impl SourceTokens {
         text
     }
 
+    /// Whether this run already holds `other`'s tokens.
+    ///
+    /// A here-document's body is read at the newline that ends the
+    /// redirection's line, and whether that newline falls inside the node
+    /// being written decides whether its run already holds the body. A
+    /// top-level `cat <<EOF` ends before that newline and does not;
+    /// `{ cat <<EOF` reaches it inside the braces and does. Emission has
+    /// to ask, because the answer is not a property of the redirection.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    pub(crate) fn holds(&self, other: &SourceTokens) -> bool {
+        !other.0.is_empty() && self.0.windows(other.0.len()).any(|run| run == &*other.0)
+    }
+
     /// The bytes of the run, concatenated.
     // [spec:nsh:def:idiom.token-stream]
     pub(crate) fn text(&self) -> BString {
@@ -214,8 +228,10 @@ impl PartialEq for SourceTokens {
 /// where they were read are the same form, and printing a tree relocates
 /// every line in it. So all positions compare equal, and code that really
 /// wants the number asks for it with [`SourceLine::get`]. That is what lets
-/// [`spec:nsh:req:idiom.printable-ast`] be checked by comparing trees.
-// [spec:nsh:req:idiom.printable-ast]
+/// a node the shell built be compared with the one its spelling parses
+/// back to, which is what `[spec:nsh:req:idiom.printable-ast+2]` asks of
+/// the fallback.
+// [spec:nsh:req:idiom.printable-ast+2]
 #[derive(Clone, Copy, Debug, Eq)]
 pub struct SourceLine(i32);
 
@@ -425,11 +441,12 @@ pub struct HereDocument {
     pub body: WordNode,
     /// The word that ends the body.
     ///
-    /// Not needed to read the document -- the parser has already found the
-    /// end by the time this node exists -- but a body that holds a line
-    /// spelling some other delimiter can only be printed back under the one
-    /// the source wrote.
-    // [spec:nsh:req:idiom.printable-ast]
+    /// The parser has already found the end by the time this node exists,
+    /// and a here-document that was read is written as the run holding its
+    /// body and its terminator line together. What reads this is the
+    /// fallback, which has to name a delimiter for a document nothing
+    /// wrote.
+    // [spec:nsh:req:idiom.printable-ast+2]
     pub delimiter: NodeText,
 }
 
@@ -468,7 +485,7 @@ pub enum Node {
     /// The braces are not decoration: they decide what a redirection or a
     /// `&` after them attaches to, and a list that lost them is a different
     /// program from the one that was written.
-    // [spec:nsh:req:idiom.printable-ast]
+    // [spec:nsh:req:idiom.printable-ast+2]
     Group(CompoundCommand),
     And(BinaryCommand),
     Or(BinaryCommand),
@@ -491,6 +508,35 @@ pub enum Node {
 }
 
 impl Node {
+    /// The run of tokens this node was parsed from.
+    ///
+    /// Empty for a node the shell built rather than read, which is the
+    /// one case a renderer has to spell for itself.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    pub(crate) fn tokens(&self) -> &SourceTokens {
+        match self {
+            Node::Command(command) => &command.tokens,
+            Node::Pipeline(pipeline) => &pipeline.tokens,
+            Node::Redirect(wrapper)
+            | Node::Background(wrapper)
+            | Node::Subshell(wrapper)
+            | Node::Group(wrapper) => &wrapper.tokens,
+            Node::And(binary)
+            | Node::Or(binary)
+            | Node::Sequence(binary)
+            | Node::While(binary)
+            | Node::Until(binary) => &binary.tokens,
+            Node::If(command) => &command.tokens,
+            Node::For(command) | Node::Select(command) => &command.tokens,
+            Node::Timed(command) => &command.tokens,
+            Node::Case(command) => &command.tokens,
+            Node::Function(definition) => &definition.tokens,
+            Node::Word(word) => &word.tokens,
+            Node::Not(negation) => &negation.tokens,
+            Node::Bash(node) => node.tokens(),
+        }
+    }
+
     /// Give a node the run of tokens it was parsed from.
     ///
     /// A compound form ends at a closing token its own branch of the

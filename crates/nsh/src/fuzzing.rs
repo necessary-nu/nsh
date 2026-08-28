@@ -44,7 +44,7 @@ pub fn canonical_source(shell: &mut Shell, source: &BStr) -> Result<BString, Err
 ///
 /// A verdict rather than a pair of trees: the property is what the fuzz
 /// workspace needs, and the syntax tree stays inside the crate that owns it.
-// [spec:nsh:req:idiom.printable-ast]
+// [spec:nsh:req:idiom.printable-ast+2]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Reversibility {
     /// The source did not parse, so there was nothing to print. An ordinary
@@ -64,7 +64,7 @@ pub enum Reversibility {
 /// positions do not take part, because printing relocates every one of them
 /// and a position is provenance rather than identity -- see
 /// [`crate::nodes::SourceLine`].
-// [spec:nsh:req:idiom.printable-ast]
+// [spec:nsh:req:idiom.printable-ast+2]
 pub fn printing_is_reversible(shell: &mut Shell, source: &BStr) -> Reversibility {
     let Ok(program) = parse_program(shell, source) else {
         return Reversibility::NotParsed;
@@ -219,9 +219,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             once,
-            BString::from(
-                b"echo hi\n{ \n    sleep 1;\n    echo derp\n} &\necho bye\nwait\n".as_slice()
-            )
+            BString::from(b"echo hi\n{ sleep 1 ; echo derp ; } &\necho bye\nwait\n".as_slice())
         );
         assert_eq!(once, twice);
     }
@@ -260,7 +258,7 @@ EOF
     /// An invalid expansion fails on bytes the source wrote, and the tree
     /// still holds them. Printing `${}` in their place spelled a different
     /// failure and threw away whatever the braces were around.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn canonical_source_keeps_an_invalid_parameter_fixed() {
         let source = b"${(M)foo}";
@@ -304,7 +302,7 @@ EOF
     /// one protects nothing and the two spell themselves. Writing a second
     /// backslash for the first grew the word by two bytes a round and
     /// expanded to one more backslash each time.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn canonical_source_keeps_an_escaped_apostrophe_fixed() {
         let source = b"\"${a+\\'}\"";
@@ -318,12 +316,14 @@ EOF
     }
 
     /// Two further reductions of the artifact behind
-    /// `crash_67407b0220a752d0f6932c9c9a3349b7e7ff9413`, each of which
-    /// outlived the fix the one before it forced: inside a `"` this printer
-    /// opened, an operand quote protects nothing but a `}`, and writing one
-    /// back anyway hands the next parse an operand it reads differently.
+    /// `crash_67407b0220a752d0f6932c9c9a3349b7e7ff9413`. Each outlived the
+    /// fix the one before it forced, because each was the printer deciding
+    /// which quotes an operand needed. Nothing decides that now: the run
+    /// the word was read as is what goes back, and a quote that protects
+    /// nothing is still a quote the source wrote.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
-    fn canonical_source_drops_a_redundant_operand_quote() {
+    fn an_operand_quote_that_protects_nothing_survives() {
         assert_roundtrip_fixed(b"\"${a+\"\"${a#\x00${ ''$''}''a}}\"$(\"\")\"\"''");
         assert_roundtrip_fixed(b"\"${a+\"\"${a#\x00${ ''$''}'a'}}\"$(\"\")\"\"''");
     }
@@ -331,7 +331,7 @@ EOF
     /// The tree a printed program parses back to is the one it came from,
     /// down to every part the grammar carries. Positions are the exception,
     /// and deliberately so: printing relocates all of them.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_a_program_recovers_the_program() {
         let mut shell = shell();
@@ -358,7 +358,7 @@ EOF
 
     /// Rejecting the input is an ordinary answer to arbitrary bytes: there is
     /// no program to print, so there is nothing the property can say.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_says_nothing_about_a_rejected_program() {
         let mut shell = shell();
@@ -372,7 +372,7 @@ EOF
     /// in. Dropping the toggle used to reopen the parameter grammar to the
     /// `}` it was protecting, which printed a stable program that ran
     /// differently -- the corruption the fixed-point property could not see.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_keeps_a_braced_quoted_operand() {
         let mut shell = shell();
@@ -385,10 +385,11 @@ EOF
         );
     }
 
-    /// The three ways to introduce a definition are three trees, so a
-    /// renderer that picks one hands the next parse a definition it was not
-    /// given. `declare -f` still normalises, the way Bash's does.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    /// The three ways to introduce a definition are three trees, and each
+    /// goes back as the bytes it was read from -- including the layout,
+    /// which no longer gets opened out. `declare -f` keeps Bash's frame
+    /// around a body; this is the renderer under it.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_keeps_a_definition_style() {
         let mut shell = shell();
@@ -397,15 +398,12 @@ EOF
             &[
                 (
                     b"f() { echo one; }".as_slice(),
-                    b"f () \n{ \n    echo one\n}\n".as_slice(),
+                    b"f() { echo one; }\n".as_slice(),
                 ),
-                (
-                    b"function f { echo one; }",
-                    b"function f \n{ \n    echo one\n}\n",
-                ),
+                (b"function f { echo one; }", b"function f { echo one; }\n"),
                 (
                     b"function f () { echo one; }",
-                    b"function f () \n{ \n    echo one\n}\n",
+                    b"function f () { echo one; }\n",
                 ),
             ],
         );
@@ -415,7 +413,7 @@ EOF
     /// not recoverable from the run and the parser records it. A backslash
     /// inside the run is the same question one level down: it spells itself
     /// only when the part after it is protected too.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_keeps_a_run_in_its_own_quote() {
         let mut shell = shell();
@@ -437,7 +435,7 @@ EOF
     /// again with the word the source wrote. A body that ended at end of
     /// input carries the line the reader saw, which is what Bash feeds and
     /// what lets a printed document close at all.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_keeps_a_here_document_delimiter() {
         let mut shell = shell();
@@ -449,7 +447,7 @@ EOF
                     b"cat <<MOF\nhello\nEOF\nMOF\n".as_slice(),
                 ),
                 (b"cat <<'Q'\nbody\nQ\n", b"cat <<'Q'\nbody\nQ\n"),
-                (b"<<a\nx", b" <<a\nx\na\n"),
+                (b"<<a\nx", b"<<a\nx\n"),
             ],
         );
     }
@@ -458,7 +456,7 @@ EOF
     /// spelled the same byte with a part the source never wrote, which is
     /// the whole shape of over-protection: `\$`, `\\`, `\'` all read back as
     /// one part more than they went in as.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_leaves_an_inert_dollar_alone() {
         let mut shell = shell();
@@ -483,7 +481,7 @@ EOF
     /// `&` after them attaches to, so a list that lost them is a different
     /// program. `{ a;}<f` used to print as `a < f`, which redirects the
     /// command rather than the group.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_keeps_a_brace_group() {
         let mut shell = shell();
@@ -508,7 +506,7 @@ EOF
     /// A byte that is only special where it begins something keeps its own
     /// spelling everywhere else. `#` opens a comment only where a word
     /// begins, and a `$` against a backslash starts nothing at all.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn printing_leaves_a_positional_byte_alone() {
         let mut shell = shell();
@@ -556,35 +554,36 @@ EOF
     }
 
     /// A backslash with nothing after it is a line continuation joining to
-    /// nothing, which Bash drops: `echo a\` over end of input writes `a`.
-    /// Keeping the byte spelled a word the source never had.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    /// nothing. The word it belongs to is `a`, which is what Bash runs, and
+    /// the byte is still one the source wrote -- so it goes back, and what
+    /// comes back reads as the same word.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
-    fn printing_drops_a_continuation_that_joins_nothing() {
+    fn a_continuation_that_joins_nothing_still_goes_back() {
         let mut shell = shell();
         assert_eq!(
             printing_is_reversible(&mut shell, BStr::new(b"echo a\\")),
             Reversibility::Reversible {
-                printed: BString::from(b"echo a\n".as_slice()),
+                printed: BString::from(b"echo a\\\n".as_slice()),
             },
         );
     }
 
-    /// Two spellings the shell reads as one thing are one tree, so the
-    /// parser records the one meaning and the printer is free to write
-    /// either. Bash discards a backslash inside `$(( ))` before evaluating,
-    /// and `$[ ]` is its own older spelling of the same expansion -- the one
-    /// that can hold an expression whose parentheses do not balance, which
-    /// `$(( ))` cannot and which used to print as `$((0))`.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    /// Two spellings the shell reads as one thing are one tree, and the
+    /// tree no longer has to choose between them: each goes back as it was
+    /// written. Bash discards a backslash inside `$(( ))` before
+    /// evaluating, and `$[ ]` is its own older spelling of the same
+    /// expansion -- which used to be rewritten as `$(( ))` and, when its
+    /// parentheses did not balance, as `$((0))`.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
-    fn printing_settles_on_one_arithmetic_spelling() {
+    fn each_arithmetic_spelling_goes_back_as_written() {
         let mut shell = shell();
         assert_prints_as(
             &mut shell,
             &[
-                (b"$((\\$))".as_slice(), b"$(($))\n".as_slice()),
-                (b"$[1]", b"$((1))\n"),
+                (b"$((\\$))".as_slice(), b"$((\\$))\n".as_slice()),
+                (b"$[1]", b"$[1]\n"),
                 (b"$[())]", b"$[())]\n"),
             ],
         );
@@ -888,7 +887,7 @@ EOF
     ///
     /// Every shape at once rather than one test each: a failure should say
     /// which shapes came back, not which single shape came back first.
-    // [spec:nsh:req:idiom.printable-ast/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn the_round_trip_corpus_prints_fixed_points() {
         let mut shell = shell();

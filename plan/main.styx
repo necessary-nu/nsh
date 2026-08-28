@@ -7154,6 +7154,13 @@ children (
                                         kind @note
                                         text "Absorbs `stop-the-printer-inventing`, which was removed rather than done: it was maintenance on a component this node deletes, and the inventions it named cannot survive a renderer that emits tokens. Their evidence is kept here so the rewrite can be checked against it rather than merely trusted.\n\nTHE THREE INVENTIONS, AND WHAT THEY COST TODAY.\n* `iteration()` writes `\" in \\\"$@\\\"\"` when a `for` has an empty word list. That is a live meaning change in a shipped builtin, not a printing blemish:\n\n      f(){ for a in; do echo \"iteration:$a\"; done; }\n      f p q                                        -> nothing\n      eval \"$(declare -f f | sed s/^f/g/)\"; g p q   -> iteration:p / iteration:q\n\n  Bash prints `for a in ;`. The tree already tells the two cases apart -- `for a;` parses to `[\"$@\"]` and `for a in;` to `[]` -- so nothing but the printer was ever wrong here.\n* An empty here-document delimiter prints as the invented `EOF`, where `<<''` spells what the tree holds and Bash accepts it. `<<${a:''}` prints a delimiter with a quote broken across it and then drifts on the next print. Five artifacts.\n* The arithmetic delimiter truncates its content: `$((]))` prints `$[]]`, and Bash gives `0]` for the second because `$[` ends at the first `]` while `$((` ends at `))`. `arithmetic_delimiters_balanced` tests parenthesis balance when the question is whether the chosen delimiter's terminator occurs inside the content. Six artifacts.\n\nALL THREE ARE THE SAME SHAPE: the renderer reaching for a construct the tree did not hold, because it had to spell something and had nothing to spell it from. Emission has nothing to reach for. The check that this landed is that all three inputs round-trip byte-exact under `prove-byte-exact-round-trip`, not that three special cases were fixed.\n\nTHE FALLBACK IS WHERE THEY COULD COME BACK. A node built rather than parsed carries no tokens and needs a spelling, and that is the one path where a renderer still decides anything. It should be visibly separate from the emission path, and it should be the first place looked when a new invention appears."
                                     }
+
+                                    {
+                                        at 2026-08-28T10:48:34.849201099Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 

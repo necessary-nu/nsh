@@ -25,6 +25,19 @@ pub(crate) enum BashNode {
 }
 
 impl BashNode {
+    /// The run of tokens this node was parsed from.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    pub(crate) fn tokens(&self) -> &SourceTokens {
+        match self {
+            BashNode::Conditional(node) => &node.tokens,
+            BashNode::ArithmeticCommand(node) => &node.tokens,
+            BashNode::ArithmeticFor(node) => &node.tokens,
+            BashNode::Function(node) => &node.tokens,
+            BashNode::ArrayAssignment(node) => &node.tokens,
+            BashNode::ProcessSubstitution(node) => &node.tokens,
+        }
+    }
+
     /// Give a Bash node the run of tokens it was parsed from.
     ///
     /// The counterpart of [`super::Node::with_tokens`], reached the same

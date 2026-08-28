@@ -140,7 +140,6 @@ impl<'a> Printer<'a> {
     fn list_with_separator(&mut self, node: &Node, indent: usize, semicolon: bool) {
         let mut items = Vec::new();
         flatten(node, &mut items);
-        items.retain(|item| !empty_simple_command(item));
         let last = items.len().saturating_sub(1);
         for (position, item) in items.into_iter().enumerate() {
             self.command(item, indent);
@@ -176,6 +175,14 @@ impl<'a> Printer<'a> {
     // -----------------------------------------------------------------
 
     fn command(&mut self, node: &Node, indent: usize) {
+        /* Anything the parser built is written as the bytes it was read
+         * from. What follows this is the fallback, and it only ever sees
+         * nodes the shell synthesized. */
+        // [spec:nsh:req:idiom.printable-ast+2]
+        if let Some(source) = super::emit::emitted(node) {
+            self.out.extend_from_slice(&source);
+            return;
+        }
         match node {
             Node::Command(command) => self.simple_command(command, indent),
             Node::Pipeline(pipeline) => self.pipeline(pipeline, indent),
@@ -365,15 +372,13 @@ impl<'a> Printer<'a> {
         self.out.extend_from_slice(b"esac");
     }
 
-    /// A definition nested inside another body. Bash prints the reserved
-    /// word here even when the source did not use it.
-    /// Print a definition the way it was introduced.
+    /// Spell a definition the shell built, the way it was introduced.
     ///
     /// The three spellings are three trees, so a renderer that picks one
-    /// hands the next parse a different definition than it was given. This is
-    /// the one place that differs from [`function_definition`], which answers
-    /// for `declare -f` and normalises the way Bash's does.
-    // [spec:nsh:req:idiom.printable-ast]
+    /// hands the next parse a different definition than it was given. Only
+    /// reached for a definition nothing read, since one that was read is
+    /// written as its own bytes.
+    // [spec:nsh:req:idiom.printable-ast+2]
     fn nested_function(&mut self, name: &BStr, body: &Node, indent: usize, style: DefinitionStyle) {
         if style != DefinitionStyle::Posix {
             self.out.extend_from_slice(b"function ");
@@ -405,7 +410,7 @@ impl<'a> Printer<'a> {
             BashNode::ArithmeticCommand(command) => {
                 // No padding: the expression the tree holds is the one the
                 // source wrote, and a space added here comes back as part of
-                // it. [spec:nsh:req:idiom.printable-ast]
+                // it. [spec:nsh:req:idiom.printable-ast+2]
                 let expression = command.expression.as_bstr();
                 if expression.is_empty() {
                     self.out.extend_from_slice(b"(())");
@@ -770,23 +775,6 @@ impl<'a> Printer<'a> {
         self.out.push(b')');
         self.pending = outer_pending;
     }
-}
-
-fn empty_simple_command(node: &Node) -> bool {
-    let Node::Command(command) = node else {
-        return false;
-    };
-    command.assignments.is_empty()
-        && command.redirections.is_empty()
-        && command.arguments.iter().all(|node| {
-            let Node::Word(word) = node else {
-                return false;
-            };
-            !word.word.parts().is_empty()
-                && word.word.parts().iter().all(|part| {
-                    matches!(part, WordPart::Text { bytes, quoted: true } if bytes.is_empty())
-                })
-        })
 }
 
 /// Keep a parsed function name one shell word when its bytes include syntax.

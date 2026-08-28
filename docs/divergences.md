@@ -736,19 +736,40 @@ evaluates without recursing through parentheses is unaffected.
 Observable difference: an expression that nests more than 1024 levels
 deep in total is a diagnostic rather than a crash.
 
-### `declare -f` prints a rendering of the definition, not its source
+### `declare -f` writes a statement as it was written, not as Bash lays it out
 
-**Status:** a stated limit. `crates/nsh/src/nodes/source.rs`.
+**Status:** deliberate. `crates/nsh/src/nodes/emit.rs`.
 
-Bash keeps each word's original spelling and re-indents the grammar
-around it. This tree keeps structure rather than bytes, so a printed body
-is re-spelled from its parts: it means what the definition means and
-re-reads as the same function, but it is not always the same text Bash
-would print. A here-document's delimiter is not retained and is printed
-as `EOF`; a brace group holding one command loses its braces, because
-`{ list; }` parses to the list itself; `a & b` prints on two lines; and a
-parameter takes `${name}` where the byte after it could otherwise be read
-as more of the name.
+This used to be the other way round, and worse: the body was re-spelled
+from its parts, so a printed definition was not always the text Bash
+would print and sometimes not even the same program -- `for a in;` came
+back as `for a in "$@";`, which iterates over the positional parameters
+instead of nothing.
+
+Under `[spec:nsh:req:idiom.printable-ast+2]` a node carries the run of
+tokens it was read from, and printing one emits that run. So each word,
+each here-document and each here-document delimiter is now the source's
+own bytes, and the three cases where the old renderer reached for a
+construct the tree did not hold are gone by construction rather than by
+being special-cased.
+
+What is left is layout, and it is the opposite kind of difference. Bash
+re-indents the grammar inside a statement:
+
+    if x; then
+        echo b;
+    fi
+
+while a statement here keeps the shape it was written in:
+
+    if x; then echo b; fi
+
+The frame around the body is Bash's and is reproduced exactly -- the
+`name () \n{ \n` opening, the four-column indent, one statement to a
+line -- because that frame is the renderer's own layout and not something
+the source said. Re-indenting the inside would mean deciding where a line
+may break, which is a second opinion about the grammar of the kind this
+renderer exists not to have.
 
 Nothing re-enters the parser to produce this text, which is the half of
 `[dec:nsh:safety-trumps-compatibility]` that matters here: an

@@ -156,10 +156,10 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
     }
 
     /* Inside double quotes a backslash only escapes the four bytes that mean
-     * something there; before anything else it is data, and so is what
-     * follows it. Which of the two happened is the difference between a
-     * spelling and a byte, and only the parser knows it. */
-    // [spec:nsh:req:idiom.printable-ast]
+     * something there; before anything else it is data, and so the
+     * backslash itself is one of the word's bytes rather than a spelling
+     * of the byte after it. Only the parser knows which happened. */
+    // [spec:nsh:req:idiom.printable-ast+2]
     if (lexer.current_syntax().double_quoted
         || lexer.current_syntax().backquote != BackquoteContext::None)
         && !lexer.input.is(b'\\')

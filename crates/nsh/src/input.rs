@@ -179,7 +179,12 @@ pub struct InputStack {
     /// `toppf` — how far `popallfiles` unwinds.
     floor_index: usize,
     /// `parsefile` — the current frame, by index. See `cur_pf`.
-    current: usize,
+    ///
+    /// Readable across the crate because the token log is bound to one
+    /// frame: anything that writes to the log has to be able to say which
+    /// input it is speaking for, the way `record` and `unrecord` do.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) current: usize,
     /// Here-document delimiters waiting for their bodies at the next
     /// grammar newline.
     pub(crate) pending_here_documents: Vec<crate::parser::PendingHereDocument>,

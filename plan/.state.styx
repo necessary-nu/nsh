@@ -5250,7 +5250,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.process-group-zero-state, version 0}
     )}
-    {id print-by-emitting-tokens}
+    {id print-by-emitting-tokens, covered_rules (
+        idiom.printable-ast
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.printable-ast}
+    )}
     {id process-environment-api, covered_rules (
         embedding-safety.process-environment-is-read-only
     ), covered_claims (

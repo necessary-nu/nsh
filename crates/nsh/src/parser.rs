@@ -1178,7 +1178,7 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
          * `x\n`. Recording the line the reader saw is also the only way the
          * body can be printed back, since a printed document has to close
          * with a delimiter on its own line. */
-        // [spec:nsh:req:idiom.printable-ast]
+        // [spec:nsh:req:idiom.printable-ast+2]
         if !word.is_empty() && !word.as_bstr().ends_with(b"\n") {
             word.push_literal_byte(b'\n');
         }
@@ -1212,9 +1212,14 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
 
     loop {
         let replayed = shell.input.token_pushed_back;
+        let frame = shell.input.current;
+        let began = shell.input.tokens.position();
         token = read_next_token(shell, &context)?;
         // [spec:nsh:def:idiom.token-stream]
-        shell.input.tokens.cut_token(token.kind, replayed);
+        shell
+            .input
+            .tokens
+            .cut_token(token.kind, replayed, frame, began);
 
         /*
          * eat newlines
@@ -1225,9 +1230,14 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
              * whole of `checkkwd` here, and the bit lived in it. */
             shell.input.clear_alias_boundary();
             let replayed = shell.input.token_pushed_back;
+            let frame = shell.input.current;
+            let began = shell.input.tokens.position();
             token = read_next_token(shell, &context)?;
             // [spec:nsh:def:idiom.token-stream]
-            shell.input.tokens.cut_token(token.kind, replayed);
+            shell
+                .input
+                .tokens
+                .cut_token(token.kind, replayed, frame, began);
         }
 
         /* `popstring` sets this while `xxreadtoken` runs. The bit belongs
@@ -1618,11 +1628,12 @@ fn parse_dollar_single_quote_escape(
     };
 
     unread_input_units(shell, text.len().saturating_sub(consumed));
-    /* A decoded byte is data, and the `$'...'` around it is what protects
-     * it. Marking it escaped as well would make `$'\"'` and `$'"'` two
-     * different words holding the same byte, and only one of them can be
-     * written back from bytes whose escapes are already gone. */
-    // [spec:nsh:req:idiom.printable-ast]
+    /* A decoded byte is data, and the `$'...'` around it is what makes it
+     * so: the run it lands in is inert because of the quote, not because
+     * of the escape that spelled it. `$'\"'` and `$'"'` are one word
+     * holding one byte, and the run each was read as is what tells them
+     * apart. */
+    // [spec:nsh:req:idiom.printable-ast+2]
     destination.extend(bytes.into_iter().map(WordToken::Literal));
     Ok(())
 }

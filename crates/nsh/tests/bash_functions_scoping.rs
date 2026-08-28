@@ -232,8 +232,15 @@ fn the_dialect_selects_the_declaration_language() {
     assert_eq!(run(&mut bash, b"declare -i m").0, 127);
 }
 
-/// `declare -f` prints a body in Bash's canonical layout, and `type`
-/// prints the same text under its own sentence.
+/// `declare -f` keeps Bash's frame and the body's own bytes.
+///
+/// The outer `name () \n{ \n` frame, the four-column indent and one
+/// statement to a line are Bash's, and are reproduced. What is inside a
+/// statement is the source's: a parsed node is written as the run it was
+/// read from, so `if x; then echo b; fi` comes back as it was written
+/// rather than opened out over four lines the way Bash does. Registered
+/// in docs/divergences.md.
+// [spec:nsh:req:idiom.printable-ast+2]
 // [spec:nsh:req:compat.bash.functions-scoping/test]
 #[test]
 fn a_definition_prints_in_bash_layout() {
@@ -247,7 +254,7 @@ fn a_definition_prints_in_bash_layout() {
     );
     expect(
         b"outer() { echo a; if x; then echo b; fi; }\ndeclare -f outer\n",
-        b"outer () \n{ \n    echo a;\n    if x; then\n        echo b;\n    fi\n}\n",
+        b"outer () \n{ \n    echo a;\n    if x; then echo b; fi\n}\n",
     );
 }
 

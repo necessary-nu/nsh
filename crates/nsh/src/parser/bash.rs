@@ -511,6 +511,11 @@ fn arithmetic_text(shell: &mut Shell) -> Result<NodeText, Error> {
             Quote::None => output.push(byte),
         }
     }
+    /* Read byte at a time rather than through `read_token`, so nothing
+     * has closed these bytes into a token and the run of the node about
+     * to be built would stop after its `((`. */
+    // [spec:nsh:req:idiom.printable-ast+2]
+    shell.input.tokens.cut(super::SourceTokenKind::Operator);
     Ok(NodeText::from(output.as_slice()))
 }
 

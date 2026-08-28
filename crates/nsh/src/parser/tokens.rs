@@ -224,6 +224,17 @@ impl TokenLog {
         self.tokens.push(SourceToken { kind, text });
     }
 
+    /// How many tokens have been cut so far.
+    ///
+    /// Taken before the reader is asked for a token, and handed back to
+    /// [`TokenLog::cut_token`] as where that token began. It has to be
+    /// the caller's local rather than the log's own state, because a
+    /// nested parse asks for tokens too and would overwrite it.
+    // [spec:nsh:def:idiom.token-stream]
+    pub(crate) fn position(&self) -> usize {
+        self.tokens.len()
+    }
+
     /// Close the pending bytes as the token the reader just returned.
     ///
     /// The kind is the reader's own answer relabelled, not a second
@@ -235,10 +246,33 @@ impl TokenLog {
     /// is already in the log, so it does not move where the last token
     /// begins; a fresh read that consumed no bytes -- end of input --
     /// does, because there is no token of it to point at.
+    ///
+    /// `began` is how long the log was before the reader was asked, and
+    /// it is where the returned token starts. Counting back from the end
+    /// does not work: a nested parse -- the list inside a `$(...)` or a
+    /// backquote -- reads on this same frame and closes the outer pending
+    /// run at its own boundaries, so one `$(o)` arrives as several tokens
+    /// and the outer cut has nothing left to close.
+    ///
+    /// `frame` is the input the reader is on, and it has to be checked
+    /// for the same reason [`TokenLog::record`] checks it. A nested parse
+    /// reading from a frame pushed underneath this one -- the string a
+    /// legacy backquote is re-read from, the empty string that closes a
+    /// `$(...)` -- cuts nothing into this log, so it must not move where
+    /// this log's last token begins either.
     // [spec:nsh:def:idiom.token-stream]
-    pub(crate) fn cut_token(&mut self, kind: crate::parser::TokenKind, replayed: bool) {
+    pub(crate) fn cut_token(
+        &mut self,
+        kind: crate::parser::TokenKind,
+        replayed: bool,
+        frame: usize,
+        began: usize,
+    ) {
+        if self.frame != Some(frame) {
+            return;
+        }
         if !replayed {
-            self.returned = self.tokens.len();
+            self.returned = began.min(self.tokens.len());
         }
         self.cut(match kind {
             crate::parser::TokenKind::Word => SourceTokenKind::Word,
