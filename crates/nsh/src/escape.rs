@@ -125,8 +125,17 @@ pub fn parse_escape(input: &[u8], single_quoted: bool) -> EscapeChunk {
         b't' => EscapeChunk::one(b'\t', 1),
         b'v' => EscapeChunk::one(0x0b, 1),
         b'\'' | b'"' if single_quoted => EscapeChunk::one(character, 1),
+        /* A `\x` with no hexadecimal digit after it is not an escape at
+         * all: Bash and dash both leave the two bytes exactly as they
+         * were written. Reading it as the value zero put a NUL into the
+         * output, which is the worse half -- a caller reading through a
+         * command substitution loses it and warns. */
+        // [spec:nsh:req:compat.bash.builtins-special-variables]
         b'x' => {
             let (value, digits) = hexadecimal_value(&input[1..], 2);
+            if digits == 0 {
+                return EscapeChunk::one(b'\\', 0);
+            }
             EscapeChunk::one(value as u8, 1 + digits)
         }
         b'u' | b'U' => {
@@ -268,5 +277,22 @@ mod tests {
                 assert_eq!(actual.as_slice(), [b'\'', byte, b'\'']);
             }
         }
+    }
+    /// `\x` with no hexadecimal digit is not an escape.
+    ///
+    /// Bash and dash agree here and nsh did not: it read the escape as
+    /// the value zero and consumed the `x`, which put a NUL into the
+    /// output. A caller reading that through a command substitution
+    /// loses the byte and is warned about it, so the NUL was the worse
+    /// half of the divergence. One hex digit is still enough.
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
+    #[test]
+    fn an_incomplete_hex_escape_stays_as_written() {
+        assert_eq!(parse_escape(b"x", false).bytes(), b"\\");
+        assert_eq!(parse_escape(b"x", false).consumed, 0);
+        assert_eq!(parse_escape(b"xg", false).bytes(), b"\\");
+        assert_eq!(parse_escape(b"xg", false).consumed, 0);
+        assert_eq!(parse_escape(b"x4", false).bytes(), &[4]);
+        assert_eq!(parse_escape(b"x41", false).bytes(), b"A");
     }
 }
