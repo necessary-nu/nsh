@@ -1621,7 +1621,7 @@ fn parse_dollar_single_quote_escape(
         }
     }
     let (bytes, consumed) = if text.first() != Some(&b'c') {
-        let converted = crate::escape::parse_escape(&text, true);
+        let converted = crate::escape::parse_escape(&shell.locale, &text, true);
         (converted.bytes().to_vec(), converted.consumed)
     } else {
         let mut consumed = 1;

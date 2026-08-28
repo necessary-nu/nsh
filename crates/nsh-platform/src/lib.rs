@@ -240,6 +240,46 @@ pub use windows_facts::{
     supplementary_groups, wait_for_input,
 };
 
+/// How one locale's charmap writes a character it was asked to write.
+///
+/// The three answers are different in kind, not in degree, which is why
+/// this is not `Option<Vec<u8>>`: a charmap can spell the character, or it
+/// has no spelling for it at all, or it is UTF-8 -- and UTF-8 is answered
+/// by naming it rather than by encoding it, because the C library has
+/// since narrowed UTF-8 to Unicode's range while the shells that write
+/// these escapes still use the original. Encoding it here would quietly
+/// drop the surrogates and the range above U+10FFFF that a script can
+/// still ask for.
+pub enum CharacterEncoding {
+    /// The charmap is UTF-8; the caller supplies the encoding.
+    Utf8,
+    /// The charmap's own spelling for the character.
+    Bytes(Vec<u8>),
+    /// The charmap has no spelling for this character.
+    Unrepresentable,
+}
+
+impl Locale {
+    /// How this locale's charmap writes the character numbered `value`.
+    #[cfg(unix)]
+    pub fn character_encoding(&self, value: u32) -> CharacterEncoding {
+        if self.charmap_is_utf8() {
+            return CharacterEncoding::Utf8;
+        }
+        match self.encode_character(value) {
+            Some(bytes) => CharacterEncoding::Bytes(bytes),
+            None => CharacterEncoding::Unrepresentable,
+        }
+    }
+
+    /// Windows shell text is UTF-8 whatever the locale is named, so there
+    /// is one charmap here and it is the one the caller encodes itself.
+    #[cfg(windows)]
+    pub fn character_encoding(&self, _value: u32) -> CharacterEncoding {
+        CharacterEncoding::Utf8
+    }
+}
+
 /// Host facts a Bash-compatible shell publishes as variables, and the two
 /// clocks it reads: the monotonic one behind `SECONDS` and the wall clock
 /// behind `EPOCHSECONDS`.

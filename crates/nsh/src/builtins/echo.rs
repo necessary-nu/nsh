@@ -55,7 +55,7 @@ fn write_escaped_text(
      * flag rather than being re-derived per word. */
     // [spec:nsh:req:compat.bash.builtins-special-variables]
     let stopped = if escapes {
-        append_escape(text, &mut buffer)
+        append_escape(&shell.locale, text, &mut buffer)
     } else {
         buffer.extend_from_slice(text);
         false

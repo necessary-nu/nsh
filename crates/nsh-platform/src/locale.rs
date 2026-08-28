@@ -37,7 +37,20 @@ unsafe extern "C" {
     fn mbrlen(bytes: *const core::ffi::c_char, len: usize, state: *mut MbState) -> usize;
     fn iswblank(wc: core::ffi::c_uint) -> core::ffi::c_int;
     fn iswspace(wc: core::ffi::c_uint) -> core::ffi::c_int;
+    fn wcrtomb(
+        bytes: *mut core::ffi::c_char,
+        wide: i32,
+        state: *mut MbState,
+    ) -> usize;
+    fn nl_langinfo(item: libc::nl_item) -> *const core::ffi::c_char;
 }
+
+// The destination `wcrtomb` is given.  C requires it to be at least
+// `MB_LEN_MAX` bytes, which is 16 on glibc and smaller elsewhere, and the
+// widest encoding any charmap glibc ships actually uses is six.  This is
+// well over both, because over-allocating is safe where under-allocating
+// would let the C library write past the end.
+const ENCODED_CHARACTER_MAX: usize = 64;
 
 static STRSIGNAL: Mutex<()> = Mutex::new(());
 
@@ -295,6 +308,57 @@ impl Locale {
         })
     }
 
+    /// Whether this locale's charmap is UTF-8.
+    ///
+    /// Asked by name rather than by probing an encoding, because the caller
+    /// wants the charmap's identity and not one of its spellings: UTF-8 is
+    /// the charmap whose encoding a shell writes itself instead of asking
+    /// the C library for it, so that the range the original UTF-8 defined
+    /// stays reachable on a C library that has since narrowed to
+    /// Unicode's.
+    pub(crate) fn charmap_is_utf8(&self) -> bool {
+        self.with_selected(|| {
+            // SAFETY: `nl_langinfo` returns a terminated string owned by the
+            // C library, valid until the locale is changed -- which cannot
+            // happen before the comparison below, on this thread.
+            let name = unsafe { nl_langinfo(libc::CODESET) };
+            if name.is_null() {
+                return false;
+            }
+            // SAFETY: see above; the pointer is non-null and terminated.
+            let name = unsafe { CStr::from_ptr(name) };
+            let name = name.to_bytes();
+            name.eq_ignore_ascii_case(b"UTF-8") || name.eq_ignore_ascii_case(b"UTF8")
+        })
+    }
+
+    /// The bytes this locale's charmap spells character number `value` with,
+    /// or `None` when the charmap has no spelling for it.
+    ///
+    /// This is the direction [`Self::decode_exact`] does not go, and the one
+    /// a shell needs to write a `\u` escape out: the escape names a
+    /// character and the charmap decides which bytes stand for it, or that
+    /// none do.
+    ///
+    /// A value above `i32::MAX` is refused here rather than handed on,
+    /// because `wchar_t` is signed and passing one through would ask the C
+    /// library about a different character than the caller named.
+    pub(crate) fn encode_character(&self, value: u32) -> Option<Vec<u8>> {
+        let wide = i32::try_from(value).ok()?;
+        self.with_selected(|| {
+            let mut encoded = [0_u8; ENCODED_CHARACTER_MAX];
+            // SAFETY: the destination is `MB_LEN_MAX` bytes or more of live
+            // local storage, which is the whole of `wcrtomb`'s contract for
+            // it, and the conversion state is initialized here; `wcrtomb`
+            // retains neither pointer.
+            let written = unsafe {
+                let mut state = std::mem::zeroed();
+                wcrtomb(encoded.as_mut_ptr().cast(), wide, &mut state)
+            };
+            (written != usize::MAX).then(|| encoded[..written.min(encoded.len())].to_vec())
+        })
+    }
+
     pub fn multibyte_len(&self, bytes: &[u8]) -> Option<usize> {
         self.with_selected(|| {
             // SAFETY: the conversion is bounded by the input slice and uses
@@ -479,6 +543,7 @@ impl Locale {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CharacterEncoding;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     fn current() -> libc::locale_t {
@@ -498,6 +563,86 @@ mod tests {
     fn construction_preserves_thread_locale() {
         let before = current();
         let _locale = Locale::c().unwrap();
+        assert_eq!(current(), before);
+    }
+
+    /// A locale whose charmap is UTF-8, or `None` where none is installed.
+    fn utf8() -> Option<Locale> {
+        [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
+            .into_iter()
+            .find_map(|name| Locale::new(name, &[]).ok())
+            .filter(|locale| matches!(locale.character_encoding(0xcc), CharacterEncoding::Utf8))
+    }
+
+    /// Three charmaps give three different answers for one character.
+    ///
+    /// U+00CC is the case that separates them: ASCII cannot write it at
+    /// all, ISO-8859-1 writes it as the single byte 0xCC, and UTF-8 is
+    /// named rather than encoded because its original range is wider than
+    /// the one `wcrtomb` will now produce. The single-byte charmap is not
+    /// installed everywhere, so that third of the test skips rather than
+    /// requiring a host to carry it.
+    // [spec:nsh:req:shell-locale.operation-binding/test]
+    #[test]
+    fn a_charmap_answers_for_its_own_characters() {
+        let c = Locale::c().unwrap();
+        assert!(matches!(
+            c.character_encoding(0xcc),
+            CharacterEncoding::Unrepresentable
+        ));
+        assert!(matches!(
+            c.character_encoding(0x20ac),
+            CharacterEncoding::Unrepresentable
+        ));
+        /* ASCII is in every charmap, including the narrowest. */
+        assert!(
+            matches!(c.character_encoding(0x41), CharacterEncoding::Bytes(bytes) if bytes == b"A")
+        );
+
+        if let Some(utf8) = utf8() {
+            assert!(matches!(
+                utf8.character_encoding(0xcc),
+                CharacterEncoding::Utf8
+            ));
+        }
+
+        let Ok(latin1) = Locale::new(b"en_US.ISO-8859-1", &[]) else {
+            return;
+        };
+        assert!(matches!(
+            latin1.character_encoding(0xcc),
+            CharacterEncoding::Bytes(bytes) if bytes == [0xcc]
+        ));
+        assert!(matches!(
+            latin1.character_encoding(0x100),
+            CharacterEncoding::Unrepresentable
+        ));
+    }
+
+    /// A value no `wchar_t` can hold is refused rather than wrapped.
+    ///
+    /// `wchar_t` is signed, so handing the C library a value above
+    /// `i32::MAX` would ask it about a different character than the caller
+    /// named.
+    // [spec:nsh:req:shell-locale.operation-binding/test]
+    #[test]
+    fn a_value_beyond_wchar_is_refused() {
+        let Some(utf8) = utf8() else {
+            return;
+        };
+        assert!(utf8.encode_character(0x8000_0000).is_none());
+        assert!(utf8.encode_character(0xffff_ffff).is_none());
+        assert!(utf8.encode_character(0x7fff_ffff).is_some());
+    }
+
+    /// Asking a charmap a question leaves the thread's own locale alone.
+    // [spec:nsh:req:embedding-safety.process-locale-is-unchanged/test]
+    #[test]
+    fn encoding_preserves_thread_locale() {
+        let before = current();
+        let locale = Locale::c().unwrap();
+        let _ = locale.character_encoding(0xcc);
+        let _ = locale.charmap_is_utf8();
         assert_eq!(current(), before);
     }
 

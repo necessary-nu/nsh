@@ -655,7 +655,7 @@ fn write_escaped_text(
     word: &BStr,
 ) -> Result<bool, Error> {
     let mut buffer = BString::default();
-    let done = append_escape(word, &mut buffer);
+    let done = append_escape(&shell.locale, word, &mut buffer);
     destination.emit_field(shell, spec.string(&buffer))?;
     Ok(done)
 }
@@ -705,7 +705,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             at += 1;
 
             if character == b'\\' {
-                let converted = parse_escape(&format[at..], false);
+                let converted = parse_escape(&shell.locale, &format[at..], false);
                 at += converted.consumed;
                 destination.emit(shell, converted.bytes())?;
                 continue;

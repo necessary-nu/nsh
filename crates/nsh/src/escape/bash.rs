@@ -7,12 +7,13 @@
 //! `${x@Q}`, `set` and `declare -p` all print through it, and a test
 //! suite compares the exact characters.
 //!
-//! The choice is made once, by [`needs_ansi_c`]: a value holding a
-//! control character or a byte that is not part of a valid character in
-//! this locale can only be written as `$'...'`, because every other form
-//! would have to put the raw byte in the output. Everything else takes
-//! the caller's ordinary spelling -- backslashes for `printf %q`, double
-//! quotes for `declare -p`, single quotes for `set`.
+//! The choice is made once, by [`needs_ansi_c`]: a value holding a byte
+//! that is not part of a valid character in this locale, or a character
+//! the locale has no printable glyph for, can only be written as
+//! `$'...'`, because every other form would have to put the raw byte in
+//! the output. Everything else takes the caller's ordinary spelling --
+//! backslashes for `printf %q`, double quotes for `declare -p`, single
+//! quotes for `set`.
 
 use bstr::{BStr, BString};
 
@@ -38,7 +39,7 @@ pub(crate) fn needs_ansi_c(locale: &nsh_platform::Locale, value: &BStr) -> bool 
             cursor += 1;
             continue;
         }
-        match character_width(locale, &value[cursor..]) {
+        match printable_character_width(locale, &value[cursor..]) {
             Some(width) => cursor += width,
             None => return true,
         }
@@ -46,13 +47,27 @@ pub(crate) fn needs_ansi_c(locale: &nsh_platform::Locale, value: &BStr) -> bool 
     false
 }
 
-/// How many bytes the character starting at `bytes` occupies, or `None`
-/// when those bytes do not begin one.
-fn character_width(locale: &nsh_platform::Locale, bytes: &[u8]) -> Option<usize> {
+/// How many bytes the printable character starting at `bytes` occupies, or
+/// `None` when those bytes do not begin one.
+///
+/// Not decoding and printability are one answer here because both callers
+/// do the same thing with them, and because Bash asks the same single
+/// question: `iswprint` on the decoded character, which is narrower than
+/// the negation of `iswcntrl`. A code point the locale does not assign is
+/// neither printable nor a control character -- U+0378 and U+FDD0 are the
+/// cases that separate the two -- and Bash escapes it, so `None` has to
+/// cover it. `print` is asked through the locale's own character classes
+/// rather than through a second entry point for the same question.
+fn printable_character_width(locale: &nsh_platform::Locale, bytes: &[u8]) -> Option<usize> {
     let mut decoder = locale.decoder();
     for (offset, byte) in bytes.iter().copied().enumerate() {
         match decoder.push(byte) {
-            nsh_platform::LocaleDecode::Complete(_) => return Some(offset + 1),
+            nsh_platform::LocaleDecode::Complete(_) => {
+                let width = offset + 1;
+                return locale
+                    .wide_class_matches(b"print", bytes, width)?
+                    .then_some(width);
+            }
             nsh_platform::LocaleDecode::Invalid => return None,
             nsh_platform::LocaleDecode::Incomplete => {}
         }
@@ -60,13 +75,16 @@ fn character_width(locale: &nsh_platform::Locale, bytes: &[u8]) -> Option<usize>
     None
 }
 
-/// `$'...'`: the only rendering that can carry a control character or a
-/// byte that is not part of a character.
+/// `$'...'`: the only rendering that can carry an unprintable character
+/// or a byte that is not part of a character.
 ///
 /// Bash writes an unrepresentable byte in octal rather than hexadecimal,
-/// and leaves a character it can decode exactly as it found it -- which
-/// is why `$'\316μ'` has one escape and one literal even though both
-/// halves are non-ASCII.
+/// and leaves a character it can decode and print exactly as it found it
+/// -- which is why `$'\316μ'` has one escape and one literal even though
+/// both halves are non-ASCII. A character that decodes but has no glyph
+/// takes the octal spelling for every one of its bytes, one at a time,
+/// which is what the loop below already does once the width test says
+/// no.
 pub(crate) fn ansi_c_quote(locale: &nsh_platform::Locale, value: &BStr) -> BString {
     let mut quoted = BString::from("$'");
     let mut cursor = 0;
@@ -84,7 +102,7 @@ pub(crate) fn ansi_c_quote(locale: &nsh_platform::Locale, value: &BStr) -> BStri
             continue;
         }
         if !byte.is_ascii()
-            && let Some(width) = character_width(locale, &value[cursor..])
+            && let Some(width) = printable_character_width(locale, &value[cursor..])
         {
             quoted.extend_from_slice(&value[cursor..cursor + width]);
             cursor += width;
@@ -279,6 +297,19 @@ mod tests {
         nsh_platform::Locale::c().expect("the C locale exists")
     }
 
+    /// A locale whose charmap is UTF-8, or `None` where none is installed.
+    fn utf8_locale() -> Option<nsh_platform::Locale> {
+        [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
+            .into_iter()
+            .find_map(|name| nsh_platform::Locale::new(name, &[]).ok())
+            .filter(|locale| {
+                matches!(
+                    locale.character_encoding(0xcc),
+                    nsh_platform::CharacterEncoding::Utf8
+                )
+            })
+    }
+
     // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn a_control_character_forces_ansi_c_quoting() {
@@ -349,6 +380,42 @@ mod tests {
         assert_eq!(q(b":#"), b":#");
         assert_eq!(q(b","), b"\\,");
         assert_eq!(q(b"a,b"), b"a\\,b");
+    }
+
+    /// Quoting asks the locale whether a character is printable.
+    ///
+    /// The check here was only whether the bytes decoded, so a character
+    /// that decodes fine and has no glyph went out raw where Bash writes
+    /// `$'...'` with every one of its bytes in octal. Three groups
+    /// separate the answers and all three are wrong under a plain
+    /// `C.UTF-8`: a C1 control that is one code point and two bytes, a
+    /// separator glibc classifies as a control character, and a code point
+    /// the locale does not assign at all -- which is neither printable nor
+    /// a control character, and is why the question is `iswprint` and not
+    /// the negation of `iswcntrl`.
+    // [spec:nsh:req:compat.bash.builtins-special-variables/test]
+    #[test]
+    fn an_unprintable_character_forces_ansi_c_quoting() {
+        let Some(utf8) = utf8_locale() else {
+            return;
+        };
+        let q = |value: &[u8]| requote(&utf8, BStr::new(value)).to_vec();
+        /* U+008C, a C1 control. */
+        assert_eq!(q(&[0xc2, 0x8c]), b"$'\\302\\214'");
+        /* U+2028, which glibc classifies as a control character. */
+        assert_eq!(q(&[0xe2, 0x80, 0xa8]), b"$'\\342\\200\\250'");
+        /* U+0378 and U+FDD0, unassigned and noncharacter: neither
+         * printable nor control, and Bash escapes both. */
+        assert_eq!(q(&[0xcd, 0xb8]), b"$'\\315\\270'");
+        assert_eq!(q(&[0xef, 0xb7, 0x90]), b"$'\\357\\267\\220'");
+        /* Printable non-ASCII is still carried as itself, including the
+         * ones that look like they might not be: NBSP, a soft hyphen, a
+         * zero-width space and a private-use character. */
+        assert_eq!(q(&[0xc3, 0xa9]), &[0xc3, 0xa9]);
+        assert_eq!(q(&[0xc2, 0xa0]), &[0xc2, 0xa0]);
+        assert_eq!(q(&[0xc2, 0xad]), &[0xc2, 0xad]);
+        assert_eq!(q(&[0xe2, 0x80, 0x8b]), &[0xe2, 0x80, 0x8b]);
+        assert_eq!(q(&[0xee, 0x80, 0x80]), &[0xee, 0x80, 0x80]);
     }
 
     /// `${x@Q}` and `set` spell an apostrophe the way Bash does.

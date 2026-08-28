@@ -1373,6 +1373,7 @@ assertions (
     {id close-untargeted-fuzz-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-28T19:17:20.963272486Z}
     {id make-the-bash-gate-able-to-fail, kind @complete, author "brendan@necessary.nu", at 2026-08-28T20:26:55.958418593Z}
     {id pin-the-fuzz-differential-oracle, kind @complete, author "brendan@necessary.nu", at 2026-08-28T21:09:02.369971294Z}
+    {id respect-the-locale-in-escape-output, kind @doing, author "brendan@necessary.nu", at 2026-08-28T21:11:47.425070059Z}
 )
 
 impl_evidence (

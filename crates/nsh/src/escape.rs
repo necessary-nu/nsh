@@ -17,18 +17,51 @@ fn octal_digit_value(byte: u8) -> u32 {
 }
 
 /// The bytes written and input bytes consumed by one escape conversion.
+///
+/// Sixteen bytes because three different things end up here and the widest
+/// wins: the C library's `MB_LEN_MAX`, the ten bytes of a `\U0010FFFF`
+/// written back to itself, and the six the original UTF-8 ever needed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EscapeChunk {
-    bytes: [u8; 6],
+    bytes: [u8; 16],
     length: u8,
     pub consumed: usize,
 }
 
 impl EscapeChunk {
     const fn one(byte: u8, consumed: usize) -> Self {
+        let mut bytes = [0u8; 16];
+        bytes[0] = byte;
         Self {
-            bytes: [byte, 0, 0, 0, 0, 0],
+            bytes,
             length: 1,
+            consumed,
+        }
+    }
+
+    /// The conversion that writes nothing, for an escape the shell accepts
+    /// and has no output for.
+    const fn none(consumed: usize) -> Self {
+        Self {
+            bytes: [0u8; 16],
+            length: 0,
+            consumed,
+        }
+    }
+
+    /// A conversion of several bytes.
+    ///
+    /// Longer input is truncated rather than refused. Nothing this shell
+    /// produces reaches the limit -- no charmap glibc ships encodes one
+    /// character in more than six bytes -- and a charmap that did would be
+    /// better served losing its tail than aborting the shell.
+    fn many(written: &[u8], consumed: usize) -> Self {
+        let mut bytes = [0u8; 16];
+        let length = written.len().min(bytes.len());
+        bytes[..length].copy_from_slice(&written[..length]);
+        Self {
+            bytes,
+            length: length as u8,
             consumed,
         }
     }
@@ -60,25 +93,22 @@ fn hexadecimal_value(input: &[u8], maximum_digits: usize) -> (u32, usize) {
     (value, consumed)
 }
 
-fn unicode_bytes(value: u32, consumed: usize) -> EscapeChunk {
-    if value < 0x80 {
-        return EscapeChunk::one(value as u8, consumed);
-    }
-
-    /* Bash encodes whatever the escape names, using UTF-8's original
-     * form rather than the range Unicode later settled on: `\U00110000`
-     * is four bytes and `\U7FFFFFFF` is six, neither of which decodes to
-     * a character. That is the right answer for a shell whose values are
-     * byte strings and not text ([dec:nsh:bytes-not-text]) -- the escape
-     * names a number, the shell writes it, and what it means is the
-     * reader's question. Refusing to encode it would drop bytes a script
-     * asked for.
-     *
-     * The encoding is the plain continuation of the pattern: a leading
-     * byte with `n` high bits set for `n` total bytes, then six payload
-     * bits each. */
-    // [spec:nsh:req:compat.bash.expansion-globbing]
-    // [dec:nsh:bytes-not-text]
+/// UTF-8's original form, which is wider than the range Unicode later
+/// settled on.
+///
+/// A shell whose values are byte strings and not text
+/// ([dec:nsh:bytes-not-text]) writes what the escape names: `\U00110000` is
+/// four bytes and `\U7FFFFFFF` is six, neither of which decodes to a
+/// character, and a surrogate is the three bytes its number spells. The C
+/// library refuses all three now, so the encoding is done here rather than
+/// asked for -- which is also what Bash does, and is why a `\ud800` is the
+/// same bytes under either shell.
+///
+/// The encoding is the plain continuation of the pattern: a leading byte
+/// with `n` high bits set for `n` total bytes, then six payload bits each.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+// [dec:nsh:bytes-not-text]
+fn utf8_bytes(value: u32, consumed: usize) -> EscapeChunk {
     let length: usize = match value {
         0x80..=0x7ff => 2,
         0x800..=0xffff => 3,
@@ -87,7 +117,7 @@ fn unicode_bytes(value: u32, consumed: usize) -> EscapeChunk {
         _ => 6,
     };
 
-    let mut bytes = [0u8; 6];
+    let mut bytes = [0u8; 16];
     for index in (1..length).rev() {
         bytes[index] = 0x80 | (value >> (6 * (length - 1 - index))) as u8 & 0x3f;
     }
@@ -101,10 +131,55 @@ fn unicode_bytes(value: u32, consumed: usize) -> EscapeChunk {
     }
 }
 
+/// The bytes a `\u` or `\U` escape writes, which is the charmap's question
+/// and not Unicode's.
+///
+/// The escape names a character; what stands for that character in the
+/// output is whatever the locale's charmap says stands for it, and a
+/// charmap with no spelling for it makes the escape unwritable. POSIX
+/// leaves the output for an unwritable character unspecified, and Bash
+/// spells it by writing the escape back canonicalised -- upper case, zero
+/// padded, `\u` below U+10000 and `\U` from there up, chosen by the value
+/// and not by how the script spelled it, so `\U000000cc` comes back as
+/// `Ì`. Under `LC_ALL=C` the charmap is ASCII and nothing above
+/// U+007F can be written, so that is what the whole range does. This shell
+/// was encoding UTF-8 whatever the locale said, which made `C` two
+/// character models at once: bytes everywhere the locale is consulted, and
+/// UTF-8 here.
+///
+/// Above U+7FFFFFFF even the original UTF-8 stops, no charmap reaches
+/// there, and there is no escape spelling wider than eight digits either.
+/// Bash writes nothing at all, in every locale.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn unicode_bytes(locale: &nsh_platform::Locale, value: u32, consumed: usize) -> EscapeChunk {
+    if value < 0x80 {
+        return EscapeChunk::one(value as u8, consumed);
+    }
+    if value > 0x7fff_ffff {
+        return EscapeChunk::none(consumed);
+    }
+    match locale.character_encoding(value) {
+        nsh_platform::CharacterEncoding::Utf8 => utf8_bytes(value, consumed),
+        nsh_platform::CharacterEncoding::Bytes(encoded) => EscapeChunk::many(&encoded, consumed),
+        nsh_platform::CharacterEncoding::Unrepresentable => {
+            let written = if value < 0x1_0000 {
+                format!("\\u{value:04X}")
+            } else {
+                format!("\\U{value:08X}")
+            };
+            EscapeChunk::many(written.as_bytes(), consumed)
+        }
+    }
+}
+
 // [spec:dash:sem:printf.conv-escape-fn]
 // [spec:dash:sem:system.conv-escape-fn]
 // [spec:nsh:req:idiom.lexer-tokens]
-pub fn parse_escape(input: &[u8], single_quoted: bool) -> EscapeChunk {
+pub fn parse_escape(
+    locale: &nsh_platform::Locale,
+    input: &[u8],
+    single_quoted: bool,
+) -> EscapeChunk {
     let Some(&character) = input.first() else {
         return EscapeChunk::one(b'\\', 0);
     };
@@ -149,7 +224,7 @@ pub fn parse_escape(input: &[u8], single_quoted: bool) -> EscapeChunk {
             if digits == 0 {
                 return EscapeChunk::one(b'\\', 0);
             }
-            unicode_bytes(value, 1 + digits)
+            unicode_bytes(locale, value, 1 + digits)
         }
         b'0'..=b'7' => {
             let mut value = 0u32;
@@ -172,7 +247,11 @@ pub fn parse_escape(input: &[u8], single_quoted: bool) -> EscapeChunk {
 ///
 /// Returns whether a `\c` requested that all further output stop.
 // [spec:dash:sem:printf.conv-escape-str-fn]
-pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
+pub(crate) fn append_escape(
+    locale: &nsh_platform::Locale,
+    input: &[u8],
+    output_bytes: &mut BString,
+) -> bool {
     let mut at = 0usize;
     let byte_at = |index: usize| -> u8 { input.get(index).copied().unwrap_or(0) };
 
@@ -199,7 +278,7 @@ pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
             at += 1;
         }
 
-        let converted_escape = parse_escape(&input[at.min(input.len())..], false);
+        let converted_escape = parse_escape(locale, &input[at.min(input.len())..], false);
         at += converted_escape.consumed;
         output_bytes.extend_from_slice(converted_escape.bytes());
     }
@@ -246,22 +325,130 @@ pub(crate) fn shell_quote(mut input: &BStr) -> BString {
 mod tests {
     use super::*;
 
+    fn c_locale() -> nsh_platform::Locale {
+        nsh_platform::Locale::c().expect("the C locale exists")
+    }
+
+    /// A locale whose charmap is UTF-8, or `None` where none is installed.
+    ///
+    /// Skipping is the established shape for a locale fixture here -- see
+    /// `tests/locale_isolation.rs` -- because the charmaps a host has are
+    /// not the shell's to require.
+    fn utf8_locale() -> Option<nsh_platform::Locale> {
+        [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
+            .into_iter()
+            .find_map(|name| nsh_platform::Locale::new(name, &[]).ok())
+            .filter(|locale| {
+                matches!(
+                    locale.character_encoding(0xcc),
+                    nsh_platform::CharacterEncoding::Utf8
+                )
+            })
+    }
+
+    /// A locale whose charmap is one byte wide and is not ASCII, or `None`.
+    fn latin1_locale() -> Option<nsh_platform::Locale> {
+        nsh_platform::Locale::new(b"en_US.ISO-8859-1", &[]).ok()
+    }
+
     #[test]
     fn escape_strings_preserve_nul_data() {
         let mut output = BString::new(Vec::new());
-        assert!(!append_escape(b"a\0b", &mut output));
+        assert!(!append_escape(&c_locale(), b"a\0b", &mut output));
         assert_eq!(output, BString::from(b"a\0b".as_slice()));
     }
 
     #[test]
     fn escape_chunks_are_owned_bytes() {
-        assert_eq!(parse_escape(b"n", false).bytes(), b"\n");
-        assert_eq!(parse_escape(b"x41z", false).bytes(), b"A");
-        assert_eq!(parse_escape(b"u20ac", true).bytes(), "€".as_bytes());
-        assert_eq!(parse_escape(b"U0001f600", true).bytes(), "😀".as_bytes());
-        assert_eq!(parse_escape(b"777", false).bytes(), &[0xff]);
-        assert_eq!(parse_escape(b"q", false).bytes(), b"\\");
-        assert_eq!(parse_escape(b"q", false).consumed, 0);
+        let c = c_locale();
+        assert_eq!(parse_escape(&c, b"n", false).bytes(), b"\n");
+        assert_eq!(parse_escape(&c, b"x41z", false).bytes(), b"A");
+        assert_eq!(parse_escape(&c, b"777", false).bytes(), &[0xff]);
+        assert_eq!(parse_escape(&c, b"q", false).bytes(), b"\\");
+        assert_eq!(parse_escape(&c, b"q", false).consumed, 0);
+        let Some(utf8) = utf8_locale() else {
+            return;
+        };
+        assert_eq!(
+            parse_escape(&utf8, b"u20ac", true).bytes(),
+            "\u{20ac}".as_bytes()
+        );
+        assert_eq!(
+            parse_escape(&utf8, b"U0001f600", true).bytes(),
+            "\u{1f600}".as_bytes()
+        );
+    }
+
+    /// A `\u` names a character, and the locale decides which bytes it is.
+    ///
+    /// Under `C` the charmap is ASCII, nothing above U+007F can be written,
+    /// and Bash writes the escape back canonicalised rather than inventing
+    /// an encoding. nsh emitted UTF-8 whatever the locale said, which made
+    /// `C` two character models at once -- bytes wherever the locale was
+    /// consulted, and UTF-8 here. The spelling that comes back is chosen by
+    /// the value, not by how the script wrote it, so a `\U` naming a small
+    /// value returns as `\u`.
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    #[test]
+    fn an_unwritable_escape_is_written_back() {
+        let c = c_locale();
+        let bytes = |input: &[u8]| parse_escape(&c, input, false).bytes().to_vec();
+        assert_eq!(bytes(b"u00cc"), b"\\u00CC");
+        assert_eq!(bytes(b"ucc"), b"\\u00CC");
+        assert_eq!(bytes(b"U000000cc"), b"\\u00CC");
+        assert_eq!(bytes(b"uffff"), b"\\uFFFF");
+        assert_eq!(bytes(b"U0001f600"), b"\\U0001F600");
+        assert_eq!(bytes(b"U7fffffff"), b"\\U7FFFFFFF");
+        /* ASCII is representable in every charmap and is untouched. */
+        assert_eq!(bytes(b"u0041"), b"A");
+        assert_eq!(bytes(b"u007f"), &[0x7f]);
+    }
+
+    /// A charmap that can write the character is asked, not overruled.
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    #[test]
+    fn a_representable_escape_uses_the_charmap() {
+        let Some(latin1) = latin1_locale() else {
+            return;
+        };
+        let bytes = |input: &[u8]| parse_escape(&latin1, input, false).bytes().to_vec();
+        /* ISO-8859-1 spells U+00CC as one byte, where UTF-8 needs two. */
+        assert_eq!(bytes(b"u00cc"), &[0xcc]);
+        assert_eq!(bytes(b"u00ff"), &[0xff]);
+        /* Above its charmap the same rule as `C` applies. */
+        assert_eq!(bytes(b"u0100"), b"\\u0100");
+        assert_eq!(bytes(b"u20ac"), b"\\u20AC");
+    }
+
+    /// The original UTF-8 stops at U+7FFFFFFF, and so does Bash.
+    ///
+    /// Above it the shell writes nothing at all, in every locale: no
+    /// charmap reaches there and there is no escape spelling wider than
+    /// eight digits either. nsh was continuing the encoding pattern past
+    /// its end and emitting six bytes led by 0xFE or 0xFF, which are not
+    /// part of any UTF-8 that ever existed.
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    #[test]
+    fn nothing_is_written_past_the_encodable_range() {
+        let c = c_locale();
+        assert_eq!(parse_escape(&c, b"U80000000", false).bytes(), b"");
+        assert_eq!(parse_escape(&c, b"Uffffffff", false).bytes(), b"");
+        /* The escape is still consumed, so the digits are not output. */
+        assert_eq!(parse_escape(&c, b"U80000000", false).consumed, 9);
+        let Some(utf8) = utf8_locale() else {
+            return;
+        };
+        assert_eq!(
+            parse_escape(&utf8, b"U7fffffff", false).bytes(),
+            &[0xfd, 0xbf, 0xbf, 0xbf, 0xbf, 0xbf]
+        );
+        assert_eq!(parse_escape(&utf8, b"U80000000", false).bytes(), b"");
+        /* A surrogate has no encoding the C library will produce, and
+         * Bash writes the three bytes its number spells. */
+        assert_eq!(
+            parse_escape(&utf8, b"ud800", false).bytes(),
+            &[0xed, 0xa0, 0x80]
+        );
     }
 
     // [spec:dash:sem:mystring.single-quote-fn/test]
@@ -296,20 +483,21 @@ mod tests {
     // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn an_incomplete_hex_escape_stays_as_written() {
-        assert_eq!(parse_escape(b"x", false).bytes(), b"\\");
-        assert_eq!(parse_escape(b"x", false).consumed, 0);
-        assert_eq!(parse_escape(b"xg", false).bytes(), b"\\");
-        assert_eq!(parse_escape(b"xg", false).consumed, 0);
-        assert_eq!(parse_escape(b"x4", false).bytes(), &[4]);
-        assert_eq!(parse_escape(b"x41", false).bytes(), b"A");
+        let c = c_locale();
+        assert_eq!(parse_escape(&c, b"x", false).bytes(), b"\\");
+        assert_eq!(parse_escape(&c, b"x", false).consumed, 0);
+        assert_eq!(parse_escape(&c, b"xg", false).bytes(), b"\\");
+        assert_eq!(parse_escape(&c, b"xg", false).consumed, 0);
+        assert_eq!(parse_escape(&c, b"x4", false).bytes(), &[4]);
+        assert_eq!(parse_escape(&c, b"x41", false).bytes(), b"A");
         /* `\u` and `\U` say the same thing, and the four-minute rerun
          * found them four minutes after `\x` was fixed. */
-        assert_eq!(parse_escape(b"u", false).bytes(), b"\\");
-        assert_eq!(parse_escape(b"u", false).consumed, 0);
-        assert_eq!(parse_escape(b"uZ", false).bytes(), b"\\");
-        assert_eq!(parse_escape(b"U", false).bytes(), b"\\");
-        assert_eq!(parse_escape(b"UZ", false).consumed, 0);
-        assert_eq!(parse_escape(b"u41", false).bytes(), b"A");
-        assert_eq!(parse_escape(b"u4", false).bytes(), &[4]);
+        assert_eq!(parse_escape(&c, b"u", false).bytes(), b"\\");
+        assert_eq!(parse_escape(&c, b"u", false).consumed, 0);
+        assert_eq!(parse_escape(&c, b"uZ", false).bytes(), b"\\");
+        assert_eq!(parse_escape(&c, b"U", false).bytes(), b"\\");
+        assert_eq!(parse_escape(&c, b"UZ", false).consumed, 0);
+        assert_eq!(parse_escape(&c, b"u41", false).bytes(), b"A");
+        assert_eq!(parse_escape(&c, b"u4", false).bytes(), &[4]);
     }
 }
