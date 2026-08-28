@@ -1372,6 +1372,7 @@ assertions (
     {id measure-tree-canonicity, kind @complete, author "brendan@necessary.nu", at 2026-08-28T15:42:21.085692383Z}
     {id close-untargeted-fuzz-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-28T19:17:20.963272486Z}
     {id make-the-bash-gate-able-to-fail, kind @complete, author "brendan@necessary.nu", at 2026-08-28T20:26:55.958418593Z}
+    {id pin-the-fuzz-differential-oracle, kind @doing, author "brendan@necessary.nu", at 2026-08-28T20:34:02.908391101Z}
 )
 
 impl_evidence (

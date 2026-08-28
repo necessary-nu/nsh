@@ -309,6 +309,92 @@ pub fn builds_one_tree_per_program(shell: &mut Shell, source: &BStr) -> Canonici
     Canonicity::OneTree
 }
 
+/// Where the pinned Bash the differential targets must be judged against
+/// is recorded, and how to tell whether a given binary is that one.
+///
+/// [`dec:nsh:differential-is-the-oracle`] only means something if the
+/// oracle is the Bash the repository pins. `calibrate-bash-5-3-oracle`
+/// pinned 5.3 and recorded its identity beside the survey corpus, and the
+/// fuzz targets were asking `/usr/bin/bash` instead -- 5.2.37 on the
+/// machine this was found on. Nothing had gone wrong yet, which is luck
+/// about which cases the fuzzer reached rather than a property of the
+/// arrangement.
+// [spec:nsh:req:compat.bash.reference-profile]
+pub mod reference {
+    use std::path::Path;
+
+    /// The calibration record the survey already keeps, read rather than
+    /// copied: one pin, not a second answer to the same question.
+    const CASES: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/surveys/oils/BASH_REFERENCE_CASES.json"
+    );
+
+    /// The version string `calibrate-bash-5-3-oracle` pinned.
+    ///
+    /// Read out of the calibration record with a string search rather
+    /// than a JSON parser, because this is the one field wanted and the
+    /// fuzz workspace has no serde. A malformed record is an error, not a
+    /// default: a missing pin must not silently become "any Bash".
+    // [spec:nsh:req:compat.bash.reference-profile]
+    pub fn pinned_version() -> Result<String, String> {
+        let text = std::fs::read_to_string(CASES)
+            .map_err(|error| format!("cannot read the Bash calibration record {CASES}: {error}"))?;
+        let key = "\"oracle_version\"";
+        let at = text
+            .find(key)
+            .ok_or_else(|| format!("{CASES} records no oracle_version"))?;
+        let rest = &text[at + key.len()..];
+        let open = rest
+            .find('"')
+            .ok_or_else(|| format!("{CASES} has a malformed oracle_version"))?;
+        let tail = &rest[open + 1..];
+        let close = tail
+            .find('"')
+            .ok_or_else(|| format!("{CASES} has an unterminated oracle_version"))?;
+        Ok(tail[..close].to_owned())
+    }
+
+    /// Whether `shell` is the pinned Bash, by asking it.
+    ///
+    /// The survey pins the oracle by digest as well, which is the
+    /// stronger check and the one it uses. This asks the version instead,
+    /// because it is what separates the two builds that were actually
+    /// confused -- 5.2.37 from 5.3.15 -- and because computing a digest
+    /// here would mean a hashing dependency in a workspace whose whole
+    /// point is that nothing in it ships.
+    ///
+    /// Every failure is an error and none is a default. A reference that
+    /// cannot be run is the one case that must never quietly become
+    /// "no comparison to make".
+    // [spec:nsh:req:compat.bash.reference-profile]
+    pub fn verify(shell: &Path) -> Result<(), String> {
+        let pinned = pinned_version()?;
+        let output = std::process::Command::new(shell)
+            .arg("--version")
+            .output()
+            .map_err(|error| {
+                format!(
+                    "cannot run the pinned Bash at {}: {error}. \
+                     The fuzz containment mounts an empty tmpfs over /tmp, so an oracle \
+                     kept there is invisible to the targets; keep it outside /tmp and \
+                     name it with NSH_FUZZ_BASH.",
+                    shell.display()
+                )
+            })?;
+        let reported = String::from_utf8_lossy(&output.stdout);
+        let first = reported.lines().next().unwrap_or_default();
+        if first.contains(&pinned) {
+            return Ok(());
+        }
+        Err(format!(
+            "{} reports {first:?}, which is not the pinned Bash {pinned:?}. \
+             Build it with `nsh-survey build-bash-reference` and name it with NSH_FUZZ_BASH.",
+            shell.display()
+        ))
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1167,5 +1253,47 @@ pub(crate) mod tests {
             changed.len(),
             ROUNDTRIP_CORPUS.len(),
         );
+    }
+    /// The oracle check has to reject the Bash that was actually used.
+    ///
+    /// The shape the gate node taught: an oracle needs a demonstration it
+    /// can fail before its agreement means anything. Here the failure to
+    /// demonstrate is the exact one this node exists for -- the ambient
+    /// `/usr/bin/bash`, which was 5.2.37 where the pin says 5.3.15 -- plus
+    /// a reference that is not there at all, which the targets used to
+    /// treat as "nothing to compare" and pass.
+    // [spec:nsh:req:compat.bash.reference-profile/test]
+    #[test]
+    fn an_unpinned_bash_is_refused() {
+        let pinned = crate::fuzzing::reference::pinned_version().expect("a recorded pin");
+        assert!(
+            pinned.starts_with("5.3."),
+            "the calibration record pins {pinned:?}, which is not a 5.3 build",
+        );
+
+        let missing = std::path::Path::new("/nonexistent/nsh-fuzz-oracle/bash");
+        assert!(
+            crate::fuzzing::reference::verify(missing).is_err(),
+            "a reference that cannot be run was accepted",
+        );
+
+        /* The ambient Bash is only a useful negative when it is not
+         * itself the pinned build, which is true wherever these two
+         * versions differ and is the situation this node was filed for. */
+        let ambient = std::path::Path::new("/usr/bin/bash");
+        if ambient.exists() {
+            let reported = std::process::Command::new(ambient)
+                .arg("--version")
+                .output()
+                .expect("the ambient bash runs");
+            let first = String::from_utf8_lossy(&reported.stdout);
+            let first = first.lines().next().unwrap_or_default().to_owned();
+            if !first.contains(&pinned) {
+                assert!(
+                    crate::fuzzing::reference::verify(ambient).is_err(),
+                    "the ambient {first:?} was accepted as the pinned {pinned:?}",
+                );
+            }
+        }
     }
 }
