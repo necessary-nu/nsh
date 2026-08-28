@@ -814,6 +814,42 @@ pub(crate) mod tests {
         ),
     ];
 
+    /// The mark check has to be able to fail, or it says nothing.
+    ///
+    /// This is the half a byte comparison cannot see. Concatenating a
+    /// tree's bytes reads the outermost run only, so a child pointing at
+    /// someone else's tokens still prints the right program -- and breaks
+    /// `declare -f`, which renders a subtree. Three defects reached a
+    /// shipped renderer that way while the log was provably complete, so
+    /// the check is only worth having if a wrong mark trips it.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
+    #[test]
+    fn a_run_from_the_wrong_place_is_caught() {
+        let mut shell = shell();
+        let parse = |shell: &mut Shell, source: &[u8]| {
+            crate::resource::with_resources(shell, |shell, _resources| {
+                crate::input::set_input_string(shell, BStr::new(source));
+                match crate::parser::parse_command(shell, false) {
+                    Ok(crate::parser::ParseResult::Tree(Some(node))) => node,
+                    _ => panic!("{:?} did not parse", BStr::new(source)),
+                }
+            })
+        };
+        let sound = parse(&mut shell, b"a; b");
+        assert!(crate::nodes::emit::misplaced_run(&sound).is_none());
+
+        let elsewhere = parse(&mut shell, b"zzz").tokens().clone();
+        let crate::nodes::Node::Sequence(mut list) = sound else {
+            panic!("a sequence")
+        };
+        list.left = Box::new((*list.left).with_tokens(elsewhere));
+        let damaged = crate::nodes::Node::Sequence(list);
+        assert!(
+            crate::nodes::emit::misplaced_run(&damaged).is_some(),
+            "a child holding a run from another program went unnoticed",
+        );
+    }
+
     /// One construct of each shape, held to the bytes it went in as.
     ///
     /// Breadth rather than depth: the corpus below is what the fuzzer
