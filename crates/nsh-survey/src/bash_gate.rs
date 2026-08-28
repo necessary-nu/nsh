@@ -418,4 +418,60 @@ mod tests {
         assert!(require_bash_basename(Path::new("/tmp/bash-pre")).is_err());
         assert!(require_bash_basename(Path::new("/tmp/nsh")).is_err());
     }
+    /// The gate's verdict has to depend on what the shell did.
+    ///
+    /// This is the demonstration that the oracle can fail, and it is the
+    /// deliverable rather than any number the gate produces afterwards. A
+    /// gate that scores every shell alike certifies
+    /// `[spec:nsh:req:compat.bash.survey-closure]` without measuring
+    /// anything, which is the same defect this repository spent seven
+    /// nodes removing from the round-trip oracle -- there a fixed point
+    /// any consistent output satisfied, here a gate any shell satisfies.
+    ///
+    /// Judged over the real register and the real eligible set, so it is
+    /// the shipped judgement being asked and not a model of it. The two
+    /// observation sets are the two extremes a shell can produce: every
+    /// eligible case passing, and every one failing.
+    // [spec:nsh:req:compat.bash.survey-closure/test]
+    #[test]
+    fn the_verdict_depends_on_what_the_shell_did() {
+        let root = root();
+        let (eligible, excluded) = crate::bash_reference::calibration(&root).unwrap();
+        let register = read_register(&root).unwrap();
+        let observe = |outcome: GateOutcome| -> Vec<GateCase> {
+            eligible
+                .iter()
+                .map(|id| GateCase {
+                    id: id.clone(),
+                    spec: id.rsplit_once(':').expect("spec:index").0.to_owned(),
+                    outcome,
+                })
+                .collect()
+        };
+        let passing = judge(&register, &observe(GateOutcome::Pass), &eligible, &excluded);
+        let failing = judge(&register, &observe(GateOutcome::Fail), &eligible, &excluded);
+        let unexpected = |findings: &Findings| {
+            findings
+                .violations
+                .iter()
+                .filter(|violation| violation.contains("is an unexpected failure"))
+                .count()
+        };
+        assert_eq!(
+            unexpected(&passing),
+            0,
+            "a shell that passes every case cannot have an unexpected failure",
+        );
+        assert!(
+            unexpected(&failing) > 800,
+            "a shell that fails every eligible case must be seen to fail: {} unexpected",
+            unexpected(&failing),
+        );
+        assert_ne!(
+            passing.violations.len(),
+            failing.violations.len(),
+            "the gate reported the same verdict for a shell that passed everything \
+             and one that failed everything",
+        );
+    }
 }

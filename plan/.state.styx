@@ -1371,6 +1371,7 @@ assertions (
     {id prove-byte-exact-round-trip, kind @complete, author "brendan@necessary.nu", at 2026-08-28T14:58:24.933796593Z}
     {id measure-tree-canonicity, kind @complete, author "brendan@necessary.nu", at 2026-08-28T15:42:21.085692383Z}
     {id close-untargeted-fuzz-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-28T19:17:20.963272486Z}
+    {id make-the-bash-gate-able-to-fail, kind @doing, author "brendan@necessary.nu", at 2026-08-28T20:06:13.098584916Z}
 )
 
 impl_evidence (

@@ -202,6 +202,7 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
         })?;
     let scratch = ScratchTree::new()?;
     let containment = Containment::verified(scratch.path())?;
+    verify_shell_is_runnable(&containment, scratch.path(), &options.shell)?;
     let fixture_view = helpers::install(scratch.path(), &options.root)?;
     let inherited_path = options
         .base_path
@@ -1455,6 +1456,53 @@ fn hex(value: &[u8]) -> String {
 
 fn duration_millis(duration: Duration) -> u64 {
     crate::process::duration_millis(duration)
+}
+
+/// Refuse to score a shell the containment cannot reach.
+///
+/// Every case runs inside a sandbox that replaces `/tmp` with an empty
+/// tmpfs, so a shell living under `/tmp` is simply not there once the
+/// boundary is up. Each case then fails to start it, and the run reports
+/// one ordinary failure per case -- a number that looks exactly like a
+/// real measurement of a very bad shell, and is not a measurement at all.
+///
+/// This asks the question once, inside the same boundary the cases use,
+/// and turns "I could not run it" into an error instead of a score. It
+/// deliberately tests only that the file is there and executable: a shell
+/// that starts and then behaves badly must still be *measured* badly
+/// rather than refused, which is what keeps a stub distinguishable from
+/// Bash instead of both being errors.
+// [spec:nsh:req:compat.bash.survey-closure]
+fn verify_shell_is_runnable(
+    containment: &Containment,
+    directory: &Path,
+    shell: &Path,
+) -> Result<()> {
+    let arguments = [
+        OsString::from("-c"),
+        OsString::from("test -x \"$1\""),
+        OsString::from("nsh-survey-shell-probe"),
+        shell.as_os_str().to_owned(),
+    ];
+    let output = crate::process::run(&crate::process::Request {
+        containment,
+        program: Path::new("/bin/sh"),
+        arguments: &arguments,
+        directory,
+        environment: &[],
+        input: b"",
+        timeout: Duration::from_secs(5),
+    })?;
+    if !output.status.success() {
+        return Err(format!(
+            "the shell under test is not executable inside the survey containment: {}. \
+             The boundary mounts an empty tmpfs over /tmp, so a shell kept there is \
+             invisible to every case; give a path outside /tmp.",
+            shell.display()
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
