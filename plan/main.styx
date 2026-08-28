@@ -6623,6 +6623,7 @@ children (
                                 id pin-the-fuzz-differential-oracle
                                 title "Point the differential targets at the pinned Bash, not at whatever is on PATH"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-28T18:07:15.031189392Z
@@ -6643,6 +6644,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Landed as `58553b3`. Verified independently after the commit: the default resolves to Bash 5.3.15 at `target/bash-reference/bash`, a bogus `NSH_FUZZ_BASH` panics naming both the reason and the tmpfs trap, the ambient 5.2.37 is refused on version, and `spawn()` can no longer return `None`.\n\nTHE FINDING WAS NOT THE ONE IN THE TITLE. `under_bash` never resolved through the operator's `PATH`: it calls `.env_clear().env(\"PATH\", \"/usr/bin:/bin\")` and Rust resolves the program with the *child's* PATH, so it was always `/usr/bin/bash` specifically. The real defect was that `assert_matches_bash` bound both sides with `let ... else { return; }` while `under_bash` returned `None` on spawn failure -- so a missing reference skipped the assertion instead of failing it. All nine differential targets could pass vacuously.\n\nThat is the third fail-open oracle found in this repository in one sitting: the round-trip fixed point that any consistent output satisfied, the Bash gate that scored every shell alike because a `/tmp` shell is invisible inside its own containment, and this. All three treated \"could not measure\" as \"nothing to report\". Worth a register of oracles with an explicit fail-closed requirement rather than fixing the fourth when it appears.\n\nCONTAINMENT DECIDED WHERE THE ORACLE LIVES. `scripts/sandboxed` passes `--tmpfs /tmp` exactly as `process.rs` does, so the pinned build at `/tmp/nsh-bash-5.3-oracle` was invisible inside the boundary the targets run in. Resolving the pin correctly would still have failed to run Bash. The default is now `target/bash-reference/bash`, which the read-only root mount reaches.\n\nPINNING CHANGED NO VERDICT. Both open printf divergences reproduce identically on 5.2.37 and 5.3.15, so nothing was being judged against the wrong Bash. What pinning bought is that the targets can no longer be wrong about which Bash, and can no longer pass without one.\n\nCAMPAIGNS, AND WHY THEY ARE WEAK EVIDENCE. printf, parameter and differential, four minutes each after the fix, zero crashes -- but at 20-32 exec/s under contention, where an uncontended run reaches ~500. An earlier uncontended 60-second printf run found two divergences in that minute. The zeros mean those campaigns did not re-reach known-reachable inputs, not that nothing is there, and the same caveat applies retroactively to the \"255s, 0 crashes\" recorded on `close-untargeted-fuzz-divergences`.\n\nSTILL OPEN, DELIBERATELY. Two printf artifacts, minimal case `V='\\ucc'` under `printf '%b'`. A divergences entry and an `LC_ALL=C.UTF-8` setting in the harness were both written and then reverted: the harness change was a disposition on a frame the operator discarded, and it would have silenced the whole C-locale-only class rather than this one case. It stays open and reporting until the locale decision lands.\n\nA GAP WITH NOWHERE TO PUT IT. `BASH_DISPOSITIONS.toml` is keyed per survey case and `docs/divergences.md` is framed around dash. A fuzz-found divergence has no case name and no home in either, so if one is ever sanctioned there is currently nowhere for it to go."
+                                    }
+
+                                    {
+                                        at 2026-08-28T21:09:02.369971294Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -6679,6 +6687,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Doing → Done (nplan complete)"
+                                    }
+                                )
+                            }
+
+                            {
+                                id respect-the-locale-in-escape-output
+                                title "Write an unrepresentable escape back the way POSIX requires"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-08-28T21:11:12.069626689Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found by the printf differential target once it was judged against the pinned Bash 5.3 and could no longer pass without a reference. Two live artifacts, minimal case below.\n\nMEASURED, `LC_ALL=C`, `printf '%b' \"$V\"`, bytes shown octal:\n\n    V='\\ucc'   nsh   303 214              -- UTF-8 for U+00CC\n               bash  \\  u  0  0  C  C     -- the escape written back, canonicalised\n    V='<U+00CC>'   both  303 214          -- a literal passes through either way\n\nBash re-spells an escape whose code point the locale's charmap cannot\nrepresent, uppercased and zero-padded to `Ì`. nsh emits UTF-8 whatever the\nlocale says. The two agree under `C.UTF-8` and `en_US.UTF-8`, so this surfaces\nonly where the charmap is ASCII -- which the fuzz harness reaches because\n`under_bash` calls `env_clear()`.\n\nTHE RULING, AND WHY THIS IS A DEFECT RATHER THAN A DIVERGENCE. The operator\nconsidered making `C` mean `C.UTF-8` and decided against it: POSIX semantics\nstand, a character under `C` is a byte, \"we'll be POSIX compliant even if it's\nshit\". So Bash is right here and nsh is wrong, and nothing goes in a divergence\nregister.\n\nWHAT IS ALREADY RIGHT, so the fix stays narrow. Under `LC_ALL=C` nsh already\nmatches Bash on the questions the locale governs elsewhere: `${#x}` on a\ntwo-byte character is 2 in both, and `${x:0:1}` takes one byte in both. Length,\nsubstring and the value model need no change. This is escape *output* only --\nthe one place nsh was applying UTF-8 unconditionally while the rest of the\nshell was counting bytes, which made `C` two models rather than one.\n\nSCOPE TO CHECK, NOT TO ASSUME. `\\u` and `\\U` are the reported pair, in\n`printf '%b'`. The same question exists wherever an escape is decoded to bytes\nagainst a charmap -- `$'...'` at parse time, `printf '%q'`, `${x@Q}` -- and\nwhether each already consults the locale is unmeasured. Enumerate before\nfixing; the `,` divergence on this node's predecessor was found by sweeping all\n127 bytes rather than by checking the reported cases, and the `\\u` sibling of\nthe `\\x` fix was found the same way.\n\nDONE WHEN. The minimal case is byte-identical to the pinned Bash under `C`,\nstill byte-identical under `C.UTF-8` and `en_US.UTF-8` where they already\nagreed, the two printf artifacts replay dead, and an uncontended printf\ncampaign is clean -- uncontended, because a contended run at 20-32 exec/s\nagainst ~500 is what made an earlier \"0 crashes\" on this target mean less than\nit appeared to."
                                     }
                                 )
                             }
