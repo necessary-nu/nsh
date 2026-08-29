@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-28T10:33:21.016672202Z
+last_sync_at 2026-08-29T12:05:39.737829999Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -858,6 +858,7 @@ rule_versions (
     {id jobctl.suspend-on-catchable-signal, version 0}
     {id jobctl.suspend-on-sigstop, version 0}
     {id jobctl.suspended-job-message, version 0}
+    {id oracle.cannot-measure-is-a-failure, version 0}
     {id param.byte-values, version 0}
     {id param.denotation, version 0}
     {id param.env, version 0}
@@ -1183,10 +1184,12 @@ derived_priorities (
     {id calibrate-bash-5-3-oracle, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id canonicalize-word-parts, priority 2, derived_at 2026-08-27T23:19:04.80080471Z}
     {id carry-tokens-into-the-tree, priority 2, derived_at 2026-08-28T00:05:37.955830881Z}
+    {id close-untargeted-fuzz-divergences, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id decide-tree-canonicity, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id define-oils-survey-manifests, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id enable-default-history-navigation, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id enforce-bash-safe-core, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id enforce-oracles-cannot-pass-unmeasured, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id enforce-survey-test-containment, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id extend-bash-mode-aware-parser, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id fix-builtin-alias-stdout-format, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
@@ -1284,11 +1287,13 @@ derived_priorities (
     {id logical-descriptor-table, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id make-fuzz-runner-containment-aware, priority 1, derived_at 2026-08-27T23:19:04.80080471Z}
     {id make-printing-reversible, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
+    {id make-the-bash-gate-able-to-fail, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id measure-tree-canonicity, priority 1, derived_at 2026-08-27T23:19:04.80080471Z}
     {id native-oils-spec-runner, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id optional-line-editor, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id owned-words, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id pin-oils-spec-corpus, priority 0, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id pin-the-fuzz-differential-oracle, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id preserve-zero-process-group-state, priority 0, derived_at 2026-08-20T07:44:24.867126181Z}
     {id print-by-emitting-tokens, priority 3, derived_at 2026-08-28T00:05:37.955830881Z}
     {id printf-builtin, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
@@ -1298,10 +1303,12 @@ derived_priorities (
     {id refresh-project-readmes, priority 0, derived_at 2026-08-20T07:44:24.867126181Z}
     {id register-posix-dash-divergences, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
     {id reject-what-bash-rejects, priority 0, derived_at 2026-08-28T00:05:37.955830881Z}
+    {id respect-the-locale-in-escape-output, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id retain-the-token-stream, priority 1, derived_at 2026-08-28T00:05:37.955830881Z}
     {id spec-default-history-navigation, priority 1, derived_at 2026-08-19T15:35:34.038807321Z}
     {id specify-bash-compatibility-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id specify-smoosh-failure-contracts, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id stop-the-locale-tests-passing-vacuously, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id test-fc-histfile-reload-format, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
     {id verify-bash-compatibility-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id verify-smoosh-zero-failures, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
@@ -1445,6 +1452,7 @@ impl_evidence (
     ), rule_versions_seen (
         {id compat.bash.safe-core, version 0}
     )}
+    {id enforce-oracles-cannot-pass-unmeasured}
     {id enforce-zero-cism-gates, covered_rules (
         idiom.regression-gates
     ), covered_claims (
@@ -5262,6 +5270,8 @@ impl_evidence (
         idiom.printable-ast
     ), covered_claims (
         {impl_name nsh-library, rule idiom.printable-ast}
+    ), rule_versions_seen (
+        {id idiom.printable-ast, version 2}
     )}
     {id process-environment-api, covered_rules (
         embedding-safety.process-environment-is-read-only
