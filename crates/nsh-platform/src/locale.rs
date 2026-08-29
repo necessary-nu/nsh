@@ -572,6 +572,7 @@ mod tests {
     /// stops glibc consulting the system locale archive, so a host that
     /// keeps its UTF-8 locales only in that archive has none until the
     /// generated one under `LOCPATH` answers to the third name.
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure]
     fn utf8() -> Locale {
         [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
             .into_iter()

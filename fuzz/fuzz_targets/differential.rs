@@ -31,14 +31,24 @@
 //! `[spec:nsh:req:compat.smoosh.error-contracts]` fixes this shell's
 //! spelling, so comparing stderr would report a disagreement the project
 //! has already decided.
+//!
+//! # Which Bash, and what happens without one
+//!
+//! The pinned one, reached through `support::assert_matches_bash`. This
+//! target used to keep its own `Command::new("bash")` -- the ambient
+//! 5.2, not the 5.3 the repository pins -- and turned a spawn failure
+//! into `None`, which the comparison then skipped. The whole target
+//! could therefore run clean with no reference present at all, and it
+//! went on doing so after the other differential targets were moved onto
+//! the pin. Obtaining the oracle now panics
+//! (`[spec:nsh:req:oracle.cannot-measure-is-a-failure]`).
 
 #![no_main]
 
+mod support;
+
 use libfuzzer_sys::arbitrary::{self, Arbitrary, Unstructured};
 use libfuzzer_sys::fuzz_target;
-use nsh::{Shell, Streams};
-use std::io::Write as _;
-use std::process::{Command, Stdio};
 
 /// A word made only of bytes that mean the same thing to both shells.
 #[derive(Arbitrary, Debug)]
@@ -267,59 +277,6 @@ impl Script {
     }
 }
 
-/// What this shell does with the script, in process.
-/// `refused` is an `Err` from `run` -- the shell rejecting the script
-/// rather than answering with a status. Kept separate on purpose: an
-/// early version folded it into status 1 and then reported the *target's*
-/// own substitution as a disagreement with Bash.
-struct Outcome {
-    stdout: Vec<u8>,
-    status: i32,
-    refused: bool,
-}
-
-/// A stable identifier for an artifact without printing generated shell text.
-fn fingerprint(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
-}
-
-fn under_nsh(script: &str) -> Option<Outcome> {
-    let streams = Streams::capture().ok()?;
-    let mut shell = Shell::builder()
-        .streams(streams)
-        .option(bstr::BStr::new(b"bash"), true)
-        .build()
-        .ok()?;
-    let outcome = shell.run(script.as_bytes());
-    let refused = outcome.is_err();
-    let status = outcome.map_or(0, |s| s.code().into());
-    let stdout = shell.take_captured_stdout().ok()?.to_vec();
-    drop(shell.take_captured_stderr());
-    Some(Outcome {
-        stdout,
-        status,
-        refused,
-    })
-}
-
-/// What GNU Bash does with it.
-fn under_bash(script: &str) -> Option<(Vec<u8>, i32)> {
-    let mut child = Command::new("bash")
-        .arg("-s")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    child.stdin.take()?.write_all(script.as_bytes()).ok()?;
-    let out = child.wait_with_output().ok()?;
-    Some((out.stdout, out.status.code().unwrap_or(-1)))
-}
-
 fuzz_target!(|data: &[u8]| {
     let mut unstructured = Unstructured::new(data);
     let Ok(generated) = Script::arbitrary(&mut unstructured) else {
@@ -328,33 +285,10 @@ fuzz_target!(|data: &[u8]| {
     if generated.0.is_empty() {
         return;
     }
-    let script = generated.render();
-
-    let (Some(ours), Some((theirs, their_status))) = (under_nsh(&script), under_bash(&script))
-    else {
-        return;
-    };
-
-    /* Both shells rejecting the script is agreement, not a finding: the
-     * generator can still emit something neither accepts, and the two
-     * word their refusals differently by design. A refusal on *one* side
-     * is a finding, and the interesting direction is kept below. */
-    if ours.refused && their_status != 0 {
-        return;
-    }
-    assert!(
-        !ours.refused,
-        "nsh refused a Bash script: input={:016x} bash_status={their_status} bash_stdout={:016x}",
-        fingerprint(data),
-        fingerprint(&theirs),
-    );
-
-    assert!(
-        ours.stdout == theirs && ours.status == their_status,
-        "nsh/Bash disagreement: input={:016x} nsh_status={} bash_status={their_status} nsh_stdout={:016x} bash_stdout={:016x}",
-        fingerprint(data),
-        ours.status,
-        fingerprint(&ours.stdout),
-        fingerprint(&theirs),
+    support::assert_matches_bash(
+        "differential",
+        data,
+        generated.render().as_bytes(),
+        Vec::new(),
     );
 });

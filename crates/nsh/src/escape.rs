@@ -328,6 +328,7 @@ pub(crate) fn shell_quote(mut input: &BStr) -> BString {
 /// with `C.UTF-8`: setting `LOCPATH` stops glibc consulting the system
 /// locale archive at all, so a host that keeps its UTF-8 locales only there
 /// has none until the generated one under `LOCPATH` answers.
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 #[cfg(test)]
 pub(crate) fn utf8_locale() -> nsh_platform::Locale {
     [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
@@ -349,6 +350,7 @@ pub(crate) fn utf8_locale() -> nsh_platform::Locale {
 /// measures nothing. Returning `None` for the caller to skip on was that
 /// silence, spelled as a pass, and it spread by being cited as precedent.
 /// Being unable to run is reported here instead.
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 #[cfg(test)]
 pub(crate) fn latin1_locale() -> nsh_platform::Locale {
     nsh_platform::Locale::new(b"en_US.ISO-8859-1", &[]).unwrap_or_else(|error| {

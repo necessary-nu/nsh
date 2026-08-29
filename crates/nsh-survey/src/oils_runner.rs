@@ -1473,6 +1473,7 @@ fn duration_millis(duration: Duration) -> u64 {
 /// rather than refused, which is what keeps a stub distinguishable from
 /// Bash instead of both being errors.
 // [spec:nsh:req:compat.bash.survey-closure]
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 fn verify_shell_is_runnable(
     containment: &Containment,
     directory: &Path,

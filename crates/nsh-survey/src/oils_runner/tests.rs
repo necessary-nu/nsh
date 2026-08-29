@@ -1,5 +1,22 @@
 use super::*;
 
+/// The system shell the runner cases drive their subject through.
+///
+/// Not optional. Skipping when `/bin/sh` is absent made four checks of
+/// the runner's containment, isolation and verdict reporting pass on a
+/// host where none of them had run
+/// ([`spec:nsh:req:oracle.cannot-measure-is-a-failure`]).
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
+fn system_shell() -> &'static Path {
+    let shell = Path::new("/bin/sh");
+    assert!(
+        shell.exists(),
+        "/bin/sh is required by this test: there is no subject to run the \
+         case under without it"
+    );
+    shell
+}
+
 #[test]
 fn parses_json_multiline_and_qualifiers() {
     let parsed = parse_spec_bytes(
@@ -70,10 +87,7 @@ fn parses_every_imported_oils_case() {
 
 #[test]
 fn process_timeout_kills_background_descendants() {
-    let shell = Path::new("/bin/sh");
-    if !shell.exists() {
-        return;
-    }
+    let shell = system_shell();
     let scratch = ScratchTree::new().unwrap();
     let containment = Containment::verified(scratch.path()).unwrap();
     let case_dir = scratch.path().join("case");
@@ -104,10 +118,7 @@ fn process_timeout_kills_background_descendants() {
 
 #[test]
 fn process_gets_isolated_env_and_cwd() {
-    let shell = Path::new("/bin/sh");
-    if !shell.exists() {
-        return;
-    }
+    let shell = system_shell();
     let scratch = ScratchTree::new().unwrap();
     let containment = Containment::verified(scratch.path()).unwrap();
     let case_dir = scratch.path().join("case");
@@ -138,10 +149,7 @@ fn process_gets_isolated_env_and_cwd() {
 
 #[test]
 fn evaluation_applies_json_status_and_qualifier() {
-    let shell = Path::new("/bin/sh");
-    if !shell.exists() {
-        return;
-    }
+    let shell = system_shell();
     let parsed = parse_spec_bytes(
         b"#### qualified\nprintf 'ok\\n'; printf 'err\\n' >&2; exit 3\n\
           ## stdout-json: \"ok\\n\"\n## stderr: err\n## status: 3\n\
@@ -173,10 +181,7 @@ fn evaluation_applies_json_status_and_qualifier() {
 
 #[test]
 fn evaluation_reports_byte_exact_mismatch() {
-    let shell = Path::new("/bin/sh");
-    if !shell.exists() {
-        return;
-    }
+    let shell = system_shell();
     let parsed = parse_spec_bytes(b"#### mismatch\nprintf actual\n## stdout: expected\n").unwrap();
     let scratch = ScratchTree::new().unwrap();
     let containment = Containment::verified(scratch.path()).unwrap();
@@ -321,6 +326,7 @@ fn recorded_bash_summaries_are_complete() {
 /// shell that starts and then misbehaves is still measured rather than
 /// refused. That is what keeps a stub distinguishable from Bash.
 // [spec:nsh:req:compat.bash.survey-closure/test]
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
 #[test]
 fn a_shell_the_containment_cannot_reach_is_refused() {
     let scratch = ScratchTree::new().unwrap();

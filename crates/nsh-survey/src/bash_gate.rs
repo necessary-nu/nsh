@@ -442,6 +442,7 @@ mod tests {
     /// the shipped judgement being asked and not a model of it. The two
     /// observation sets are the two extremes a shell can produce: every
     /// eligible case passing, and every one failing.
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
     // [spec:nsh:req:compat.bash.survey-closure/test]
     #[test]
     fn the_verdict_depends_on_what_the_shell_did() {

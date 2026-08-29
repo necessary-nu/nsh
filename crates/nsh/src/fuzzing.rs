@@ -56,6 +56,7 @@ pub enum RoundTrip {
 /// and is required to be nothing but trivia -- otherwise a parser that
 /// silently dropped a command would satisfy this by having nothing to
 /// print.
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 // [spec:nsh:req:idiom.printable-ast+2]
 pub fn round_trips_byte_exactly(shell: &mut Shell, source: &BStr) -> RoundTrip {
     crate::resource::with_resources(shell, |shell, _resources| {
@@ -367,6 +368,7 @@ pub mod reference {
     /// Every failure is an error and none is a default. A reference that
     /// cannot be run is the one case that must never quietly become
     /// "no comparison to make".
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure]
     // [spec:nsh:req:compat.bash.reference-profile]
     pub fn verify(shell: &Path) -> Result<(), String> {
         let pinned = pinned_version()?;
@@ -451,6 +453,7 @@ pub(crate) mod tests {
     /// same text says nothing about whether that text was what was written,
     /// and `false ; x=hi` reached a fixed point as `false\nx=hi`, which is a
     /// different spelling of the same program and no longer allowed.
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
     // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn former_fixed_points_now_come_back() {
@@ -1269,6 +1272,7 @@ pub(crate) mod tests {
     /// a reference that is not there at all, which the targets used to
     /// treat as "nothing to compare" and pass.
     // [spec:nsh:req:compat.bash.reference-profile/test]
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
     #[test]
     fn an_unpinned_bash_is_refused() {
         let pinned = crate::fuzzing::reference::pinned_version().expect("a recorded pin");

@@ -17,6 +17,7 @@ const ISO: &str = "en_US.ISO-8859-1";
 // asserts is unchanged. The fixture is a precondition of the run instead,
 // built and named by `tests/build-locales.sh`.
 // [dec:nsh:no-ambient-state]
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 fn require_single_byte_fixture() {
     if let Err(error) = nsh_platform::Locale::new(ISO.as_bytes(), &[]) {
         panic!(

@@ -1452,7 +1452,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id compat.bash.safe-core, version 0}
     )}
-    {id enforce-oracles-cannot-pass-unmeasured}
+    {id enforce-oracles-cannot-pass-unmeasured, covered_rules (
+        oracle.cannot-measure-is-a-failure
+    ), covered_claims (
+        {impl_name nsh-library, rule oracle.cannot-measure-is-a-failure}
+    )}
     {id enforce-zero-cism-gates, covered_rules (
         idiom.regression-gates
     ), covered_claims (

@@ -91,11 +91,15 @@ fn a_bracketed_expression_ends_where_bash_ends_it() {
 ///
 /// Named by `NSH_FUZZ_BASH` or found beside the build tree, and checked
 /// against the version `calibrate-bash-5-3-oracle` pinned -- the ambient
-/// `/usr/bin/bash` is 5.2 on this machine and is not an answer here. A
-/// reference that is not there yet is the one case that reports rather
-/// than asserts, because the oracle is a build artifact and this suite
-/// runs without it.
-fn reference_bash() -> Option<PathBuf> {
+/// `/usr/bin/bash` is 5.2 on this machine and is not an answer here.
+///
+/// A reference that is not there is a failure and not a pass. This used
+/// to report and return `None` for the caller to skip on, which made the
+/// one test that re-derives the table from the reference incapable of
+/// disagreeing with it on any machine that had not built the oracle
+/// ([`spec:nsh:req:oracle.cannot-measure-is-a-failure`]).
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
+fn reference_bash() -> PathBuf {
     let path = std::env::var_os("NSH_FUZZ_BASH").map_or_else(
         || {
             PathBuf::from(concat!(
@@ -105,13 +109,15 @@ fn reference_bash() -> Option<PathBuf> {
         },
         PathBuf::from,
     );
-    if !path.exists() {
-        eprintln!(
-            "no pinned Bash at {}; build it with `nsh-survey build-bash-reference`",
-            path.display()
-        );
-        return None;
-    }
+    assert!(
+        path.exists(),
+        "no pinned Bash at {}, so the verdicts below cannot be checked against \
+         the reference that produced them\n\
+         build it and name it to the run:\n\
+         \x20   cargo run -p nsh-survey -- build-bash-reference\n\
+         \x20   (or point NSH_FUZZ_BASH at an existing pinned build)",
+        path.display()
+    );
     /* The pin itself is read out of the survey's calibration record, by
      * the string search `nsh::fuzzing::reference` uses, so the two
      * cannot drift apart. That module is behind a feature this test
@@ -140,16 +146,14 @@ fn reference_bash() -> Option<PathBuf> {
         "{} reports {first:?}, which is not the pinned {pinned:?}",
         path.display()
     );
-    Some(path)
+    path
 }
 
 /// The table is the reference's answer, not this repository's opinion.
 // [spec:nsh:req:compat.bash.expansion-globbing/test]
 #[test]
 fn the_recorded_verdicts_are_the_references_own() {
-    let Some(bash) = reference_bash() else {
-        return;
-    };
+    let bash = reference_bash();
     for (script, accepted) in VERDICTS {
         let mut source = b"set -n\n".to_vec();
         source.extend_from_slice(script);
