@@ -1381,8 +1381,8 @@ assertions (
     {id make-the-bash-gate-able-to-fail, kind @complete, author "brendan@necessary.nu", at 2026-08-28T20:26:55.958418593Z}
     {id pin-the-fuzz-differential-oracle, kind @complete, author "brendan@necessary.nu", at 2026-08-28T21:09:02.369971294Z}
     {id respect-the-locale-in-escape-output, kind @complete, author "brendan@necessary.nu", at 2026-08-28T22:36:09.985383906Z}
-    {id reject-what-bash-rejects, kind @doing, author "brendan@necessary.nu", at 2026-08-28T22:36:15.604612322Z}
-    {id stop-the-locale-tests-passing-vacuously, kind @doing, author "brendan@necessary.nu", at 2026-08-29T10:58:01.375857561Z}
+    {id reject-what-bash-rejects, kind @complete, author "brendan@necessary.nu", at 2026-08-29T12:35:47.091211546Z}
+    {id stop-the-locale-tests-passing-vacuously, kind @complete, author "brendan@necessary.nu", at 2026-08-29T12:35:51.627877045Z}
 )
 
 impl_evidence (
