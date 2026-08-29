@@ -413,9 +413,6 @@ pub(crate) enum PendingRedirection {
 /// pop. No cursor into the vector survives a push or pop.
 pub struct SyntaxFrame {
     pub syntax: SyntaxContext,
-    /// Bash's `$[expression]` ends at `]` rather than at `))`.
-    // [spec:nsh:req:compat.bash.expansion-globbing]
-    pub bracketed: bool,
     pub inner_double_quote: bool,
     pub variable_context_pushed: bool,
     pub double_quoted: bool,
@@ -1726,7 +1723,6 @@ fn read_word_token(
     let mut lexer = WordLexer {
         syntax_frames: vec![SyntaxFrame {
             syntax,
-            bracketed: false,
             inner_double_quote: false,
             variable_context_pushed: false,
             double_quoted: syntax == SyntaxContext::DoubleQuoted,
@@ -1800,7 +1796,7 @@ fn read_word_token(
                 }
                 SyntaxClass::Word => {
                     bash::track_assignment_subscript(shell, &mut lexer);
-                    if !bash::close_arithmetic_bracket(&mut lexer) {
+                    if !bash::scan_arithmetic_bracket(&mut lexer) {
                         lexer.push_literal(lexer.input.expect_byte());
                     }
                 }
@@ -1882,6 +1878,9 @@ fn read_word_token(
 /// structural word the lexer built.
 // [spec:dash:sem:parser.readtoken1-fn]
 fn finish_word_token(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<Token, Error> {
+    if lexer.current_syntax().syntax == SyntaxContext::ArithmeticBracket {
+        return Err(syntax_error(shell, b"Missing ']'"));
+    }
     if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
         return Err(syntax_error(shell, b"Missing '))'"));
     }
@@ -2348,7 +2347,12 @@ fn parse_parameter_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             &mut nested_syntax,
         )?;
 
-        if nested_syntax == SyntaxContext::Arithmetic {
+        if matches!(
+            nested_syntax,
+            SyntaxContext::Arithmetic
+                | SyntaxContext::ArithmeticBracket
+                | SyntaxContext::ArithmeticDoubleQuoted
+        ) {
             nested_syntax = SyntaxContext::DoubleQuoted;
         }
 

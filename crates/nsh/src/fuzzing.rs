@@ -1198,9 +1198,15 @@ pub(crate) mod tests {
     /// parsed trees goes well past what it was written for -- its
     /// contract is nodes the shell built, which are simple -- and over
     /// the corpus the byte-exact campaigns reduced to, it writes a
-    /// different program for 53 of 101. Every one of them is the
+    /// different program for 52 of 101. Every one of them is the
     /// speller's, not the parser's: no input yet found makes the parser
     /// build two trees for one program.
+    ///
+    /// It was 53 until `$[…]` stopped counting parentheses. One artifact,
+    /// `$[(${\x92[]})))`, parsed only because the `))` inside it closed
+    /// the expansion; Bash ends `$[` at a bracket and refuses that
+    /// program, so the parser now refuses it too and the speller is no
+    /// longer asked to spell a tree that should not have been built.
     ///
     /// THE CLASSES, so a fix can be aimed rather than searched for. An
     /// operand inside `${...}` is spelled with quotes that a
@@ -1212,7 +1218,7 @@ pub(crate) mod tests {
     ///
     /// THIS IS ALSO THE PROPERTY'S NON-VACUITY. The test above would pass
     /// just as happily against a comparison that returned `OneTree` for
-    /// everything; these 53 are the evidence that it does not.
+    /// everything; these 52 are the evidence that it does not.
     // [spec:nsh:req:idiom.canonical-tree+1/test]
     #[test]
     fn the_fallback_speller_is_not_yet_total() {
@@ -1228,8 +1234,8 @@ pub(crate) mod tests {
             .count();
         assert_eq!(
             failures,
-            53,
-            "the fallback speller writes a different program for {failures} of {} shapes, not 53 -- \
+            52,
+            "the fallback speller writes a different program for {failures} of {} shapes, not 52 -- \
              if that is fewer, lower the number and say which class went; if more, something regressed",
             ROUNDTRIP_CORPUS.len()
         );

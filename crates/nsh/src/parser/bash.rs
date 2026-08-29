@@ -1054,9 +1054,8 @@ pub(super) fn arithmetic_bracket(
     if !active(shell) || !lexer.input.is(b'[') || lexer.check_here_document_end {
         return false;
     }
-    syntax_stack::push(&mut lexer.syntax_frames, SyntaxContext::Arithmetic);
+    syntax_stack::push(&mut lexer.syntax_frames, SyntaxContext::ArithmeticBracket);
     lexer.current_syntax_mut().double_quoted = true;
-    lexer.current_syntax_mut().bracketed = true;
     lexer.output.truncate(substitution_start);
     lexer.output.push(WordToken::ArithmeticStart);
     true
@@ -1107,11 +1106,37 @@ pub(super) fn track_assignment_subscript(shell: &Shell, lexer: &mut WordLexer<'_
     }
 }
 
-/// Close a `$[…]` expression, counting the brackets a subscript inside
-/// it opens. `true` means the byte was consumed.
+/// Scan one byte of a `$[…]` expression, and say whether it was consumed.
+///
+/// Bash reads `$[` with `parse_matched_pair`, which is a much smaller
+/// scanner than this one: only the brackets nest, a parenthesis is one
+/// of the expression's own bytes, and a quoted run is a nested pair
+/// whose contents -- a `]` included -- are data. Sharing the arithmetic
+/// context made `$[(]` unterminated, let `$[))` close, and let `$[']`
+/// end an expression Bash reads to end of input.
+///
+/// The quotes stay in the expression's text, because Bash hands them to
+/// the arithmetic evaluator too. All this decides is where the scan ends.
 // [spec:nsh:req:compat.bash.expansion-globbing]
-pub(super) fn close_arithmetic_bracket(lexer: &mut WordLexer<'_>) -> bool {
-    if !lexer.current_syntax().bracketed {
+pub(super) fn scan_arithmetic_bracket(lexer: &mut WordLexer<'_>) -> bool {
+    let run = match lexer.current_syntax().syntax {
+        SyntaxContext::ArithmeticSingleQuoted => Some(b'\''),
+        SyntaxContext::ArithmeticDoubleQuoted => Some(b'"'),
+        SyntaxContext::ArithmeticBracket => None,
+        _ => return false,
+    };
+    if let Some(quote) = run {
+        if lexer.input.is(quote) {
+            lexer.current_syntax_mut().syntax = SyntaxContext::ArithmeticBracket;
+        }
+        return false;
+    }
+    if lexer.input.is(b'\'') {
+        lexer.current_syntax_mut().syntax = SyntaxContext::ArithmeticSingleQuoted;
+        return false;
+    }
+    if lexer.input.is(b'"') {
+        lexer.current_syntax_mut().syntax = SyntaxContext::ArithmeticDoubleQuoted;
         return false;
     }
     if lexer.input.is(b'[') {

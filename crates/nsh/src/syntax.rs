@@ -90,6 +90,29 @@ pub(crate) enum SyntaxContext {
     DoubleQuoted,
     SingleQuoted,
     Arithmetic,
+    /// Bash's `$[expression]`, which ends at `]` rather than at `))`.
+    ///
+    /// Bash reads it with the scanner that reads `${...}`: only the
+    /// brackets nest, and a parenthesis is one of the expression's own
+    /// bytes. Sharing `Arithmetic`'s classification made `$[(]` an
+    /// unterminated expansion and let `$[))` close one.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    ArithmeticBracket,
+    /// A `'...'` run inside `$[...]`, which is data to its closing quote.
+    ///
+    /// Bash scans a quoted run in an arithmetic expression as a nested
+    /// matched pair, so the `]` that would end the expression is one of
+    /// the run's bytes and a run left open is the error. Nothing in a
+    /// single-quoted run is an expansion, so every byte is a word byte.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    ArithmeticSingleQuoted,
+    /// A `"..."` run inside `$[...]`, where expansions still apply.
+    ///
+    /// Bash parses `$(`, `${` and a backquote inside this run and leaves
+    /// the quotes in the expression's text, so only the bracket stops
+    /// being a terminator.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    ArithmeticDoubleQuoted,
     /// The operand of Bash's `=~`, where regular-expression syntax wins.
     ///
     /// A regular expression and the shell disagree about `(`, `|` and `)`,
@@ -158,16 +181,39 @@ impl SyntaxContext {
                 b' ' | b'\t' | b'&' | b';' | b'<' | b'>' => SyntaxClass::WordSeparator,
                 _ => SyntaxClass::Word,
             },
-            Self::Arithmetic => match byte {
+            Self::Arithmetic
+            | Self::ArithmeticBracket
+            | Self::ArithmeticDoubleQuoted
+            | Self::ArithmeticSingleQuoted => self.classify_arithmetic(byte),
+        }
+    }
+
+    /// Classify a byte inside an arithmetic expression.
+    ///
+    /// The four arithmetic contexts differ only in what still terminates
+    /// the expression, so they are one question asked four ways rather
+    /// than four arms of the shell's own table. `$((` counts parentheses
+    /// to find its `))` and `$[` does not, because `$[` ends at a bracket
+    /// and a parenthesis inside it is data; a quoted run suspends both,
+    /// and a single-quoted one suspends expansion as well.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    #[inline]
+    const fn classify_arithmetic(self, byte: u8) -> SyntaxClass {
+        if matches!(self, Self::ArithmeticSingleQuoted) {
+            return match byte {
                 b'\n' => SyntaxClass::Newline,
-                b'\\' => SyntaxClass::Backslash,
-                b'`' => SyntaxClass::Backquote,
-                b'$' => SyntaxClass::Variable,
-                b'}' => SyntaxClass::EndVariable,
-                b'(' => SyntaxClass::LeftParen,
-                b')' => SyntaxClass::RightParen,
                 _ => SyntaxClass::Word,
-            },
+            };
+        }
+        match byte {
+            b'\n' => SyntaxClass::Newline,
+            b'\\' => SyntaxClass::Backslash,
+            b'`' => SyntaxClass::Backquote,
+            b'$' => SyntaxClass::Variable,
+            b'}' => SyntaxClass::EndVariable,
+            b'(' if matches!(self, Self::Arithmetic) => SyntaxClass::LeftParen,
+            b')' if matches!(self, Self::Arithmetic) => SyntaxClass::RightParen,
+            _ => SyntaxClass::Word,
         }
     }
 }

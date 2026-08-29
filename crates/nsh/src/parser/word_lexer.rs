@@ -147,9 +147,15 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
     }
 
     /* Bash discards a backslash inside `$(( ))` before it evaluates, so
-     * `$((\$))` and `$(($))` are one expression and the byte is data. */
+     * `$((\$))` and `$(($))` are one expression and the byte is data.
+     * `$[ ]` is the same expression read to a different terminator. */
     // [spec:nsh:req:compat.bash.conditionals-arithmetic]
-    if lexer.current_syntax().syntax == SyntaxContext::Arithmetic {
+    if matches!(
+        lexer.current_syntax().syntax,
+        SyntaxContext::Arithmetic
+            | SyntaxContext::ArithmeticBracket
+            | SyntaxContext::ArithmeticDoubleQuoted
+    ) {
         lexer.quoted = true;
         lexer.push_literal(lexer.input.expect_byte());
         return Ok(());

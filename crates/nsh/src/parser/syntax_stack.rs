@@ -5,7 +5,6 @@ use super::{BackquoteContext, SyntaxContext, SyntaxFrame};
 pub(super) fn push(stack: &mut Vec<SyntaxFrame>, syntax: SyntaxContext) {
     stack.push(SyntaxFrame {
         syntax,
-        bracketed: false,
         inner_double_quote: false,
         variable_context_pushed: false,
         double_quoted: false,
@@ -36,7 +35,6 @@ mod tests {
         assert_eq!(stack.len(), 1);
         let frame = &stack[0];
         assert_eq!(frame.syntax, syntax);
-        assert!(!frame.bracketed);
         assert!(!frame.inner_double_quote);
         assert!(!frame.variable_context_pushed);
         assert!(!frame.double_quoted);

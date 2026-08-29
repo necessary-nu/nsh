@@ -6580,6 +6580,13 @@ children (
                                         kind @note
                                         text "Moved out of the token rewrite, because the rewrite will not catch it and does not fix it.\n\nThe round-trip property found these -- nsh parses `$[])a]` and `$[$(a+=)))`, which Bash rejects outright, and then could not write them back -- but that was an artefact of a renderer that had to re-spell. Once a node carries the tokens it was read as, an unspellable parse prints back byte-exact like any other, so `prove-byte-exact-round-trip` passes on both and the divergence becomes invisible to it.\n\nIt is still a divergence. `[dec:nsh:differential-is-the-oracle]` is what should have caught it and what should own it: two forms this shell accepts as programs and the reference refuses. That makes it differential work against the pinned 5.3 oracle, not frontend work, which is why it sits here rather than under the rewrite.\n\nMeasured: of the eight arithmetic artifacts in the round-trip corpus, Bash parses six -- their errors are at evaluation, not at parse -- and rejects these two.\n\nDONE WHEN. Both are refused with a diagnostic, and the test asserts against the reference rather than against a printed form."
                                     }
+
+                                    {
+                                        at 2026-08-28T22:36:15.604612322Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -6695,6 +6702,7 @@ children (
                                 id respect-the-locale-in-escape-output
                                 title "Write an unrepresentable escape back the way POSIX requires"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-28T21:11:12.069626689Z
@@ -6722,6 +6730,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Landed as `b619646`. Verified independently on the committed tree: `\\ucc` under `LC_ALL=C` writes `Ì` byte-for-byte as Bash does, `%q` on U+2028 under `en_US.UTF-8` matches, both shells emit nothing above U+7FFFFFFF, and all 16 stored printf artifacts replay dead.\n\nTHE ENUMERATION FOUND FOUR THINGS THE NOTE DID NOT PREDICT, and the note named one path.\n\nThe decoder is shared, so four paths were wrong, not one: `printf '%b'`, the `printf` *format string*, `echo -e`, and `$'...'` at parse time. `printf '\\ucc'` and `echo -e '\\ucc'` were as wrong as the reported case.\n\n`needs_ansi_c` was escaping the wrong class. It asked whether bytes decoded, never whether the character could be *printed*, so U+2028 and U+008C diverged under plain `C.UTF-8` and `en_US.UTF-8` with no exotic locale involved, across all five `escape/bash.rs` helpers. The predicate is `iswprint`, not `!iswcntrl`: U+0378 and U+FDD0 are unassigned, so `iswcntrl` is 0 and the obvious \"escape the control characters\" reading passes every motivating case while shipping a silent divergence on every unassigned code point.\n\nAbove U+7FFFFFFF the encoder extended its pattern into lead bytes 0xFE and 0xFF that no UTF-8 has ever had. The `_ => 6` arm had no upper bound. Bash writes nothing there in every locale.\n\nAlready right, and left alone: `\\x` and octal escapes in all three decode paths and all four locales, because they name a byte and no charmap is involved; and `%q`/`@Q`/`declare -p`/`set -x` were already correct for byte *validity* -- their `C` divergences were downstream of the decode bug.\n\n\"UNTESTABLE\" WAS WRONG. The note said to state the single-byte non-ASCII case as untested if no such locale is installed. One can be built: `localedef -i en_US -f ISO-8859-1` into a `LOCPATH` directory, and it is exactly what separates \"asks the charmap\" from \"assumes UTF-8\", since ISO-8859-1 writes U+00CC as the single byte 0xCC. Deciding a case is untestable is a claim that needs the same evidence as any other.\n\nA FOURTH FAIL-OPEN ORACLE, pre-existing and not introduced here: `crates/nsh/tests/locale_isolation.rs` skips its entire single-byte fixture on a host without that locale, and has therefore been passing vacuously. The new charmap test skips the same way but was proved non-vacuous by flipping an assertion and confirming it fails with `LOCPATH` set.\n\nEVIDENCE. 13,640 comparisons byte-identical to the pinned Bash 5.3.15 across `C`, `C.UTF-8`, `en_US.UTF-8` and the built `en_US.ISO-8859-1`, shown able to fail with 399 differing lines on mismatched locales. The two artifacts were proved *live* against a target built from `a8010ce` before being shown dead at HEAD, which is the ordering that makes \"dead\" mean something. Campaign 260s, 129,124 execs, ~510 exec/s, zero crashes, with libFuzzer's log naming `charmap_is_utf8` and `encode_character` as newly reached. 752 workspace tests, no gate bypassed -- four fired and were fixed by folding, printability reusing the existing `wide_class_matches(b\"print\", ...)` rather than adding a second entry point for one question.\n\nLEFT OPEN, DELIBERATELY. `\\u`/`\\U` are decoded in POSIX mode too and real dash implements neither, passing `\\ucc` through as four bytes. nsh diverged from dash there before this node and still does; the change moved it from one non-dash answer to another. No oracle covers POSIX-mode escape output, which is why nothing caught it in either direction. Whether `\\u` should be Bash-mode-only is a separate question and wants its own node."
+                                    }
+
+                                    {
+                                        at 2026-08-28T22:36:09.985383906Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
