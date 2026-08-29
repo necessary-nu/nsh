@@ -6740,6 +6740,20 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id stop-the-locale-tests-passing-vacuously
+                                title "Make a missing locale fixture fail the tests that need it"
+                                kind @test
+                                log (
+                                    {
+                                        at 2026-08-29T10:57:38.019822082Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "`crates/nsh/tests/locale_isolation.rs` has four tests that each open with\n\n    if !has_single_byte_fixture() { return; }\n\nand `has_single_byte_fixture()` asks whether `en_US.ISO-8859-1` can be opened. It cannot on this host -- `locale -a` lists no ISO-8859 locale at all -- so all four return immediately and report success. They have been passing without executing their bodies.\n\nConfirmed by measurement rather than by reading: `locale -a | grep -ci 8859` is 0 here, and the four tests pass.\n\nThe same shape was then repeated. The charmap test added by `respect-the-locale-in-escape-output` skips on the same predicate, so there are now two vacuous fixtures rather than one. That agent proved its own test non-vacuous by flipping an assertion under a built locale -- good practice, and not a substitute for the test being able to run.\n\nTHE SKIP IS AVOIDABLE, WHICH IS WHAT MAKES IT A DEFECT. Measured: `localedef -i en_US -f ISO-8859-1 <dir>/en_US.ISO-8859-1` builds the fixture in about a second, `localedef` is present at `/usr/bin/localedef`, and with `LOCPATH` naming that directory nsh reads the locale correctly -- `${#x}` on a two-byte character gives 2 under it, where UTF-8 gives 1. So the fixture is one command away and the tests skip anyway.\n\nFOURTH INSTANCE OF THE SAME CLASS. This branch has now found four oracles that treated \"could not measure\" as \"nothing to report\": the round-trip fixed point any consistent output satisfied; `gate-bash` scoring real Bash, nsh and a stub identically because a shell under `/tmp` is invisible inside its own containment; the differential targets skipping their assertion when the reference could not be spawned; and this. Every one produced a plausible pass rather than an error. A register of oracles carrying an explicit fail-closed requirement would be worth more than fixing the fifth when it appears, and that is a bigger question than this node.\n\nWHAT THIS NODE HAS TO DECIDE, and it is a real trade rather than an oversight. Failing outright when the fixture is absent breaks `cargo test --workspace` on every host that has not built it, including CI. Building it inside the test needs `LOCPATH` in the environment at `newlocale` time, and mutating the process environment from a test is both racy under a threaded harness and against the grain of `[dec:nsh:no-ambient-state]`. Driving it from a subprocess avoids the mutation but does not fit the four tests here, which exercise the library API in-process. Pick one and say why; what is not acceptable is a fifth spelling of \"return quietly\".\n\nDONE WHEN. On a host without the fixture the suite says so and does not report success, and on a host with it the four tests and the charmap test actually execute. Prove the bodies run by breaking one deliberately and watching it fail."
+                                    }
+                                )
+                            }
                         )
                     }
                 )
