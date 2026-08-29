@@ -6768,6 +6768,23 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id enforce-oracles-cannot-pass-unmeasured
+                                title "Lint the shape that lets a check pass without measuring"
+                                kind @test
+                                implements {
+                                    nsh-library ([spec:nsh:req:oracle.cannot-measure-is-a-failure])
+                                }
+                                log (
+                                    {
+                                        at 2026-08-29T11:24:53.441154824Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "`[spec:nsh:req:oracle.cannot-measure-is-a-failure]` is written, in the new `docs/spec/nsh/verification.md`. It is uncovered: the five instances that motivated it are all fixed, but none is annotated, so nothing ties the rule to the code that now satisfies it and nothing stops a sixth.\n\nTHE RULE IS WORTH LITTLE AS PROSE. It earns its place only if the shape is caught mechanically, and it is catchable, because all five instances took one of two forms:\n\n* a check whose first statement is a guarded `return` -- `if !fixture() { return; }`\n* an assertion nested inside `if let Ok(reference)` or `if let Some(fixture)`, so the unavailable case falls through having asserted nothing\n\nA lint over test functions finds both. That is this node.\n\nTWO THINGS THE LINT MUST GET RIGHT, or it will be turned off within a week.\n\nA legitimate skip exists. A check that does not apply to the host or configuration it runs on is permitted, and the rule already says how to spell it -- `cfg`, `#[ignore]`, or something the runner reports -- so the lint's job is to reject the *runtime* return, not the static one. The distinction is whether the check knows in advance it has nothing to measure or discovers at run time that it cannot measure what it came for.\n\nAnd it will have false positives. An early return in a test that has nothing to do with a reference is ordinary code. It needs an opt-out carrying a stated reason, in the shape the existing quality gates already use for `violations:`, so that suppressing it is a recorded decision rather than a silent one.\n\nSCOPE. The lint, the opt-out, annotating the five fixed sites so the rule is covered, and a check that the lint fires -- write a violating test, watch the lint reject it, remove it. That last part is the same standard this rule is about: a lint that has never been seen to fail is exactly the thing the rule forbids.\n\nONE SITE THE ANNOTATION CANNOT REACH. `tests/harness/locale-sweep.sh` is a shell script, and the nsh spec's impl scope is `crates/**/*.rs`. Its fix is real and is committed, but the rule cannot be annotated against it, so the coverage will read as complete while one of the five instances sits outside the corpus. Say so somewhere rather than letting the number imply otherwise."
+                                    }
+                                )
+                            }
                         )
                     }
                 )
