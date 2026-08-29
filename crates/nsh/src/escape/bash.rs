@@ -297,19 +297,6 @@ mod tests {
         nsh_platform::Locale::c().expect("the C locale exists")
     }
 
-    /// A locale whose charmap is UTF-8, or `None` where none is installed.
-    fn utf8_locale() -> Option<nsh_platform::Locale> {
-        [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
-            .into_iter()
-            .find_map(|name| nsh_platform::Locale::new(name, &[]).ok())
-            .filter(|locale| {
-                matches!(
-                    locale.character_encoding(0xcc),
-                    nsh_platform::CharacterEncoding::Utf8
-                )
-            })
-    }
-
     // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn a_control_character_forces_ansi_c_quoting() {
@@ -396,9 +383,7 @@ mod tests {
     // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn an_unprintable_character_forces_ansi_c_quoting() {
-        let Some(utf8) = utf8_locale() else {
-            return;
-        };
+        let utf8 = crate::escape::utf8_locale();
         let q = |value: &[u8]| requote(&utf8, BStr::new(value)).to_vec();
         /* U+008C, a C1 control. */
         assert_eq!(q(&[0xc2, 0x8c]), b"$'\\302\\214'");

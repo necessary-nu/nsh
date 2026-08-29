@@ -566,12 +566,18 @@ mod tests {
         assert_eq!(current(), before);
     }
 
-    /// A locale whose charmap is UTF-8, or `None` where none is installed.
-    fn utf8() -> Option<Locale> {
+    /// A locale whose charmap is UTF-8, and a failure where there is none.
+    ///
+    /// `en_US.UTF-8` is not redundant with `C.UTF-8` here: setting `LOCPATH`
+    /// stops glibc consulting the system locale archive, so a host that
+    /// keeps its UTF-8 locales only in that archive has none until the
+    /// generated one under `LOCPATH` answers to the third name.
+    fn utf8() -> Locale {
         [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
             .into_iter()
             .find_map(|name| Locale::new(name, &[]).ok())
             .filter(|locale| matches!(locale.character_encoding(0xcc), CharacterEncoding::Utf8))
+            .expect("no UTF-8 charmap: tried C.UTF-8, C.utf8 and en_US.UTF-8")
     }
 
     /// Three charmaps give three different answers for one character.
@@ -579,9 +585,9 @@ mod tests {
     /// U+00CC is the case that separates them: ASCII cannot write it at
     /// all, ISO-8859-1 writes it as the single byte 0xCC, and UTF-8 is
     /// named rather than encoded because its original range is wider than
-    /// the one `wcrtomb` will now produce. The single-byte charmap is not
-    /// installed everywhere, so that third of the test skips rather than
-    /// requiring a host to carry it.
+    /// the one `wcrtomb` will now produce. The single-byte charmap is
+    /// generated rather than installed, and it is a third of what this test
+    /// measures, so its absence is reported instead of skipped.
     // [spec:nsh:req:shell-locale.operation-binding/test]
     #[test]
     fn a_charmap_answers_for_its_own_characters() {
@@ -599,16 +605,18 @@ mod tests {
             matches!(c.character_encoding(0x41), CharacterEncoding::Bytes(bytes) if bytes == b"A")
         );
 
-        if let Some(utf8) = utf8() {
-            assert!(matches!(
-                utf8.character_encoding(0xcc),
-                CharacterEncoding::Utf8
-            ));
-        }
+        assert!(matches!(
+            utf8().character_encoding(0xcc),
+            CharacterEncoding::Utf8
+        ));
 
-        let Ok(latin1) = Locale::new(b"en_US.ISO-8859-1", &[]) else {
-            return;
-        };
+        let latin1 = Locale::new(b"en_US.ISO-8859-1", &[]).unwrap_or_else(|error| {
+            panic!(
+                "en_US.ISO-8859-1 is required by this test and could not be opened: {error}\n\
+                 build it and name it to the run:\n\
+                 \x20   export LOCPATH=$(tests/build-locales.sh)"
+            )
+        });
         assert!(matches!(
             latin1.character_encoding(0xcc),
             CharacterEncoding::Bytes(bytes) if bytes == [0xcc]
@@ -627,9 +635,7 @@ mod tests {
     // [spec:nsh:req:shell-locale.operation-binding/test]
     #[test]
     fn a_value_beyond_wchar_is_refused() {
-        let Some(utf8) = utf8() else {
-            return;
-        };
+        let utf8 = utf8();
         assert!(utf8.encode_character(0x8000_0000).is_none());
         assert!(utf8.encode_character(0xffff_ffff).is_none());
         assert!(utf8.encode_character(0x7fff_ffff).is_some());

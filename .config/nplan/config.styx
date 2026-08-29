@@ -26,7 +26,9 @@ platforms (
     // operator's terminal -- see enforce-survey-test-containment. A gate
     // command running them bare would reintroduce that hazard, and the
     // suite is far past the check budget besides. Run tests with
-    // `scripts/sandboxed -- cargo test --workspace`.
+    // `export LOCPATH=$(./tests/build-locales.sh)` and then
+    // `scripts/sandboxed -- cargo test --workspace`; the locale tests fail
+    // rather than skip when that fixture is missing.
     {
         platform "rust/workspace"
         files (crates/**/*.rs crates/**/Cargo.toml Cargo.toml Cargo.lock)

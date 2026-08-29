@@ -104,13 +104,14 @@ The public API is documented by the crate and checked with
 > containment wrapper. Some cases deliberately exercise process-wide signals
 > and job-control behavior.
 
-Bootstrap the C reference, then run builds and tests through
-`scripts/sandboxed`. The bootstrap downloads the pinned official Dash archive,
-verifies its SHA-256 and the two documented oracle patches, and builds it
-inside the same containment boundary:
+Bootstrap the C reference and the generated locales, then run builds and tests
+through `scripts/sandboxed`. The reference bootstrap downloads the pinned
+official Dash archive, verifies its SHA-256 and the two documented oracle
+patches, and builds it inside the same containment boundary:
 
 ```sh
 ./tests/build-reference.sh
+export LOCPATH=$(./tests/build-locales.sh)
 scripts/sandboxed -- cargo build
 
 scripts/sandboxed -- cargo test --workspace
@@ -122,6 +123,15 @@ scripts/sandboxed --writable posix -- \
 The wrapper requires the `sandbox` tool and fails closed if containment cannot
 be established. Read [tests/README.md](tests/README.md) before adding or
 changing differential cases.
+
+`LOCPATH` is an export rather than a path the tests look up themselves. A
+locale is opened by name, and glibc resolves every name under its own locale
+directory, so a generated one is reachable only through that variable in the
+process environment — which a test cannot set without the ambient mutation
+`[dec:nsh:no-ambient-state]` refuses. Tests that need the generated
+`en_US.ISO-8859-1` therefore fail, with that command, rather than skipping:
+they compare a single-byte charmap against UTF-8, so without it there is
+nothing for them to measure and passing would mean nothing.
 
 The pinned survey suites have native runners:
 

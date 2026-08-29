@@ -321,34 +321,51 @@ pub(crate) fn shell_quote(mut input: &BStr) -> BString {
     quoted
 }
 
+/// A locale whose charmap is UTF-8, and a failure where the host has none.
+///
+/// The three names are tried in the order a host is likely to answer to.
+/// `en_US.UTF-8` earns its place at the end rather than being redundant
+/// with `C.UTF-8`: setting `LOCPATH` stops glibc consulting the system
+/// locale archive at all, so a host that keeps its UTF-8 locales only there
+/// has none until the generated one under `LOCPATH` answers.
+#[cfg(test)]
+pub(crate) fn utf8_locale() -> nsh_platform::Locale {
+    [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
+        .into_iter()
+        .find_map(|name| nsh_platform::Locale::new(name, &[]).ok())
+        .filter(|locale| {
+            matches!(
+                locale.character_encoding(0xcc),
+                nsh_platform::CharacterEncoding::Utf8
+            )
+        })
+        .expect("no UTF-8 charmap: tried C.UTF-8, C.utf8 and en_US.UTF-8")
+}
+
+/// A locale whose charmap is one byte wide and is not ASCII.
+///
+/// This one is generated rather than installed, and the tests that use it
+/// separate "asks the charmap" from "assumes UTF-8", so a host without it
+/// measures nothing. Returning `None` for the caller to skip on was that
+/// silence, spelled as a pass, and it spread by being cited as precedent.
+/// Being unable to run is reported here instead.
+#[cfg(test)]
+pub(crate) fn latin1_locale() -> nsh_platform::Locale {
+    nsh_platform::Locale::new(b"en_US.ISO-8859-1", &[]).unwrap_or_else(|error| {
+        panic!(
+            "en_US.ISO-8859-1 is required by this test and could not be opened: {error}\n\
+             build it and name it to the run:\n\
+             \x20   export LOCPATH=$(tests/build-locales.sh)"
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn c_locale() -> nsh_platform::Locale {
         nsh_platform::Locale::c().expect("the C locale exists")
-    }
-
-    /// A locale whose charmap is UTF-8, or `None` where none is installed.
-    ///
-    /// Skipping is the established shape for a locale fixture here -- see
-    /// `tests/locale_isolation.rs` -- because the charmaps a host has are
-    /// not the shell's to require.
-    fn utf8_locale() -> Option<nsh_platform::Locale> {
-        [b"C.UTF-8".as_slice(), b"C.utf8", b"en_US.UTF-8"]
-            .into_iter()
-            .find_map(|name| nsh_platform::Locale::new(name, &[]).ok())
-            .filter(|locale| {
-                matches!(
-                    locale.character_encoding(0xcc),
-                    nsh_platform::CharacterEncoding::Utf8
-                )
-            })
-    }
-
-    /// A locale whose charmap is one byte wide and is not ASCII, or `None`.
-    fn latin1_locale() -> Option<nsh_platform::Locale> {
-        nsh_platform::Locale::new(b"en_US.ISO-8859-1", &[]).ok()
     }
 
     #[test]
@@ -366,9 +383,7 @@ mod tests {
         assert_eq!(parse_escape(&c, b"777", false).bytes(), &[0xff]);
         assert_eq!(parse_escape(&c, b"q", false).bytes(), b"\\");
         assert_eq!(parse_escape(&c, b"q", false).consumed, 0);
-        let Some(utf8) = utf8_locale() else {
-            return;
-        };
+        let utf8 = utf8_locale();
         assert_eq!(
             parse_escape(&utf8, b"u20ac", true).bytes(),
             "\u{20ac}".as_bytes()
@@ -408,9 +423,7 @@ mod tests {
     // [spec:nsh:req:compat.bash.expansion-globbing/test]
     #[test]
     fn a_representable_escape_uses_the_charmap() {
-        let Some(latin1) = latin1_locale() else {
-            return;
-        };
+        let latin1 = latin1_locale();
         let bytes = |input: &[u8]| parse_escape(&latin1, input, false).bytes().to_vec();
         /* ISO-8859-1 spells U+00CC as one byte, where UTF-8 needs two. */
         assert_eq!(bytes(b"u00cc"), &[0xcc]);
@@ -435,9 +448,7 @@ mod tests {
         assert_eq!(parse_escape(&c, b"Uffffffff", false).bytes(), b"");
         /* The escape is still consumed, so the digits are not output. */
         assert_eq!(parse_escape(&c, b"U80000000", false).consumed, 9);
-        let Some(utf8) = utf8_locale() else {
-            return;
-        };
+        let utf8 = utf8_locale();
         assert_eq!(
             parse_escape(&utf8, b"U7fffffff", false).bytes(),
             &[0xfd, 0xbf, 0xbf, 0xbf, 0xbf, 0xbf]

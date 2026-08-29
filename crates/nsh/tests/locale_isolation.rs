@@ -5,16 +5,32 @@ use nsh::{Shell, Streams};
 
 const ISO: &str = "en_US.ISO-8859-1";
 
-fn has_single_byte_fixture() -> bool {
-    nsh_platform::Locale::new(ISO.as_bytes(), &[]).is_ok()
+// A test that cannot reach its fixture says so rather than passing.
+//
+// Every assertion below separates a single-byte charmap from UTF-8, so
+// without that locale there is nothing here to measure and the `return` this
+// call replaced was a pass that meant nothing. It cannot be recovered from
+// inside the process: glibc resolves every locale name under its own locale
+// directory, an absolute one included, so a generated locale is reachable
+// only through `LOCPATH` in the environment, and a test that exported it for
+// itself would be mutating the very process environment the last test here
+// asserts is unchanged. The fixture is a precondition of the run instead,
+// built and named by `tests/build-locales.sh`.
+// [dec:nsh:no-ambient-state]
+fn require_single_byte_fixture() {
+    if let Err(error) = nsh_platform::Locale::new(ISO.as_bytes(), &[]) {
+        panic!(
+            "{ISO} is required by this test and could not be opened: {error}\n\
+             build it and name it to the run:\n\
+             \x20   export LOCPATH=$(tests/build-locales.sh)"
+        );
+    }
 }
 
 // [spec:nsh:sem:shell-locale.selection/test]
 #[test]
 fn locale_precedence_is_posix() {
-    if !has_single_byte_fixture() {
-        return;
-    }
+    require_single_byte_fixture();
 
     let mut category = Shell::builder()
         .env([("LC_CTYPE", ISO), ("LANG", "C")])
@@ -70,9 +86,7 @@ fn locale_precedence_is_posix() {
 // [spec:nsh:sem:shell-locale.invalid-selection/test]
 #[test]
 fn invalid_locale_retains_effective_state() {
-    if !has_single_byte_fixture() {
-        return;
-    }
+    require_single_byte_fixture();
 
     let mut initial = Shell::builder()
         .env([("LC_ALL", "nsh-invalid-locale")])
@@ -102,9 +116,7 @@ fn invalid_locale_retains_effective_state() {
 // [spec:nsh:req:shell-locale.operation-binding/test]
 #[test]
 fn raw_names_follow_shell_locale() {
-    if !has_single_byte_fixture() {
-        return;
-    }
+    require_single_byte_fixture();
 
     let mut shell = Shell::builder()
         .env([("LC_ALL", ISO)])
@@ -123,9 +135,7 @@ fn raw_names_follow_shell_locale() {
 // [spec:nsh:req:shell-locale.instance-isolation/test]
 #[test]
 fn shell_locales_are_isolated() {
-    if !has_single_byte_fixture() {
-        return;
-    }
+    require_single_byte_fixture();
 
     let mut before = nsh_platform::process_environment();
     before.sort();
