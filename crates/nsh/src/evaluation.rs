@@ -70,20 +70,39 @@ use crate::variables::VariableAttributes;
 pub(crate) struct EvaluationContext {
     exit: bool,
     tested: bool,
+    /// Whether the child this is running in was forked *for this command*,
+    /// so the command is the child rather than something the child runs.
+    ///
+    /// Bash forks inside the code that runs an asynchronous simple command
+    /// and a pipeline member, and the child then becomes the command --
+    /// `execute_command_internal` never reaches the foot where `ERR` and
+    /// `-e` read the status, and its `pipe_in == NO_PIPE && pipe_out ==
+    /// NO_PIPE` guard says the same thing for a member that did not exec.
+    /// There is no shell left above such a command to notice its failure.
+    ///
+    /// It describes one node and stops there: a function body, a group, a
+    /// nested subshell are all commands the child *runs*, and each restores
+    /// the fact rather than inheriting it. That is why it is not `tested`,
+    /// which travels down into everything the syntax consumes.
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    forked_as_this_command: bool,
 }
 
 impl EvaluationContext {
     pub(crate) const DEFAULT: Self = Self {
         exit: false,
         tested: false,
+        forked_as_this_command: false,
     };
     pub(crate) const EXITING: Self = Self {
         exit: true,
         tested: false,
+        forked_as_this_command: false,
     };
     pub(crate) const TESTED: Self = Self {
         exit: false,
         tested: true,
+        forked_as_this_command: false,
     };
 
     const fn exits(self) -> bool {
@@ -105,17 +124,11 @@ impl EvaluationContext {
         }
     }
 
-    const fn without_tested(self) -> Self {
-        Self {
-            tested: false,
-            ..self
-        }
-    }
-
     pub(crate) const fn tested_only(self) -> Self {
         Self {
             exit: false,
             tested: self.tested,
+            forked_as_this_command: false,
         }
     }
 }
@@ -850,9 +863,15 @@ pub fn evaluate_tree(
     /* Bash raises `ERR` exactly where `errexit` would act, which is not
      * a coincidence to be re-derived: both ask whether this command's
      * failure is the shell's to notice, and a status the surrounding
-     * syntax consumes is neither's business. One predicate, read twice. */
+     * syntax consumes is neither's business. One predicate, read twice.
+     *
+     * A command the shell forked a child *for* is neither's business
+     * either, and for the same reason rather than a second one: Bash
+     * replaces that process with the command, so nothing is left above it
+     * to read the status back. */
     // [spec:nsh:req:compat.bash.traps-introspection]
-    let acted_on_failure = check_exit && !context.is_tested() && !status.success();
+    let acted_on_failure =
+        check_exit && !context.is_tested() && !context.forked_as_this_command && !status.success();
     if acted_on_failure {
         flow!(crate::trap::bash::run_err(shell));
     }
@@ -1081,6 +1100,39 @@ fn evaluate_case(
 
 // [spec:dash:sem:eval.evalsubshell-fn]
 // [spec:posix:req:jobctl.list-splitting]
+/// The context a subshell's child runs the body under.
+///
+/// The child runs the body rather than the wrapper, so "forked as this
+/// command" is restored here, and then set again only where Bash's own
+/// fork leaves the body with no shell above it to read a status back. A
+/// simple command and a pipeline are not control structures, so Bash
+/// forks an asynchronous one from inside the code that runs it and the
+/// child becomes the command. A subshell is the same story and not only
+/// when asynchronous: entering one, Bash runs its *body*, so the subshell
+/// node is never a command anything noticed the failure of. Everything
+/// else -- a group, a loop, a `case`, `(( ))`, `[[ ]]` -- is a control
+/// structure Bash runs inside the child it forked first, where the
+/// failure is noticed as usual: `(( 0 )) &` raises `ERR` where `false &`
+/// does not.
+// [spec:nsh:req:compat.bash.traps-introspection]
+fn subshell_child_context(
+    context: EvaluationContext,
+    body: &Node,
+    background: bool,
+) -> EvaluationContext {
+    EvaluationContext {
+        exit: context.exit,
+        /* An asynchronous command's status is the child's own exit
+         * status, not something the surrounding syntax consumed. */
+        tested: context.tested && !background,
+        forked_as_this_command: match body {
+            Node::Subshell(_) => true,
+            Node::Command(_) | Node::Pipeline(_) => background,
+            _ => false,
+        },
+    }
+}
+
 // [spec:posix:def:jobctl.background-job]
 // [spec:posix:def:jobctl.foreground-job]
 // [spec:posix:req:exit.subshell-error-exit]
@@ -1111,6 +1163,7 @@ fn evaluate_subshell(
     let forked = crate::error::with_interrupts_deferred(shell, |shell| {
         if !background && context.exits() && !crate::trap::has_traps(shell) {
             shell.prepare_fork_child(None);
+            context = subshell_child_context(context, command.command.as_ref(), background);
             return Ok(Some(false));
         }
         let job_id = crate::jobs::create_job(shell, 1);
@@ -1123,10 +1176,8 @@ fn evaluate_subshell(
             )?,
             nsh_platform::ForkResult::Child
         ) {
-            context = context.with_exit();
-            if background {
-                context = context.without_tested();
-            }
+            context =
+                subshell_child_context(context.with_exit(), command.command.as_ref(), background);
             return Ok(Some(true));
         }
         /* the parent tail of the C function; the child path below
@@ -1284,6 +1335,21 @@ fn evaluate_pipeline(
     pipeline: &Pipeline,
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
+    /* A member with a pipe on either side is a command Bash forked a child
+     * for, and its `pipe_in == NO_PIPE && pipe_out == NO_PIPE` guard keeps
+     * `ERR` and `-e` off that member whether or not the child went on to
+     * exec. The pipeline itself is still noticed, which is why `false |
+     * false` raises once and `false | cat` not at all. A pipeline of one
+     * has no pipe and is an ordinary command. */
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    let context = if pipeline.commands.len() > 1 {
+        EvaluationContext {
+            forked_as_this_command: true,
+            ..context
+        }
+    } else {
+        context
+    };
     let caller_context = context;
     let context = context.with_exit();
     flow!(run_pipeline_debug_traps(shell, pipeline));

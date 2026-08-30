@@ -14,9 +14,10 @@
 //! accepted expressions is a Bash *evaluation* error, so a test written
 //! against output would agree with the reference for the wrong reason.
 
+mod pinned_bash;
+
 use bstr::BStr;
 use nsh::{Shell, Streams};
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 /// One program and the verdict the pinned Bash gives it.
@@ -87,73 +88,11 @@ fn a_bracketed_expression_ends_where_bash_ends_it() {
     }
 }
 
-/// The pinned Bash whose verdicts the table above records.
-///
-/// Named by `NSH_FUZZ_BASH` or found beside the build tree, and checked
-/// against the version `calibrate-bash-5-3-oracle` pinned -- the ambient
-/// `/usr/bin/bash` is 5.2 on this machine and is not an answer here.
-///
-/// A reference that is not there is a failure and not a pass. This used
-/// to report and return `None` for the caller to skip on, which made the
-/// one test that re-derives the table from the reference incapable of
-/// disagreeing with it on any machine that had not built the oracle
-/// ([`spec:nsh:req:oracle.cannot-measure-is-a-failure`]).
-// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
-fn reference_bash() -> PathBuf {
-    let path = std::env::var_os("NSH_FUZZ_BASH").map_or_else(
-        || {
-            PathBuf::from(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../target/bash-reference/bash"
-            ))
-        },
-        PathBuf::from,
-    );
-    assert!(
-        path.exists(),
-        "no pinned Bash at {}, so the verdicts below cannot be checked against \
-         the reference that produced them\n\
-         build it and name it to the run:\n\
-         \x20   cargo run -p nsh-survey -- build-bash-reference\n\
-         \x20   (or point NSH_FUZZ_BASH at an existing pinned build)",
-        path.display()
-    );
-    /* The pin itself is read out of the survey's calibration record, by
-     * the string search `nsh::fuzzing::reference` uses, so the two
-     * cannot drift apart. That module is behind a feature this test
-     * does not turn on. */
-    let record = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/surveys/oils/BASH_REFERENCE_CASES.json"
-    ))
-    .expect("read the Bash calibration record");
-    let at = record
-        .find("\"oracle_version\"")
-        .expect("the record names an oracle_version");
-    let tail = &record[at..];
-    let open = tail[16..].find('"').expect("a quoted oracle_version") + 17;
-    let close = tail[open..].find('"').expect("a terminated oracle_version");
-    let pinned = &tail[open..open + close];
-
-    let reported = Command::new(&path)
-        .arg("--version")
-        .output()
-        .expect("run the pinned Bash");
-    let reported = String::from_utf8_lossy(&reported.stdout);
-    let first = reported.lines().next().unwrap_or_default();
-    assert!(
-        first.contains(pinned),
-        "{} reports {first:?}, which is not the pinned {pinned:?}",
-        path.display()
-    );
-    path
-}
-
 /// The table is the reference's answer, not this repository's opinion.
 // [spec:nsh:req:compat.bash.expansion-globbing/test]
 #[test]
 fn the_recorded_verdicts_are_the_references_own() {
-    let bash = reference_bash();
+    let bash = pinned_bash::path();
     for (script, accepted) in VERDICTS {
         let mut source = b"set -n\n".to_vec();
         source.extend_from_slice(script);
