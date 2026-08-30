@@ -9,7 +9,7 @@ use std::io::Write;
 
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
-use crate::nodes::{FileRedirectionOperator, HereDocument, Node};
+use crate::nodes::{FileRedirectionOperator, HereDocument, Node, RedirectionDescriptor};
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
 
@@ -50,11 +50,11 @@ enum RedirectSource {
 pub(crate) enum ExpandedRedirection<'a> {
     File {
         operator: FileRedirectionOperator,
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
         target: BString,
     },
     Descriptor {
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
         source: Option<LogicalDescriptor>,
     },
     HereDocument(&'a HereDocument),
@@ -62,7 +62,7 @@ pub(crate) enum ExpandedRedirection<'a> {
     /// reads. The trailing newline is part of the content.
     // [spec:nsh:req:compat.bash.expansion-globbing]
     HereString {
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
         content: BString,
     },
     /// A redirection whose operand did not expand to exactly one
@@ -70,18 +70,85 @@ pub(crate) enum ExpandedRedirection<'a> {
     /// command status 1.
     // [spec:nsh:req:compat.bash.expansion-globbing]
     Ambiguous {
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
         word: BString,
     },
 }
 
 impl ExpandedRedirection<'_> {
-    fn descriptor(&self) -> LogicalDescriptor {
+    fn descriptor(&self) -> &RedirectionDescriptor {
         match self {
-            Self::File { descriptor, .. } | Self::Descriptor { descriptor, .. } => *descriptor,
-            Self::HereDocument(document) => document.descriptor,
-            Self::HereString { descriptor, .. } | Self::Ambiguous { descriptor, .. } => *descriptor,
+            Self::File { descriptor, .. } | Self::Descriptor { descriptor, .. } => descriptor,
+            Self::HereDocument(document) => &document.descriptor,
+            Self::HereString { descriptor, .. } | Self::Ambiguous { descriptor, .. } => descriptor,
         }
+    }
+
+    /// Whether this redirection closes the slot rather than opening it.
+    ///
+    /// `{name}<&-` is the one form that reads `name` instead of assigning
+    /// it: the script is closing a descriptor it already has, so the
+    /// number has to come from where the script put it.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn closes(&self) -> bool {
+        matches!(self, Self::Descriptor { source: None, .. })
+    }
+}
+
+/// The lowest slot no descriptor occupies, at or above the inherited range.
+///
+/// Bash allocates from ten upward -- above every number a script can write
+/// as an ordinary IO_NUMBER without counting -- and reuses a slot once it
+/// is closed, which is why this searches rather than counting up from the
+/// last one handed out. `RLIMIT_NOFILE` bounds it, as it bounds a number
+/// the script writes itself.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn allocate_descriptor(shell: &mut Shell) -> Result<LogicalDescriptor, Error> {
+    let limit = nsh_platform::descriptor_limit() as usize;
+    let free = (LogicalDescriptor::INHERITED..limit)
+        .filter_map(LogicalDescriptor::from_index)
+        .find(|candidate| shell.descriptors.get(*candidate).is_none());
+    free.ok_or_else(|| {
+        let line = shell.evaluation.diagnostic_line;
+        shell
+            .diagnostics()
+            .report(Error::other(line, 1, b"no free file descriptor"))
+    })
+}
+
+/// The slot `{name}<&-` closes, read out of `name`.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn named_descriptor(shell: &mut Shell, name: &BStr) -> Result<LogicalDescriptor, Error> {
+    let held = crate::variables::lookup_bytes(shell, name);
+    if let Some(held) = &held
+        && let Some(descriptor) = LogicalDescriptor::from_digits(held)
+    {
+        return Ok(descriptor);
+    }
+    let mut message = name.to_vec();
+    message.extend_from_slice(b": ambiguous redirect");
+    let line = shell.evaluation.diagnostic_line;
+    Err(shell.diagnostics().report(Error::other(line, 1, &message)))
+}
+
+/// The slot a redirection acts on, allocating one where the source wrote
+/// `{name}` rather than a number.
+///
+/// The assignment back into `name` is not done here: Bash leaves the name
+/// untouched when the open fails, so the number is only published once
+/// there is a descriptor behind it.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn resolve_descriptor(
+    shell: &mut Shell,
+    redirection: &ExpandedRedirection<'_>,
+) -> Result<LogicalDescriptor, Error> {
+    match redirection.descriptor() {
+        RedirectionDescriptor::Fixed(descriptor) => Ok(*descriptor),
+        RedirectionDescriptor::Allocated(name) if redirection.closes() => {
+            let name = BString::from(name.as_bstr());
+            named_descriptor(shell, BStr::new(&name))
+        }
+        RedirectionDescriptor::Allocated(_) => allocate_descriptor(shell),
     }
 }
 
@@ -156,9 +223,19 @@ pub(crate) fn redirect(
         /* The C walks the list through `n->nfile.next`, which is the same offset
          * in every redirection arm; the list is a `Vec` now. */
         for redirection in redirections {
-            let descriptor = redirection.descriptor();
+            /* A slot the shell chose is the script's from here on. Bash
+             * does not undo one when the command finishes -- `{ echo; }
+             * {fd}<<< walrus` leaves `$fd` readable afterwards, where the
+             * same group with `7<` gets 7 back -- so it is never saved
+             * into the frame that would restore it. */
+            // [spec:nsh:req:compat.bash.expansion-globbing]
+            let allocates = matches!(
+                redirection.descriptor(),
+                RedirectionDescriptor::Allocated(_)
+            ) && !redirection.closes();
+            let descriptor = resolve_descriptor(shell, redirection)?;
             reject_unusable_descriptor(shell, descriptor)?;
-            let source = open_redirection(shell, redirection)?;
+            let source = open_redirection(shell, redirection, descriptor)?;
             if !matches!(source, RedirectSource::Noop) {
                 /* The C's `fd == 0` is "this redirection replaced the shell's
                  * own input", which is what makes the buffered parse state
@@ -168,6 +245,7 @@ pub(crate) fn redirect(
                 }
 
                 if let Some(frame_index) = saved_frame
+                    && !allocates
                     && !shell.redirections.frames[frame_index]
                         .saved_descriptors
                         .contains_key(&descriptor)
@@ -179,6 +257,21 @@ pub(crate) fn redirect(
                 }
 
                 install_redirection(shell, descriptor, source)?;
+                /* `{name}>file` publishes the slot it was given, and only
+                 * now: an open that failed leaves the name as it was. */
+                // [spec:nsh:req:compat.bash.expansion-globbing]
+                if let RedirectionDescriptor::Allocated(name) = redirection.descriptor()
+                    && allocates
+                {
+                    let name = BString::from(name.as_bstr());
+                    let digits = descriptor.digits();
+                    crate::variables::arrays::assign_text_target(
+                        shell,
+                        BStr::new(&name),
+                        BStr::new(&digits),
+                        false,
+                    )?;
+                }
             }
         }
         Ok(saved_frame)
@@ -365,13 +458,13 @@ pub(crate) fn expand_file_target<'a>(
         let mut word = BString::default();
         redirection.target.word.render(&mut word);
         return Ok(ExpandedRedirection::Ambiguous {
-            descriptor: redirection.descriptor,
+            descriptor: redirection.descriptor.clone(),
             word,
         });
     }
     Ok(ExpandedRedirection::File {
         operator: redirection.operator,
-        descriptor: redirection.descriptor,
+        descriptor: redirection.descriptor.clone(),
         target: fields.fields.remove(0).text,
     })
 }
@@ -439,13 +532,14 @@ fn reject_unusable_descriptor(
 fn open_redirection(
     shell: &mut Shell,
     redirection: &ExpandedRedirection<'_>,
+    descriptor: LogicalDescriptor,
 ) -> Result<RedirectSource, Error> {
     let source = match redirection {
         ExpandedRedirection::File {
             operator, target, ..
         } => open_file_redirection(shell, *operator, BStr::new(target.as_slice()))?,
-        ExpandedRedirection::Descriptor { descriptor, source } => {
-            open_descriptor_redirection(shell, *descriptor, *source)?
+        ExpandedRedirection::Descriptor { source, .. } => {
+            open_descriptor_redirection(shell, descriptor, *source)?
         }
         ExpandedRedirection::HereDocument(document) => {
             RedirectSource::Owned(open_here_document(shell, document)?)

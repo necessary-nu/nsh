@@ -22,6 +22,7 @@ use crate::nodes::{
     FileRedirectionOperator, Node, NodeText, SourceTokens, WordNode,
 };
 use crate::options::{BashShopt, Dialect};
+use crate::syntax::{is_in_name, is_name};
 use crate::word::{ParameterOperation, ParsedWord, WordToken, WordUnit};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -631,7 +632,7 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
                 operator,
                 descriptor,
             }) if *operator == FileRedirectionOperator::Read
-                && *descriptor == LogicalDescriptor::STDIN =>
+                && descriptor.fixed() == Some(LogicalDescriptor::STDIN) =>
             {
                 Some(NodeText::from(b"<".as_slice()))
             }
@@ -639,7 +640,7 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
                 operator,
                 descriptor,
             }) if *operator == FileRedirectionOperator::Write
-                && *descriptor == LogicalDescriptor::STDOUT =>
+                && descriptor.fixed() == Some(LogicalDescriptor::STDOUT) =>
             {
                 Some(NodeText::from(b">".as_slice()))
             }
@@ -1196,4 +1197,38 @@ pub(super) fn inside_extended_glob(lexer: &mut WordLexer<'_>) -> bool {
         lexer.extglob_depth -= 1;
     }
     true
+}
+
+/// The name in a `{name}` redirection prefix, if the word is one.
+///
+/// `{name}` names no descriptor and asks for one to be allocated, with the
+/// number assigned to `name`. So `name` has to be somewhere a number can
+/// go, which is what keeps the form from swallowing ordinary words: `{1a}`
+/// and `{}` are words -- Bash runs `exec {1a}` as a command and reports it
+/// not found -- and the braces have to be the whole word, so `echo {fd}x>f`
+/// redirects and allocates nothing. A subscript is a place too, because
+/// Bash accepts `{a[0]}`.
+// [spec:nsh:req:compat.bash.parser-ast]
+pub(super) fn allocated_descriptor(shell: &Shell, bytes: &[u8]) -> Option<NodeText> {
+    if !active(shell) {
+        return None;
+    }
+    let name = bytes.strip_prefix(b"{")?.strip_suffix(b"}")?;
+    /* The `x` stands in for a subscript that is there, so the emptiness
+     * test below reads the same whether or not one was written. */
+    let (head, subscript) = match name.iter().position(|byte| *byte == b'[') {
+        Some(open) if name.last() == Some(&b']') => {
+            (&name[..open], &name[open + 1..name.len() - 1])
+        }
+        Some(_) => return None,
+        None => (name, &b"x"[..]),
+    };
+    let assignable = !subscript.is_empty()
+        && head
+            .first()
+            .is_some_and(|byte| is_name(&shell.locale, *byte))
+        && head[1..]
+            .iter()
+            .all(|byte| is_in_name(&shell.locale, *byte));
+    assignable.then(|| NodeText::new(BString::from(name)))
 }

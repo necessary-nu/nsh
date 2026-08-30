@@ -21,8 +21,8 @@ use super::{
     BashAssignmentOperator, BashConditionalExpr, BashFunctionStyle, BashNode, BashProcessDirection,
     BashProcessSubstitution, BinaryCommand, CaseCommand, CompoundCommand, DescriptorRedirection,
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
-    ForCommand, HereDocument, HereString, IfCommand, Node, Pipeline, Redirection, SimpleCommand,
-    WordNode,
+    ForCommand, HereDocument, HereString, IfCommand, Node, Pipeline, Redirection,
+    RedirectionDescriptor, SimpleCommand, WordNode,
 };
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, WordPart};
 
@@ -595,7 +595,7 @@ impl<'a> Printer<'a> {
     /// `<<< word`, which unlike a here-document carries its whole body in
     /// the word and so needs no queueing to the end of the line.
     fn here_string(&mut self, redirection: &HereString, indent: usize) {
-        self.descriptor_prefix(redirection.descriptor.index(), 0);
+        self.descriptor_prefix(&redirection.descriptor, 0);
         self.out.extend_from_slice(b"<<< ");
         self.word(&redirection.word, indent);
     }
@@ -608,7 +608,7 @@ impl<'a> Printer<'a> {
             FileRedirectionOperator::ReadWrite => (b"<>", 0),
             FileRedirectionOperator::Append => (b">>", 1),
         };
-        self.descriptor_prefix(redirection.descriptor.index(), default);
+        self.descriptor_prefix(&redirection.descriptor, default);
         self.out.extend_from_slice(operator);
         self.out.push(b' ');
         self.word(&redirection.target, indent);
@@ -619,7 +619,7 @@ impl<'a> Printer<'a> {
             DescriptorRedirectionOperator::Input => (b"<&", 0),
             DescriptorRedirectionOperator::Output => (b">&", 1),
         };
-        self.descriptor_prefix(redirection.descriptor.index(), default);
+        self.descriptor_prefix(&redirection.descriptor, default);
         self.out.extend_from_slice(operator);
         match &redirection.target {
             DescriptorTarget::Number(number) => {
@@ -632,11 +632,20 @@ impl<'a> Printer<'a> {
     }
 
     /// Write the descriptor number, unless the operator already implies it.
-    fn descriptor_prefix(&mut self, descriptor: usize, default: usize) {
-        if descriptor != default {
-            self.out
-                .extend_from_slice(descriptor.to_string().as_bytes());
+    /// The number, or `{name}`, before a redirection operator.
+    ///
+    /// A fixed slot the operator would have taken anyway is left unwritten,
+    /// which is why the default comes in. `{name}` is never the default and
+    /// is always written: it is the request to allocate.
+    // [spec:nsh:req:compat.bash.parser-ast]
+    fn descriptor_prefix(&mut self, descriptor: &RedirectionDescriptor, default: usize) {
+        if descriptor
+            .fixed()
+            .is_some_and(|fixed| fixed.index() == default)
+        {
+            return;
         }
+        self.out.extend_from_slice(&descriptor.text());
     }
 
     /// Write `<<DELIM` and queue the body for the end of the line.
@@ -651,7 +660,7 @@ impl<'a> Printer<'a> {
         // [spec:nsh:req:idiom.printable-ast+2]
         let read = document.body.tokens.text();
         if !self.ignore_runs && !read.is_empty() && !document.delimiter.as_bstr().is_empty() {
-            self.descriptor_prefix(document.descriptor.index(), 0);
+            self.descriptor_prefix(&document.descriptor, 0);
             self.out.extend_from_slice(b"<<");
             if document.expand {
                 self.out.extend_from_slice(document.delimiter.as_bstr());
@@ -684,7 +693,7 @@ impl<'a> Printer<'a> {
             BString::from(spelled)
         };
 
-        self.descriptor_prefix(document.descriptor.index(), 0);
+        self.descriptor_prefix(&document.descriptor, 0);
         self.out.extend_from_slice(b"<<");
         if document.expand {
             self.out.extend_from_slice(&delimiter);

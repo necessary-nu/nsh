@@ -6349,18 +6349,42 @@ children (
                                 id bash-mode-error-boundary
                                 title "Give Bash mode Bash's error boundary"
                                 kind @fix
+                                log (
+                                    {
+                                        at 2026-08-30T18:30:32.080253821Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "NOT CLOSEABLE. Probed on `34982c0` against the pinned Bash 5.3.15. `docs/divergences.md` says Bash mode \"now does the same\" as Bash -- reports and carries on -- and that is true for the class the work targeted (a failed assignment, a bad substitution, a bad subscript) and untrue for another that was never separated from it: a special built-in whose *utility* fails.\n\nSix shapes, all `bash -c` so the whole script is one input record. Bash prints `after`; this shell abandons the record:\n\n    exec 1000000</dev/null; echo after   bash: msg, after, 0   nsh: msg, 1\n    exec 3</nonesuch; echo after         bash: msg, after, 0   nsh: msg, 1\n    unset -v \"a[\"; echo after            bash: msg, after, 0   nsh: msg, 2\n    local x=1; echo after                bash: msg, after, 0   nsh: msg, 2\n    export -f nope; echo after           bash: msg, after, 0   nsh: msg, 2\n    shift 99; echo after                 bash: after, 0        nsh: msg, 2\n\nThe first five are one rule: `exec`, `unset`, `local` and `export` are special built-ins, POSIX makes their failure fatal, and Bash treats all of them as ordinary command failures. The divergence entry already carved out one case of this -- \"a special built-in's refusal of a read-only name becomes that command's status instead of ending the shell\" -- so the mechanism exists and reaches one call site rather than the class.\n\nTwo of the six are not the boundary and want separating before anyone patches them: `shift 99` is *silent success* in Bash where POSIX makes it an error, which is a behaviour question rather than a boundary one, and `export -f` is simply not implemented here (`Illegal option -f`).\n\n`exec 3</nonesuch` is the one `01d1b14`'s commit message named as pre-existing and left, so it has been known for six days and is now measured with its five relatives.\n\nWHAT DOES MATCH, so this is a gap and not a regression: `readonly r=1; r=2`, `${x!!}`, `${a[-9]}`, `cd /nonesuch`, `printf %d abc`, `let \"1 +\"`, `$((1/0))`, `a[abc]=2`, `trap \"\" NOSUCHSIG`, `read -q` and `x=$(exit 3)` all take the same boundary as Bash. Diagnostic *wording* differs almost everywhere and is registered as such; it is not what this note is about.\n\nONE STATUS DIFFERENCE, separate again: `: ${x:?boom}` and `set -u; echo \"$nope\"` exit 127 under Bash and 1 here. Both shells stop, so the boundary agrees and only the number does not."
+                                    }
+                                )
                             }
 
                             {
                                 id bash-array-assignment-gaps
                                 title "Close the remaining Bash array and assignment gaps"
                                 kind @feat
+                                log (
+                                    {
+                                        at 2026-08-30T18:30:02.128827337Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "NOT CLOSEABLE. Probed on `34982c0` before closing this node on the strength of its \"EVIDENCE AT THIS REVISION\" note, and the probe found live divergences from the pinned Bash 5.3.15 inside this node's own remit. The gate is PASS and stays PASS, which is the point worth taking: `gate-bash` measures the corpus, and the corpus does not reach these.\n\nSILENT DATA LOSS. An associative key holding a blank, written unquoted in a *compound* assignment, is dropped entirely:\n\n    declare -A m=([x y]=z); declare -p m\n      bash: declare -A m=([\"x y\"]=\"z\" )\n      nsh:  declare -A m=()\n\n    declare -A m=([k]=v [x y]=z); echo \"${!m[@]}\"\n      bash: k x y\n      nsh:  k\n\nThe element does not arrive and nothing is reported. `m[x y]=z` as an ordinary assignment stores it correctly, and `declare -A m=([\"x y\"]=z)` stores it correctly, so it is the unquoted subscript inside `( ... )` alone. The 2026-08-23 work fixed quoted associative subscripts on the *read* side (`resolve_text_selector`); this is the write side of the same question and was not covered by it.\n\n`declare -p` DOES NOT QUOTE A KEY THAT NEEDS IT, which makes its output unreadable by the shell that printed it:\n\n    declare -A m; m[x y]=z; declare -p m\n      bash: declare -A m=([\"x y\"]=\"z\" )\n      nsh:  declare -A m=([x y]=\"z\" )\n\nFeeding nsh's own line back gives an empty array, by the first defect above. `declare -p` is meant to be re-readable, so these two compound into a round trip that loses data twice and reports nothing either time.\n\nFourteen other array and declaration shapes were probed and all fourteen match: `${a[@]:1:2}`, sparse `${!a[@]}` and `${#a[@]}`, `a+=(3)`, `declare -i` arithmetic assignment, `${a[@]^^}`, iteration over `${!m[@]}`, `unset \"a[1]\"`, `declare -r`, a nameref to an array, `local -a` in a function, negative offsets, a newline in a key, and `\"${a[*]}\"`."
+                                    }
+                                )
                             }
 
                             {
                                 id bash-expansion-gaps
                                 title "Close the remaining Bash expansion gaps"
                                 kind @feat
+                                log (
+                                    {
+                                        at 2026-08-30T18:30:15.195536222Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "NOT CLOSEABLE, though only just. Probed on `34982c0` against the pinned Bash 5.3.15 before closing this node on its \"EVIDENCE AT THIS REVISION\" note. One divergence in this node's remit, and the gate does not see it.\n\n`**` ON ITS OWN YIELDS AN EXTRA EMPTY MATCH. In a tree holding `f`, `a/f` and `a/b/f`:\n\n    shopt -s globstar; echo **\n      bash: a a/b a/b/f a/f f\n      nsh:   a a/b a/b/f a/f f     <- leading empty field\n\n`**/f` is correct in both, with and without `globstar`, and `shopt globstar` reports the same state in both. So the recursion works and the option works; the bare pattern additionally matches the empty path, which becomes a field in the expansion. A word list that gains an empty argument is not cosmetic -- `for x in **` runs an extra iteration on the empty string.\n\nThirteen other expansion and globbing shapes were probed and all thirteen match: substring and suffix offsets, `${x/pat/rep}` and `${x//[set]/rep}`, case transforms with and without a pattern, `@Q` and `@U`, indirect expansion, brace lists and both range forms with a step, `nocasematch` under `[[`, unquoted field splitting, `-`/`:=` defaults, `printf %q` on a blank, an apostrophe and a tab, arithmetic bases and precedence, the ternary, `IFS` splitting of `$1`, and the `$@`/`$#`/`$*` trio when empty.\n\nONE PROBE WAS MINE, NOT THE SHELL'S: `shopt -s extglob; case abc in @(abc|def))` fails under *both* shells, because `-c` parses the whole command before the `shopt` runs. Recorded so it is not read as a finding."
+                                    }
+                                )
                             }
 
                             {

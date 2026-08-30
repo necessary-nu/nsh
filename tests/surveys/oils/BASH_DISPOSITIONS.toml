@@ -76,11 +76,6 @@ disposition = "out-of-contract"
 reason = "`compgen` is part of the programmable-completion surface retired by [dec:nsh:bash-compatibility-is-scripts]; there is no `complete`/`compgen`/`compopt` and reporting one would advertise a facility that is not here."
 
 [[case]]
-id = "toysh.test.sh:6"
-disposition = "not-implemented"
-reason = "`{name}<word` asks the shell to allocate a descriptor, open the target on it, and store its number in a shell variable. The syntax is what is missing: `{ echo; } {abc}<<< walrus` is a syntax error here, because `{name}` before a redirection operator is not read as anything. This entry previously said the blocker was the descriptor model -- a fixed `[DescriptorSlot; 10]` with no representation for the descriptor to hand back -- and that stopped being true with `01d1b14`, which made `DescriptorTable` a `BTreeMap` bounded by `RLIMIT_NOFILE`; `exec 10</dev/null` and `exec 63</dev/null` now match the pinned Bash. Bash allocates above 9 so the number cannot collide with one a script wrote by hand, and `LogicalDescriptor::INHERITED` is already that floor. Filed on `bash-named-descriptor-redirection`, which no longer needs an operator decision. Here-strings themselves work; only the named-descriptor form does not."
-
-[[case]]
 id = "var-op-bash.test.sh:24"
 disposition = "sanctioned-divergence"
 reason = "An associative array iterates in sorted key order where Bash iterates in its hash order, so `${A[@]}` and `${A[*]}` list the same elements in a different order. The operator order this case also tests is implemented -- `@Q` applies per element and joins afterwards -- and only the ordering differs. Matching Bash would mean reproducing its hash function, which is not a claim about what a script means; a deterministic order is. Recorded in docs/divergences.md."

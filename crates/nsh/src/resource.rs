@@ -134,7 +134,7 @@ mod tests {
                 VariableAttributes::NONE,
             )?;
             let redirections = [ExpandedRedirection::Descriptor {
-                descriptor: LogicalDescriptor::STDOUT,
+                descriptor: crate::nodes::RedirectionDescriptor::Fixed(LogicalDescriptor::STDOUT),
                 source: None,
             }];
             resources.apply_redirections(shell, &redirections)?;

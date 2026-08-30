@@ -1578,7 +1578,7 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
         push_command_text(b" ", text);
         match redirection {
             Redirection::File(redirection) => {
-                push_command_text(&redirection.descriptor.digits(), text);
+                push_command_text(&redirection.descriptor.text(), text);
                 push_command_text(
                     match redirection.operator {
                         FileRedirectionOperator::Write => b">",
@@ -1592,7 +1592,7 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
                 redirection.target.word.render(text);
             }
             Redirection::Descriptor(redirection) => {
-                push_command_text(&redirection.descriptor.digits(), text);
+                push_command_text(&redirection.descriptor.text(), text);
                 push_command_text(
                     match redirection.operator {
                         DescriptorRedirectionOperator::Input => b"<&",
@@ -1610,7 +1610,7 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
             }
             Redirection::HereDocument(_) => push_command_text(b"<<...", text),
             Redirection::HereString(here) => {
-                push_command_text(&here.descriptor.digits(), text);
+                push_command_text(&here.descriptor.text(), text);
                 push_command_text(b"<<<", text);
                 here.word.word.render(text);
             }

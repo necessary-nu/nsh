@@ -93,8 +93,8 @@ fn read_only_redirection(shell: &Shell, command: Option<&Node>) -> Option<WordNo
         return None;
     };
     (redirection.operator == FileRedirectionOperator::Read
-        && redirection.descriptor == LogicalDescriptor::STDIN)
-        .then(|| redirection.target.clone())
+        && redirection.descriptor.fixed() == Some(LogicalDescriptor::STDIN))
+    .then(|| redirection.target.clone())
 }
 
 /// The `${!…}` forms that name variables rather than read one.

@@ -21,8 +21,8 @@ use crate::nodes::{
     BinaryCommand, CaseClause, CaseCommand, CompoundCommand, DescriptorRedirection,
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
     ForCommand, FunctionDefinition, HereDocument, HereString, IfCommand, NegatedCommand, Node,
-    NodeText, Pipeline, Redirection, SimpleCommand, SourceLine, SourceTokens, TimedCommand,
-    WordNode,
+    NodeText, Pipeline, Redirection, RedirectionDescriptor, SimpleCommand, SourceLine,
+    SourceTokens, TimedCommand, WordNode,
 };
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
 use crate::word::{ParameterOperation, ParsedWord, WordToken};
@@ -390,20 +390,20 @@ pub struct PendingHereDocument {
 pub(crate) enum PendingRedirection {
     File {
         operator: FileRedirectionOperator,
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
     },
     Descriptor {
         operator: DescriptorRedirectionOperator,
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
     },
     HereDocument {
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
     },
     /// Bash's `<<< word`. The operand is an ordinary word, so nothing is
     /// deferred to a grammar newline the way a here-document body is.
     // [spec:nsh:req:compat.bash.expansion-globbing]
     HereString {
-        descriptor: LogicalDescriptor,
+        descriptor: RedirectionDescriptor,
     },
 }
 
@@ -1903,33 +1903,52 @@ fn finish_word_token(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<Tok
     if lexer.subscript_depth != 0 {
         return Err(syntax_error(shell, b"Missing ']'"));
     }
+    /* The outer `Option` is whether what was just read is a redirection
+     * prefix at all; the inner one is whether it carried one, since an
+     * operator with nothing before it takes its own default. A prefix is
+     * literal bytes and nothing else: a word holding an expansion or a
+     * quoted run is a word. */
     /* IO_NUMBER is "a string consisting solely of digits", not one digit:
-     * `exec 42>file` names slot 42. The outer `Option` is whether this is
-     * an IO_NUMBER at all; the inner one is whether it carried a number,
-     * since an operator with nothing before it takes its own default. A
-     * digit run too large to name a slot is not an IO_NUMBER either, and
-     * the standard says the token identifier is then TOKEN -- an ordinary
-     * word, which is what falling through to the bottom of this function
-     * produces. */
+     * `exec 42>file` names slot 42. A run too large to name a slot is not
+     * an IO_NUMBER, and the standard says the token identifier is then
+     * TOKEN -- an ordinary word, which is what falling through to the
+     * bottom of this function produces. Bash adds `{name}`, which names no
+     * slot and asks for one to be allocated.
+     *
+     * The first byte settles it for almost every word, and settling it
+     * there is not a micro-optimisation: the collect below copies the
+     * word, and a script of 200,000-byte lines would otherwise copy each
+     * one to be told it is not a redirection. Digits go on being read as
+     * digits, so only a word that opens with a brace costs more than it
+     * did, and only in the dialect that has the form. */
     // [spec:posix:syn:grammar.token-classification]
     // [spec:posix:syn:redir.format]
-    let io_number: Option<Option<LogicalDescriptor>> = if lexer.output.is_empty() {
+    let braced =
+        bash::active(shell) && matches!(lexer.output.first(), Some(WordToken::Literal(b'{')));
+    let prefix: Option<Option<RedirectionDescriptor>> = if lexer.output.is_empty() {
         Some(None)
     } else {
         lexer
             .output
             .iter()
             .map(|token| match token {
-                WordToken::Literal(byte) if byte.is_ascii_digit() => Some(*byte),
+                WordToken::Literal(byte) if braced || byte.is_ascii_digit() => Some(*byte),
                 _ => None,
             })
             .collect::<Option<Vec<u8>>>()
-            .and_then(|digits| LogicalDescriptor::from_digits(&digits))
+            .and_then(|bytes| {
+                LogicalDescriptor::from_digits(&bytes)
+                    .map(RedirectionDescriptor::Fixed)
+                    .or_else(|| {
+                        bash::allocated_descriptor(shell, &bytes)
+                            .map(RedirectionDescriptor::Allocated)
+                    })
+            })
             .map(Some)
     };
     if lexer.delimiter.is_none() {
         if let Some(explicit) =
-            io_number.filter(|_| (lexer.input.is(b'>') || lexer.input.is(b'<')) && !lexer.quoted)
+            prefix.filter(|_| (lexer.input.is(b'>') || lexer.input.is(b'<')) && !lexer.quoted)
         {
             parse_redirection(shell, lexer, explicit)?;
             shell.input.last_token = TokenKind::Redirection;
@@ -2044,7 +2063,7 @@ fn finish_word_if_delimited(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Res
 fn parse_redirection(
     shell: &mut Shell,
     lexer: &mut WordLexer<'_>,
-    explicit: Option<LogicalDescriptor>,
+    explicit: Option<RedirectionDescriptor>,
 ) -> Result<(), Error> {
     enum ParsedRedirection {
         File(FileRedirectionOperator),
@@ -2057,11 +2076,11 @@ fn parse_redirection(
      * assigning `np->type`, re-allocating only because `nhere` is smaller.
      * The arm has to be chosen up front here, so the type and the fd are
      * worked out first and the node built at the end. */
-    let mut descriptor: LogicalDescriptor;
+    let mut descriptor: RedirectionDescriptor;
     let redirection: ParsedRedirection;
 
     if lexer.input.is(b'>') {
-        descriptor = LogicalDescriptor::STDOUT;
+        descriptor = RedirectionDescriptor::Fixed(LogicalDescriptor::STDOUT);
         lexer.input = read_unit_skipping_line_continuations(shell)?;
         if lexer.input.is(b'>') {
             redirection = ParsedRedirection::File(FileRedirectionOperator::Append);
@@ -2075,7 +2094,7 @@ fn parse_redirection(
         }
     } else {
         /* c == '<' */
-        descriptor = LogicalDescriptor::STDIN;
+        descriptor = RedirectionDescriptor::Fixed(LogicalDescriptor::STDIN);
         lexer.input = read_unit_skipping_line_continuations(shell)?;
         if lexer.input.is(b'<') {
             let mut here = PendingHereDocument {

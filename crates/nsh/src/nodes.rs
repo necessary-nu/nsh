@@ -401,6 +401,47 @@ pub enum FileRedirectionOperator {
     Append,
 }
 
+/// Which shell descriptor a redirection acts on.
+///
+/// `2>file` names slot 2 in the source and that is the whole answer. Bash's
+/// `{name}>file` names no slot: the shell allocates a free one above the
+/// range it inherited and stores that number in `name`, so a script can
+/// hold a descriptor open without picking a number that might collide with
+/// one it wrote by hand. Which slot that is depends on what is open when
+/// the redirection is applied, so it is not a number the parser can know --
+/// which is why this is syntax and not a `LogicalDescriptor`.
+// [spec:nsh:req:compat.bash.parser-ast]
+#[derive(Clone, PartialEq, Eq)]
+pub enum RedirectionDescriptor {
+    /// A number the source wrote, or the operator's own default.
+    Fixed(LogicalDescriptor),
+    /// `{name}`: allocate a slot, and assign its number to this name.
+    Allocated(NodeText),
+}
+
+impl RedirectionDescriptor {
+    /// The slot this names outright, if it names one.
+    pub fn fixed(&self) -> Option<LogicalDescriptor> {
+        match self {
+            Self::Fixed(descriptor) => Some(*descriptor),
+            Self::Allocated(_) => None,
+        }
+    }
+
+    /// How the source spells this, for whatever reprints the command.
+    pub fn text(&self) -> Vec<u8> {
+        match self {
+            Self::Fixed(descriptor) => descriptor.digits(),
+            Self::Allocated(name) => {
+                let mut text = vec![b'{'];
+                text.extend_from_slice(name.as_bstr());
+                text.push(b'}');
+                text
+            }
+        }
+    }
+}
+
 /// A parsed redirection. Redirections are syntax attached to commands, not
 /// commands themselves, so they do not inhabit [`Node`].
 // [spec:nsh:req:idiom.immutable-ast]
@@ -417,7 +458,7 @@ pub enum Redirection {
 #[derive(Clone, PartialEq, Eq)]
 pub struct FileRedirection {
     pub operator: FileRedirectionOperator,
-    pub descriptor: LogicalDescriptor,
+    pub descriptor: RedirectionDescriptor,
     pub target: WordNode,
 }
 
@@ -440,14 +481,14 @@ pub enum DescriptorTarget {
 #[derive(Clone, PartialEq, Eq)]
 pub struct DescriptorRedirection {
     pub operator: DescriptorRedirectionOperator,
-    pub descriptor: LogicalDescriptor,
+    pub descriptor: RedirectionDescriptor,
     pub target: DescriptorTarget,
 }
 
 /// A here-document redirection.
 #[derive(Clone, PartialEq, Eq)]
 pub struct HereDocument {
-    pub descriptor: LogicalDescriptor,
+    pub descriptor: RedirectionDescriptor,
     pub expand: bool,
     pub body: WordNode,
     /// The word that ends the body.
@@ -469,7 +510,7 @@ pub struct HereDocument {
 // [spec:nsh:req:compat.bash.expansion-globbing]
 #[derive(Clone, PartialEq, Eq)]
 pub struct HereString {
-    pub descriptor: LogicalDescriptor,
+    pub descriptor: RedirectionDescriptor,
     pub word: WordNode,
 }
 

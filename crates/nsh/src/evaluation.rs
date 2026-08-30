@@ -1258,7 +1258,7 @@ fn expand_redirections<'a>(
                     }
                 };
                 expanded.push(ExpandedRedirection::Descriptor {
-                    descriptor: redirection.descriptor,
+                    descriptor: redirection.descriptor.clone(),
                     source,
                 });
             }
@@ -1276,7 +1276,7 @@ fn expand_redirections<'a>(
                 let mut content = fnl.fields.remove(0).text;
                 content.push(b'\n');
                 expanded.push(ExpandedRedirection::HereString {
-                    descriptor: here.descriptor,
+                    descriptor: here.descriptor.clone(),
                     content,
                 });
             }
