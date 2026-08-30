@@ -5343,12 +5343,27 @@ children (
                 id optional-line-editor
                 title "Make the line editor an optional `edit` feature the frontend enables"
                 kind @build
+                sealed true
                 log (
                     {
                         at 2026-08-23T23:35:12.415170204Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-30T18:15:14.495121013Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Closed. `d07dd1e` landed the feature on 2026-08-24 and the node stayed Doing for six days for the same reason `make-fuzz-runner-containment-aware` did: no `implements`, so the sync has nothing to derive a transition from.\n\nVERIFIED ON `f583633`, not taken from the commit message.\n- `crates/nsh/Cargo.toml` declares `edit = [\"dep:nshedit\", \"dep:nshterm\", \"nsh-platform/edit\"]`, off by default, and `nsh-cli` names it in its dependency on `nsh`.\n- `cargo tree -p nsh -e normal --depth 1` at default features lists `bstr` and `nsh-platform` only: an embedder linking this crate does not get a line editor, which is the whole title.\n- `cargo build -p nsh` (default), `cargo build -p nsh --features edit` and `cargo build -p nsh --example embed` all succeed, so neither half of the `cfg` has rotted.\n\n`e87a5f9` (lock refresh) rode along on the same node and is not part of the claim."
+                    }
+
+                    {
+                        at 2026-08-30T18:15:18.536374848Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
@@ -6379,6 +6394,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-08-30T18:15:37.16712164Z
+                                        author "brendan@necessary.nu"
+                                        kind @unblock
+                                        text "THE DECISION THIS NODE WAS WAITING ON WAS TAKEN SIX DAYS AGO, BY THIS NODE. The blocker of 2026-08-24 asked whether the descriptor table becomes dynamic and offered three shapes. `01d1b14`, committed the same day against this same node, chose shape 3 and shipped it -- and the blocker was never retracted, so the node and the register entry have been carrying a dead question since.\n\nMEASURED ON `f583633`, not read off the commit message:\n- `crates/nsh/src/descriptors.rs:187` is `slots: Mutex<BTreeMap<LogicalDescriptor, DescriptorSlot>>`. There is no fixed array and no `COUNT`. `INHERITED = 10` survives with a narrower job: how many descriptors the shell inherits, and the floor its own backing descriptors are moved above.\n- `exec 10</dev/null; cat <&10` and `exec 63</dev/null` behave identically to the pinned Bash 5.3.15. A descriptor past `RLIMIT_NOFILE` is refused where it is written, with Bash's own line: `1000000: Bad file descriptor`.\n\nSo there is no representation gap left, and the register entry's reason is wrong in exactly the way `builtin-trap-err:12`'s was: it names a blocker that a later commit removed. Unlike that one, the gate cannot catch it -- `toysh.test.sh:6` still genuinely fails, so only the *reason* is stale, and nothing in the tree reads a reason. Corrected in `BASH_DISPOSITIONS.toml` alongside this note.\n\nWHAT IS ACTUALLY LEFT, all of it ordinary implementation with the reference to answer to:\n1. The lexer. `{ echo; } {abc}<<< walrus` is `Syntax error: word unexpected` here, so `{name}` before a redirection operator is not read as anything. This is the whole visible gap now.\n2. Where allocation starts. Bash's answer is observable rather than a matter of taste -- `exec {fd}</dev/null; echo $fd` prints `fd=10` -- so `[dec:nsh:differential-is-the-oracle]` settles it at the first free slot from `INHERITED` upward, which is what `INHERITED` already means.\n3. Storing the number in the named variable as bytes, since everything a script reads is bytes.\n4. `{name}<&-` closes and leaves the variable holding the old number.\n5. Refusing a nameref or a read-only `name`.\n\nEach of 2 to 5 is a question the pinned Bash answers by being run. None of them is a model decision, and none of them needs the operator.\n\nSTILL NOT THIS NODE'S, and it is the one real divergence the probes turned up: `exec 1000000</dev/null; echo reached` prints `reached` under Bash and ends the shell here. That is the special-built-in redirection boundary `01d1b14`'s own message flagged as pre-existing, and it belongs to `bash-mode-error-boundary`."
                                     }
                                 )
                             }
