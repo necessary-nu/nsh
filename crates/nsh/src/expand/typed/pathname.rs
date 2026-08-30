@@ -229,14 +229,32 @@ fn matches(
     }];
     let mut saw_meta = false;
 
-    let last = components.len().saturating_sub(1);
     for (index, component) in components.iter().enumerate() {
         if component.as_bytes().is_empty() {
             continue;
         }
         if settings.globstar && is_globstar(component) {
             saw_meta = true;
-            candidates = descendants(candidates, index != last || trailing_slash);
+            /* Nothing but empty components after a `**` means the word
+             * ends there, which is what decides both whether files can
+             * match and how the directory the walk starts from is
+             * written out. */
+            let ends_word = components[index + 1..]
+                .iter()
+                .all(|rest| rest.as_bytes().is_empty());
+            let start = if !ends_word {
+                StartMatch::Prefix
+            } else if components[..index].iter().any(Pattern::has_meta) {
+                StartMatch::Matched
+            } else {
+                StartMatch::Literal
+            };
+            let walk = Walk {
+                directories_only: !ends_word || trailing_slash,
+                start,
+                settings,
+            };
+            candidates = walk.descendants(candidates);
             continue;
         }
         if component.has_meta() {
@@ -282,37 +300,118 @@ fn is_globstar(component: &Pattern) -> bool {
     component.as_bytes() == b"**" && component.quote_bits().iter().all(|quoted| !quoted)
 }
 
-/// Every directory reachable from these candidates, the candidates
-/// themselves included, plus their non-directory entries when `**` ends
-/// the pattern. Symbolic links are not followed, matching Bash.
+/// How the directory a `**` starts from is written into the words that
+/// `**` generates.
+///
+/// Bash matches the last component of a pattern against the directory
+/// everything before it names, and `**` matches that directory itself.
+/// The word it produces for it is the prefix Bash already had in hand:
+/// text the pattern spelled out comes back verbatim, slash and all, so
+/// `a/**` yields `a/`, while a prefix the shell had to match contributes
+/// only the path it found, so `?/**` yields `a`. A bare `**` has no
+/// prefix at all, and that is the field it does not generate.
 // [spec:nsh:req:compat.bash.expansion-globbing]
-fn descendants(candidates: Vec<Candidate>, directories_only: bool) -> Vec<Candidate> {
-    let mut result = Vec::new();
-    let mut pending = candidates;
-    while let Some(candidate) = pending.pop() {
-        let entries = nsh_platform::read_directory(&candidate.path).unwrap_or_default();
-        for entry in entries {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StartMatch {
+    /// The word continues past this `**`, so the directory is only
+    /// somewhere to carry on from and even an empty prefix is one.
+    Prefix,
+    /// The word ends here and the prefix was matched, not spelled out.
+    Matched,
+    /// The word ends here and the prefix is the pattern's own text.
+    Literal,
+}
+
+/// The part of one `**` that does not change as the walk goes down: what
+/// it is allowed to match, and how the directory it starts from is
+/// written into the words it generates.
+struct Walk<'a> {
+    directories_only: bool,
+    start: StartMatch,
+    settings: &'a GlobSettings,
+}
+
+impl Walk<'_> {
+    /// Every directory reachable from these candidates, the candidates
+    /// themselves included, plus their non-directory entries when `**`
+    /// ends the pattern.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn descendants(&self, candidates: Vec<Candidate>) -> Vec<Candidate> {
+        let mut result = Vec::new();
+        let mut pending = Vec::new();
+        for candidate in candidates {
+            self.entries_below(&candidate, &mut pending, &mut result);
+            if let Some(candidate) = self.starting_match(candidate) {
+                result.push(candidate);
+            }
+        }
+        /* Everything the walk finds for itself is a directory it reached
+         * by name, so it is its own word as well as somewhere to go on
+         * from. Only the candidates above were reached some other way. */
+        while let Some(candidate) = pending.pop() {
+            self.entries_below(&candidate, &mut pending, &mut result);
+            result.push(candidate);
+        }
+        result
+    }
+
+    /// Sort one directory's entries into the ones the walk descends into
+    /// and the ones it generates a word for.
+    ///
+    /// Descent is over the directory tree only, so a symbolic link is
+    /// never a way in — that is why `**` reaches a link to a directory
+    /// but nothing under it.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn entries_below(
+        &self,
+        candidate: &Candidate,
+        pending: &mut Vec<Candidate>,
+        result: &mut Vec<Candidate>,
+    ) {
+        for entry in nsh_platform::read_directory(&candidate.path).unwrap_or_default() {
             let bytes = entry.name.to_shell_bytes();
-            if bytes.first() == Some(&b'.') {
+            if bytes.first() == Some(&b'.') && !self.settings.dot_names {
                 continue;
             }
             let child = Candidate {
                 path: candidate.path.join(&entry.name),
                 display: append_component(&candidate.display, &bytes),
             };
-            if is_directory(&child.path) {
+            if entry.is_directory {
                 pending.push(child);
-            } else if !directories_only {
+            } else if !self.directories_only {
+                result.push(child);
+            } else if self.start != StartMatch::Prefix && is_directory(&child.path) {
+                /* A `**` the word ends at asks what a name resolves to, so
+                 * a link to a directory is one. A `**` the word carries on
+                 * past is the walk's own list of places to go on from, and
+                 * the walk does not go through links. */
                 result.push(child);
             }
         }
-        result.push(candidate);
     }
-    result
+
+    /// The word this `**` generates for the directory it starts from, or
+    /// `None` where Bash generates none: `**` matches a directory and not
+    /// a file, and a prefix that is nothing at all is not a field.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn starting_match(&self, mut candidate: Candidate) -> Option<Candidate> {
+        if self.start == StartMatch::Prefix {
+            return Some(candidate);
+        }
+        if candidate.display.is_empty() || !is_directory(&candidate.path) {
+            return None;
+        }
+        if self.start == StartMatch::Literal && candidate.display.last() != Some(&b'/') {
+            candidate.display.push(b'/');
+        }
+        Some(candidate)
+    }
 }
 
+/// Whether the path names a directory, a symbolic link to one included.
 fn is_directory(path: &Path) -> bool {
-    nsh_platform::path_metadata(path, false)
+    nsh_platform::path_metadata(path, true)
         .is_ok_and(|metadata| metadata.kind == nsh_platform::FileKind::Directory)
 }
 
