@@ -229,6 +229,30 @@ undefined behavior.
 > C implementation used a fixed local buffer. Fixed-size storage MAY remain
 > only where an ABI or encoding maximum makes the bound semantic and tested.
 
+> [spec:nsh:req:idiom.bounded-recursion]
+> Every recursive descent the shell makes over script text MUST be bounded,
+> and reaching the bound MUST produce an error value rather than a crash. This
+> covers parsing -- nested commands, command substitutions, word expansions,
+> `time`, and the Bash-only groupings -- and evaluation, where function calls,
+> dot scripts, `eval`, trap actions and command substitutions share one depth.
+> Constructs that nest through one another MUST share one budget rather than
+> hold separate ceilings, because separate ceilings multiply into a depth none
+> of them names.
+>
+> The bound MUST be fixed. A limit a script can raise is a control for turning
+> the safety off, which `[dec:nsh:safety-trumps-compatibility]` refuses even
+> where a reference shell offers one. It MUST hold under the smallest stack
+> the library can be run on rather than the stack the frontend happens to
+> give the main thread, and in every build profile.
+>
+> This is not a limit `[spec:nsh:req:idiom.no-artificial-limits]` bans. That
+> rule refuses a bound inherited from a fixed C buffer, where the value is
+> representable and the truncation says nothing. Here the alternative to the
+> bound is a segmentation fault, so the bound is what makes the behaviour
+> defined -- and `[dec:nsh:shell-as-library]` makes it an embedder's concern
+> rather than a shell's, since a host calling `Shell::run` on text it did not
+> write must get an `Err` it can handle.
+
 > [spec:nsh:req:idiom.no-mystring]
 > There MUST NOT be a generic `mystring` compatibility module. Byte parsing,
 > validation, prefix handling, and shell quoting belong to their domain modules

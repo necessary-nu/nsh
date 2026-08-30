@@ -1342,7 +1342,7 @@ fn expand_redirections<'a>(
 }
 
 fn descriptor_source(shell: &mut Shell, text: &BStr) -> Result<Option<LogicalDescriptor>, Error> {
-    // [spec:posix:req:redir.duplicate-output]
+    // [spec:posix:req:redir.dup-output]
     if let Some(number) = LogicalDescriptor::from_digits(text) {
         Ok(Some(number))
     } else if text == BStr::new(b"-") {

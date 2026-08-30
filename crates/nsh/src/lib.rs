@@ -7,7 +7,6 @@
 //! Items carry `[spec:dash:sem:…]` annotations for inherited behavior that
 //! remains relevant. Historical C signatures stay in `docs/spec/port/` as
 //! provenance, not as structural contracts on the Rust implementation.
-//! [spec:nsh:sem:idiom.specified-defects+1]
 //!
 //! **The surface is closed.** It was thirty-eight public modules, which is
 //! not an API but the transliteration left open — see

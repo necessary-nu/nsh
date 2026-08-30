@@ -1134,7 +1134,7 @@ fn parse_redirection_target(
             /* "If word evaluates to one or more digits, the file
              * descriptor denoted by n shall be a duplicate" -- so `>&42`
              * duplicates onto slot 42, not only `>&2`. */
-            // [spec:posix:req:redir.duplicate-output]
+            // [spec:posix:req:redir.dup-output]
             let target = if let Some(number) = LogicalDescriptor::from_digits(text) {
                 DescriptorTarget::Number(number)
             } else if text == BStr::new(b"-") {

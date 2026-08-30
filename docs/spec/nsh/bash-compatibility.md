@@ -93,6 +93,17 @@ implementation source is not an implementation input.
 > `[[` and `((` MUST NOT be modeled as ordinary command-name built-ins, and the
 > implementation MUST NOT introduce a second forked parser.
 
+> [spec:nsh:req:compat.bash.select-time-grammar]
+> Bash mode MUST accept the `select` and `time` reserved words as grammar
+> rather than as command names. `select` takes `for`'s syntax exactly, and
+> what it adds -- the numbered menu, `PS3`, reading a reply, and `REPLY` --
+> belongs to the evaluator rather than to the parse. `time` prefixes a
+> pipeline, MUST be read before the pipeline's own negation because it times
+> that too, and MUST accept having no pipeline at all. Neither word may be
+> reported as a keyword by `type` in a dialect that does not parse it, and
+> the POSIX dialect MUST go on refusing both -- `[spec:nsh:req:compat.bash.default-isolation]`
+> covers that, and this rule adds only that the refusal is the grammar's.
+
 > [spec:nsh:req:compat.bash.value-model]
 > Bash-mode variables MUST structurally distinguish scalar, sparse indexed
 > array, and associative array values while retaining byte-preserving names,

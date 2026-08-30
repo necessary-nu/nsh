@@ -360,7 +360,7 @@ pub(super) fn substring(
              * end, so it can name one in front of the start. Bash
              * refuses that rather than returning nothing, and says so in
              * the same words `select` already uses for an array. */
-            // [spec:nsh:req:compat.bash.expansion-parameter]
+            // [spec:nsh:req:compat.bash.expansion-globbing]
             let Some(sliced) = slice_characters(&shell.locale, &text, offset, length) else {
                 let mut message = length.unwrap_or_default().to_string().into_bytes();
                 message.extend_from_slice(b": substring expression < 0");
@@ -459,7 +459,7 @@ fn slice_characters(
          * reaches past the front selects nothing at all rather than
          * being clamped to the front. `select` says the same of an
          * array and has always done it; only the scalar clamped. */
-        // [spec:nsh:req:compat.bash.expansion-parameter]
+        // [spec:nsh:req:compat.bash.expansion-globbing]
         let from_end = count + offset;
         if from_end < 0 {
             return Some(BString::default());
@@ -469,7 +469,7 @@ fn slice_characters(
         /* An offset past the end selects nothing, and Bash decides that
          * before it ever looks at the length -- which is why `${x:3:-1}`
          * on two characters is empty where `${x:2:-1}` is refused. */
-        // [spec:nsh:req:compat.bash.expansion-parameter]
+        // [spec:nsh:req:compat.bash.expansion-globbing]
         return Some(BString::default());
     } else {
         offset
@@ -945,7 +945,7 @@ mod tests {
     /// `select` has said the same of an array since it was written. Only
     /// the scalar clamped to the front, which is what the sixth
     /// parameter artifact was -- not the invalid UTF-8 it looked like.
-    // [spec:nsh:req:compat.bash.expansion-parameter/test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
     #[test]
     fn a_substring_offset_past_the_end_selects_nothing() {
         let locale = nsh_platform::Locale::c().expect("the C locale");

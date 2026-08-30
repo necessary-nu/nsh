@@ -68,7 +68,7 @@ fn two_digits_are_one_io_number() {
 
 /// `>&n` duplicates onto the slot `n` names, and POSIX says `n` there is
 /// "one or more digits" too.
-// [spec:posix:req:redir.duplicate-output/test]
+// [spec:posix:req:redir.dup-output/test]
 #[test]
 fn a_duplication_target_takes_many_digits() {
     let mut shell = shell(true);
