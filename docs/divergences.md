@@ -650,7 +650,8 @@ on time; what it is not is private to one image.
 
 **Status:** deliberate, and now the default dialect's alone. Not a
 sanctioned divergence: Bash mode takes Bash's boundary.
-`crates/nsh/src/error.rs`, `crates/nsh/src/evaluation.rs`.
+`crates/nsh/src/error.rs`, `crates/nsh/src/evaluation.rs`,
+`crates/nsh/src/redirection.rs`.
 
 POSIX XCU 2.8.1 requires a non-interactive shell to exit when a variable
 assignment fails or an expansion is in error. The default dialect does
@@ -664,12 +665,41 @@ same**. The failure leaves status 1 and abandons the *input record* it
 was raised in -- the unit `parse_and_execute` reads, which is why
 `readonly r=1; r=2; echo x` prints nothing while the same three commands
 on three lines print `x`. A subshell or a command substitution contains
-the recovery; a function call and a loop do not. A special built-in's
-refusal of a read-only name becomes that command's status instead of
-ending the shell, so `unset r; echo same` still prints `same`. A
-subscript that names no element is the one asymmetric case: it is
-reported and expands to nothing, and the command it was written in runs
-with one fewer field, exactly as `argv.py "${a[-5]}"` does under Bash.
+the recovery; a function call and a loop do not. A subscript that names
+no element is the one asymmetric case: it is reported and expands to
+nothing, and the command it was written in runs with one fewer field,
+exactly as `argv.py "${a[-5]}"` does under Bash.
+
+A **special built-in whose utility fails** is not that shape and does not
+abandon the record at all. POSIX makes an error in a special built-in
+fatal to a non-interactive shell and the default dialect keeps that;
+Bash treats it as an ordinary command failure, takes its status and runs
+the next command of the same list, and Bash mode does the same.
+`unset -v 'a['; echo after` prints `after` there, and so do `local x=1`,
+`export 'a['=1`, `set -o nosuchopt`, `eval 'syntax ((('` and
+`. /nonesuch`. Two frames could end a shell over one of these, and Bash
+mode withdraws specialness at both: `builtin_error_is_fatal` catches
+what the utility returned, and `evaluate_command_in_scope`'s `bail:`
+catches a redirection that failed before the utility was entered at all,
+which is `exec 3</nonesuch`, `exec 1000000</dev/null` and `: > /nodir/x`.
+What
+stays fatal in both dialects is what was never the built-in's own
+failure: an expansion error crossing the frame on its way out of `eval`
+or `.` -- `eval ': ${x:?boom}'` ends both shells -- and an unrecoverable
+read of the shell's own input. `break` and `continue` keep it too, and
+they are Bash's rule rather than an exception to it: their count is read
+through `get_numeric_arg`'s fatal flag, which ends the shell instead of
+returning, so `while true; do break oops; done` stops there as well. A
+status in place of that refusal would leave the loop that asked to be
+left still running.
+
+A **redirection failure answers 1** in Bash mode, which is what Bash
+answers for every one of them. Every refusal in `redirection.rs` already
+did except the descriptor-dup one, which took dash's `sh_error` 2; that
+was invisible from a script while a failed redirection on a special
+built-in ended the shell, and is not now. `echo foo >&10` answers 1 in
+Bash mode and dash's 2 in the default dialect, and `is_fd_open() { :
+>&$1; }` reads the number back.
 
 `set -e` overrides the recovery: Bash's `report_error` ends the shell
 where it stands when the option is on, so a script that asked to stop at
@@ -694,6 +724,26 @@ shape at a smaller scale: Bash treats the arithmetic failure of those two
 *commands* as an ordinary built-in failure and stays in the list, while
 this abandons the record. Both were previously fatal, so both moved
 towards Bash rather than away from it.
+
+The **status** a reported special-built-in failure takes is still this
+shell's and not Bash's, outside the redirection layer. Bash answers 1
+where the operand was at fault and 2 where its option scan was, and this
+shell answers what dash answered: `unset -v 'a['`, `local x=1` and
+`export 'a['=1` are 2 here and 1 there. Both shells run the next command
+either way, so the number is visible only to a script that reads `$?`,
+and under `set -e`, where both stop and only the exit status differs.
+
+Three shapes measured beside those are not the boundary at all and were
+left where they are. `shift 99` is a *silent* status 1 in Bash where
+this reports `shift: can't shift that many` and answers 2; both shells
+run on, so what is left is a question about `shift`. `export -f` is not
+implemented here, so `export -f nope` is `Illegal option -f` rather than
+Bash's `nope: not a function`; both carry on past it. And a failed
+`exec` leaves different descriptors open: `exec 3</dev/null 4</nonesuch`
+keeps 3 open here and closes it in Bash, which undoes every redirection
+of an `exec` that failed. That last one is the redirection
+layer's rule rather than the boundary's, and it was unobservable while
+the shell ended at the failure.
 
 The remaining one goes the other way and is left there deliberately.
 Under `set -e`, Bash ends the script at every failure in this class

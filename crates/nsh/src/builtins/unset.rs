@@ -43,7 +43,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" is read-only");
                 // [spec:nsh:req:compat.bash.error-boundary]
-                return Err(shell.diagnostics().dialect_builtin_error(1, &message));
+                return Err(shell.diagnostics().builtin_error_value(1, &message));
             }
             /* Bash lets one `unset` reach either table: a name with no
              * variable behind it unsets the function of that name.

@@ -697,6 +697,15 @@ fn open_descriptor_redirection(
     }
 }
 
+/// The status is the dialect's. Every other refusal in this module
+/// answers 1, which is what Bash's `redirection_error` takes for all of
+/// them; this one took dash's `sh_error` 2 instead, and while a failed
+/// redirection on a special built-in ended the shell the difference was
+/// not visible from a script. It is now, because Bash mode carries on
+/// past that failure: `echo foo >&10` answers 1 in Bash and 2 in dash,
+/// and `is_fd_open() { : >&$1; }` -- the survey's way of finding the
+/// first free descriptor -- reads the number back.
+// [spec:nsh:req:compat.bash.error-boundary]
 pub(crate) fn descriptor_error(
     shell: &mut Shell,
     source: LogicalDescriptor,
@@ -706,7 +715,11 @@ pub(crate) fn descriptor_error(
     write!(&mut message, "{}", source).expect("writing to a Vec cannot fail");
     message.extend_from_slice(b": ");
     message.extend_from_slice(shell.locale.error_message(&error).as_bytes());
-    shell.diagnostics().shell_error(&message)
+    if shell.options.dialect() != crate::options::Dialect::Bash {
+        return shell.diagnostics().shell_error(&message);
+    }
+    let line = shell.evaluation.diagnostic_line;
+    shell.diagnostics().report(Error::other(line, 1, &message))
 }
 
 // [spec:dash:sem:redir.dupredirect-fn]

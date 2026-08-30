@@ -559,12 +559,43 @@ fn redirection_only_status(
 /// Bash does not, outside its own POSIX mode, and a failure the dialect has
 /// already classed as survivable must not be escalated by the frame that
 /// catches it -- `readonly r=1; unset r; echo next` prints `next` there.
+///
+/// Specialness is the whole of what the dialect withdraws, and it is
+/// withdrawn for the class rather than for the sites that thought to build
+/// an [`Error::Abandoned`]: `unset -v 'a['`, `local x=1` outside a function
+/// and a bad option to any of them are all ordinary command failures under
+/// Bash, and the next command of the same list runs.
+///
+/// Three things are not that and stay fatal in Bash mode too. An expansion
+/// error only crossed this frame on its way out of `eval` or `.` --
+/// `eval ': ${x:?boom}'` ends both shells -- and the shell's own input
+/// failing to read is unrecoverable by POSIX wherever it is noticed.
+/// `break` and `continue` are the third, and they are Bash's own rule
+/// rather than an exception to it: their count goes through
+/// `get_numeric_arg`'s fatal flag, which ends the shell instead of
+/// returning, so `while true; do break oops; done` stops there in Bash as
+/// well. A status in place of that refusal would leave the loop that asked
+/// to be left still running.
 // [spec:nsh:req:compat.bash.error-boundary]
-fn builtin_error_is_fatal(shell: &Shell, special_builtin: bool, error: &Error) -> bool {
+fn builtin_error_is_fatal(
+    shell: &Shell,
+    builtin: BuiltinId,
+    special_builtin: bool,
+    error: &Error,
+) -> bool {
     if error.is_abandoned() {
         return false;
     }
-    error.is_interrupt() || (special_builtin && shell.evaluation.signal_trap_depth == 0)
+    if error.is_interrupt() {
+        return true;
+    }
+    if !special_builtin || shell.evaluation.signal_trap_depth != 0 {
+        return false;
+    }
+    shell.options.dialect() != crate::options::Dialect::Bash
+        || error.is_expansion()
+        || error.is_unrecoverable_read()
+        || matches!(builtin, BuiltinId::Break | BuiltinId::Continue)
 }
 
 fn capture_local_control(flow: Flow, slot: &mut Option<Flow>) -> Result<(), Flow> {
@@ -2035,6 +2066,7 @@ fn evaluate_command_in_scope(
                             // [spec:nsh:req:compat.smoosh.trap-status]
                             if builtin_error_is_fatal(
                                 shell,
+                                builtin.id(),
                                 special_builtin.unwrap_or(false),
                                 &error,
                             ) {
@@ -2135,7 +2167,25 @@ fn evaluate_command_in_scope(
         shell.status = status;
 
         /* We have a redirection error. */
-        if special_builtin == Some(true) {
+        /* The dialect test is the same withdrawal of specialness that
+         * `builtin_error_is_fatal` makes, at the other of the two frames
+         * that can end a shell over a special built-in. This one is
+         * reached before the built-in runs at all -- `exec 3</nonesuch`
+         * and `: > /nonesuch-dir/x` never enter their utility -- so it
+         * cannot be folded into that one. Falling through to `out:`
+         * leaves the status the redirection layer took, which is the 1
+         * Bash reports.
+         *
+         * What falling through does *not* reproduce is what a failed
+         * `exec` leaves open: `out:` retains the descriptors the
+         * successful redirections of the list already installed, where
+         * Bash undoes all of them, so `exec 3</dev/null 4</nonesuch`
+         * leaves 3 open here and closed there. That is the redirection
+         * layer's rule and not the boundary's; it was unobservable while
+         * the shell ended at the failure. */
+        // [spec:nsh:req:compat.bash.error-boundary]
+        if special_builtin == Some(true) && shell.options.dialect() != crate::options::Dialect::Bash
+        {
             /* POSIX's "an error in a special built-in exits a
              * non-interactive shell", and the C's textless
              * `exraise(EXERROR)`: no diagnostic is written here because

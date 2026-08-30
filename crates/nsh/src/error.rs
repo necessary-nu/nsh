@@ -678,26 +678,6 @@ impl Diagnostics<'_> {
         }
     }
 
-    /// [`Self::builtin_error_value`] where the dialect decides the boundary.
-    ///
-    /// A built-in's refusal of a read-only name is the same rule as an
-    /// assignment's, so it takes the same boundary: `unset`, `export` and
-    /// `readonly` are special built-ins, and a special built-in's failure
-    /// ends a non-interactive POSIX shell. Bash ends nothing -- it reports
-    /// the refusal, answers 1 and runs the next command of the same list,
-    /// which is one frame short of what a raise elsewhere in the record
-    /// does. `readonly` shares `export`'s implementation, so the two call
-    /// sites are `export.rs` and `unset.rs`.
-    // [spec:nsh:req:compat.bash.error-boundary]
-    pub fn dialect_builtin_error(&mut self, status: u8, msg: &[u8]) -> Error {
-        let error = self.builtin_error_value(status, msg);
-        if self.dialect != crate::options::Dialect::Bash {
-            return error;
-        }
-        drop(error);
-        Error::abandoned(self.line)
-    }
-
     /// Report a parameter-expansion error without the implementation's
     /// shell/line prefix and retain its distinct control-flow class.
     // [spec:nsh:req:compat.smoosh.error-contracts]
