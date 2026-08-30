@@ -1385,6 +1385,7 @@ assertions (
     {id stop-the-locale-tests-passing-vacuously, kind @complete, author "brendan@necessary.nu", at 2026-08-29T12:35:51.627877045Z}
     {id bound-word-parsing-cost, kind @complete, author "brendan@necessary.nu", at 2026-08-30T21:27:11.161997476Z}
     {id bound-recursive-evaluation, kind @complete, author "brendan@necessary.nu", at 2026-08-30T21:27:15.450115667Z}
+    {id bound-total-parse-work, kind @complete, author "brendan@necessary.nu", at 2026-08-30T23:48:35.78347204Z}
 )
 
 impl_evidence (
