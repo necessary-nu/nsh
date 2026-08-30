@@ -7957,4 +7957,41 @@ children (
             }
         )
     }
+
+    {
+        id shell-construction-costs-more-than-the-command
+        title "Stop paying for the locale, the environment and the table on every shell built"
+        kind @perf
+        sealed true
+        log (
+            {
+                at 2026-08-30T23:19:01.22136542Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-08-30T23:19:35.719483532Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "WHERE THE MEASUREMENT CAME FROM. Ronin (github.com/necessary-nu/ronin) runs nsh as its own `/bin/sh`, once per recipe line, and profiled its Make front end against GNU Make 4.4.1. Six shells per no-op build of vim, and `nsh::builder::Builder::build` was 47.78% INCLUSIVE of each one: constructing the shell cost twice what running the command did. 748k instructions an invocation against dash's 269k for the same command; 607k against dash's 217k for `sh -c 'true'`.\n\nTHREE THINGS PAID FOR IT, and the first is most of it.\n\nONE: `valid_name` asked the C library about every byte, and every question selected the locale. `Locale::is_alpha` and `is_alphanumeric` wrap `isalpha`/`isalnum` in `with_selected`, which is a `uselocale` to install this shell's locale, the call, a guard drop, and a `uselocale` to restore. `valid_name` runs that per byte of a name; `import_environment_pairs` runs `valid_name` per variable and `set_entry` runs it AGAIN on the same name. An environment of fifty variables with ten-byte names is on the order of a thousand `uselocale` pairs establishing that ordinary letters are letters.\n\nA locale object is immutable once `newlocale` has returned it, so what it says about a byte is a property of the handle and not of the moment. `RawLocale` now holds a `OnceLock<[ByteClass; 256]>` filled under ONE selection the first time a byte is asked about, and `is_alpha` / `is_alphanumeric` / `is_space` are table lookups. Lazy rather than eager because building a shell constructs seven locales -- a base plus one per category -- and keeps the last, so filling at construction would pay for six tables nothing reads. This is the caching [dec:nsh:per-shell-locale] permits: a decoded answer cached against a handle, not a selection hoisted out of an operation.\n\nTWO: `set_entry` cloned the whole variable to read three flags off it. `entries.get(name).cloned()` copies the `BString` value with it, and the update path then rebuilt the `Variable` and `insert`ed it over itself with `name.to_owned()` -- an allocation and a copy of the name AND of the value, per assignment, for a map slot that was never going to move. It now reads out the two `Copy` fields the decision needs and updates the entry where it stands. The callback value, itself a full copy, is only taken when a callback will read it; it is `Callback::None` for nearly every variable.\n\nTHREE: the environment snapshot copied every string twice. `process_environment()` returns owned `OsString`s and the builder called `to_shell_bytes()` on them, which is `as_bytes().to_vec()` -- four allocations and two memcpys per variable before a single one had reached the table. `IntoShellBytes for OsString` takes the bytes instead; on Unix the native representation IS the byte string, so it costs nothing.\n\nAND A FOURTH, SMALLER: `Locale::new` issued one `newlocale` per category override. A shell selects all six of its categories through one `LANG`, so six identical loads of the same locale data. A run of adjacent overrides naming the same locale is now one call with their masks joined, which is exactly what applying them one at a time says. Runs rather than the whole slice, so a name is still first tried where the caller wrote it and a later override of the same category still wins.\n\nWHAT IT IS WORTH, `perf stat -e instructions:u -r 200`, the shell reached through Ronin's multicall so this is the real caller:\n\n  sh -c 'true'                                607,253 -> 437,704   -27.9%\n  the vim probe, `if test -n \"\" -a -f po/Makefile; ...`\n                                              686,723 -> 525,759   -23.4%\n  dash 0.5.13.5, same commands                217,438      219,000ish\n\nStill twice dash and no longer four times it. What remains, from a fresh profile: `__memcmp_avx2_movbe` at 7.6% is the `BTreeMap<BString, Variable>` probing -- `set_bytes` takes four probes per variable, two of them (`nameref::assign_through`, `nameref::declared_value`) purely to discover that an ordinary name carries no Bash attributes. A shell-wide \"no Bash attributes exist here\" flag would collapse both. The 8,209-byte zeroed input frame and the ten `fcntl` descriptor snapshots are also unread by `-c`.\n\nA PRE-EXISTING FAILURE FOUND ON THE WAY, and it is NOT this change: `posix/harness` case `inv-input-file-long-lines` times out after 20s, having emitted one of the three expected lines. Reproduced on unmodified master at 9788287 in both debug and release, so the harness's headline is 804/805 rather than 805/805 on this host today. Long-line input handling is quadratic or near it somewhere; filed here rather than fixed."
+            }
+
+            {
+                at 2026-08-30T23:42:10.903816659Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan complete)"
+            }
+
+            {
+                at 2026-08-30T23:49:43.900988188Z
+                author "brendan@necessary.nu"
+                kind @errata
+                text "CORRECTING THE NOTE ABOVE ON TWO POINTS.\n\nThe `IntoShellBytes` cut — taking the environment snapshot's bytes out of the owned `OsString` instead of copying them — is NOT in what landed. It added a function to `crates/nsh-platform/src/unix.rs`, which the `function-density` gate holds at its pre-image count of 137 because that file is already five thousand lines of grab-bag, and adding one is exactly what the ratchet exists to refuse. Worth about 10k instructions an invocation, which does not buy a bypass. Whoever wants it should move `NativeStrExt` and its neighbours out of `unix.rs` first, or change `process_environment` to return the bytes rather than `OsString`s — the second is the better boundary anyway, since `OsString` is the host representation this crate exists to keep out of the shell.\n\nThe `test-footprint` gate fired alongside it, and that one was right rather than merely strict: the locale change had no test. Four now: the cached table answers what the C library answers for all 256 byte values; the first byte question leaves the thread's selected locale where it found it (the fill is a selection, and it is the one that could leak); a run of six identical overrides reaches a locale that answers identically to six overrides no two of which are adjacent, which is the joining's whole claim; and an unusable override name still refuses.\n\nTHE NUMBERS, RE-MEASURED PAIRED after the revert, both arms identical but for this change and both through Ronin's multicall (so both on Ronin's allocator), `perf stat -e instructions:u`, 200 and 100 repetitions:\n\n  sh -c 'true'                          816,940 -> 663,912   -18.7%\n  if test -n \"\" -a -f po/Makefile; ...  890,314 -> 738,759   -17.0%\n  dash 0.5.13.5, sh -c 'true'           217,423\n\nAbout 152k instructions of constant removed per invocation, which is the allocator-independent way to say it. On glibc the same three cuts plus the reverted fourth read 607,253 -> 437,704."
+                after_done true
+            }
+        )
+    }
 )
