@@ -6,10 +6,11 @@ use core::mem;
 use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{
-    InputUnit, ListMode, SyntaxClass, SyntaxContext, TokenContext, TokenKind, TokenMark, WordLexer,
-    command, consume_newline_without_prompt, expected_token_error, finalize, is_valid_name, list,
-    parse_here_documents, read_input_unit, read_token, read_unit_skipping_line_continuations,
-    set_input_string, syntax_error, syntax_stack, unread_input_unit,
+    InputUnit, ListMode, SubscriptPosition, SyntaxClass, SyntaxContext, TokenContext, TokenKind,
+    TokenMark, WordLexer, command, consume_newline_without_prompt, expected_token_error, finalize,
+    is_valid_name, list, parse_here_documents, read_input_unit, read_token,
+    read_unit_skipping_line_continuations, set_input_string, syntax_error, syntax_stack,
+    unread_input_unit,
 };
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
@@ -326,7 +327,7 @@ pub(super) fn compound_array(
     let mut elements = Vec::new();
     loop {
         let element_mark = super::tokens::mark(shell);
-        let token = read_token(shell, TokenContext::SKIP_NEWLINES)?;
+        let token = read_token(shell, TokenContext::COMPOUND_ELEMENT)?;
         if token.kind == TokenKind::RightParen {
             break;
         }
@@ -1070,13 +1071,17 @@ pub(super) fn arithmetic_bracket(
 /// word and one assignment, where the ordinary rules would end the word
 /// at the blank and leave three. The subscript is an arithmetic
 /// expression, so what is inside it is data -- including `&`, `|` and
-/// `;` -- and only the matching `]` ends it.
+/// `;` -- and only the matching `]` ends it. An element of `name=( ... )`
+/// gets the same treatment from its first byte, which is what carries
+/// `declare -A m=([x y]=z)` through as one element rather than two.
 ///
-/// A word that is not in that position is untouched, which is what
+/// A word that is not in either position is untouched, which is what
 /// keeps `argv.py a[1 + 2]=` three arguments.
 // [spec:nsh:req:compat.bash.arrays-declarations]
 pub(super) fn track_assignment_subscript(shell: &Shell, lexer: &mut WordLexer<'_>) {
-    if !lexer.assignment_position || lexer.current_syntax().syntax != SyntaxContext::Base {
+    if lexer.subscript_position == SubscriptPosition::None
+        || lexer.current_syntax().syntax != SyntaxContext::Base
+    {
         return;
     }
     /* A bracket inside `${...}` belongs to the expansion, not to the
@@ -1092,18 +1097,32 @@ pub(super) fn track_assignment_subscript(shell: &Shell, lexer: &mut WordLexer<'_
             lexer.subscript_depth += 1;
             return;
         }
-        /* The bytes before the bracket have to spell a name; anything
-         * else -- a glob, a quoted run, an expansion -- is an ordinary
-         * word that happens to contain a bracket. */
-        let name = lexer.literal_bytes(0..lexer.output.len());
-        if name.is_some_and(|name| !name.is_empty() && is_valid_name(&shell.locale, name.as_bstr()))
-        {
+        if opens_subscript(shell, lexer) {
             lexer.subscript_depth = 1;
         }
         return;
     }
     if lexer.input.is(b']') && lexer.subscript_depth > 0 {
         lexer.subscript_depth -= 1;
+    }
+}
+
+/// Whether the `[` the lexer is looking at opens a subscript.
+///
+/// The two positions ask different things of the bytes already in the
+/// word. An assignment word wants a name in front of the bracket;
+/// anything else -- a glob, a quoted run, an expansion -- is an ordinary
+/// word that happens to contain a bracket. A compound assignment's
+/// element wants nothing in front of it at all, so `a=(x[1 2]=v)` splits
+/// at the blank as Bash splits it.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn opens_subscript(shell: &Shell, lexer: &WordLexer<'_>) -> bool {
+    match lexer.subscript_position {
+        SubscriptPosition::None => false,
+        SubscriptPosition::ElementStart => lexer.output.is_empty(),
+        SubscriptPosition::AfterName => lexer
+            .literal_bytes(0..lexer.output.len())
+            .is_some_and(|name| !name.is_empty() && is_valid_name(&shell.locale, name.as_bstr())),
     }
 }
 

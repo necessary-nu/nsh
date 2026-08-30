@@ -189,6 +189,23 @@ pub(crate) fn declaration_quote(locale: &nsh_platform::Locale, value: &BStr) -> 
     quoted
 }
 
+/// `declare -p`: the spelling of the key an element is printed under.
+///
+/// The line exists to be read back by the shell that printed it, so a
+/// key that would not survive being read bare is quoted: `[a b]` would
+/// arrive as two words and `[a$b]` would arrive expanded, while `[a]`
+/// and `[a=b]` read back as themselves and stay bare. Bash asks the same
+/// two questions in the same order, and quotes with the double quotes
+/// [`declaration_quote`] already spells a value with -- so the key is
+/// the value's spelling, minus the quotes nothing needs.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn subscript_quote(locale: &nsh_platform::Locale, key: &BStr) -> BString {
+    if needs_ansi_c(locale, key) || contains_shell_metacharacter(key) {
+        return declaration_quote(locale, key);
+    }
+    key.to_owned()
+}
+
 /// `set` with no operands, and `${x@Q}`: single quotes, or `$'...'`
 /// where single quotes could not carry the bytes.
 ///

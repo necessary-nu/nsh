@@ -375,6 +375,7 @@ fn selected(shell: &Shell, requested: &Requested, name: &BStr) -> bool {
 
 fn render(shell: &Shell, name: &BStr) -> Option<BString> {
     let double_quote = |value: &BStr| crate::escape::bash::declaration_quote(&shell.locale, value);
+    let subscript = |key: &BStr| crate::escape::bash::subscript_quote(&shell.locale, key);
     // A name that was declared without a value still has a declaration
     // to print; only a name with no entry at all is missing.
     let attributes = crate::variables::variable_attributes(shell, name)?;
@@ -431,7 +432,7 @@ fn render(shell: &Shell, name: &BStr) -> Option<BString> {
                     line.push(b' ');
                 }
                 line.push(b'[');
-                line.extend_from_slice(key);
+                line.extend_from_slice(&subscript(BStr::new(key.as_slice())));
                 line.extend_from_slice(b"]=");
                 line.extend_from_slice(&double_quote(BStr::new(element.as_slice())));
             }

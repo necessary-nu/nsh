@@ -151,6 +151,27 @@ impl TokenKind {
     }
 }
 
+/// Where in a word a `[` opens a subscript rather than ending the name
+/// before it.
+///
+/// Bash's lexer asks this question twice, and the two answers differ.
+/// At the start of a simple command a bracket opens one only after a
+/// name, so `a[1 + 1]=x` is one word while `argv.py a[1 + 2]=` is three.
+/// Inside a compound assignment's parentheses the bracket has to be the
+/// element's very first byte instead, which is why `a=(x[1 2]=v)` still
+/// splits at the blank and Bash reads `x[1` and `2]=v`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) enum SubscriptPosition {
+    /// Nowhere: a bracket is an ordinary byte of an ordinary word.
+    #[default]
+    None,
+    /// After the name of an assignment word.
+    AfterName,
+    /// As the first byte of a compound assignment's element.
+    ElementStart,
+}
+
 /// Parser context for one token read. Each property names the grammar
 /// distinction it enables; no caller constructs or decodes an integer mask.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -164,6 +185,10 @@ pub(crate) struct TokenContext {
     /// lexer reads a balanced `[...]` after a name as part of the word.
     // [spec:nsh:req:compat.bash.arrays-declarations]
     assignment_position: bool,
+    /// Whether the word being read is one element of a compound array
+    /// assignment, where a leading `[...]` is the element's subscript.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    compound_element: bool,
 }
 
 impl TokenContext {
@@ -174,6 +199,7 @@ impl TokenContext {
         check_here_document_end: false,
         regex_operand: false,
         assignment_position: false,
+        compound_element: false,
     };
     /// Read the next word as the operand of Bash's `=~`.
     // [spec:nsh:req:compat.bash.conditionals-arithmetic]
@@ -192,6 +218,14 @@ impl TokenContext {
     };
     const SKIP_NEWLINES: Self = Self {
         skip_newlines: true,
+        ..Self::NONE
+    };
+    /// One element of `name=( ... )`, whose parentheses a newline may
+    /// sit inside.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    const COMPOUND_ELEMENT: Self = Self {
+        skip_newlines: true,
+        compound_element: true,
         ..Self::NONE
     };
     const HERE_DOCUMENT_END: Self = Self {
@@ -225,6 +259,7 @@ impl TokenContext {
             check_here_document_end: self.check_here_document_end || other.check_here_document_end,
             regex_operand: self.regex_operand || other.regex_operand,
             assignment_position: self.assignment_position || other.assignment_position,
+            compound_element: self.compound_element || other.compound_element,
         }
     }
 }
@@ -1162,7 +1197,7 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
                 mark,
                 here.strip_tabs,
                 false,
-                false,
+                SubscriptPosition::None,
             )?;
         } else {
             let firstc = read_unit_skipping_line_continuations(shell)?;
@@ -1173,7 +1208,7 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
                 mark,
                 here.strip_tabs,
                 false,
-                false,
+                SubscriptPosition::None,
             )?;
         }
         let mut word = mem::take(&mut shell.input.word);
@@ -1400,7 +1435,7 @@ fn read_next_token(shell: &mut Shell, context: &TokenContext) -> Result<Token, E
                 EofMark::None,
                 false,
                 check_here_document_end,
-                false,
+                SubscriptPosition::None,
             )?;
             if token.kind != TokenKind::Blank {
                 return Ok(token);
@@ -1464,7 +1499,17 @@ fn read_next_token(shell: &mut Shell, context: &TokenContext) -> Result<Token, E
             EofMark::None,
             false,
             check_here_document_end,
-            context.assignment_position,
+            /* Where this context lets a `[` open a subscript. An
+             * element's own bracket wins: a compound assignment's
+             * contents are never also the start of a simple command. */
+            // [spec:nsh:req:compat.bash.arrays-declarations]
+            if context.compound_element {
+                SubscriptPosition::ElementStart
+            } else if context.assignment_position {
+                SubscriptPosition::AfterName
+            } else {
+                SubscriptPosition::None
+            },
         )?;
         if token.kind != TokenKind::Blank {
             return Ok(token);
@@ -1671,11 +1716,11 @@ struct WordLexer<'a> {
     /// one is, `(`, `)`, `|`, and blanks are the pattern's own bytes.
     // [spec:nsh:req:compat.bash.expansion-globbing]
     extglob_depth: usize,
-    /// Whether this word could be an assignment: only at the start of a
-    /// simple command, where Bash's lexer reads `name[` as the opening
-    /// of a subscript rather than as the end of a name.
+    /// Where a `[` in this word opens a subscript, which is what lets
+    /// Bash's lexer read `name[` as the opening of a subscript rather
+    /// than as the end of a name.
     // [spec:nsh:req:compat.bash.arrays-declarations]
-    assignment_position: bool,
+    subscript_position: SubscriptPosition,
     /// How many `[` of an assignment word's subscript are open. While
     /// one is, blanks and shell operators are the subscript's own bytes.
     // [spec:nsh:req:compat.bash.arrays-declarations]
@@ -1718,7 +1763,7 @@ fn read_word_token(
     delimiter: EofMark<'_>,
     strip_tabs: bool,
     check_here_document_end: bool,
-    assignment_position: bool,
+    subscript_position: SubscriptPosition,
 ) -> Result<Token, Error> {
     let mut lexer = WordLexer {
         syntax_frames: vec![SyntaxFrame {
@@ -1742,7 +1787,11 @@ fn read_word_token(
         input: first_input,
         quoted: false,
         extglob_depth: 0,
-        assignment_position: assignment_position && bash::active(shell) && delimiter.is_none(),
+        subscript_position: if bash::active(shell) && delimiter.is_none() {
+            subscript_position
+        } else {
+            SubscriptPosition::None
+        },
         subscript_depth: 0,
         output: Vec::new(),
         delimiter,
@@ -2650,7 +2699,7 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
                 EofMark::Fake,
                 false,
                 false,
-                false,
+                SubscriptPosition::None,
             )?;
 
             /* Expanded and thrown away rather than kept in a tree, so
