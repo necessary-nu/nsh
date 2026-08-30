@@ -22,9 +22,40 @@ use crate::word::{ParsedWord, WordUnit};
 // [spec:nsh:req:compat.bash.expansion-globbing]
 const WORD_LIMIT: usize = 65_536;
 
-/// The budget ran out. Reported as an ordinary shell error, once, by the
-/// entry point; the recursion carries only the fact.
-struct TooManyWords;
+/// How deeply one brace expansion may nest.
+///
+/// The word budget is charged on the way back up, so it cannot see
+/// `{a,{a,{a,...` coming: the descent to the innermost brace is a frame
+/// per level and reaches the stack's end while the count is still zero.
+/// It costs 960 bytes a level in a release build, measured, so 256
+/// levels is 0.23 MiB and fits many times over in the 2 MiB a spawned
+/// Rust thread gets. It is the same ceiling the parser gives nesting, on
+/// the same reasoning, and a written brace expression reaches a handful.
+// [spec:nsh:req:idiom.bounded-recursion]
+const DEPTH_LIMIT: u32 = 256;
+
+/// Which limit the budget ran out of. Reported as an ordinary shell
+/// error, once, by the entry point; the recursion carries only the fact.
+enum Refused {
+    Words,
+    Depth,
+}
+
+/// What one brace expansion may spend.
+struct Budget {
+    /// Words that may still be built.
+    words: usize,
+    /// Nesting levels that may still be entered.
+    depth: u32,
+}
+
+impl Budget {
+    /// Take `count` words out of the budget before they are built.
+    fn charge(&mut self, count: usize) -> Result<(), Refused> {
+        self.words = self.words.checked_sub(count).ok_or(Refused::Words)?;
+        Ok(())
+    }
+}
 
 /// Rewrite one word into the words its braces stand for.
 ///
@@ -36,27 +67,22 @@ pub(super) fn expand(shell: &mut Shell, word: &ParsedWord) -> Result<Vec<ParsedW
         return Ok(Vec::new());
     }
     let units = word.units();
-    let mut budget = WORD_LIMIT;
+    let mut budget = Budget {
+        words: WORD_LIMIT,
+        depth: DEPTH_LIMIT,
+    };
     match expand_units(&units, &mut budget) {
         Ok(None) => Ok(Vec::new()),
         Ok(Some(words)) => Ok(words
             .iter()
             .map(|units| ParsedWord::from_units(units))
             .collect()),
-        Err(TooManyWords) => Err(shell
+        Err(Refused::Words) => Err(shell
             .diagnostics()
             .shell_error(b"brace expansion produces too many words")),
-    }
-}
-
-/// Take `count` words out of the budget before they are built.
-fn charge(budget: &mut usize, count: usize) -> Result<(), TooManyWords> {
-    match budget.checked_sub(count) {
-        Some(remaining) => {
-            *budget = remaining;
-            Ok(())
-        }
-        None => Err(TooManyWords),
+        Err(Refused::Depth) => Err(shell
+            .diagnostics()
+            .shell_error(b"brace expansion nested too deeply")),
     }
 }
 
@@ -64,8 +90,8 @@ fn charge(budget: &mut usize, count: usize) -> Result<(), TooManyWords> {
 /// same as one that stands for a single word: `{1..1}` expands to `1`.
 fn expand_units(
     units: &[WordUnit],
-    budget: &mut usize,
-) -> Result<Option<Vec<Vec<WordUnit>>>, TooManyWords> {
+    budget: &mut Budget,
+) -> Result<Option<Vec<Vec<WordUnit>>>, Refused> {
     let mut from = 0;
     while let Some(open) = opening_brace(units, from) {
         let Some(close) = closing_brace(units, open) else {
@@ -85,8 +111,8 @@ fn expand_units(
         let count = alternatives
             .len()
             .checked_mul(tails.len())
-            .ok_or(TooManyWords)?;
-        charge(budget, count)?;
+            .ok_or(Refused::Words)?;
+        budget.charge(count)?;
         let mut result = Vec::with_capacity(count);
         for alternative in alternatives {
             for tail in &tails {
@@ -101,14 +127,20 @@ fn expand_units(
     Ok(None)
 }
 
+/// Every route back into [`expand_units`] passes through here, so this
+/// is where a nesting level is taken from the budget and given back.
+// [spec:nsh:req:idiom.bounded-recursion]
 fn expanded_or_self(
     units: &[WordUnit],
-    budget: &mut usize,
-) -> Result<Vec<Vec<WordUnit>>, TooManyWords> {
-    match expand_units(units, budget)? {
+    budget: &mut Budget,
+) -> Result<Vec<Vec<WordUnit>>, Refused> {
+    budget.depth = budget.depth.checked_sub(1).ok_or(Refused::Depth)?;
+    let expanded = expand_units(units, budget);
+    budget.depth += 1;
+    match expanded? {
         Some(words) => Ok(words),
         None => {
-            charge(budget, 1)?;
+            budget.charge(1)?;
             Ok(vec![units.to_vec()])
         }
     }
@@ -160,8 +192,8 @@ fn closing_brace(units: &[WordUnit], open: usize) -> Option<usize> {
 /// `None` means the amble has no comma, so the braces are ordinary text.
 fn comma_separated(
     amble: &[WordUnit],
-    budget: &mut usize,
-) -> Result<Option<Vec<Vec<WordUnit>>>, TooManyWords> {
+    budget: &mut Budget,
+) -> Result<Option<Vec<Vec<WordUnit>>>, Refused> {
     let mut parts = Vec::new();
     let mut start = 0;
     let mut depth = 0usize;
@@ -200,8 +232,8 @@ fn comma_separated(
 /// single characters.
 fn sequence(
     amble: &[WordUnit],
-    budget: &mut usize,
-) -> Result<Option<Vec<Vec<WordUnit>>>, TooManyWords> {
+    budget: &mut Budget,
+) -> Result<Option<Vec<Vec<WordUnit>>>, Refused> {
     let Some(text) = literal_text(amble) else {
         return Ok(None);
     };
@@ -242,16 +274,11 @@ fn sequence(
 
 /// How many terms a `{first..last..step}` sequence has, charged against
 /// the budget before any of them is built.
-fn sequence_length(
-    start: i64,
-    end: i64,
-    step: i64,
-    budget: &mut usize,
-) -> Result<usize, TooManyWords> {
-    let span = end.checked_sub(start).ok_or(TooManyWords)?.unsigned_abs();
+fn sequence_length(start: i64, end: i64, step: i64, budget: &mut Budget) -> Result<usize, Refused> {
+    let span = end.checked_sub(start).ok_or(Refused::Words)?.unsigned_abs();
     let stride = step.unsigned_abs().max(1);
-    let count = usize::try_from(span / stride + 1).map_err(|_| TooManyWords)?;
-    charge(budget, count)?;
+    let count = usize::try_from(span / stride + 1).map_err(|_| Refused::Words)?;
+    budget.charge(count)?;
     Ok(count)
 }
 
@@ -259,8 +286,8 @@ fn numeric_sequence(
     first: &[u8],
     last: &[u8],
     step: Option<i64>,
-    budget: &mut usize,
-) -> Result<Option<Vec<BString>>, TooManyWords> {
+    budget: &mut Budget,
+) -> Result<Option<Vec<BString>>, Refused> {
     let (Some(start), Some(end)) = (parse_integer(first), parse_integer(last)) else {
         return Ok(None);
     };
@@ -280,8 +307,8 @@ fn character_sequence(
     first: &[u8],
     last: &[u8],
     step: Option<i64>,
-    budget: &mut usize,
-) -> Result<Option<Vec<BString>>, TooManyWords> {
+    budget: &mut Budget,
+) -> Result<Option<Vec<BString>>, Refused> {
     if first.len() != 1
         || last.len() != 1
         || !first[0].is_ascii_alphabetic()

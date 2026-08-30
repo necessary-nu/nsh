@@ -194,6 +194,15 @@ pub struct EvaluationState {
     /// refused has to survive the return.
     // [spec:nsh:req:compat.bash.arrays-declarations]
     pub(crate) refused_declarations: Vec<BString>,
+    /// How many string re-entries into the evaluator are active.
+    ///
+    /// `eval`, a trap action and `fc -e` all parse a string and run it on
+    /// top of the frame that asked for it, which is a stack frame per
+    /// level exactly as a call is. The call stack counts calls and dot
+    /// scripts; this counts the rest, and
+    /// [`crate::variables::call_stack::evaluation_depth`] adds the two.
+    // [spec:nsh:req:idiom.bounded-recursion]
+    pub(crate) nested_evaluations: usize,
     /// The name the running builtin was invoked by, for the error prefix.
     ///
     /// dash points this at `argv[0]` and relies on the word outliving the
@@ -220,6 +229,7 @@ impl EvaluationState {
             trap_default_exit_status: None,
             diagnostic_line: 0,
             refused_declarations: Vec::new(),
+            nested_evaluations: 0,
             command_name: None,
         }
     }
@@ -377,10 +387,25 @@ pub fn evaluate_string(
      * is why the copy is taken *before* the mark is set and released by
      * hand afterwards.  Owning it says both halves at once, and says them
      * on the unwind path too, where the C's `stunalloc` never runs. */
-    crate::resource::with_resources(shell, |shell, _resources| {
+    /* `eval eval eval ... :` recursed here once per word and overflowed
+     * the stack at about 3,500 levels, which dash and Bash both survive.
+     * It is the same resource a call spends and it shares the same
+     * ceiling; only the diagnostic differs, because there is no function
+     * here to name. */
+    // [spec:nsh:req:idiom.bounded-recursion]
+    if crate::variables::call_stack::evaluation_depth(shell) >= MAX_EVALUATION_DEPTH {
+        let mut message = b"Maximum recursion depth (".to_vec();
+        message.extend_from_slice(MAX_EVALUATION_DEPTH.to_string().as_bytes());
+        message.extend_from_slice(b") reached");
+        return Err(shell.diagnostics().shell_error(&message));
+    }
+    shell.evaluation.nested_evaluations += 1;
+    let outcome = crate::resource::with_resources(shell, |shell, _resources| {
         crate::input::set_input_string(shell, text);
         parse_and_execute(shell, context)
-    })
+    });
+    shell.evaluation.nested_evaluations -= 1;
+    outcome
 }
 
 /// Parse and execute until the current input frame runs out.
@@ -2307,7 +2332,7 @@ fn evaluate_builtin(
 // [spec:posix:req:cmd.function-return]
 // [spec:posix:req:cmd.function-exit-status]
 // [spec:posix:req:cmd.function-syntax-error-properties]
-/// How deeply calls may nest before the shell refuses to go further.
+/// How deeply the evaluator may re-enter itself before it refuses.
 ///
 /// Bash leaves this unbounded unless `FUNCNEST` is set and segfaults on
 /// `f() { f; }; f`; dash refuses at 1,000 and says so. Bash's crash is
@@ -2315,20 +2340,28 @@ fn evaluate_builtin(
 /// than a behaviour to reproduce, so the shape here is dash's -- refuse,
 /// with its wording, so a script that hits it reads the same diagnostic.
 ///
+/// One ceiling for calls, dot scripts and `eval` together rather than
+/// one each, because they compose: `f() { eval f; }` spends one of each
+/// per turn, and separate ceilings would let it reach a depth neither
+/// names. [`crate::variables::call_stack::evaluation_depth`] is what they
+/// are all measured against.
+///
 /// The number is not dash's, and the arithmetic is why. A call costs
-/// 1,952 bytes of stack in a release build, measured; dash's 1,000 would
-/// be 1.86 MiB, which does not fit the 2 MiB a spawned Rust thread gets
-/// by default with anything to spare. 512 is 0.95 MiB, half the budget,
-/// and is the same rule the parser's bound is set by -- size it against
-/// the smallest stack the shell can plausibly be asked to run on, not
-/// the largest. A debug build costs 13,952 bytes a call, so the full
-/// depth wants 7 MiB there and the tests say so where it matters.
+/// 1,952 bytes of stack in a release build and an `eval` 2,351, both
+/// measured; dash's 1,000 calls would be 1.86 MiB, which does not fit
+/// the 2 MiB a spawned Rust thread gets by default with anything to
+/// spare. 512 is 0.95 MiB of calls, half the budget, or 1.15 MiB if
+/// every level is an `eval` -- the same rule the parser's bound is set
+/// by, which is to size it against the smallest stack the shell can
+/// plausibly be asked to run on rather than the largest. A debug build
+/// costs 13,952 bytes a call, so the full depth wants 7 MiB there and
+/// the tests say so where it matters.
 ///
 /// The limit is observable, since the diagnostic names it, but it is not
 /// a compatibility surface: no rule fixes it and it moves if the
-/// per-call cost does.
+/// per-level cost does.
 // [spec:nsh:req:idiom.bounded-recursion]
-pub(crate) const MAX_CALL_DEPTH: usize = 512;
+pub(crate) const MAX_EVALUATION_DEPTH: usize = 512;
 
 fn evaluate_function(
     shell: &mut Shell,
@@ -2349,9 +2382,9 @@ fn evaluate_function(
      * frame counts, because `.` inside a function nests the evaluator
      * exactly as another call does. */
     // [spec:nsh:req:idiom.bounded-recursion]
-    if shell.variables.call_stack.depth() >= MAX_CALL_DEPTH {
+    if crate::variables::call_stack::evaluation_depth(shell) >= MAX_EVALUATION_DEPTH {
         let mut message = b"Maximum function recursion depth (".to_vec();
-        message.extend_from_slice(MAX_CALL_DEPTH.to_string().as_bytes());
+        message.extend_from_slice(MAX_EVALUATION_DEPTH.to_string().as_bytes());
         message.extend_from_slice(b") reached");
         return Err(shell.diagnostics().shell_error(&message));
     }

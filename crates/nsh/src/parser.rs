@@ -507,7 +507,7 @@ pub fn parse_command(shell: &mut Shell, interactive: bool) -> Result<ParseResult
     let dialect = shell.options.dialect();
     shell.input.begin_parse(dialect);
     shell.input.token_pushed_back = false;
-    shell.input.command_depth = 0;
+    shell.input.nesting_depth = 0;
     shell.input.pending_here_documents = Vec::new();
     shell.input.completed_here_documents = Vec::new();
     shell.input.prompt_before_read = interactive;
@@ -2007,6 +2007,7 @@ fn finish_word_token(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<Tok
         unread_input_unit(shell);
     }
     shell.input.last_token_quoted = lexer.quoted;
+    keywords::nested_expansions(shell, &lexer.output)?;
     /* `grabstackblock(len)` reserved the bytes the C had been writing into
      * scratch space, which is what made `wordtext` outlive the next token.
      * Moving the buffer out is the same guarantee. */
@@ -2551,22 +2552,29 @@ fn parse_command_substitution(
         shell.input.prompt_before_read = false;
     }
 
-    let parsed = crate::resource::with_resources(shell, |shell, _resources| {
-        if legacy {
-            set_input_string(shell, BStr::new(&substitution_text));
-        }
-        let mut node = list(shell, ListMode::StopAtTerminator)?.into_node();
-
-        if !legacy {
-            if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
-                return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
+    /* A substitution re-enters the grammar from inside a word, which is
+     * a route `nested_command` cannot see: the word being read belongs to
+     * the enclosing command, and the list inside `$( )` starts a fresh
+     * descent. `$( $( ... ) )` recursed unbounded until this charged it. */
+    // [spec:nsh:req:idiom.bounded-recursion]
+    let parsed = keywords::nested(shell, |shell| {
+        crate::resource::with_resources(shell, |shell, _resources| {
+            if legacy {
+                set_input_string(shell, BStr::new(&substitution_text));
             }
-            set_input_string(shell, BStr::new(b""));
-        }
+            let mut node = list(shell, ListMode::StopAtTerminator)?.into_node();
 
-        parse_here_documents(shell)?;
-        finalize::node(shell, &mut node, completed_at)?;
-        Ok(node)
+            if !legacy {
+                if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
+                    return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
+                }
+                set_input_string(shell, BStr::new(b""));
+            }
+
+            parse_here_documents(shell)?;
+            finalize::node(shell, &mut node, completed_at)?;
+            Ok(node)
+        })
     });
 
     if legacy {

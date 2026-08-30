@@ -113,9 +113,15 @@ fn run_dot_with_missing_status(
              * the same reason as a function's: an embedder gets an `Err`
              * where the stack would otherwise go. */
             // [spec:nsh:req:idiom.bounded-recursion]
-            if shell.variables.call_stack.depth() >= crate::evaluation::MAX_CALL_DEPTH {
+            if crate::variables::call_stack::evaluation_depth(shell)
+                >= crate::evaluation::MAX_EVALUATION_DEPTH
+            {
                 let mut message = b"Maximum function recursion depth (".to_vec();
-                message.extend_from_slice(crate::evaluation::MAX_CALL_DEPTH.to_string().as_bytes());
+                message.extend_from_slice(
+                    crate::evaluation::MAX_EVALUATION_DEPTH
+                        .to_string()
+                        .as_bytes(),
+                );
                 message.extend_from_slice(b") reached");
                 return Err(shell.diagnostics().shell_error(&message));
             }

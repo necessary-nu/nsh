@@ -212,15 +212,16 @@ pub struct InputStack {
     pub(crate) parsing_conditional: bool,
     /// `tokpushback` — one token of lookahead, pushed back.
     pub(crate) token_pushed_back: bool,
-    /// How many commands the parser is currently nested inside.
+    /// How many levels the parser is currently nested inside: commands,
+    /// the list inside a `$( )`, and a `time` prefix's pipeline alike.
     ///
     /// Recursive descent puts one frame per nesting level on the stack,
     /// and script text is untrusted input: `(((...)))` deep enough
     /// overflows it, with no unwind to catch and nothing executed --
     /// `sh -n` on a hostile file is enough. Bounded rather than trusted;
-    /// see `parser::keywords::nested_command`.
+    /// see `parser::keywords::nested`.
     // [spec:nsh:req:idiom.bounded-recursion]
-    pub(crate) command_depth: u32,
+    pub(crate) nesting_depth: u32,
     /// The option-derived dialect captured at the current parser entry.
     /// It is a snapshot, not a second setting: every top-level parse unit
     /// replaces it from this shell's [`crate::options::ShellOptions`].
@@ -268,7 +269,7 @@ impl InputStack {
             last_token_after_blank: false,
             parsing_conditional: false,
             token_pushed_back: false,
-            command_depth: 0,
+            nesting_depth: 0,
             parse_dialect: crate::options::Dialect::Posix,
             word: crate::word::ParsedWord::new(),
             pending_redirection: None,

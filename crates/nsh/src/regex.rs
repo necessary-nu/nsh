@@ -38,6 +38,18 @@ const MAX_DEPTH: u32 = 2_000;
 /// The largest repetition count an interval may name.
 const MAX_REPEAT: u32 = 1000;
 
+/// How deeply the *compiler* may nest a group.
+///
+/// Separate from the continuation bound above, which holds matching
+/// down: `(((...)))` never reaches the matcher at all, because building
+/// the tree recurses once per open parenthesis and dropping it recurses
+/// the same way. A level costs 575 bytes in a release build, measured,
+/// so 256 of them is 0.14 MiB. The figure is the parser's own nesting
+/// ceiling, on the same reasoning: a written expression reaches a
+/// handful.
+// [spec:nsh:req:idiom.bounded-recursion]
+const MAX_GROUP_DEPTH: u32 = 256;
+
 /// A compiled extended regular expression.
 pub(crate) struct Regex {
     root: Expr,
@@ -101,6 +113,7 @@ impl Regex {
             quoted,
             pos: 0,
             groups: 0,
+            depth: 0,
         };
         let root = parser.alternation()?;
         if parser.pos != bytes.len() {
@@ -169,6 +182,9 @@ struct Parser<'a> {
     quoted: &'a [bool],
     pos: usize,
     groups: usize,
+    /// Open groups, which is how deeply this parse has recursed.
+    // [spec:nsh:req:idiom.bounded-recursion]
+    depth: u32,
 }
 
 impl Parser<'_> {
@@ -281,10 +297,17 @@ impl Parser<'_> {
 
     fn atom(&mut self) -> Result<Expr, BString> {
         if self.here(b'(') {
+            // [spec:nsh:req:idiom.bounded-recursion]
+            if self.depth >= MAX_GROUP_DEPTH {
+                return Err(BString::from(&b"Regular expression nested too deeply"[..]));
+            }
             self.pos += 1;
             self.groups += 1;
             let index = self.groups;
-            let body = self.alternation()?;
+            self.depth += 1;
+            let body = self.alternation();
+            self.depth -= 1;
+            let body = body?;
             if !self.here(b')') {
                 return Err(BString::from(&b"Unmatched ( or \\("[..]));
             }

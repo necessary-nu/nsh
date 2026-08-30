@@ -20,13 +20,14 @@ use crate::variables::{
 
 /// How deep an expression may nest before the evaluator refuses it.
 ///
-/// Two things spend this budget and they spend the same stack, so they
-/// share one counter: a parenthesis, and a name whose *value* is read
-/// back as an expression. Bash evaluates a name's value that way, which
-/// makes `a=b; b=a` a cycle rather than a number and
-/// `loop='i<=100&&(s+=i,i++,loop)'` a way to count to a hundred.
+/// Three things spend this budget and they spend the same stack, so they
+/// share one counter: a parenthesis; a prefix `+`, `-`, `!` or `~`; and a
+/// name whose *value* is read back as an expression. Bash evaluates a
+/// name's value that way, which makes `a=b; b=a` a cycle rather than a
+/// number and `loop='i<=100&&(s+=i,i++,loop)'` a way to count to a
+/// hundred.
 ///
-/// Counting both is what keeps the ceiling meaningful.
+/// Counting all three is what keeps the ceiling meaningful.
 /// `[dec:nsh:safety-trumps-compatibility]` does not allow the
 /// alternative: Bash bounds only the name recursion, so sixty
 /// parentheses inside a self-referring name crash it, and a shell that
@@ -646,12 +647,28 @@ impl<'a, 'shell> Parser<'a, 'shell> {
                 self.advance();
                 Ok(value)
             }
-            Token::Binary(BinaryOperator::Add) => self.power(evaluate),
-            Token::Binary(BinaryOperator::Subtract) => Ok(self.power(evaluate)?.wrapping_neg()),
-            Token::Not => Ok((self.power(evaluate)? == 0) as i64),
-            Token::BitNot => Ok(!self.power(evaluate)?),
+            Token::Binary(BinaryOperator::Add) => self.prefixed(evaluate),
+            Token::Binary(BinaryOperator::Subtract) => Ok(self.prefixed(evaluate)?.wrapping_neg()),
+            Token::Not => Ok((self.prefixed(evaluate)? == 0) as i64),
+            Token::BitNot => Ok(!self.prefixed(evaluate)?),
             _ => Err(self.error(b"expecting primary")),
         }
+    }
+
+    /// The operand of a prefix `+`, `-`, `!` or `~`.
+    ///
+    /// Charged the budget a parenthesis is charged, because it spends the
+    /// same stack: `$(( ---...1 ))` recurses once per sign, and untouched
+    /// it overflows where `$(( (((...))) ))` is refused.
+    // [spec:nsh:req:idiom.bounded-recursion]
+    fn prefixed(&mut self, evaluate: bool) -> Result<i64, Error> {
+        if self.depth >= MAX_NAME_DEPTH {
+            return Err(self.error(b"expression recursion level exceeded"));
+        }
+        self.depth += 1;
+        let value = self.power(evaluate);
+        self.depth -= 1;
+        value
     }
 
     /// A name, with the postfix `++`/`--` that may follow it.

@@ -143,6 +143,19 @@ impl CallStack {
     }
 }
 
+/// How deeply the evaluator is nested, counting every re-entry that
+/// spends a stack frame on what it is about to run.
+///
+/// A call, a dot script and an `eval` cost the same kind of frame and
+/// share one ceiling, because they compose: `f() { eval f; }` spends one
+/// of each per turn, and two separate ceilings would let it reach a depth
+/// neither of them names. The call stack already counts the first two, so
+/// only the string re-entries need a counter of their own.
+// [spec:nsh:req:idiom.bounded-recursion]
+pub(crate) fn evaluation_depth(shell: &Shell) -> usize {
+    shell.variables.call_stack.depth() + shell.evaluation.nested_evaluations
+}
+
 /// Record the command file the shell was started with.
 ///
 /// Only a named file produces a bottom frame; `sh -c` and a shell reading

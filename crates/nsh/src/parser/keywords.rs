@@ -14,8 +14,10 @@ use super::{
     expected_token_error, is_valid_name, list, mem, pipeline, read_token, required_compound_node,
     syntax_error,
 };
+use crate::word::WordToken;
 
-/// How deeply one parse unit may nest commands.
+/// How deeply one parse unit may nest, counting every construct that
+/// spends stack on what is inside it.
 ///
 /// Recursive descent spends stack per level and script text is untrusted,
 /// so the depth is bounded rather than trusted. Unbounded, `(` repeated
@@ -24,10 +26,19 @@ use super::{
 /// embedder gets a dead process where [`dec:nsh:shell-as-library`]
 /// promised an `Err`.
 ///
+/// One budget rather than one per construct, because the constructs
+/// compose: `$( ${x:- $( ${x:- ... ` would otherwise multiply four
+/// separate ceilings into a depth none of them names. Each level costs
+/// what its own construct costs, so the budget is sized against the
+/// dearest of them.
+///
 /// Set by measurement against the smallest stack the shell can plausibly
-/// be asked to run on. A release build spends 1,744 bytes a level, so 256
-/// levels is 0.43 MiB and fits four times over in the 2 MiB a spawned
-/// Rust thread gets by default. A debug build spends 14,928, which is
+/// be asked to run on. In a release build a level costs 2,161 bytes
+/// inside `$( )`, 1,744 in a compound command, 1,733 inside `[[ ]]`, 560
+/// behind `time` and 304 in a nested expansion; 256 of the dearest is
+/// 0.53 MiB and fits nearly four times over in the 2 MiB a spawned Rust
+/// thread gets by default. A
+/// debug build spends 14,928 bytes for a compound command, which is
 /// 3.7 MiB at this depth -- comfortable on an 8 MiB main thread, and the
 /// reason `bounded_recursion.rs` names its own stack size rather than
 /// trusting the 2 MiB the test harness hands a thread.
@@ -36,33 +47,64 @@ use super::{
 /// past what written scripts reach: generated `configure` scripts manage
 /// a dozen or two.
 ///
-/// Both figures used to be far worse -- 5,200 and 41,120 -- and what
-/// changed is where the nodes live. Moving `if_command` and
-/// `case_command` out of `command`'s frame took the first cut; boxing the
-/// fat `Node` variants took `Node` from 136 bytes to 48 and took the
-/// rest, because roughly 26 node-sized slots are live per level and every
-/// one of them shrank. dash spends about 160 bytes a level for the same
-/// grammar, holding `union node *` where this held the nodes themselves.
+/// The compound-command figures used to be far worse -- 5,200 and
+/// 41,120 -- and what changed is where the nodes live. Moving
+/// `if_command` and `case_command` out of `command`'s frame took the
+/// first cut; boxing the fat `Node` variants took `Node` from 136 bytes
+/// to 48 and took the rest, because roughly 26 node-sized slots are live
+/// per level and every one of them shrank. dash spends about 160 bytes a
+/// level for the same grammar, holding `union node *` where this held
+/// the nodes themselves.
 // [spec:nsh:req:idiom.bounded-recursion]
-const MAX_COMMAND_DEPTH: u32 = 256;
+const MAX_NESTING_DEPTH: u32 = 256;
 
-/// Enter one command, refusing to nest past [`MAX_COMMAND_DEPTH`].
+/// Enter one nesting level, refusing to go past [`MAX_NESTING_DEPTH`].
 ///
-/// Every route into a command goes through here, so the count is the
-/// nesting depth exactly, and it is decremented on the way out whether
-/// the command parsed or not.
+/// The count is decremented on the way out whether the level parsed or
+/// not, so a refused parse leaves the budget as it found it.
+// [spec:nsh:req:idiom.bounded-recursion]
+pub(super) fn nested<T>(
+    shell: &mut Shell,
+    body: impl FnOnce(&mut Shell) -> Result<T, Error>,
+) -> Result<T, Error> {
+    if shell.input.nesting_depth >= MAX_NESTING_DEPTH {
+        return Err(syntax_error(shell, b"too many nested commands"));
+    }
+    shell.input.nesting_depth += 1;
+    let parsed = body(shell);
+    shell.input.nesting_depth -= 1;
+    parsed
+}
+
+/// Enter one command. Every route into a command goes through here, so
+/// the count is the grammar's nesting depth exactly.
 // [spec:nsh:req:idiom.bounded-recursion]
 pub(super) fn nested_command(
     shell: &mut Shell,
     context: TokenContext,
 ) -> Result<Option<Node>, Error> {
-    if shell.input.command_depth >= MAX_COMMAND_DEPTH {
+    nested(shell, |shell| command(shell, context))
+}
+
+/// Charge a finished word's expansion nesting to the same budget.
+///
+/// `${x:-${x:-...}}` and `$(( $(( ... )) ))` cost no stack while the word
+/// is being lexed -- the lexer is a loop over a flat event stream -- and
+/// all of it when that stream is turned into a tree, which recurses once
+/// per open expansion and drops the tree the same way. The events are
+/// already in hand, so the depth is read off them rather than tracked
+/// through the lexer's several exits, where an unpaired count would
+/// refuse an ordinary word later in the same parse unit.
+///
+/// It is charged on top of the depth already spent, because a word is
+/// read inside whatever commands enclose it.
+// [spec:nsh:req:idiom.bounded-recursion]
+pub(super) fn nested_expansions(shell: &mut Shell, tokens: &[WordToken]) -> Result<(), Error> {
+    let word = crate::word::expansion_nesting(tokens);
+    if shell.input.nesting_depth.saturating_add(word) > MAX_NESTING_DEPTH {
         return Err(syntax_error(shell, b"too many nested commands"));
     }
-    shell.input.command_depth += 1;
-    let parsed = command(shell, context);
-    shell.input.command_depth -= 1;
-    parsed
+    Ok(())
 }
 
 /// `if list; then list; [elif ...] [else list;] fi`.
@@ -70,7 +112,7 @@ pub(super) fn nested_command(
 /// Extracted from `command` for the stack rather than for tidiness: in a
 /// debug build every branch of that dispatch keeps its locals in one
 /// frame whether taken or not, and this one's clause vector was part of
-/// why a nesting level cost 41 KiB. See `MAX_COMMAND_DEPTH`.
+/// why a nesting level cost 41 KiB. See [`MAX_NESTING_DEPTH`].
 // [spec:posix:syn:grammar.if-clause]
 pub(super) fn if_command(shell: &mut Shell, start: TokenMark) -> Result<Option<Node>, Error> {
     /* The C threads the elif chain through `elsepart` on the way down,
@@ -283,7 +325,11 @@ pub(super) fn timed_pipeline(shell: &mut Shell) -> Result<Option<Node>, Error> {
     {
         return Ok(None);
     }
-    pipeline(shell, TokenContext::COMMAND_START)
+    /* `time` reaches `pipeline` without passing through a command, so
+     * `time time time ...` recurses on a route `nested_command` never
+     * sees. It is charged here instead. */
+    // [spec:nsh:req:idiom.bounded-recursion]
+    nested(shell, |shell| pipeline(shell, TokenContext::COMMAND_START))
 }
 
 /// The optional `-p` after `time`, which asks for the POSIX report format.

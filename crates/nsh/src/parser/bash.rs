@@ -364,15 +364,20 @@ pub(super) fn process_substitutions(
 
         let saved_heredocs = mem::take(&mut shell.input.pending_here_documents);
         let completed_at = shell.input.completed_here_documents.len();
-        let parsed = crate::resource::with_resources(shell, |shell, _resources| {
-            let mut body = list(shell, ListMode::StopAtTerminator)?.into_node();
-            if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
-                return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
-            }
-            set_input_string(shell, BStr::new(b""));
-            parse_here_documents(shell)?;
-            finalize::node(shell, &mut body, completed_at)?;
-            Ok(body)
+        /* `<( <( ... ) )` re-enters the grammar from inside a word just
+         * as `$( )` does, and on the same unseen route. */
+        // [spec:nsh:req:idiom.bounded-recursion]
+        let parsed = super::keywords::nested(shell, |shell| {
+            crate::resource::with_resources(shell, |shell, _resources| {
+                let mut body = list(shell, ListMode::StopAtTerminator)?.into_node();
+                if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
+                    return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
+                }
+                set_input_string(shell, BStr::new(b""));
+                parse_here_documents(shell)?;
+                finalize::node(shell, &mut body, completed_at)?;
+                Ok(body)
+            })
         });
         shell.input.pending_here_documents = saved_heredocs;
         let body = parsed?;
@@ -593,7 +598,11 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
     let first_mark = super::tokens::mark(shell);
     let token = read_token(shell, TokenContext::NONE)?;
     if token.kind == TokenKind::LeftParen {
-        let expression = conditional_or(shell)?;
+        /* `[[ ( ( ( ... ) ) ) ]]` is its own recursive descent, reached
+         * from a command rather than through one, so it is charged the
+         * same nesting budget the grammar around it spends. */
+        // [spec:nsh:req:idiom.bounded-recursion]
+        let expression = super::keywords::nested(shell, conditional_or)?;
         if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
             return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
         }
@@ -605,9 +614,9 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
 
     let first = take_word(shell, token.quoted, first_mark);
     if !first.quoted && first.arg.word.as_bstr() == BStr::new(b"!") {
-        return Ok(BashConditionalExpr::Not(Box::new(conditional_primary(
-            shell,
-        )?)));
+        // [spec:nsh:req:idiom.bounded-recursion]
+        let negated = super::keywords::nested(shell, conditional_primary)?;
+        return Ok(BashConditionalExpr::Not(Box::new(negated)));
     }
     if !first.quoted && unary_operator(first.arg.word.as_bstr()) {
         let operand_mark = super::tokens::mark(shell);

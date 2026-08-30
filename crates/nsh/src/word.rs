@@ -408,6 +408,43 @@ impl ParameterExpansion {
     }
 }
 
+/// How deep [`TokenDecoder::word_until`] will recurse over these events.
+///
+/// The lexer is a loop, so nothing is spent while a word is being read;
+/// the whole cost arrives here, one frame per open expansion, and again
+/// when the resulting tree is dropped. The parser reads the figure off
+/// the events before building the tree, so hostile nesting is refused
+/// with the stack still intact. The walk mirrors `word_until` exactly,
+/// including its stopping at an end marker the word's own level did not
+/// open.
+// [spec:nsh:req:idiom.bounded-recursion]
+pub(crate) fn expansion_nesting(tokens: &[WordToken]) -> u32 {
+    let mut depth = 0u32;
+    let mut deepest = 0u32;
+    for token in tokens {
+        match token {
+            WordToken::ParameterStart { operation, .. }
+                if *operation != ParameterOperation::Value =>
+            {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            WordToken::ArithmeticStart => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            WordToken::ParameterEnd | WordToken::ArithmeticEnd => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum TokenBoundary {
     Word,
