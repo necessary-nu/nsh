@@ -66,8 +66,16 @@ pub(super) fn evaluate_select(
         let Some(reply) = read_reply(shell)? else {
             /* End of input closes the prompt line and ends the loop.
              * Bash answers 1 here whatever the body last did, which is
-             * the one place `select`'s status is not the body's. */
-            shell.write_output(OutputDestination::Stderr, b"\n")?;
+             * the one place `select`'s status is not the body's.
+             *
+             * The closing newline goes to standard *output*, where the
+             * menu and the prompt went to standard error. That looks like
+             * an inconsistency and is Bash's, measured: the prompt is
+             * decoration and the newline is `read` finishing a line it
+             * did not get. A script that captures the output of a
+             * `select` sees the newline and not the menu. */
+            // [spec:nsh:req:compat.bash.select-time-grammar]
+            shell.write_output(OutputDestination::Stdout, b"\n")?;
             status = ExitStatus::FAILURE;
             break None;
         };

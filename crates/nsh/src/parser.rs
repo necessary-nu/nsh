@@ -709,14 +709,7 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
     // [spec:posix:req:token.reserved-word-time]
     // [spec:nsh:req:compat.bash.select-time-grammar]
     if first == TokenKind::Time {
-        let posix_format = keywords::timed_posix_format(shell)?;
-        let timed = keywords::timed_pipeline(shell)?.map(Box::new);
-        return Ok(Some(Node::Timed(TimedCommand {
-            tokens: tokens::run(shell, start),
-            line: SourceLine::new(line),
-            posix_format,
-            command: timed,
-        })));
+        return Ok(Some(keywords::timed_command(shell, start, line)?));
     }
     let mut parsed_command: Option<Node>;
     let mut negate = false;
@@ -736,6 +729,24 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
             }
             shell.input.token_pushed_back = true;
         }
+        /* Bash takes `!` and `time` in either order, because both are
+         * flags on the pipeline command rather than wrappers around it:
+         * `! time false` is as ordinary as `time ! false` and reports the
+         * same. Reading `time` only before the `!` made the commoner of
+         * the two -- `if ! time cmd` -- a syntax error. */
+        // [spec:nsh:req:compat.bash.select-time-grammar]
+        if read_token(shell, TokenContext::COMMAND_START)?.kind == TokenKind::Time {
+            let timed = keywords::timed_command(shell, start, line)?;
+            return Ok(Some(if negate {
+                Node::Not(NegatedCommand {
+                    tokens: tokens::run(shell, start),
+                    command: Box::new(timed),
+                })
+            } else {
+                timed
+            }));
+        }
+        shell.input.token_pushed_back = true;
         TokenContext::COMMAND_START
     } else {
         shell.input.token_pushed_back = true;

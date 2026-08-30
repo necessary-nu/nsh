@@ -106,9 +106,17 @@ fn posix_report(report: Durations) -> String {
 }
 
 /// `\nreal\t0m0.051s\n…` -- Bash's default `TIMEFORMAT`, rendered
-/// directly. `TIMEFORMAT` itself is not read: this shell has no format
-/// interpreter and [`dec:nsh:no-format-interpreters`] says it is not to
-/// grow one for this.
+/// directly.
+///
+/// `TIMEFORMAT` itself is not read, and the reason has moved:
+/// [`dec:nsh:no-format-interpreters`] is obsolesced, and its successor
+/// [`dec:nsh:printf-is-parsed-not-interpreted`] is what still forbids
+/// this. That decision sanctions parsing a `%` conversion at runtime for
+/// `printf` alone -- "scoped to `builtins::printf` and travels no
+/// further" -- and says in as many words that nothing outside it may
+/// format a value by a pattern chosen at runtime. A variable holding a
+/// report layout is exactly such a pattern, so the two default formats
+/// are written with `write!` at the site that knows the types.
 fn bash_report(report: Durations) -> String {
     format!(
         "\nreal\t{}\nuser\t{}\nsys\t{}\n",

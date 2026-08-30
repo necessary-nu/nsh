@@ -876,3 +876,31 @@ for the one syntax that made it visible.
 
 Pinned as a row in `crates/nsh-cli/tests/bash_named_descriptor.rs` carrying
 both answers, so it fails when someone closes it. No survey case sees it.
+
+### `TIMEFORMAT` is not read
+
+**Status:** deliberate, under `[dec:nsh:printf-is-parsed-not-interpreted]`.
+`crates/nsh/src/evaluation/timed.rs`.
+
+Bash renders `time`'s report through `TIMEFORMAT`, a variable holding a
+layout with `%R`, `%U`, `%S`, `%P` and `%%` in it, read when the report is
+written. `TIMEFORMAT="%R"` therefore prints one number where the default
+prints three lines. This shell ignores the variable and always writes one
+of two fixed reports: Bash's default layout, or `time -p`'s two-decimal
+seconds, both rendered with `write!` at the site that knows the types.
+
+The reason is not that a `%` specification cannot be parsed here --
+`printf` parses one. It is that the sanction to do so is scoped:
+`[dec:nsh:printf-is-parsed-not-interpreted]` grants it to `builtins::printf`
+because reading a pattern at runtime *is* that utility's contract, and says
+in the same breath that it "travels no further" and that nothing outside
+that module may format a value by a pattern chosen at runtime.
+`TIMEFORMAT` is precisely such a pattern, and honouring it would mean a
+second format interpreter in the crate for a report layout.
+
+Everything else `time` does matches, measured against the pinned Bash
+5.3.15 across eighteen shapes: `-p`, a bare `time`, `time` on a pipeline,
+`!` and `time` in either order and any number, and `time time` reporting
+once.
+
+Costs no survey case; no corpus exercises `TIMEFORMAT`.

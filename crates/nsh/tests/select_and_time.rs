@@ -65,9 +65,14 @@ fn a_reply_outside_the_menu_empties_the_name() {
           EOF\n",
     );
 
-    assert_eq!(printed, b"[][9]\n[][zzz]\n".to_vec());
-    // The blank line reprints the menu; end of input closes the prompt.
-    assert_eq!(menu, b"1) only\n#? #? 1) only\n#? #? \n".to_vec());
+    /* The newline that closes the prompt at end of input goes to standard
+     * *output*, where the menu and the prompt went to standard error.
+     * This test used to assert the opposite, which was this shell's own
+     * output written down rather than the reference's -- Bash puts it on
+     * stdout, measured on this exact script. */
+    assert_eq!(printed, b"[][9]\n[][zzz]\n\n".to_vec());
+    // The blank line reprints the menu; the prompt is left unterminated.
+    assert_eq!(menu, b"1) only\n#? #? 1) only\n#? #? ".to_vec());
     // End of input answers 1 whatever the body last did.
     assert_eq!(status, 1);
 }
@@ -180,4 +185,58 @@ fn repeated_negation_is_bash_only() {
     drop(posix.take_captured_stdout());
     drop(posix.take_captured_stderr());
     assert!(refused.is_err(), "POSIX mode accepted a second `!`");
+}
+
+/// `!` and `time` are flags on a pipeline command in Bash's grammar, not
+/// wrappers around it, so they take either order and any number: `time`
+/// is idempotent and `-p` anywhere in the run selects the POSIX report.
+///
+/// Reading `time` only *before* the `!` made `if ! time cmd` a syntax
+/// error, which is the commoner of the two spellings. The status is what
+/// is asserted here rather than the report, because the report's numbers
+/// are a clock; `crates/nsh-cli/tests/bash_time_and_select.rs` compares
+/// the report itself against the pinned Bash.
+// [spec:nsh:req:compat.bash.select-time-grammar/test]
+#[test]
+fn negation_and_timing_take_either_order() {
+    let mut bash_mode = shell(true);
+    for (script, expected) in [
+        ("! time false; echo $?", "0\n"),
+        ("time ! false; echo $?", "0\n"),
+        ("! ! time false; echo $?", "1\n"),
+        ("! time ! false; echo $?", "1\n"),
+        ("time ! ! false; echo $?", "1\n"),
+        ("if ! time false; then echo yes; fi", "yes\n"),
+    ] {
+        let (status, printed, _) = run(&mut bash_mode, script.as_bytes());
+        assert_eq!(printed, expected.as_bytes(), "{script}");
+        assert_eq!(status, 0, "{script}");
+    }
+}
+
+/// A second `time` sets a flag that is already set, so one report comes
+/// out, and `-p` written anywhere in the run selects the POSIX format for
+/// all of it. The two spellings reach one tree, which is what
+/// `[dec:nsh:no-equivalent-forms]` asks; the words are in its tokens.
+// [spec:nsh:req:compat.bash.select-time-grammar/test]
+#[test]
+fn a_repeated_time_reports_once() {
+    let mut bash_mode = shell(true);
+    for (script, reports, posix_format) in [
+        ("time time :", 1, false),
+        ("time -p time :", 1, true),
+        ("time time -p :", 1, true),
+        ("time time time :", 1, false),
+    ] {
+        let (status, _, written) = run(&mut bash_mode, script.as_bytes());
+        let text = String::from_utf8_lossy(&written);
+        assert_eq!(status, 0, "{script}");
+        assert_eq!(
+            text.matches("real").count(),
+            reports,
+            "{script} wrote {text:?}"
+        );
+        /* `time -p` writes `real 0.00`; the default writes `real\t0m0.000s`. */
+        assert_eq!(text.contains("real\t"), !posix_format, "{script}");
+    }
 }

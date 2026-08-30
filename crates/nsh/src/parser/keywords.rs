@@ -10,9 +10,9 @@ use bstr::{BStr, BString};
 
 use super::{
     CaseClause, CaseCommand, Error, ForCommand, IfCommand, ListMode, Node, NodeText, ParsedWord,
-    Shell, SourceLine, SourceTokens, Token, TokenContext, TokenKind, TokenMark, WordNode, command,
-    expected_token_error, is_valid_name, list, mem, pipeline, read_token, required_compound_node,
-    syntax_error,
+    Shell, SourceLine, SourceTokens, TimedCommand, Token, TokenContext, TokenKind, TokenMark,
+    WordNode, command, expected_token_error, is_valid_name, list, mem, pipeline, read_token,
+    required_compound_node, syntax_error,
 };
 use crate::word::WordToken;
 
@@ -315,6 +315,33 @@ pub(super) fn iteration_command(
 /// A bare `time` is a whole command in Bash and reports zeros, so the
 /// end of the command is not an error here the way it is in front of any
 /// other prefix.
+/// `time [-p] [pipeline]`, collapsed the way Bash's own grammar collapses
+/// it.
+///
+/// Bash carries `time` as a *flag* on the pipeline command rather than a
+/// wrapper around it, so a second `time` sets a flag that is already set
+/// and `-p` anywhere in the run selects the POSIX report for all of it:
+/// `time time :`, `time -p time :` and `time time -p :` each report once.
+/// The wrapper stays -- it is what the evaluator reads -- and the collapse
+/// happens here, so the two spellings reach one tree and
+/// `[dec:nsh:no-equivalent-forms]` holds. The `time` words themselves are
+/// in the node's tokens, which is where spelling belongs.
+// [spec:nsh:req:compat.bash.select-time-grammar]
+pub(super) fn timed_command(shell: &mut Shell, start: TokenMark, line: i32) -> Result<Node, Error> {
+    let mut posix_format = timed_posix_format(shell)?;
+    let mut command = timed_pipeline(shell)?;
+    if let Some(Node::Timed(inner)) = command {
+        posix_format |= inner.posix_format;
+        command = inner.command.map(|nested| *nested);
+    }
+    Ok(Node::Timed(TimedCommand {
+        tokens: super::tokens::run(shell, start),
+        line: SourceLine::new(line),
+        posix_format,
+        command: command.map(Box::new),
+    }))
+}
+
 pub(super) fn timed_pipeline(shell: &mut Shell) -> Result<Option<Node>, Error> {
     let next = read_token(shell, TokenContext::COMMAND_START)?.kind;
     shell.input.token_pushed_back = true;
