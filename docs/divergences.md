@@ -797,3 +797,32 @@ joined afterwards, as Bash does -- `"${A[*]@Q}"` quotes each element
 before joining -- so only the order differs.
 
 Costs `var-op-bash.test.sh:24` and `var-op-bash.test.sh:25`.
+
+### A `{name}` slot is opened by the shell where Bash opens it in the child
+
+**Status:** deliberate for now, and recorded rather than sanctioned: it is
+the evaluation model rather than a reading of what a script means.
+`crates/nsh/src/redirection.rs`, `crates/nsh/src/evaluation.rs`.
+
+`{name}<word` allocates a descriptor and assigns its number to `name`, and
+whichever process applies the redirection is the one that ends up with
+both. Bash forks an external command *before* applying its redirections, so
+`cat /dev/null {fd}</dev/null` leaves the parent with no slot and `$fd`
+unset. This shell applies a simple command's redirections in the parent and
+forks afterwards -- the dash arrangement, and the same place a built-in's
+redirection is applied -- so the parent keeps the slot and `$fd` is 10.
+
+The two agree everywhere the fork is not in between. A built-in (`echo x
+{v}>/dev/null`), a compound command (`{ echo x; } {fd}>/dev/null`), a
+function call, a loop and `exec` all set the name in the shell under both,
+and a subshell sets it in the child under both. Only an external command
+differs, and there it costs a descriptor per execution: a loop running
+`cat /dev/null {fd}</dev/null` three times leaves 10, 11 and 12 open here.
+
+Moving it means moving the fork, which changes where *every* redirection is
+applied rather than this one form. That is a change to the evaluation model
+and wants its own measurement against both references, not a special case
+for the one syntax that made it visible.
+
+Pinned as a row in `crates/nsh-cli/tests/bash_named_descriptor.rs` carrying
+both answers, so it fails when someone closes it. No survey case sees it.
