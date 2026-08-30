@@ -234,3 +234,69 @@ fn an_expanded_alias_records_what_was_parsed() {
 
     assert_eq!(read, BString::from(b"echo hello there\n".as_slice()));
 }
+
+/// A flat one-line list costs its length, not its length squared.
+///
+/// `a && b && c` is a left-leaning chain, and every node in it holds the
+/// run from the chain's first word to its own end -- so the runs are
+/// nested prefixes and the sum of their lengths is quadratic in the
+/// chain's length. Copying each one made that sum real: `:` joined by
+/// ` && ` took 0.21s at a thousand terms and 27s at eight thousand, and
+/// at sixteen thousand the shell was killed for the memory it asked for.
+/// Hostile script text reaches that through `[dec:nsh:shell-as-library]`,
+/// which is what makes it a defect and not a slow parse.
+///
+/// The shape that says it cannot come back is that the chain's runs are
+/// one array rather than many, which is what an equal address says. A
+/// clock would report how busy the machine was; this reports what the
+/// machine was doing.
+// [spec:nsh:def:idiom.token-stream/test]
+#[test]
+fn a_flat_list_shares_one_log() {
+    let terms = 64;
+    let mut source = BString::from(Vec::new());
+    for term in 0..terms {
+        if term > 0 {
+            source.extend_from_slice(b" && ");
+        }
+        source.extend_from_slice(b":");
+    }
+    source.extend_from_slice(b"\n");
+
+    let mut shell = shell(false);
+    crate::input::set_input_string(&mut shell, source.as_ref());
+    let tree = match crate::parser::parse_command(&mut shell, false).expect("parse") {
+        crate::parser::ParseResult::Tree(Some(tree)) => tree,
+        _ => panic!("a chain of {terms} terms did not parse to a tree"),
+    };
+
+    /* The chain hangs off the left of every `&&`, so walking left is
+     * walking it. Every step's run reaches back to the same first token,
+     * which is why sharing shows as one address. */
+    let whole = tree.tokens().tokens();
+    let mut node = &tree;
+    let mut spanned = 0;
+    let mut visited = 0;
+    loop {
+        let run = node.tokens().tokens();
+        assert!(
+            core::ptr::eq(run.as_ptr(), whole.as_ptr()),
+            "term {visited} holds a copy of the chain rather than a view of it",
+        );
+        spanned += run.len();
+        visited += 1;
+        match node {
+            crate::nodes::Node::And(binary) => node = &binary.left,
+            _ => break,
+        }
+    }
+
+    assert_eq!(visited, terms, "the chain is not left-leaning");
+    /* What the copies came to: the runs overlap this much, and one array
+     * is what stops the overlap being paid for. */
+    assert!(
+        spanned > 10 * whole.len(),
+        "{spanned} tokens spanned over a log of {}",
+        whole.len(),
+    );
+}

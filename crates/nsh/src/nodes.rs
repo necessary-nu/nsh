@@ -106,7 +106,18 @@ impl From<&BStr> for NodeText {
 ///
 /// The bytes are shared rather than copied down the nesting, because
 /// every level of a tree holds the run of every level under it and a
-/// function definition is cloned for each call.
+/// function definition is cloned for each call. So a run is a pair of
+/// offsets into the log its parse produced, and not a copy of the tokens
+/// between them: `a && b && c` builds three nodes whose runs are nested
+/// prefixes of one another, `:` joined by ` && ` is how long that nesting
+/// gets, and copying each run made both the time and the memory a flat
+/// one-line list costs quadratic in its length.
+///
+/// The log is shared through a cell the parse fills when it ends, because
+/// the parser hands a node its run while the log it points into is still
+/// growing. Nothing reads a run's bytes before then -- the parser decides
+/// where the cuts fall and never asks what they say -- so the cell is
+/// always full by the time anything looks.
 ///
 /// EQUALITY IS THE POINT. Comparing two trees as programs must ignore
 /// their tokens, so this compares equal to everything and the derived
@@ -116,13 +127,22 @@ impl From<&BStr> for NodeText {
 // [spec:nsh:req:idiom.canonical-tree+1]
 // [spec:nsh:def:idiom.token-stream]
 #[derive(Clone, Eq)]
-pub struct SourceTokens(Arc<[SourceToken]>);
+pub struct SourceTokens {
+    /// The log this run was cut from, or `None` for the empty run.
+    log: Option<crate::parser::SealedLog>,
+    start: usize,
+    end: usize,
+}
 
 impl SourceTokens {
-    /// Take a copy of the log run a node was parsed from.
+    /// Name the log run a node was parsed from, without copying it.
     // [spec:nsh:def:idiom.token-stream]
-    pub(crate) fn new(run: &[SourceToken]) -> SourceTokens {
-        SourceTokens(Arc::from(run))
+    pub(crate) fn cut(log: &crate::parser::SealedLog, start: usize, end: usize) -> SourceTokens {
+        SourceTokens {
+            log: Some(Arc::clone(log)),
+            start,
+            end,
+        }
     }
 
     /// The empty run, for a node the shell built rather than parsed.
@@ -132,13 +152,27 @@ impl SourceTokens {
     /// than left as a default that could be reached by forgetting.
     // [spec:nsh:req:idiom.printable-ast+2]
     pub(crate) fn none() -> SourceTokens {
-        SourceTokens(Arc::from([] as [SourceToken; 0]))
+        SourceTokens {
+            log: None,
+            start: 0,
+            end: 0,
+        }
     }
 
     /// The tokens themselves, in the order they were read.
+    ///
+    /// Empty while the parse that cut this run is still going, which no
+    /// caller is: the parser is the only code holding a run before its
+    /// parse ends, and it asks where the cuts fall rather than what they
+    /// say. Empty too if the bounds outran the log, which is a run of
+    /// tokens the reader gave back after the run was cut.
     // [spec:nsh:def:idiom.token-stream]
     pub(crate) fn tokens(&self) -> &[SourceToken] {
-        &self.0
+        self.log
+            .as_ref()
+            .and_then(|log| log.get())
+            .and_then(|sealed| sealed.get(self.start..self.end))
+            .unwrap_or(&[])
     }
 
     /// Whether two runs are the same source text.
@@ -162,12 +196,12 @@ impl SourceTokens {
     // [spec:nsh:req:idiom.printable-ast+2]
     pub(crate) fn written(&self) -> BString {
         let mut text = BString::from(Vec::new());
-        let from = self
-            .0
+        let run = self.tokens();
+        let from = run
             .iter()
             .position(|token| !token.kind().is_trivia())
-            .unwrap_or(self.0.len());
-        for token in &self.0[from..] {
+            .unwrap_or(run.len());
+        for token in &run[from..] {
             text.extend_from_slice(token.text());
         }
         text
@@ -181,7 +215,7 @@ impl SourceTokens {
     // [spec:nsh:req:idiom.printable-ast+2]
     #[cfg(any(feature = "fuzzing", test))]
     pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.tokens().is_empty()
     }
 
     /// Whether this run already holds `other`'s tokens.
@@ -194,7 +228,8 @@ impl SourceTokens {
     /// to ask, because the answer is not a property of the redirection.
     // [spec:nsh:req:idiom.printable-ast+2]
     pub(crate) fn holds(&self, other: &SourceTokens) -> bool {
-        !other.0.is_empty() && self.0.windows(other.0.len()).any(|run| run == &*other.0)
+        let (run, inside) = (self.tokens(), other.tokens());
+        !inside.is_empty() && run.windows(inside.len()).any(|window| window == inside)
     }
 
     /// The bytes of the run, concatenated.

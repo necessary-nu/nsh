@@ -13,6 +13,8 @@
 //! which applies. The reader appends bytes; the parser says where the cuts
 //! fall.
 
+use std::sync::{Arc, OnceLock};
+
 use bstr::{BStr, BString};
 
 use crate::context::Shell;
@@ -87,6 +89,15 @@ impl SourceToken {
     }
 }
 
+/// One parse's tokens, once that parse can no longer add to them.
+///
+/// A node is given its run while the log is still growing, so the run
+/// names offsets and the tokens arrive here afterwards. Shared rather
+/// than handed out, because every node of a parse points at the same
+/// one.
+// [spec:nsh:def:idiom.token-stream]
+pub(crate) type SealedLog = Arc<OnceLock<Box<[SourceToken]>>>;
+
 /// Every byte one parse consumed, in order, cut into tokens.
 ///
 /// Recording is bound to the input frame the parse started on. A frame
@@ -97,6 +108,10 @@ impl SourceToken {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TokenLog {
     tokens: Vec<SourceToken>,
+    /// Where [`TokenLog::seal`] will put those tokens, and what every run
+    /// this parse hands out already points at. Absent before the first
+    /// parse, which has nothing to point at yet.
+    sealed: Option<SealedLog>,
     /// Bytes read since the last cut. The parser has not yet said what
     /// token they belong to.
     pending: Vec<u8>,
@@ -125,6 +140,7 @@ impl TokenLog {
     pub(crate) const fn new() -> Self {
         Self {
             tokens: Vec::new(),
+            sealed: None,
             pending: Vec::new(),
             frame: None,
             expanded_alias: false,
@@ -135,23 +151,53 @@ impl TokenLog {
     /// Start recording a parse reading from `frame`, discarding the last.
     // [spec:nsh:def:idiom.token-stream]
     pub(crate) fn begin(&mut self, frame: usize) {
-        self.tokens.clear();
+        /* Sealed first, because a parse may be under way: expanding a
+         * `PS2` that holds a command substitution starts one parse in the
+         * middle of another. The runs that parse has already handed out
+         * are cut from the log about to be replaced, so they are given
+         * what it holds rather than left pointing at a cell nothing will
+         * ever fill. */
+        self.seal();
+        self.tokens = Vec::new();
+        self.sealed = Some(SealedLog::default());
         self.pending.clear();
         self.frame = Some(frame);
         self.expanded_alias = false;
         self.returned = 0;
     }
 
-    /// Stop recording, keeping whatever the parse got through.
+    /// Stop recording, and hand the tokens to the runs cut from them.
     ///
     /// Bytes still pending belong to a token the parser never finished,
     /// which happens when a parse ends in a syntax error. They are kept as
     /// a word rather than dropped, because dropping them would make the
     /// log claim the parser read less than it did.
+    ///
+    /// Sealing twice is what an already-sealed log is asked for by
+    /// [`TokenLog::begin`], and the first answer stands: the second call
+    /// has the same tokens to give.
     // [spec:nsh:def:idiom.token-stream]
     pub(crate) fn seal(&mut self) {
         self.cut(SourceTokenKind::Word);
         self.frame = None;
+        if let Some(sealed) = &self.sealed {
+            sealed.get_or_init(|| self.tokens.as_slice().into());
+        }
+    }
+
+    /// The run between two positions in this log.
+    ///
+    /// The tokens are not read: the caller is the parser, which knows
+    /// where a node's run begins and ends long before the log stops
+    /// growing, and asking for the bytes now is what made a run cost a
+    /// copy.
+    // [spec:nsh:def:idiom.token-stream]
+    fn between(&self, start: usize, end: usize) -> crate::nodes::SourceTokens {
+        self.sealed
+            .as_ref()
+            .map_or_else(crate::nodes::SourceTokens::none, |sealed| {
+                crate::nodes::SourceTokens::cut(sealed, start, end)
+            })
     }
 
     /// Record one byte the reader handed to the parser.
@@ -252,7 +298,7 @@ impl TokenLog {
     /// nothing does -- so the unit has to be able to say so itself.
     // [spec:nsh:req:idiom.printable-ast+2]
     pub(crate) fn whole(&self) -> crate::nodes::SourceTokens {
-        crate::nodes::SourceTokens::new(&self.tokens)
+        self.between(0, self.tokens.len())
     }
 
     /// How many tokens have been cut so far.
@@ -339,7 +385,7 @@ impl TokenLog {
     // [spec:nsh:def:idiom.token-stream]
     pub(crate) fn cut_run(&mut self, kind: SourceTokenKind) -> crate::nodes::SourceTokens {
         self.cut(kind);
-        crate::nodes::SourceTokens::new(self.tokens.last().map_or(&[], core::slice::from_ref))
+        self.between(self.tokens.len().saturating_sub(1), self.tokens.len())
     }
 }
 
@@ -383,5 +429,5 @@ pub(crate) fn mark(shell: &Shell) -> TokenMark {
 pub(crate) fn run(shell: &Shell, start: TokenMark) -> crate::nodes::SourceTokens {
     let TokenMark(start) = start;
     let TokenMark(end) = mark(shell);
-    crate::nodes::SourceTokens::new(&shell.input.tokens.tokens[start.min(end)..end])
+    shell.input.tokens.between(start.min(end), end)
 }

@@ -1564,7 +1564,7 @@ pub(crate) mod tokens;
 mod word_lexer;
 
 pub(crate) use multibyte::MultibyteMode;
-pub(crate) use tokens::{SourceToken, SourceTokenKind, TokenLog, TokenMark};
+pub(crate) use tokens::{SealedLog, SourceToken, SourceTokenKind, TokenLog, TokenMark};
 use word_lexer::{ParenthesisOutcome, WordPosition, close_parenthesis};
 
 /// Result of decoding the input unit at the current lexer position.
