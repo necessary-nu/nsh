@@ -476,13 +476,29 @@ fn append_literal(
             }
         }
 
-        let byte = bytes[at];
+        /* The loop above is a state machine over three bytes and nothing
+         * else reads a literal one at a time, so the bytes between them
+         * are one contribution rather than one each. The field is the
+         * same either way -- adjacent regions of equal quoting merge, and
+         * an anchor inside a run sits on a byte quoting made unsplittable,
+         * which is a byte splitting never asks about -- but a byte at a
+         * time buys a field, four allocations and an anchor per byte of
+         * the word, and the anchors then made appending quadratic. */
+        let end = if TILDE_SIGNIFICANT.contains(&bytes[at]) {
+            at + 1
+        } else {
+            bytes[at + 1..]
+                .iter()
+                .position(|byte| TILDE_SIGNIFICANT.contains(byte))
+                .map_or(bytes.len(), |offset| at + 1 + offset)
+        };
         result.append(Expansion::one(Field::from_bytes(
-            &[byte],
+            &bytes[at..end],
             context.protects(),
             context.literal_splits(),
             context.quoted,
         )));
+        let byte = bytes[end - 1];
         *tilde = if byte == b'=' && *assignment_equal_available {
             *assignment_equal_available = false;
             TildePosition::Assignment
@@ -491,9 +507,16 @@ fn append_literal(
         } else {
             TildePosition::None
         };
-        at += 1;
+        at = end;
     }
 }
+
+/// The literal bytes the tilde rules can tell apart.
+///
+/// `~` opens a prefix, and `=` and `:` are the separators after which
+/// another may open. Every other byte closes any prefix under way and is
+/// otherwise indistinguishable from its neighbours.
+const TILDE_SIGNIFICANT: &[u8] = b"~=:";
 
 // [spec:posix:req:expand.tilde-home]
 // [spec:posix:req:expand.tilde-login-name]
@@ -1344,5 +1367,33 @@ mod tests {
                 },
             ]
         );
+
+        /* Sparse is also what a long word costs. A quoted run appended a
+         * byte at a time left an anchor at every byte boundary and then
+         * rescanned every anchor already recorded on the next append, so
+         * reading a 200,000-byte word took seconds where dash takes
+         * milliseconds. The metadata is the shape that gives that away
+         * and a clock on a shared machine is not: what a run records must
+         * not grow with how long the run is. */
+        let mut shell = Shell::builder().build().unwrap();
+        let mut recorded = |length: usize| {
+            let mut expansion = Expansion::none();
+            let mut tilde = TildePosition::None;
+            let mut assignment_equal_available = false;
+            append_literal(
+                &mut shell,
+                &mut expansion,
+                &vec![b'a'; length],
+                Context::top(ExpansionMode::SPLIT).quoted(),
+                false,
+                &mut tilde,
+                &mut assignment_equal_available,
+            );
+            let run = expansion.collapse();
+            (run.bytes.len(), run.regions.len(), run.empty_anchors)
+        };
+
+        assert_eq!(recorded(16), (16, 1, vec![16]));
+        assert_eq!(recorded(200_000), (200_000, 1, vec![200_000]));
     }
 }

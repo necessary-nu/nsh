@@ -65,13 +65,17 @@ impl Field {
             region.end += boundary;
             self.push_region(region);
         }
-        self.empty_anchors.extend(
-            other
-                .empty_anchors
-                .into_iter()
-                .map(|offset| boundary + offset),
-        );
-        self.empty_anchors.dedup();
+        /* Both sides are already free of adjacent duplicates and every
+         * offset arriving from `other` is at or past the boundary, so the
+         * only pair that can repeat is the one the join creates. Deduping
+         * the whole vector instead costs a pass over every anchor for
+         * every append, which is quadratic in a word appended piecewise. */
+        for offset in other.empty_anchors {
+            let offset = boundary + offset;
+            if self.empty_anchors.last() != Some(&offset) {
+                self.empty_anchors.push(offset);
+            }
+        }
         self.bytes.append(&mut other.bytes);
     }
 
