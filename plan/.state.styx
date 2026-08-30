@@ -1316,9 +1316,9 @@ derived_priorities (
 
 assertions (
     {id bash-array-assignment-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:50.828945161Z}
-    {id bash-expansion-gaps, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:51.231881628Z}
+    {id bash-expansion-gaps, kind @complete, author "brendan@necessary.nu", at 2026-08-30T20:16:02.886219554Z}
     {id bash-introspection-gaps, kind @complete, author "brendan@necessary.nu", at 2026-08-30T17:41:49.261425513Z}
-    {id bash-mode-error-boundary, kind @doing, author "brendan@necessary.nu", at 2026-08-23T20:37:50.377440971Z}
+    {id bash-mode-error-boundary, kind @complete, author "brendan@necessary.nu", at 2026-08-30T20:15:57.612327984Z}
     {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}
     {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}
     {id crate-rename, kind @complete, author "brendan@necessary.nu", at 2026-08-08T02:12:48.664729127Z}
