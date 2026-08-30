@@ -1370,7 +1370,7 @@ assertions (
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
     {id optional-line-editor, kind @complete, author "brendan@necessary.nu", at 2026-08-30T18:15:18.536374848Z}
     {id bash-named-descriptor-redirection, kind @complete, author "brendan@necessary.nu", at 2026-08-30T19:04:52.813744057Z}
-    {id bash-select-and-time-grammar, kind @doing, author "brendan@necessary.nu", at 2026-08-24T10:07:50.753985924Z}
+    {id bash-select-and-time-grammar, kind @complete, author "brendan@necessary.nu", at 2026-08-30T22:23:42.940658355Z}
     {id fuzz-the-shell, kind @complete, author "brendan@necessary.nu", at 2026-08-25T14:31:05.885569498Z}
     {id make-fuzz-runner-containment-aware, kind @complete, author "brendan@necessary.nu", at 2026-08-30T17:41:53.049957135Z}
     {id decide-tree-canonicity, kind @complete, author "brendan@necessary.nu", at 2026-08-27T23:20:26.878567937Z}
