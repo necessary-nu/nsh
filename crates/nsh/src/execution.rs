@@ -12,6 +12,7 @@ use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::builtins::BuiltinSpec;
 use crate::error::{Error, Operation};
@@ -83,9 +84,21 @@ impl CommandSearch {
 #[derive(Clone)]
 pub(crate) enum Command {
     Unknown,
-    External { path_index: Option<usize> },
+    External {
+        path_index: Option<usize>,
+    },
+    /// Shared rather than owned, because every lookup clones the entry
+    /// and a body is as large as the text it was parsed from. A call that
+    /// copied it charged the caller the whole function again, so
+    /// `f() { : <20,000 words>; f; }` held one copy per live level and
+    /// spent 1.8 GB reaching the depth ceiling -- 18 MB now, against
+    /// dash's 6 MB, and no `eval` is involved, so no budget on evaluated
+    /// text could ever have seen it. Sharing keeps the guarantee the copy
+    /// was there for: redefining a function while it runs cannot pull the
+    /// body out from under the call, which holds its own handle to the
+    /// old one.
     // [spec:nsh:req:idiom.structural-ast]
-    Function(FunctionDefinition),
+    Function(Arc<FunctionDefinition>),
     Builtin(&'static BuiltinSpec),
 }
 
@@ -878,7 +891,7 @@ pub fn define_function(
         cache_command(
             commands,
             definition.name.as_bstr(),
-            Command::Function(definition.clone()),
+            Command::Function(Arc::new(definition.clone())),
         );
     });
 }

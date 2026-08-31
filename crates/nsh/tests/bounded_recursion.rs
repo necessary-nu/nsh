@@ -294,12 +294,17 @@ fn arithmetic_prefix_operators_are_bounded() {
 /// `eval` parses a string and runs it on top of the frame that asked for
 /// it, so a chain of them is a call chain wearing another name. Bash and
 /// dash both survive this one, and this crashed at about 3,500.
+///
+/// The count has a ceiling as well as a floor now, and both are the
+/// point. It must pass 512 to reach the depth bound, and it must stay
+/// small enough that the chain's own text does not reach the *work* bound
+/// first -- which a longer one does, and which the next case is about.
 // [spec:nsh:req:idiom.bounded-recursion/test]
 #[test]
 fn nested_eval_is_refused_not_fatal() {
     with_stack(|| {
         let mut shell = executing_shell();
-        let script = format!("{}':'", "eval ".repeat(5_000));
+        let script = format!("{}':'", "eval ".repeat(600));
 
         let outcome = shell.run(script.as_bytes());
 
@@ -310,6 +315,62 @@ fn nested_eval_is_refused_not_fatal() {
             "unexpected diagnostic: {}",
             BStr::new(&complained),
         );
+    });
+}
+
+/// A depth bound stops the recursion and does not stop the work: each of
+/// the 512 levels it allows re-parses the whole word list that carried it,
+/// so this costs 512N and was killed for memory at N = 100,000 having
+/// refused nothing. The chain is legitimate at every individual level,
+/// which is why no depth can see it, and it is refused for what the live
+/// levels are carrying between them instead.
+// [spec:nsh:req:idiom.bounded-recursion/test]
+#[test]
+fn a_wide_eval_chain_is_refused() {
+    with_stack(|| {
+        let mut shell = executing_shell();
+        let script = format!("{}':'", "eval ".repeat(5_000));
+
+        let outcome = shell.run(script.as_bytes());
+
+        assert!(outcome.is_err());
+        let complained = shell.take_captured_stderr().expect("capture stderr");
+        assert!(
+            complained.contains_str("Maximum evaluation size"),
+            "unexpected diagnostic: {}",
+            BStr::new(&complained),
+        );
+    });
+}
+
+/// The budget is on what the live re-entries carry, not on how many there
+/// are, so a recursion far shallower than the depth bound reaches it: this
+/// one is refused around thirty levels down. A single `eval` of the same
+/// text is ordinary and must still run, which is what the second half
+/// asserts -- the charge is against re-entry, not against size.
+// [spec:nsh:req:idiom.bounded-recursion/test]
+#[test]
+fn shallow_evaluation_is_charged_for_size() {
+    with_stack(|| {
+        let padding = "x".repeat(256 << 10);
+        let mut shell = executing_shell();
+
+        let outcome = shell.run(format!("f() {{ eval '# {padding}\nf'; }}\nf").as_bytes());
+
+        assert!(outcome.is_err());
+        let complained = shell.take_captured_stderr().expect("capture stderr");
+        assert!(
+            complained.contains_str("Maximum evaluation size"),
+            "unexpected diagnostic: {}",
+            BStr::new(&complained),
+        );
+
+        let mut shell = executing_shell();
+        let outcome = shell.run(format!("eval '# {padding}\necho ran'").as_bytes());
+
+        assert!(outcome.is_ok(), "one large evaluation was refused");
+        let printed = shell.take_captured_stdout().expect("capture stdout");
+        assert_eq!(BStr::new(&printed), BStr::new(b"ran\n"));
     });
 }
 

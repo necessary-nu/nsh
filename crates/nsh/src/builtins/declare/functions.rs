@@ -44,7 +44,7 @@ pub(crate) fn source(shell: &Shell, name: &BStr) -> Option<BString> {
 
 fn definition<'a>(shell: &'a Shell, name: &BStr) -> Option<&'a FunctionDefinition> {
     match shell.commands.get(name).map(|entry| &entry.command) {
-        Some(Command::Function(definition)) => Some(definition),
+        Some(Command::Function(definition)) => Some(definition.as_ref()),
         _ => None,
     }
 }
@@ -55,7 +55,7 @@ fn list_all(shell: &Shell, names_only: bool, listing: &mut BString) {
         .commands
         .iter()
         .filter_map(|(name, entry)| match &entry.command {
-            Command::Function(definition) => Some((name.clone(), definition)),
+            Command::Function(definition) => Some((name.clone(), definition.as_ref())),
             _ => None,
         })
         .collect();

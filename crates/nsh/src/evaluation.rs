@@ -203,6 +203,17 @@ pub struct EvaluationState {
     /// [`crate::variables::call_stack::evaluation_depth`] adds the two.
     // [spec:nsh:req:idiom.bounded-recursion]
     pub(crate) nested_evaluations: usize,
+    /// Bytes of script text the live string re-entries are between them
+    /// evaluating, which is the resource a depth alone cannot see.
+    ///
+    /// Depth counts levels; this counts what the levels are carrying.
+    /// `eval eval ... echo hi` is 512 legitimate levels each re-parsing
+    /// the text of the one below it, so the work is the product and only
+    /// one of its factors is bounded. It sits beside
+    /// [`Self::nested_evaluations`] because it is charged and released at
+    /// the same two lines, by the same re-entry.
+    // [spec:nsh:req:idiom.bounded-recursion]
+    pub(crate) live_evaluation_bytes: usize,
     /// The name the running builtin was invoked by, for the error prefix.
     ///
     /// dash points this at `argv[0]` and relies on the word outliving the
@@ -230,6 +241,7 @@ impl EvaluationState {
             diagnostic_line: 0,
             refused_declarations: Vec::new(),
             nested_evaluations: 0,
+            live_evaluation_bytes: 0,
             command_name: None,
         }
     }
@@ -399,11 +411,27 @@ pub fn evaluate_string(
         message.extend_from_slice(b") reached");
         return Err(shell.diagnostics().shell_error(&message));
     }
+    /* The depth ceiling above stops the recursion and does not stop the
+     * work: each of its 512 levels re-parses the text of the level below,
+     * so `eval` repeated N times costs 512N and was killed for memory at
+     * N = 100,000 long before any of it was refused. What every re-entry
+     * has in hand, and no ancestor can free while it runs, is the text it
+     * was asked to evaluate; the sum of those is the work the depth
+     * cannot see, and it is what is bounded here. */
+    // [spec:nsh:req:idiom.bounded-recursion]
+    if shell.evaluation.live_evaluation_bytes + text.len() > MAX_EVALUATION_WORK {
+        let mut message = b"Maximum evaluation size (".to_vec();
+        message.extend_from_slice(MAX_EVALUATION_WORK.to_string().as_bytes());
+        message.extend_from_slice(b" bytes) reached");
+        return Err(shell.diagnostics().shell_error(&message));
+    }
     shell.evaluation.nested_evaluations += 1;
+    shell.evaluation.live_evaluation_bytes += text.len();
     let outcome = crate::resource::with_resources(shell, |shell, _resources| {
         crate::input::set_input_string(shell, text);
         parse_and_execute(shell, context)
     });
+    shell.evaluation.live_evaluation_bytes -= text.len();
     shell.evaluation.nested_evaluations -= 1;
     outcome
 }
@@ -2363,6 +2391,51 @@ fn evaluate_builtin(
 // [spec:nsh:req:idiom.bounded-recursion]
 pub(crate) const MAX_EVALUATION_DEPTH: usize = 512;
 
+/// How much script text the live string re-entries may be carrying between
+/// them, in bytes.
+///
+/// [`MAX_EVALUATION_DEPTH`] bounds one factor of a product. `eval` repeated
+/// N times reaches the ceiling at 512 levels and each of them re-parses the
+/// O(N)-word command that carried it, so the work is 512N and only the 512
+/// is bounded: measured here, N = 8,000 refused correctly after 1.9 GB of
+/// resident memory and N = 100,000 after 25.1 GB, which on a machine with
+/// less to spare is the OOM kill this was filed for. Both reference shells
+/// are worse on the same input -- neither bounds the depth at all, so both
+/// pay N squared and both pass 8 GiB at N = 100,000 -- but a shell that
+/// refuses must not spend more doing it than one that succeeds, so the
+/// other factor is bounded too.
+///
+/// The charge is the text a re-entry is asked to evaluate, summed over the
+/// re-entries that are live, and it is against *re-entry* rather than
+/// against size on purpose. A generated script of a hundred thousand words
+/// run once is ordinary and is not charged at all: a file is read one
+/// command at a time, so nothing accumulates. The same text reached
+/// through four hundred nested evaluations is four hundred copies alive at
+/// once, and that is what this sees.
+///
+/// Set from measurement rather than from taste. Over 41,189 real script
+/// cases -- every case of the Oils spec suites, the Smoosh suite and this
+/// repository's own corpus -- the peak of this sum is 0 bytes at the
+/// median, 7 bytes at the 99th centile and 20,004 bytes at its maximum,
+/// which is itself an adversarial case in `aud_foundation_e.txt`. 8 MiB is
+/// 419 times that maximum, and is far past any real `eval` payload: the
+/// shell-initialisation blobs that motivate a large one are kilobytes.
+///
+/// What it buys is a ceiling on memory, because the retained parse is
+/// about a hundred times the text it came from -- 61 MB to parse one
+/// 500 KB command, measured. Eight mebibytes of live text is therefore
+/// about 0.85 GB whatever N is, against 25.1 GB before, and below the
+/// 1.52 GB the pinned Bash spends *succeeding* on the same input at
+/// N = 4,000. Lowering it would buy proportionally less memory and cost
+/// the same headroom; the hundredfold is the parse's own constant and is
+/// a separate question from this bound.
+///
+/// Fixed, with no option and no variable, for the reason
+/// [`MAX_EVALUATION_DEPTH`] is: a limit a script can raise is a control for
+/// turning the safety off.
+// [spec:nsh:req:idiom.bounded-recursion]
+pub(crate) const MAX_EVALUATION_WORK: usize = 8 << 20;
+
 fn evaluate_function(
     shell: &mut Shell,
     function: &FunctionDefinition,
@@ -2393,8 +2466,10 @@ fn evaluate_function(
     let saved_loop_depth = shell.evaluation.loop_depth;
 
     crate::error::with_interrupts_deferred(shell, |shell| {
-        /* Command lookup cloned the owned body, so redefining this function
-         * while it runs cannot pull the body out from under this call. */
+        /* Command lookup took a handle on the body, so redefining this
+         * function while it runs cannot pull the body out from under this
+         * call: the table gets a new handle and this frame keeps the old
+         * one. */
         shell.evaluation.function_line = function.line.get();
         // [spec:nsh:req:compat.smoosh.nonlexical-control]
         // Ordinarily only loops lexically inside the function are visible.
