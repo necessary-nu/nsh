@@ -40,6 +40,22 @@ fn with_stack(case: impl FnOnce() + Send + 'static) {
         .expect("case thread finished");
 }
 
+/// Run one case on a stack far smaller than any frontend's, which is the
+/// stack [`spec:nsh:req:idiom.bounded-recursion`] names.
+///
+/// A megabyte is for the cases whose subject is a walk that must spend no
+/// stack at all: one that spends a frame per element of a list overflows
+/// this long before the eight megabytes a main thread happens to get, and
+/// one that spends none cannot tell the two apart.
+fn on_a_small_stack(case: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(case)
+        .expect("spawn a case thread")
+        .join()
+        .expect("case thread finished");
+}
+
 /// Parsing only. `noexec` is what makes these parser tests rather than
 /// evaluator ones -- and it is the threat model too, since a syntax check
 /// on a hostile file is the cheapest way to reach the crash. It also
@@ -403,6 +419,90 @@ fn a_long_flat_list_is_not_deep() {
     with_stack(|| {
         let mut shell = executing_shell();
         let script = ":\n".repeat(20_000);
+
+        let status = shell.run(script.as_bytes()).expect("a flat list parses");
+
+        assert_eq!(status.code(), 0);
+    });
+}
+
+/// A list joined on one line is the same non-nesting, and running it must
+/// not nest either.
+///
+/// The parser reads `a && b && c` by hanging each new element off what it
+/// already has, so the chain is as deep as the line is long and no ceiling
+/// counts it -- while the evaluator walked that chain by recursion and
+/// spent a frame per element. `:` twenty thousand times joined by ` && `
+/// is a script both reference shells run, and here it was a segmentation
+/// fault; `;` and `||` reached the same walk.
+///
+/// Short-circuiting is asserted at the same length rather than only in the
+/// small, because a walk that unwound the chain into the wrong order or
+/// lost the status between two elements would run exactly the commands a
+/// `&&` refuses -- and would say so twenty thousand times.
+// [spec:nsh:req:idiom.bounded-recursion/test]
+#[test]
+fn a_long_flat_list_runs_to_completion() {
+    on_a_small_stack(|| {
+        let count = 20_000;
+        let cases = [
+            // Every element runs, and the list is over when they have.
+            (
+                "and",
+                format!("{}\necho end", vec![":"; count].join(" && ")),
+                0,
+            ),
+            (
+                "semicolon",
+                format!("{}\necho end", vec![":"; count].join("; ")),
+                0,
+            ),
+            (
+                "or",
+                format!("{}\necho end", vec!["false"; count].join(" || ")),
+                0,
+            ),
+            // And none of them runs when the first says so.
+            (
+                "and-refused",
+                format!("false{}\necho end", " && echo boom".repeat(count)),
+                0,
+            ),
+            (
+                "or-refused",
+                format!("true{}\necho end", " || echo boom".repeat(count)),
+                0,
+            ),
+            // The list's status is the last element that ran.
+            (
+                "failing-tail",
+                format!("{} && false\necho end", vec![":"; count].join(" && ")),
+                0,
+            ),
+        ];
+
+        for (name, script, code) in cases {
+            let mut shell = executing_shell();
+
+            let status = shell.run(script.as_bytes()).expect("a flat list runs");
+
+            assert_eq!(status.code(), code, "{name}");
+            let stdout = shell.take_captured_stdout().expect("capture stdout");
+            assert_eq!(stdout.as_bstr(), BStr::new(b"end\n"), "{name}");
+        }
+    });
+}
+
+/// Freeing the chain is the same walk with the same hazard, and it does
+/// not need the list to have been run: `noexec` builds the tree and drops
+/// it without evaluating anything, and the drop glue the compiler writes
+/// descended it one element per frame.
+// [spec:nsh:req:idiom.bounded-recursion/test]
+#[test]
+fn a_long_flat_list_is_freed_iteratively() {
+    on_a_small_stack(|| {
+        let mut shell = shell();
+        let script = vec![":"; 50_000].join(" && ");
 
         let status = shell.run(script.as_bytes()).expect("a flat list parses");
 

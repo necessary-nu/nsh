@@ -347,6 +347,42 @@ pub struct BinaryCommand {
     pub right: Box<Node>,
 }
 
+/* A list is parsed one element at a time into a chain that leans left, so a
+ * long line is a deep tree and no ceiling in the parser counts it. Freeing
+ * such a tree is the same walk as running it and has the same hazard: the
+ * glue the compiler writes descends the chain by recursion, which spends a
+ * frame per element and overflows the stack on a tree that need never have
+ * been evaluated -- `nsh -n` builds one and drops it. The chain is taken
+ * apart from the top instead, so every element reaches its own drop with
+ * nothing left below it. */
+impl Drop for BinaryCommand {
+    fn drop(&mut self) {
+        let mut chain = Vec::new();
+        take_binary_children(&mut chain, (self.left.as_mut(), self.right.as_mut()));
+        while let Some(mut node) = chain.pop() {
+            if let Ok(sides) = node.split_binary() {
+                take_binary_children(&mut chain, sides);
+            }
+        }
+    }
+}
+
+/// Move a node's binary children out for the caller to free, leaving behind
+/// a leaf whose own drop reaches nothing.
+fn take_binary_children(chain: &mut Vec<Node>, sides: (&mut Node, &mut Node)) {
+    for side in [sides.0, sides.1] {
+        if side.split_binary().is_ok() {
+            chain.push(std::mem::replace(
+                side,
+                Node::Word(WordNode {
+                    tokens: SourceTokens::none(),
+                    word: crate::word::ParsedWord::new(),
+                }),
+            ));
+        }
+    }
+}
+
 /// An if command.
 #[derive(Clone, PartialEq, Eq)]
 pub struct IfCommand {
@@ -655,6 +691,25 @@ impl Node {
             Node::Bash(node) => node.set_tokens(tokens),
         }
         self
+    }
+
+    /// The two children of a binary form, or the node itself when it is
+    /// not one.
+    ///
+    /// The five forms sharing a [`BinaryCommand`] answer together because
+    /// they are what a list's chain is built from, and it is the chain that
+    /// can be as deep as a script is long. A walk down one keeps using the
+    /// node it asked about, so the borrow is handed back rather than left
+    /// outstanding on the arm that says no.
+    pub(crate) fn split_binary(&mut self) -> Result<(&mut Node, &mut Node), &mut Node> {
+        match self {
+            Node::And(binary)
+            | Node::Or(binary)
+            | Node::Sequence(binary)
+            | Node::While(binary)
+            | Node::Until(binary) => Ok((binary.left.as_mut(), binary.right.as_mut())),
+            node => Err(node),
+        }
     }
 }
 

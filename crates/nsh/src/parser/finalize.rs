@@ -47,7 +47,28 @@ pub(super) fn node(
     Ok(())
 }
 
+/* A list's chain leans left and is as deep as the line is long, so walking
+ * into it by recursion would spend a frame per element on a tree the parser
+ * built without recursing at all. The spine is unwound here and its elements
+ * are visited in source order, which is the order the bodies queued in. */
 fn here_documents(node: &mut Node, bodies: &mut VecDeque<WordNode>) -> Result<(), ()> {
+    let mut spine = vec![node];
+    while let Some(element) = spine.pop() {
+        match element.split_binary() {
+            /* Left last, so it comes back off first: the bodies queued in
+             * source order and are handed out in the order they are asked
+             * for. */
+            Ok((left, right)) => {
+                spine.push(right);
+                spine.push(left);
+            }
+            Err(element) => here_document(element, bodies)?,
+        }
+    }
+    Ok(())
+}
+
+fn here_document(node: &mut Node, bodies: &mut VecDeque<WordNode>) -> Result<(), ()> {
     match node {
         Node::Command(command) => redirections(&mut command.redirections, bodies)?,
         Node::Pipeline(pipeline) => {
@@ -62,14 +83,9 @@ fn here_documents(node: &mut Node, bodies: &mut VecDeque<WordNode>) -> Result<()
             here_documents(&mut command.command, bodies)?;
             redirections(&mut command.redirections, bodies)?;
         }
-        Node::And(binary)
-        | Node::Or(binary)
-        | Node::Sequence(binary)
-        | Node::While(binary)
-        | Node::Until(binary) => {
-            here_documents(&mut binary.left, bodies)?;
-            here_documents(&mut binary.right, bodies)?;
-        }
+        // The caller unwinds a chain before visiting anything, so a binary
+        // form never arrives here whole.
+        Node::And(_) | Node::Or(_) | Node::Sequence(_) | Node::While(_) | Node::Until(_) => {}
         Node::If(command) => {
             here_documents(&mut command.condition, bodies)?;
             here_documents(&mut command.then_branch, bodies)?;

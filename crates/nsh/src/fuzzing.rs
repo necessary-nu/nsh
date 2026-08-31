@@ -1064,7 +1064,11 @@ pub(crate) mod tests {
         let crate::nodes::Node::Sequence(mut list) = sound else {
             panic!("a sequence")
         };
-        list.left = Box::new((*list.left).with_tokens(elsewhere));
+        /* A `BinaryCommand` frees its own children, so a child cannot be
+         * moved out of one: the hole is filled with something to free
+         * rather than left behind. */
+        let left = std::mem::replace(&mut list.left, Box::new(parse(&mut shell, b"z")));
+        list.left = Box::new((*left).with_tokens(elsewhere));
         let damaged = crate::nodes::Node::Sequence(list);
         assert!(
             crate::nodes::emit::misplaced_run(&damaged).is_some(),

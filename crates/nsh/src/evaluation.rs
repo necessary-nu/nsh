@@ -794,38 +794,8 @@ pub fn evaluate_tree(
                 flow!(evaluate_pipeline(shell, pipeline, context))
             }
             Node::Case(command) => flow!(evaluate_case(shell, command, context)),
-            Node::And(command) => {
-                let left = flow!(evaluate_tree(
-                    shell,
-                    Some(command.left.as_ref()),
-                    EvaluationContext::TESTED
-                ));
-                if !left.success() {
-                    left
-                } else {
-                    flow!(evaluate_tree(shell, Some(command.right.as_ref()), context))
-                }
-            }
-            Node::Or(command) => {
-                let left = flow!(evaluate_tree(
-                    shell,
-                    Some(command.left.as_ref()),
-                    EvaluationContext::TESTED
-                ));
-                if left.success() {
-                    left
-                } else {
-                    flow!(evaluate_tree(shell, Some(command.right.as_ref()), context))
-                }
-            }
-            Node::Sequence(command) => {
-                // A sequence's observable status is its right-hand command.
-                flow!(evaluate_tree(
-                    shell,
-                    Some(command.left.as_ref()),
-                    context.tested_only(),
-                ));
-                flow!(evaluate_tree(shell, Some(command.right.as_ref()), context))
+            Node::And(_) | Node::Or(_) | Node::Sequence(_) => {
+                flow!(evaluate_list(shell, node, context))
             }
             Node::If(command) => {
                 let condition = flow!(evaluate_tree(
@@ -964,6 +934,68 @@ pub fn evaluate_tree(
         return Ok(Flow::Done(shell.status));
     }
     Ok(Flow::END)
+}
+
+/// Which operator joined an element of a list to the ones before it.
+#[derive(Clone, Copy)]
+enum ListJoin {
+    And,
+    Or,
+    Sequence,
+}
+
+/* The parser reads a list one element at a time and hangs each new one off
+ * what it already has, so `a; b; c` arrives as a chain leaning left that is
+ * as deep as the line is long. Nothing bounds that depth: a nesting ceiling
+ * charges constructs that nest, and a list nests nothing. A walk that spent
+ * a frame per element would therefore overflow the stack on a list both
+ * reference shells run, so the spine is collected and then run in the one
+ * frame -- iteratively, the way the parser built it.
+ *
+ * Each element's context is settled on the way down with it, because it is
+ * the joins to an element's *right* that say whether the shell may act on
+ * its failure: `&&` and `||` consume their left side's status, a `;` passes
+ * down whatever its own caller said, and the last element answers for the
+ * list. `-e` reads that distinction, so it is carried rather than recomputed.
+ */
+// [spec:posix:req:cmd.and-or-precedence]
+fn evaluate_list(
+    shell: &mut Shell,
+    node: &Node,
+    context: EvaluationContext,
+) -> Result<Flow, Error> {
+    let mut joins = Vec::new();
+    let mut element = node;
+    let mut element_context = context;
+    /* The join a list node makes, and the two sides it makes it between.
+     * Anything else is the element the spine ends at. */
+    while let Some((join, binary)) = match element {
+        Node::And(binary) => Some((ListJoin::And, binary)),
+        Node::Or(binary) => Some((ListJoin::Or, binary)),
+        Node::Sequence(binary) => Some((ListJoin::Sequence, binary)),
+        _ => None,
+    } {
+        joins.push((join, binary.right.as_ref(), element_context));
+        element_context = match join {
+            ListJoin::Sequence => element_context.tested_only(),
+            ListJoin::And | ListJoin::Or => EvaluationContext::TESTED,
+        };
+        element = binary.left.as_ref();
+    }
+
+    let mut status = flow!(evaluate_tree(shell, Some(element), element_context));
+    for (join, element, element_context) in joins.into_iter().rev() {
+        let short_circuited = match join {
+            ListJoin::And => !status.success(),
+            ListJoin::Or => status.success(),
+            // A sequence's observable status is its right-hand command.
+            ListJoin::Sequence => false,
+        };
+        if !short_circuited {
+            status = flow!(evaluate_tree(shell, Some(element), element_context));
+        }
+    }
+    Ok(Flow::Done(status))
 }
 
 // [spec:dash:sem:eval.evaltreenr-fn]
