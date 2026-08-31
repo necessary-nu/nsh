@@ -1387,6 +1387,7 @@ assertions (
     {id bound-recursive-evaluation, kind @complete, author "brendan@necessary.nu", at 2026-08-30T21:27:15.450115667Z}
     {id bound-total-parse-work, kind @complete, author "brendan@necessary.nu", at 2026-08-30T23:48:35.78347204Z}
     {id bound-repeated-evaluation-work, kind @complete, author "brendan@necessary.nu", at 2026-08-31T09:36:32.75481754Z}
+    {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
 )
 
 impl_evidence (
