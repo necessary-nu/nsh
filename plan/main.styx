@@ -7107,6 +7107,7 @@ children (
                                 id stop-the-closure-gate-flaking
                                 title "Stop the closure gate depending on machine load"
                                 kind @test
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-30T21:26:30.358267412Z
@@ -7120,6 +7121,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-01T19:16:52.116355938Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

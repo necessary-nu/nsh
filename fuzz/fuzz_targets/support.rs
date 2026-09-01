@@ -70,6 +70,31 @@ fn reference_bash() -> &'static PathBuf {
     })
 }
 
+/// A script or an output as it goes into a report.
+///
+/// A fingerprint identifies a divergence across runs and says nothing
+/// about what it was, so every triage began by writing a program to
+/// recover the script from the artifact. Printable bytes go through as
+/// themselves, everything else in octal, and the whole thing is cut at a
+/// screenful -- the head of a differing script is what names it.
+pub fn shown(bytes: &[u8]) -> String {
+    const LIMIT: usize = 600;
+    let mut out = String::new();
+    for byte in bytes.iter().take(LIMIT) {
+        match byte {
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'\\' => out.push_str("\\\\"),
+            0x20..=0x7e => out.push(char::from(*byte)),
+            _ => out.push_str(&format!("\\{byte:03o}")),
+        }
+    }
+    if bytes.len() > LIMIT {
+        out.push_str(&format!("... ({} bytes)", bytes.len()));
+    }
+    out
+}
+
 pub fn under_bash(script: &[u8], env: &[(Vec<u8>, Vec<u8>)]) -> Option<(Vec<u8>, i32)> {
     let shell = reference_bash();
     let mut child = Command::new(shell)
@@ -88,39 +113,48 @@ pub fn under_bash(script: &[u8], env: &[(Vec<u8>, Vec<u8>)]) -> Option<(Vec<u8>,
         // rather than an input being uninteresting.
         .unwrap_or_else(|error| panic!("cannot start the pinned Bash {}: {error}", shell.display()));
 
-    let write_result = child.stdin.take()?.write_all(script);
-    if write_result.is_err() {
-        drop(child.kill());
-        drop(child.wait());
-        return None;
-    }
+    /* A short write is Bash having stopped reading, which is an answer
+     * about the script rather than a reason to measure nothing: the
+     * output it produced before it stopped and the status it exited with
+     * are both still the reference's. Returning `None` here made every
+     * script that makes Bash exit early invisible to the comparison. */
+    drop(
+        child
+            .stdin
+            .take()
+            .expect("the reference's standard input")
+            .write_all(script),
+    );
 
     let out = child.wait_with_output().ok()?;
     Some((out.stdout, out.status.code().unwrap_or(-1)))
 }
 
 pub fn assert_matches_bash(label: &str, data: &[u8], script: &[u8], env: Vec<(Vec<u8>, Vec<u8>)>) {
-    let (Some(ours), Some((theirs, their_status))) =
-        (under_nsh(script, env.clone()), under_bash(script, &env))
-    else {
-        return;
-    };
+    let ours = under_nsh(script, env.clone())
+        .expect("this shell could not be built or captured, which is the harness and not an input");
+    let (theirs, their_status) = under_bash(script, &env)
+        .expect("the pinned Bash could not be waited for, which is the harness and not an input");
 
     if ours.refused && their_status != 0 {
         return;
     }
     assert!(
         !ours.refused,
-        "{label}: nsh refused Bash script input={:016x} bash_status={their_status} bash_stdout={:016x}",
+        "{label}: nsh refused a script Bash ran (input={:016x}, bash_status={their_status})\n\
+         script: {}\n  bash: {}",
         fingerprint(data),
-        fingerprint(&theirs),
+        shown(script),
+        shown(&theirs),
     );
     assert!(
         ours.stdout == theirs && ours.status == their_status,
-        "{label}: nsh/Bash disagreement input={:016x} nsh_status={} bash_status={their_status} nsh_stdout={:016x} bash_stdout={:016x}",
+        "{label}: nsh/Bash disagreement (input={:016x})\n\
+         script: {}\n   nsh: {} (status {})\n  bash: {} (status {their_status})",
         fingerprint(data),
+        shown(script),
+        shown(&ours.stdout),
         ours.status,
-        fingerprint(&ours.stdout),
-        fingerprint(&theirs),
+        shown(&theirs),
     );
 }

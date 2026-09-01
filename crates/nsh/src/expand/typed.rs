@@ -976,7 +976,7 @@ fn value_expansion(
             context.splits(),
             context.quoted,
         ))),
-        Value::At(words) if context.full => {
+        Value::At(words) if context.full && context.quoted => {
             if words.is_empty() {
                 return Ok(Expansion::none());
             }
@@ -996,7 +996,15 @@ fn value_expansion(
                     .collect(),
             })
         }
-        Value::Star(words) if context.full && !context.quoted => {
+        /* Unquoted, `$@` and `$*` are the same expansion: the words are
+         * joined with IFS and the result is split like any other. Giving
+         * `$@` a field per word instead kept an empty positional as an
+         * empty field, where splitting would have dropped it -- so
+         * `set -- '' b; echo $@` printed a leading space that Bash, dash
+         * and POSIX do not. Found by the differential fuzz target on
+         * 2026-09-01; the quoted form, where the two do differ, is the
+         * arm above. */
+        Value::At(words) | Value::Star(words) if context.full && !context.quoted => {
             if words.is_empty() {
                 return Ok(Expansion::none());
             }

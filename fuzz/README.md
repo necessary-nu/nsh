@@ -6,6 +6,13 @@ Coverage-guided fuzzing of the shell, with libFuzzer through `cargo-fuzz`.
     fuzz/run.sh parse 600        # for ten minutes
     fuzz/run.sh parse 600 -jobs=4
 
+A target that does not exist is refused, against `cargo fuzz list`, before
+anything is seeded. `fuzz/run.sh parse 240` typed as `fuzz/run.sh 240` used
+to pass the name check, seed a corpus for `240`, create an artifact
+directory for it and hand it to cargo -- a session that measures nothing
+and says nothing, which is what
+`[spec:nsh:req:oracle.cannot-measure-is-a-failure]` exists to refuse.
+
 The first run seeds `fuzz/corpus/<target>` from the shell text this
 repository already vendors — the Smoosh scripts and the Oils spec files.
 Real scripts are far better starting points than random bytes: they reach
@@ -28,6 +35,32 @@ The reason is sharper for a fuzzer than for a test: the whole point of one
 is to reach states nobody predicted, so "this target cannot execute
 anything" is precisely a claim it is trying to falsify. The managed
 workspace sandbox already supplies that outer boundary in Codex sessions.
+
+## What a campaign has found
+
+The first campaign against the current tree ran on 2026-09-01: fifteen
+minutes on `differential` and five on each of the other nine. It produced
+six artifacts across three targets, and none of the three had been seen by
+the Oils survey, the POSIX harness or Smoosh.
+
+* `differential` -- unquoted `$@` kept an empty positional as an empty
+  field, so `set -- '' b; echo $@` printed a leading space that Bash, dash
+  and POSIX do not. Fixed; `crates/nsh-cli/tests/unquoted_positional_fields.rs`
+  pins it. The corpora set positionals to non-empty words, which is why
+  none of them reached it.
+* `parameter` -- `${X/$P/$R}` substitutes a different span from Bash when
+  the pattern is made of metacharacters and the value is long. Filed as
+  `close-the-pattern-replacement-divergence`.
+* `matcher` -- four inputs of about four hundred bytes take between eleven
+  and ninety-two seconds to match. libFuzzer files these as `slow-unit`
+  rather than `crash`, so a replay exits zero and a sweep does not see
+  them; they have to be read. Filed as
+  `bound-the-cost-of-matching-a-pattern`.
+
+A divergence used to be reported as two fingerprints, which identifies it
+across runs and says nothing about what it was, so every triage began by
+writing a program to recover the script from the artifact. The report now
+carries the script and both outputs.
 
 ## Why this exists
 
