@@ -60,9 +60,31 @@ function under `crates/` and reports two shapes:
 |---|---|
 | `early-return` | a `return;` or `return Ok(())` -- an exit that reports success -- reached at run time |
 | `unmeasured-branch` | every assertion in the check sits inside one `if let Ok(…)` or `if let Some(…)` that has no `else` |
+| `unmeasured-provenance` | a comment says the pinned reference produced the values below it, in a file that never runs that reference |
 
 A `return None` inside a closure is not an exit that reports success, and
 is not reported.
+
+The third code was added later, for a shape the first two cannot see.
+`crates/nsh/src/escape/bash.rs` said its `%q` table was "derived byte by
+byte from the pinned Bash 5.3 build" and
+`crates/nsh/src/expand/typed/bash.rs` said the same of its substring
+table. Neither returned early and neither nested an assertion, because
+neither file held a reference at all: both tables were a transcript of
+one session with that build, written down once and never run again. The
+values turned out to be right, which is the part worth saying -- the
+defect is not a wrong table, it is a table that could not have told
+anyone it had gone wrong.
+
+The claim is recognised by the words `from the pinned` or `against the
+pinned`, `pinned` being this repository's name for its one calibrated
+oracle; a file counts as running it when it reaches `pinned_bash`,
+`fuzzing::reference` or `NSH_FUZZ_BASH`. A claim that names a `.rs` file
+is a cross-reference rather than a claim, and is not reported -- which is
+also the resolution the code asks for. Both instances were closed that
+way: `crates/nsh-cli/tests/bash_quoting_and_slicing.rs` runs every case
+from both tables through both shells and compares the answers, holding no
+expected values of its own, and each table's comment now names it.
 
 ### The permitted static skip
 
@@ -113,6 +135,31 @@ coverage reads complete while they are checked by nobody:
   catch the twenty-sixth. What the fuzz side has instead is
   `fuzz/fuzz_targets/support.rs`, where obtaining the oracle panics, so no
   target can reach a comparison without one.
+
+### What no lint here reaches
+
+A check can also fail to measure because its *input* is not what its name
+says, and that is not findable in the source text. Three were found by
+hand and none of the three codes above would have reported any of them:
+
+* `a_long_flat_list_is_not_deep` built its list with `":\n".repeat(20_000)`,
+  and a newline ends a top-level list, so it never built a deep tree. It
+  checked that a shallow thing was shallow, under a name saying otherwise,
+  for as long as it existed. The 20,000-element `&&` chain it was believed
+  to cover was a reachable SIGSEGV the whole time.
+* `a_reply_outside_the_menu_empties_the_name` asserted this shell's own
+  `select` output as the reference's, on the one stream where the two
+  differ.
+* the round-trip printer property was a fixed point that any
+  self-consistent output satisfies, including output that runs differently
+  from its source.
+
+The honest statement is that these were caught by re-measuring the
+behaviour for an unrelated reason, and that nothing in the tree looks for
+them. A name is prose and an input is code; no lint can compare the two.
+What the repository has instead is the standing bar that a check be seen
+to fail before it is trusted -- which each of these would have failed on
+the day it was written, had anyone asked.
 
 The one real defect in that count was `fuzz/fuzz_targets/differential.rs`,
 which the commit that moved the differential targets onto the pinned Bash

@@ -945,6 +945,11 @@ mod tests {
     /// `select` has said the same of an array since it was written. Only
     /// the scalar clamped to the front, which is what the sixth
     /// parameter artifact was -- not the invalid UTF-8 it looked like.
+    ///
+    /// Every case below is also run as `${x:offset:length}` in both
+    /// shells by `crates/nsh-cli/tests/bash_quoting_and_slicing.rs`, so
+    /// the claim this comment makes is re-measured rather than
+    /// remembered.
     // [spec:nsh:req:compat.bash.expansion-globbing/test]
     #[test]
     fn a_substring_offset_past_the_end_selects_nothing() {

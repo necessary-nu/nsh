@@ -1389,6 +1389,7 @@ assertions (
     {id bound-repeated-evaluation-work, kind @complete, author "brendan@necessary.nu", at 2026-08-31T09:36:32.75481754Z}
     {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
     {id run-the-fuzz-oracle-against-this-tree, kind @doing, author "brendan@necessary.nu", at 2026-09-01T17:22:21.766689073Z}
+    {id catch-a-test-whose-input-is-not-its-name, kind @doing, author "brendan@necessary.nu", at 2026-09-01T17:30:20.442536448Z}
 )
 
 impl_evidence (

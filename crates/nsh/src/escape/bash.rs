@@ -362,6 +362,11 @@ mod tests {
     /// straight after the `:` or `=` of an assignment and nowhere else, a
     /// `#` starts a comment only at the front, and a `,` is escaped
     /// everywhere -- which nsh was not doing at all.
+    ///
+    /// The table below is this function's answer. Every input in it is
+    /// also run through `printf %q` in both shells by
+    /// `crates/nsh-cli/tests/bash_quoting_and_slicing.rs`, so the claim
+    /// this comment makes is re-measured rather than remembered.
     // [spec:nsh:req:compat.bash.builtins-special-variables/test]
     #[test]
     fn requote_escapes_a_byte_where_it_is_syntax() {

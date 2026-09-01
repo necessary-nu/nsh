@@ -8,6 +8,16 @@
 //! findable in the source text, which is what makes the rule worth more
 //! than prose.
 //!
+//! A third shape was found later and is reported too: a table of expected
+//! bytes whose comment says the pinned reference produced them, in a file
+//! that never runs that reference. The first two codes cannot see it --
+//! nothing returns early and nothing is nested, because there is no
+//! reference in the file at all -- and it is how a transcript of one
+//! session becomes a permanent expectation nobody re-measures. A claim
+//! that names the `.rs` file where the measurement lives is a
+//! cross-reference and is not reported, which is also the resolution:
+//! measure the table somewhere and say where.
+//!
 //! # What is not flagged
 //!
 //! A check that does not apply to the host it is running on is permitted,
@@ -57,6 +67,21 @@ const PLATFORM_FACTS: &str = "crates/nsh-platform/src";
 /// The two shapes, and the codes their suppressions carry.
 const EARLY_RETURN: &str = "early-return";
 const UNMEASURED_BRANCH: &str = "unmeasured-branch";
+const UNMEASURED_PROVENANCE: &str = "unmeasured-provenance";
+
+/// How a comment claims that the values beneath it are the reference's.
+///
+/// Both spellings are already in the tree: the module doc of
+/// `crates/nsh-cli/tests/bash_error_trap_forks.rs` uses one and the
+/// table doc in `crates/nsh/src/expand/typed/bash.rs` the other. The
+/// word that makes either a claim rather than a mention is `pinned`,
+/// which is this repository's name for its one calibrated oracle.
+const PROVENANCE_CLAIMS: &[&str] = &["from the pinned", "against the pinned"];
+
+/// How a file obtains that reference. `pinned_bash::path` asserts its way
+/// to the pinned build and `fuzzing::reference` is the library spelling
+/// of the same check; `NSH_FUZZ_BASH` names it to a run.
+const REFERENCE_CALLS: &[&str] = &["pinned_bash", "fuzzing::reference", "NSH_FUZZ_BASH"];
 
 /// Ways a check says it measured something. `unwrap` and `expect` are
 /// here because they fail the run, which is the property that matters.
@@ -421,6 +446,119 @@ fn shapes(masked: &str, check: &Check, facts: &[String]) -> Vec<(&'static str, u
     found
 }
 
+/// Where a file claims the pinned reference produced its expectations
+/// without ever obtaining that reference, as `(line, the claim)`.
+///
+/// A table of expected bytes with the reference's name on it is the third
+/// way a check passes without measuring, and the one the other two codes
+/// cannot see: nothing returns early and nothing is nested, because there
+/// is no reference in the file at all. It was found by hand twice --
+/// `escape/bash.rs` and `expand/typed/bash.rs` both said "Derived ... from
+/// the pinned Bash 5.3 build" over literals nobody re-ran.
+///
+/// A claim that names a `.rs` file is a cross-reference rather than a
+/// claim: it says where the measurement lives, which is the resolution
+/// this code asks for and not the defect.
+fn unmeasured_claims(raw: &str, masked: &str) -> Vec<(usize, String)> {
+    if REFERENCE_CALLS.iter().any(|call| masked.contains(call)) {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for phrase in PROVENANCE_CLAIMS {
+        for (at, _) in raw.match_indices(phrase) {
+            /* A comment blanks to spaces and a literal to `~`, so this is
+             * how a claim quoted in a string stays a string. */
+            if masked.as_bytes().get(at) != Some(&b' ') {
+                continue;
+            }
+            let block = comment_block(raw, at);
+            if raw[block.0..block.1].contains(".rs") {
+                continue;
+            }
+            found.push((
+                raw[..at].matches('\n').count() + 1,
+                raw[at..]
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned(),
+            ));
+        }
+    }
+    found.sort_unstable();
+    found.dedup();
+    found
+}
+
+/// The run of comment lines the byte at `at` belongs to, as a byte range.
+fn comment_block(raw: &str, at: usize) -> (usize, usize) {
+    let mut start = raw[..at].rfind('\n').map_or(0, |end| end + 1);
+    while start > 0 {
+        let previous = raw[..start - 1].rfind('\n').map_or(0, |end| end + 1);
+        if !raw[previous..start].trim_start().starts_with("//") {
+            break;
+        }
+        start = previous;
+    }
+    let mut end = raw[at..].find('\n').map_or(raw.len(), |to| at + to + 1);
+    while end < raw.len() {
+        let next = raw[end..].find('\n').map_or(raw.len(), |to| end + to + 1);
+        if !raw[end..next].trim_start().starts_with("//") {
+            break;
+        }
+        end = next;
+    }
+    (start, end)
+}
+
+/// The provenance reports for one file, and the suppression they cost.
+///
+/// The suppression is file-scoped where the other two are check-scoped,
+/// because the claim is usually in a module or item doc comment rather
+/// than inside the `#[test]` that rests on it.
+fn provenance_reports(path: &str, raw: &str, masked: &str) -> Vec<String> {
+    let found = unmeasured_claims(raw, masked);
+    let mut allowed = Vec::new();
+    for (at, _) in raw.match_indices("// oracle-violation:") {
+        if masked.as_bytes().get(at) != Some(&b' ') {
+            continue;
+        }
+        let line = raw[at..].lines().next().unwrap_or_default();
+        let (code, reason) = line
+            .trim_start_matches("// oracle-violation:")
+            .trim()
+            .split_once('=')
+            .unwrap_or_default();
+        if code.trim() == UNMEASURED_PROVENANCE {
+            allowed.push((
+                reason.trim().to_owned(),
+                raw[..at].matches('\n').count() + 1,
+            ));
+        }
+    }
+    let mut lines = Vec::new();
+    if let Some((reason, line)) = allowed.first() {
+        if reason.len() < 12 {
+            lines.push(format!(
+                "{path}:{line}: `{UNMEASURED_PROVENANCE}=` needs a reason, not `{reason}`"
+            ));
+        } else if found.is_empty() {
+            lines.push(format!(
+                "{path}:{line}: `{UNMEASURED_PROVENANCE}` suppresses nothing here; delete it"
+            ));
+        }
+        return lines;
+    }
+    for (line, claim) in found {
+        lines.push(format!(
+            "{path}:{line}: {UNMEASURED_PROVENANCE}: `{claim}` names the reference \
+             this file never runs"
+        ));
+    }
+    lines
+}
+
 /// One file's reports, and the suppressions that were spent doing it.
 fn report(path: &str, raw: &str, facts: &[String]) -> Vec<String> {
     let masked = String::from_utf8_lossy(&masked(raw)).into_owned();
@@ -444,7 +582,9 @@ fn report(path: &str, raw: &str, facts: &[String]) -> Vec<String> {
             lines.push(text);
         }
         for (code, reason, line) in allowed {
-            if !matches!(code.as_str(), EARLY_RETURN | UNMEASURED_BRANCH) {
+            if code == UNMEASURED_PROVENANCE {
+                /* File-scoped, and audited by `provenance_reports`. */
+            } else if !matches!(code.as_str(), EARLY_RETURN | UNMEASURED_BRANCH) {
                 lines.push(format!(
                     "{path}:{line}: `{code}` is not a shape this lint reports"
                 ));
@@ -459,6 +599,7 @@ fn report(path: &str, raw: &str, facts: &[String]) -> Vec<String> {
             }
         }
     }
+    lines.extend(provenance_reports(path, raw, &masked));
     lines
 }
 
@@ -504,6 +645,9 @@ fn no_check_can_pass_without_measuring() {
          If the report is wrong -- an early return with nothing to do with a \
          reference -- record why, inside the check:\n\
          \x20   // oracle-violation: {EARLY_RETURN}=<reason, at least a dozen characters>\n\
+         An `{UNMEASURED_PROVENANCE}` report wants the table measured rather \
+         than excused: run it against the pinned Bash somewhere and name that \
+         file in the comment that makes the claim.\n\
          A check that genuinely does not apply to this host says so statically, \
          with a `pub const fn` host fact from nsh-platform, `cfg`, or `#[ignore]`.\n\
          The lint itself is crates/nsh/tests/oracle_measurement.rs.",
@@ -536,11 +680,25 @@ fn the_forbidden_shapes_are_reported() {
      * excusing a runtime skip further down. */
     let after_a_closed_block = "#[test]\nfn t() {\n    if can_unlink_current_directory() {\n        prepare();\n    }\n    if !fixture_exists() {\n        return;\n    }\n    assert!(true);\n}\n";
 
+    /* The third shape. Every sample below spells the claim inside a Rust
+     * string, which the masker blanks to `~`, so this file cannot report
+     * itself for holding them. */
+    let claimed = "/// Derived from the pinned Bash 5.3 build.\nconst T: u8 = 0;\n";
+    let delegated =
+        "/// Measured against the pinned Bash by tests/elsewhere.rs.\nconst T: u8 = 0;\n";
+    let measured =
+        "/// Derived from the pinned Bash 5.3 build.\nfn t() {\n    pinned_bash::path();\n}\n";
+    let claim_in_a_literal = "fn t() {\n    let s = \"derived from the pinned Bash\";\n}\n";
+    let excused = "// oracle-violation: unmeasured-provenance=the table is a transcript kept by hand\n/// Derived from the pinned Bash 5.3 build.\nconst T: u8 = 0;\n";
+    let thin_excuse = "// oracle-violation: unmeasured-provenance=no\n/// Derived from the pinned Bash 5.3 build.\nconst T: u8 = 0;\n";
+    let stale_excuse = "// oracle-violation: unmeasured-provenance=this file makes no such claim at all\nconst T: u8 = 0;\n";
+
     for (source, expected) in [
         (guarded_return, EARLY_RETURN),
         (let_else, EARLY_RETURN),
         (nested, UNMEASURED_BRANCH),
         (after_a_closed_block, EARLY_RETURN),
+        (claimed, UNMEASURED_PROVENANCE),
     ] {
         let reports = report("sample.rs", source, &facts);
         assert_eq!(
@@ -551,7 +709,15 @@ fn the_forbidden_shapes_are_reported() {
         assert!(reports[0].contains(expected), "{reports:?}");
     }
 
-    for source in [static_skip, in_a_literal, suppressed] {
+    for source in [
+        static_skip,
+        in_a_literal,
+        suppressed,
+        delegated,
+        measured,
+        claim_in_a_literal,
+        excused,
+    ] {
         assert!(
             report("sample.rs", source, &facts).is_empty(),
             "reported something it should not have: {:?}",
@@ -570,5 +736,17 @@ fn the_forbidden_shapes_are_reported() {
             .iter()
             .any(|line| line.contains("suppresses nothing")),
         "a suppression that suppresses nothing was kept"
+    );
+    assert!(
+        report("sample.rs", thin_excuse, &facts)
+            .iter()
+            .any(|line| line.contains("needs a reason")),
+        "a provenance suppression without a reason was accepted"
+    );
+    assert!(
+        report("sample.rs", stale_excuse, &facts)
+            .iter()
+            .any(|line| line.contains("suppresses nothing")),
+        "a provenance suppression that suppresses nothing was kept"
     );
 }
