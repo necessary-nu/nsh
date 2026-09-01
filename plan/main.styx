@@ -7485,6 +7485,15 @@ children (
                                         id split-input-reading-from-the-stack
                                         title "Separate reading input from the frame stack that holds it"
                                         kind @refactor
+                                        sealed true
+                                        log (
+                                            {
+                                                at 2026-09-01T23:01:48.395678455Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
+                                            }
+                                        )
                                     }
 
                                     {
