@@ -7381,12 +7381,20 @@ children (
                                         id split-the-evaluator-by-form
                                         title "Separate the evaluator's pipeline, redirection and loop families"
                                         kind @refactor
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T20:47:40.318517539Z
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-01T20:59:22.399648222Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
