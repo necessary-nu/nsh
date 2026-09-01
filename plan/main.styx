@@ -7222,12 +7222,20 @@ children (
                                 id run-the-fuzz-oracle-against-this-tree
                                 title "Run the differential oracle against the tree it is meant to judge"
                                 kind @test
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-01T17:22:21.766689073Z
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-01T19:17:24.380409239Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
