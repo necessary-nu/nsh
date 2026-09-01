@@ -7463,6 +7463,14 @@ children (
                                         id split-jobs-by-subject
                                         title "Separate job control's terminal, reporting and forking subjects"
                                         kind @refactor
+                                        log (
+                                            {
+                                                at 2026-09-01T21:37:06.210695851Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
+                                        )
                                     }
 
                                     {
@@ -7501,6 +7509,20 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "`evaluate_command_in_scope` is 545 lines, and it is the largest single function in the shell. `split-the-evaluator-by-form` moved it into `crates/nsh/src/evaluation/command.rs`, whose whole subject is it, and deliberately did not touch it: that commit was a move and this is a decomposition, which is a different claim about a diff and wants a different commit.\n\nIt survived the density gate for as long as it has because the gate counts functions and this is one of them. `[spec:np:req:dod.complexity]` caps cyclomatic complexity at 50 rather than length, and a long straight-line body with few branches passes both -- so nothing in the tree has ever objected to it.\n\nWHAT IT DOES, in the order it does it, which is also the seam: expand the command's words; decide whether the name is a built-in, a function or a file; save the shell state the command may change; apply the redirections; run the thing; put the state back; and decide what the failure meant. Six or seven of those are nameable and several already have local `let` blocks around them.\n\nTHE CONSTRAINT THAT MAKES IT DELICATE. The save-and-restore pairs are what a `return` in the middle would leak, so any decomposition has to keep every early exit inside the frame that restores. `[dec:nsh:errors-are-values]` means those exits are `Err`/`Flow` values rather than jumps, which helps; `capture_local_control` and `builtin_error_is_fatal` are the two places where the decision about a failure is already factored out, and they are the model.\n\nIT WILL ADD FUNCTIONS, which is the point and is now affordable: `command.rs` is four functions, so six more leaves it at ten.\n\nDONE WHEN. No function in `command.rs` is longer than about eighty lines; `scripts/moved-only` reports the set as *changed*, because this one is not a move and must not be committed as though it were; and the full set is re-measured -- workspace, gate, `run-oils` as a list, POSIX, smoosh -- because every command the shell runs goes through here."
+                                            }
+                                        )
+                                    }
+
+                                    {
+                                        id read-a-module-not-a-file-in-the-lints
+                                        title "Have the structural lints read a module rather than one file"
+                                        kind @test
+                                        log (
+                                            {
+                                                at 2026-09-01T21:44:50.0567977Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "`crates/nsh/tests/idiomatic_control_flow.rs` pins twenty-odd source files by path:\n\n    const PARSER: &str = include_str!(\"../src/parser.rs\");\n    const EVALUATOR: &str = include_str!(\"../src/evaluation.rs\");\n    ...\n\nand then asserts over their text -- that job control uses typed states rather than integer flags, that no translated `goto` marker survives, that no labelled block does, that a `ChildStatus` is never defaulted to zero. The subject of every one of those is how a *module* is written. The instrument is one file.\n\nTHAT WAS ALWAYS A HOLE AND THIS WEEK'S SPLITS WIDENED IT. A forbidden shape can be moved into a child module and the lint stops seeing it, without anything reporting. `split-jobs-by-subject` made it concrete from the other side: two *required* shapes -- `fn record_child_status` and `enum WaitOutcome` -- moved to `jobs/wait.rs` and the lint failed on a commit that moved code and changed nothing. `JOBS` is fixed there, and is now the concatenation of `jobs.rs` and its four children.\n\nTHE OTHERS ARE NOT FIXED, deliberately: making them read whole modules would start reporting shapes the lint has never looked at, and that is a finding to triage rather than something to smuggle into a commit whose whole claim is that it moved code without changing it. `parser.rs`, `evaluation.rs`, `expand/typed.rs`, `nodes/source.rs`, `variables.rs` and `options.rs` all have children now.\n\nTHERE IS NO DEFECT HIDING TODAY. Every split this week was verified with `scripts/moved-only`, so nothing crossed a file boundary that was not already in the parent when the lint last passed. The exposure is prospective: new code written into a child module is unchecked.\n\nWHAT TO BUILD. Read a module as its file plus its directory, at run time, from `env!(\"CARGO_MANIFEST_DIR\")` rather than `include_str!` -- which cannot take a computed path and is why the current shape exists. One helper, `module(\"parser\")`, returning the concatenation, and the twenty consts become calls to it.\n\nWATCH IT FIND SOMETHING BEFORE TRUSTING IT. Put a `state: u8` in a child module of `jobs` and see it reported; the lint has never been asked that question and its answer is the whole point of the change.\n\nDONE WHEN. Every `include_str!` of a module root is a module read, the run reports whatever it reports, and each report is either fixed or dispositioned with a reason -- not suppressed by narrowing the read back to one file."
                                             }
                                         )
                                     }

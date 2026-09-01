@@ -1,3 +1,4 @@
+use super::wait::record_child_status;
 use super::*;
 use crate::nodes::{CaseClause, CaseCommand, SimpleCommand, SourceLine, SourceTokens, WordNode};
 use crate::word::ParsedWord;

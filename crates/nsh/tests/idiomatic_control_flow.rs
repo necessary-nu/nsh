@@ -8,7 +8,23 @@ const EXPANDER: &str = include_str!("../src/expand.rs");
 const EXPANSION_MODES: &str = include_str!("../src/expand/mode.rs");
 const EVALUATOR: &str = include_str!("../src/evaluation.rs");
 const REDIRECTIONS: &str = include_str!("../src/redirection.rs");
-const JOBS: &str = include_str!("../src/jobs.rs");
+/// The whole `jobs` module: the file and the four it was split into.
+///
+/// Every check below is about how job control is *modelled* -- typed
+/// states, no integer flags, no translated `goto` markers -- and not about
+/// which file a declaration is written in. Reading only the parent made
+/// two of them fail on a commit that moved code and changed nothing, and
+/// would have let a forbidden shape hide by moving one file down.
+static JOBS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    [
+        include_str!("../src/jobs.rs"),
+        include_str!("../src/jobs/fork.rs"),
+        include_str!("../src/jobs/render.rs"),
+        include_str!("../src/jobs/terminal.rs"),
+        include_str!("../src/jobs/wait.rs"),
+    ]
+    .concat()
+});
 const JOB_MODEL: &str = include_str!("../src/jobs/model.rs");
 const OPTIONS: &str = include_str!("../src/options.rs");
 const OPTION_MODEL: &str = include_str!("../src/options/model.rs");
@@ -595,8 +611,8 @@ fn fallible_results_are_explicit() {
 #[test]
 fn dynamic_values_are_not_clamped() {
     for (name, source, forbidden) in [
-        ("jobs", JOBS, "append_ascii"),
-        ("jobs", JOBS, "name.len().min(32)"),
+        ("jobs", JOBS.as_str(), "append_ascii"),
+        ("jobs", JOBS.as_str(), "name.len().min(32)"),
         ("parser", PARSER, "message.truncate(63)"),
         ("mail", MAIL, "MAXMBOXES"),
         ("mail", MAIL, ".take(MAXMBOXES)"),
@@ -830,7 +846,7 @@ fn operation_modes_are_typed() {
         ("expansion", EXPANSION_MODES, "pub const EXP_"),
         ("escaping", EXPANSION_MODES, "pub const RMESCAPE_"),
         ("redirection", REDIRECTIONS, "pub const REDIR_"),
-        ("job display", JOBS, "pub const SHOW_"),
+        ("job display", JOBS.as_str(), "pub const SHOW_"),
     ] {
         assert!(
             !source.contains(old_prefix),
@@ -842,7 +858,7 @@ fn operation_modes_are_typed() {
         (EVALUATOR, "struct EvaluationContext"),
         (EXPANSION_MODES, "struct ExpansionMode"),
         (REDIRECTIONS, "enum RedirectionMode"),
-        (JOBS, "enum JobDisplay"),
+        (JOBS.as_str(), "enum JobDisplay"),
         (PARSER_MULTIBYTE, "enum MultibyteMode"),
     ] {
         assert!(source.contains(typed_mode), "missing {typed_mode}");
@@ -888,7 +904,11 @@ fn evaluator_control_is_carried_by_flow() {
 // [spec:nsh:req:idiom.jobs-startup-control-flow/test]
 #[test]
 fn jobs_read_startup_are_structured() {
-    for (name, source) in [("jobs", JOBS), ("read", BUILTIN_READ), ("startup", RUNTIME)] {
+    for (name, source) in [
+        ("jobs", JOBS.as_str()),
+        ("read", BUILTIN_READ),
+        ("startup", RUNTIME),
+    ] {
         for forbidden in ["goto", "at_start", "let mut phase", "StartupPhase"] {
             assert!(
                 !source.contains(forbidden),
