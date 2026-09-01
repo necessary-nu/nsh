@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Assert that a change moved code rather than changed it.
+#
+#   scripts/moved-only            # working tree against HEAD
+#   scripts/moved-only HEAD~1     # working tree against an older commit
+#
+# A seven-hundred-line move and a seven-hundred-line rewrite are the same
+# diff, and no reviewer can tell them apart by reading one. This compares
+# the multiset of function names declared across every Rust file the change
+# touches: a move preserves it exactly, and anything that folded, inlined,
+# renamed or invented a function does not.
+#
+# It is deliberately not a lint over the tree. It answers one question about
+# one change, and it is the check that lets a split of a two-thousand-line
+# file be reviewed as the move it claims to be. A commit that means to fold
+# a helper is a different commit, and this is expected to report it.
+set -euo pipefail
+
+base=${1:-HEAD}
+git rev-parse --verify --quiet "$base^{commit}" >/dev/null || {
+    echo "scripts/moved-only: no such commit: $base" >&2
+    exit 2
+}
+
+# `fn name` at any indent, with whatever qualifiers precede it.
+names() {
+    grep -hoE '^[[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?(const[[:space:]]+|async[[:space:]]+|unsafe[[:space:]]+|extern[[:space:]]+"[^"]*"[[:space:]]+)*fn[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' \
+        | sed -E 's/.*fn[[:space:]]+//' \
+        | sort
+}
+
+touched=$(git diff --name-only --diff-filter=ACMRD "$base" -- '*.rs')
+if [ -z "$touched" ]; then
+    echo "scripts/moved-only: no Rust file changed against $base"
+    exit 0
+fi
+
+before=$(mktemp) after=$(mktemp)
+trap 'rm -f "$before" "$after"' EXIT
+while IFS= read -r path; do
+    # A file that did not exist, or no longer does, contributes nothing to
+    # that side -- which is the whole point when a split adds one.
+    git show "$base:$path" 2>/dev/null | names >> "$before" || true
+    [ -f "$path" ] && names < "$path" >> "$after"
+done <<< "$touched"
+
+sort -o "$before" "$before"
+sort -o "$after" "$after"
+
+if diff -q "$before" "$after" >/dev/null; then
+    printf 'scripts/moved-only: %s function(s) across %s file(s), unchanged\n' \
+        "$(wc -l < "$after")" "$(wc -l <<< "$touched")"
+    exit 0
+fi
+
+echo "scripts/moved-only: the set of functions changed, so this is not only a move" >&2
+diff "$before" "$after" | sed -E 's/^</  gone: /; s/^>/  new:  /' | grep -E '^  (gone|new)' >&2
+exit 1

@@ -6993,6 +6993,7 @@ children (
                                 id record-the-line-a-compound-command-ends-on
                                 title "Record the line a compound command ends on, as Bash does"
                                 kind @fix
+                                deps (split-the-parser-by-layer)
                                 log (
                                     {
                                         at 2026-08-30T17:41:44.985900606Z
@@ -7050,6 +7051,7 @@ children (
                                 id close-associative-assignment-diagnostics
                                 title "Refuse and spell associative assignments as Bash does"
                                 kind @fix
+                                deps (split-parameter-expansion-out move-the-inline-test-modules-out)
                                 log (
                                     {
                                         at 2026-08-30T20:26:54.695391238Z
@@ -7208,6 +7210,7 @@ children (
                                 id shrink-the-parsed-representation
                                 title "Make a parsed script cost what the script costs"
                                 kind @perf
+                                deps (split-the-printer-by-node-family)
                                 log (
                                     {
                                         at 2026-08-31T18:14:29.161556424Z
@@ -7309,12 +7312,104 @@ children (
                                 id split-the-files-at-the-density-cap
                                 title "Split the files sitting on the function-density cap"
                                 kind @refactor
+                                children (
+                                    {
+                                        id move-the-inline-test-modules-out
+                                        title "Give each inline test module a file of its own"
+                                        kind @refactor
+                                        log (
+                                            {
+                                                at 2026-09-01T19:43:47.501380998Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "THE CHEAPEST OF THE THREE LEVERS, AND FOR TWO FILES IT IS THE WHOLE ANSWER. `[spec:np:req:dod.function-density]` counts a file's own `mod tests { … }`, so nine files are carrying their tests against the same fifty as their code:\n\n    options.rs      50 = 28 prod + 22 tests   -> 28, and done\n    variables.rs    51 = 46 prod +  5 tests   -> 46, and done (it is the one file over the cap today)\n    evaluation.rs   50 = 41 prod +  9 tests   -> 41\n    jobs.rs         50 = 45 prod +  5 tests   -> 45\n    windows.rs     223 = 211 prod + 12 tests  -> 211\n    unix.rs        142 = 136 prod +  6 tests  -> 136\n    expand/typed.rs 50 = 47 prod +  3 tests   -> 47\n    input.rs        50 = 49 prod +  1 test    -> 49\n    nodes/source.rs 50 = 49 prod +  1 test    -> 49\n\nEach becomes `#[cfg(test)] mod tests;` beside the code, with the module's body moved verbatim into `<name>/tests.rs`. `parser.rs` already reads 50/0 for exactly this reason -- its five test modules are already separate files -- so this is the repository's existing shape rather than a new one, and it is not an exemption: the tests still count, in a file of their own where fifty is not a constraint.\n\nWHAT MAKES IT ALMOST FREE. The test module becomes a child of the same module it already was a child of, so `use super::*` keeps working and nothing widens. The only real edits are the ones the compiler asks for.\n\nONE COMMIT PER FILE, `refactor`, and `scripts/moved-only` must report nothing: the set of `fn` names across the two files is identical to the set in the one.\n\nDONE WHEN. All nine are moved, `options.rs` and `variables.rs` need nothing further, and the seven remaining have the headroom their splits will need."
+                                            }
+                                        )
+                                    }
+
+                                    {
+                                        id split-the-survey-spec-parser
+                                        title "Separate the spec-file parser from the survey runner"
+                                        kind @refactor
+                                        log (
+                                            {
+                                                at 2026-09-01T19:44:19.989416438Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "THE PILOT, chosen to prove the procedure before it touches the shell. `crates/nsh-survey/src/oils_runner.rs` is 50 functions of production and no inline tests, so lever one buys it nothing and it has to be split. It is in the survey crate rather than in the shell, so a mistake fails loudly and immediately in `run-oils` rather than subtly in a corner of expansion. And `oils_runner/` already exists, holding `helpers.rs`, `reference.rs` and `tests.rs`, so the shape is established.\n\nTHE SEAM IS A DIFFERENT PROGRAM. Lines 560 to 1063 are a parser and lexer for the Oils `.test.sh` file format: `ParsedFile`, `FileMetadata`, `TestCase`, `Assertions`, `ExpectedBytes`, `QualifiedAssertions` and `CaseBuilder`; `parse_spec` through `set_bytes`; and the whole tokenizer -- `LexMode`, `SpannedToken`, `Token`, `KeyValue`, `Tokenizer` with its three methods, `classify_line`, `parse_key_value`, `valid_key`, `valid_shells`, `valid_qualifier`, `is_end_marker`, `strip_line_ending`, `trim_start_ascii`, `trim_ascii`. Nineteen functions. It reads bytes and answers with a structure, and knows nothing about shells, containment, timeouts or reports.\n\n`expectation_key` stays. It is next to the range and looks like it belongs, and it does not: `evaluate_case` uses it to pick which recorded expectation applies to the shell under test, which is the runner's question and not the file format's.\n\nRESULT: `oils_runner.rs` 50 -> 31, and `oils_runner/spec.rs` starts at 19.\n\nHOW. Cut the byte range and paste it -- do not retype it. Then let the compiler ask for the visibility: `pub(super)` on the entry points the runner calls and on the struct fields it reads, and nothing wider. `tests.rs` is a sibling of `spec` rather than a child, so it reaches the parser through the parent's own `use`, which its descendants can see.\n\nDONE WHEN. `scripts/moved-only` reports nothing, the workspace suite passes, and `run-oils` reports the same figures -- `parses_every_imported_oils_case` asserts 2,755 cases across the manifest and is the check that the file format is still read the same way."
+                                            }
+                                        )
+                                    }
+
+                                    {
+                                        id split-the-parser-by-layer
+                                        title "Separate the parser's lexer, grammar and expansion layers"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-the-evaluator-by-form
+                                        title "Separate the evaluator's pipeline, redirection and loop families"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-parameter-expansion-out
+                                        title "Give parameter expansion the submodule its siblings already have"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-the-printer-by-node-family
+                                        title "Split the printer's impl by the node family it prints"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-jobs-by-subject
+                                        title "Separate job control's terminal, reporting and forking subjects"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-input-reading-from-the-stack
+                                        title "Separate reading input from the frame stack that holds it"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-the-platform-modules-by-subject
+                                        title "Give the two platform modules a subject structure"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id register-a-file-nearing-the-density-cap
+                                        title "Present the density bill five functions before it is due"
+                                        kind @test
+                                        log (
+                                            {
+                                                at 2026-09-01T19:44:03.271286084Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "THE CAP IS NOT THE PROBLEM, ITS TIMING IS. `[spec:np:req:dod.function-density]` charges growth rather than level -- probed at `cc887df` -- so a file costs nothing until someone adds to it, and then it costs everything at once. The bill arrives at fifty, during whatever change happened to come next, in a commit about something else. That was five bugfixes in a row in the week of 2026-08-25, and eight files out of about two hundred sitting on exactly fifty is what an attractor looks like rather than a distribution.\n\nWHAT TO BUILD, and it is the same shape as `gate-bash` rather than a second cap. A structural lint kept as a test, beside `oracle_measurement.rs`, `idiomatic_control_flow.rs`, `rust_naming.rs` and `port_provenance.rs`:\n\n  * a file under `crates/` with 45 or more functions must have an entry in a checked-in register, with a reason;\n  * a registered file that has fallen below 45 fails until its entry is removed.\n\nThe second half is what stops it becoming a place to hide, and it is exactly the symmetry `gate-bash` already has -- a registered case that starts passing fails the gate. Registering costs one line and a sentence, and it is the signal to plan the split: five functions of headroom rather than none.\n\nCOUNT IT THE WAY THE GATE DOES, which means inline test functions count. The lint would be lying if it disagreed with the thing it exists to give warning of, and `options.rs` at 28 production functions and 22 tests is precisely the case where the two counts differ.\n\nWATCH IT FAIL BEFORE TRUSTING IT, per this repository's standing bar: point it at a file at 45 with no entry, and at an entry for a file at 30.\n\nDONE WHEN. The register exists with an entry for every file at or above 45 after the splits land, a file crossing 45 without an entry fails the suite, a stale entry fails it too, and both have been seen to."
+                                            }
+                                        )
+                                    }
+                                )
                                 log (
                                     {
                                         at 2026-09-01T17:29:21.685808441Z
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "THE PLAN. Measured 2026-09-01 across every tracked `crates/**/*.rs`, counting `fn` items at any indent.\n\nTHE FACT THAT MAKES THIS A NODE. Eight files sit on exactly fifty functions:\n\n    50 fn  2886 loc  crates/nsh/src/parser.rs\n    50 fn  2810 loc  crates/nsh/src/evaluation.rs\n    50 fn  1885 loc  crates/nsh/src/jobs.rs\n    50 fn  1510 loc  crates/nsh-survey/src/oils_runner.rs\n    50 fn  1399 loc  crates/nsh/src/expand/typed.rs\n    50 fn  1358 loc  crates/nsh/src/input.rs\n    50 fn  1081 loc  crates/nsh/src/nodes/source.rs\n    50 fn   890 loc  crates/nsh/src/options.rs\n\nEight files out of roughly two hundred landing on one number is not a distribution, it is an attractor. `[spec:np:req:dod.function-density]` caps a staged file at fifty, so each of these is a file where the next change must first delete or move a function before it may add one -- and the bill is presented during whatever change happens to arrive, which last week was five bugfixes in a row. That is the worst moment to refactor: under a deadline, inside a commit about something else, where the move reads as noise in the diff.\n\nTWO FILES ARE ALREADY OVER AND NOTHING SAYS SO.\n\n    223 fn  3317 loc  crates/nsh-platform/src/windows.rs\n    142 fn  1789 loc  crates/nsh-platform/src/unix.rs\n     51 fn  1155 loc  crates/nsh/src/variables.rs\n\n`windows.rs` is also past the rust file-size *error* threshold of 3000 lines, and `ca0fa37`'s own message says so (\"past the file-size cap and wants splitting on its own change\").\n\nTHE GATE CHARGES GROWTH, NOT LEVEL -- probed rather than assumed, and the probe is in the history at `cc887df`. A one-line comment staged into `variables.rs`, which is at fifty-one, committed with no density refusal. The counterpart is `9ba7a0b`'s recorded violation, \"`crates/nsh/src/nodes/source.rs` is at 73 functions\", on a commit that grew it. So a file over the cap is frozen rather than flagged: it costs nothing until someone adds to it, and then it costs everything at once. The growth half was not probed directly -- a second probe failed on `clippy` before reaching the gate -- and `9ba7a0b` is the evidence for it.\n\nTHE SEAMS, read out of each file rather than invented. Every one of these moves code without changing it.\n\n* `evaluation.rs` -- the real defect is not the count, it is `evaluate_command_in_scope` at 545 lines (1793-2338). Three families lift cleanly: `evaluation/pipeline.rs` (`evaluate_pipeline`, `evaluate_subshell`, `subshell_child_context`, `run_pipeline_debug_traps`), `evaluation/redirect.rs` (`expand_redirections`, `descriptor_source`, `redirection_only_status`), `evaluation/compound.rs` (`evaluate_loop`, `evaluate_for`, `evaluate_case`, `catch_one_loop`, `LoopStep`).\n* `parser.rs` -- three layers in one file. `parser/lexer.rs` takes `WordLexer` and the word-token machinery (1261-2124, about 860 lines); `parser/expansion.rs` takes the four `parse_*_expansion` / `parse_parameter_operator` functions (2210-2628); `parser/prompt.rs` takes `render_prompt`, `select_prompt`, `expand_string`.\n* `expand/typed.rs` -- it already has `bash`, `brace`, `field`, `pathname`, `split` submodules; parameter expansion is the one that stayed behind. `typed/parameter.rs` takes about twenty functions, `expand_parameter` through `trim`.\n* `nodes/source.rs` -- `Printer<'a>`'s impl is 750 lines (123-877). Make `nodes/source/` a directory and split the printer by node family. This one is worth doing *before* `shrink-the-parsed-representation`, which will rewrite what it prints.\n* `variables.rs` -- nine near-identical `pub fn <name>_value(shell)` accessors are the `trivial-function` shape the gate flags elsewhere; they and `builtin`/`builtin_value`/`run_callback` are one concern (`variables/known.rs`), and `LOCALE_CATEGORIES`/`selected_locale` are another (`variables/locale.rs`).\n* `jobs.rs` -- three families: `jobs/terminal.rs` (`set_terminal_process_group` through `set_job_control`), `jobs/report.rs` (`write_job`, `write_jobs`, `format_process_status`, `write_command_text`, `notify_completion_now`), `jobs/fork.rs` (`fork_shell`, `fork_and_execute`, `initialize_child_process`, `record_forked_child`).\n* `input.rs` -- the frame and stack model against the reading machinery. `input/read.rs` takes `read_input_unit*`, `refill_input_buffer`, `read_input_descriptor`, `tee_standard_input`, `flush_tee` and the overlay helpers.\n* `options.rs` -- `Options<'a>` (509-653) is an argv scanner and has nothing to do with the option table. `options/scan.rs`.\n* `oils_runner.rs` -- the `.test.sh` *parser* (`parse_spec` through `set_bytes`, plus `ParsedFile`/`TestCase`/`Assertions`/`CaseBuilder`) is a different program from the runner. `oils_runner/spec.rs`.\n* `nsh-platform/windows.rs` and `unix.rs` -- last, and largest. `windows.rs` needs splitting for the file-size gate independently of the function count.\n\nTHE ORDER, by how likely a file is to be touched next times how much it currently costs: `evaluation.rs` and `parser.rs` first (every Bash-compatibility fix touches one of them, and three of last week's five gate hits landed there); then `expand/typed.rs`; then `nodes/source.rs` ahead of `shrink-the-parsed-representation`; then `variables.rs`, which is over the cap today; then `jobs.rs`, `input.rs`, `options.rs`; then `oils_runner.rs`; then the two platform files.\n\nONE FILE PER COMMIT, `refactor`, and the bar is that nothing changed. `cargo test --workspace`, `gate-bash`, `run-oils --group bash-comparison`, the POSIX harness and Smoosh all report identical figures before and after -- not \"no regressions\", identical. A move that changes a number is a move that changed behaviour, and it should be backed out rather than explained.\n\nWHAT THIS NODE MUST NOT DO. Raise the cap, add an exempt path, or split a file into two halves of twenty-five with a name like `evaluation_more.rs`. Every seam above is a concern with a name. Where no such seam exists the answer is deletion, which is what `9ba7a0b`'s violation text already committed this repository to: \"the count comes down by deletion rather than by a cap raise\"."
+                                    }
+
+                                    {
+                                        at 2026-09-01T19:43:32.722150089Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "CORRECTION TO THE PLAN ABOVE: IT COUNTED INLINE TESTS AS PRODUCTION, AND THAT CHANGES THE ANSWER FOR TWO FILES. `[spec:np:req:dod.function-density]` runs with `exempt-test-scope false`, so a file's own `mod tests { … }` counts toward its fifty. Re-measured 2026-09-01, splitting each file at its inline test module:\n\n    file                       total  prod  tests\n    parser.rs                     50    50      0\n    oils_runner.rs                50    50      0\n    input.rs                      50    49      1\n    nodes/source.rs               50    49      1\n    expand/typed.rs               50    47      3\n    variables.rs                  51    46      5\n    jobs.rs                       50    45      5\n    evaluation.rs                 50    41      9\n    options.rs                    50    28     22\n    unix.rs                      142   136      6\n    windows.rs                   223   211     12\n\n`options.rs` is at the cap because of its own test module, and `variables.rs` -- the one file currently *over* -- is one short of it for the same reason. Moving those modules to files of their own takes them to 28 and 46 with no production change, which is the whole fix for both. It is not an exemption: `parser.rs` already reads 50/0 because its five test modules are already separate files, so this is the shape the repository already uses.\n\nSO THERE ARE THREE LEVERS, in the order to try them per file:\n\n  1. give the inline test module a file (`mod tests;` beside the code it tests);\n  2. fold the small single-caller private helpers -- 2 to 7 real ones per file, counting only private, one caller, ten lines or fewer, which is what `9ba7a0b` already committed this repository to;\n  3. split downward into child modules.\n\nAfter lever 1 alone: options 28, variables 46, evaluation 41, jobs 45, typed 47, input 49, source 49, unix 136, windows 211, and parser and oils_runner unmoved at 50.\n\nSPLIT DOWNWARD, NEVER SIDEWAYS, and the reason is what makes this cheap. A private item in Rust is visible in its defining module *and every descendant*, so code moved into `evaluation/pipeline.rs` still reaches everything `evaluation.rs` kept private, through `super::`. Only the moved items' own entry points need `pub(super)`, and only the struct fields the parent actually touches. A sibling module -- `evaluation_pipeline.rs` -- would need every one of those dependencies widened to `pub(crate)`, trading a density number for the encapsulation the module had. The one thing to know for `nodes/source.rs`: an inherent `impl` may be split across modules of the same crate, which is the only reason `Printer`'s 750-line impl can be split at all.\n\nTHE COUNT AND THE READ ARE DIFFERENT PROBLEMS. `options.rs` at 890 lines reads fine and wants nothing but its tests moved. `parser.rs` at 2,886 lines wants splitting whatever its count says. Deciding by the number produces a file called `evaluation_more.rs`; deciding by the read produces files that happen to satisfy the number.\n\nONE COMMIT PER LEVER, NEVER MIXED, because a seven-hundred-line move and a seven-hundred-line rewrite are the same diff. `scripts/moved-only` makes the difference checkable: the multiset of `fn` names across the touched files must be identical before and after a move. A fold commit shrinks that set and adds no file; a split commit preserves it and adds one.\n\nVERIFICATION. Per commit: `fmt`, `clippy --workspace --all-targets`, `scripts/moved-only`, and `cargo test --workspace` -- which needs `NSH_TEST_NPROC=2048`, because at the sandbox's default 256 it fails with rustc ICEs in `codegen_ssa::back::write::spawn_work` that look exactly like a compiler bug and are `RLIMIT_NPROC`. Once per batch, not per commit: `gate-bash`, `run-oils --group bash-comparison` compared as a failing-case *list*, the POSIX harness and Smoosh. A move that compiles, passes 787 tests and satisfies clippy has almost no channel left to change behaviour; the surveys are the backstop. The exception is `#[cfg]` and macro hygiene, which the tests do not fully cover -- no seam here touches either, and one that does gets the full set.\n\nTHE ORDER CHANGES, and the open plan is why rather than a guess about what gets touched. Every one of these will add a function to a capped file:\n\n    reap-only-the-children-this-shell-forked      -> nsh-platform/unix.rs (136), jobs.rs (45)\n    close-the-pattern-replacement-divergence      -> expand/typed.rs (47)\n    close-associative-assignment-diagnostics      -> expand/typed.rs, variables.rs (46)\n    record-the-line-a-compound-command-ends-on    -> parser.rs (50)\n    shrink-the-parsed-representation              -> nodes/source.rs (49), word.rs\n\nThe platform modules were last on the list above and have to be near first, because `reap-only-the-children-this-shell-forked` adds `wait_for_child` to a file at 136. Those five now carry `deps` on their splits, so the computed order says it rather than a paragraph. The trade is deliberate and it is that defect fixes wait hours behind refactors: the fix pays the refactor either way, and paying it in a commit of its own is what makes both reviewable.\n\nDO IT AS ONE BURST rather than spread over weeks. Each split is a whole-file move in diff terms, so every day one waits is a merge against it."
                                     }
                                 )
                             }
@@ -7323,6 +7418,7 @@ children (
                                 id reap-only-the-children-this-shell-forked
                                 title "Reap only the children this shell forked"
                                 kind @fix
+                                deps (split-the-platform-modules-by-subject split-jobs-by-subject)
                                 log (
                                     {
                                         at 2026-09-01T17:56:42.220713463Z
@@ -7351,6 +7447,7 @@ children (
                                 id close-the-pattern-replacement-divergence
                                 title "Close the divergence the fuzzer found in pattern replacement"
                                 kind @fix
+                                deps (split-parameter-expansion-out)
                                 log (
                                     {
                                         at 2026-09-01T18:52:16.834509892Z
