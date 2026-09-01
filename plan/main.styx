@@ -7324,6 +7324,13 @@ children (
                                                 kind @note
                                                 text "THE CHEAPEST OF THE THREE LEVERS, AND FOR TWO FILES IT IS THE WHOLE ANSWER. `[spec:np:req:dod.function-density]` counts a file's own `mod tests { … }`, so nine files are carrying their tests against the same fifty as their code:\n\n    options.rs      50 = 28 prod + 22 tests   -> 28, and done\n    variables.rs    51 = 46 prod +  5 tests   -> 46, and done (it is the one file over the cap today)\n    evaluation.rs   50 = 41 prod +  9 tests   -> 41\n    jobs.rs         50 = 45 prod +  5 tests   -> 45\n    windows.rs     223 = 211 prod + 12 tests  -> 211\n    unix.rs        142 = 136 prod +  6 tests  -> 136\n    expand/typed.rs 50 = 47 prod +  3 tests   -> 47\n    input.rs        50 = 49 prod +  1 test    -> 49\n    nodes/source.rs 50 = 49 prod +  1 test    -> 49\n\nEach becomes `#[cfg(test)] mod tests;` beside the code, with the module's body moved verbatim into `<name>/tests.rs`. `parser.rs` already reads 50/0 for exactly this reason -- its five test modules are already separate files -- so this is the repository's existing shape rather than a new one, and it is not an exemption: the tests still count, in a file of their own where fifty is not a constraint.\n\nWHAT MAKES IT ALMOST FREE. The test module becomes a child of the same module it already was a child of, so `use super::*` keeps working and nothing widens. The only real edits are the ones the compiler asks for.\n\nONE COMMIT PER FILE, `refactor`, and `scripts/moved-only` must report nothing: the set of `fn` names across the two files is identical to the set in the one.\n\nDONE WHEN. All nine are moved, `options.rs` and `variables.rs` need nothing further, and the seven remaining have the headroom their splits will need."
                                             }
+
+                                            {
+                                                at 2026-09-01T20:07:59.052485964Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 

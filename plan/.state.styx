@@ -1394,6 +1394,7 @@ assertions (
     {id stop-the-closure-gate-flaking, kind @complete, author "brendan@necessary.nu", at 2026-09-01T19:16:52.116355938Z}
     {id shrink-the-parsed-representation, kind @blocked, reason "Measured and the first term fixed on f15f6ce; the node's own bar -- a small multiple of the script's bytes -- is not met and the remaining three changes are named on it with their numbers. Not in progress: nobody is on it, and it should not read as though someone is. Unblock by taking one of the three, starting with WordToken::Literal being one token per source byte, which is bound-word-parsing-cost's defect one layer up.", author "brendan@necessary.nu", at 2026-09-01T19:30:41.460560678Z}
     {id split-the-survey-spec-parser, kind @complete, author "brendan@necessary.nu", at 2026-09-01T19:51:52.113252181Z}
+    {id move-the-inline-test-modules-out, kind @doing, author "brendan@necessary.nu", at 2026-09-01T20:07:59.052485964Z}
 )
 
 impl_evidence (
