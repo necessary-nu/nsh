@@ -1,3 +1,4 @@
+use super::spec::parse_spec_bytes;
 use super::*;
 
 /// The system shell the runner cases drive their subject through.

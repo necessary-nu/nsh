@@ -7338,6 +7338,13 @@ children (
                                                 kind @note
                                                 text "THE PILOT, chosen to prove the procedure before it touches the shell. `crates/nsh-survey/src/oils_runner.rs` is 50 functions of production and no inline tests, so lever one buys it nothing and it has to be split. It is in the survey crate rather than in the shell, so a mistake fails loudly and immediately in `run-oils` rather than subtly in a corner of expansion. And `oils_runner/` already exists, holding `helpers.rs`, `reference.rs` and `tests.rs`, so the shape is established.\n\nTHE SEAM IS A DIFFERENT PROGRAM. Lines 560 to 1063 are a parser and lexer for the Oils `.test.sh` file format: `ParsedFile`, `FileMetadata`, `TestCase`, `Assertions`, `ExpectedBytes`, `QualifiedAssertions` and `CaseBuilder`; `parse_spec` through `set_bytes`; and the whole tokenizer -- `LexMode`, `SpannedToken`, `Token`, `KeyValue`, `Tokenizer` with its three methods, `classify_line`, `parse_key_value`, `valid_key`, `valid_shells`, `valid_qualifier`, `is_end_marker`, `strip_line_ending`, `trim_start_ascii`, `trim_ascii`. Nineteen functions. It reads bytes and answers with a structure, and knows nothing about shells, containment, timeouts or reports.\n\n`expectation_key` stays. It is next to the range and looks like it belongs, and it does not: `evaluate_case` uses it to pick which recorded expectation applies to the shell under test, which is the runner's question and not the file format's.\n\nRESULT: `oils_runner.rs` 50 -> 31, and `oils_runner/spec.rs` starts at 19.\n\nHOW. Cut the byte range and paste it -- do not retype it. Then let the compiler ask for the visibility: `pub(super)` on the entry points the runner calls and on the struct fields it reads, and nothing wider. `tests.rs` is a sibling of `spec` rather than a child, so it reaches the parser through the parent's own `use`, which its descendants can see.\n\nDONE WHEN. `scripts/moved-only` reports nothing, the workspace suite passes, and `run-oils` reports the same figures -- `parses_every_imported_oils_case` asserts 2,755 cases across the manifest and is the check that the file format is still read the same way."
                                             }
+
+                                            {
+                                                at 2026-09-01T19:45:49.730341253Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 

@@ -29,7 +29,16 @@ names() {
         | sort
 }
 
-touched=$(git diff --name-only --diff-filter=ACMRD "$base" -- '*.rs')
+# Untracked files count. A split's whole point is the file it adds, and
+# `git diff` cannot see one that has never been staged -- which this check
+# discovered about itself on its first real use, by reporting nineteen
+# functions gone and none arrived.
+touched=$(
+    {
+        git diff --name-only --diff-filter=ACMRD "$base" -- '*.rs'
+        git ls-files --others --exclude-standard -- '*.rs'
+    } | sort -u
+)
 if [ -z "$touched" ]; then
     echo "scripts/moved-only: no Rust file changed against $base"
     exit 0
