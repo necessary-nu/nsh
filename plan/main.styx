@@ -7331,6 +7331,7 @@ children (
                                         id split-the-survey-spec-parser
                                         title "Separate the spec-file parser from the survey runner"
                                         kind @refactor
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T19:44:19.989416438Z
@@ -7344,6 +7345,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-01T19:51:52.113252181Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
