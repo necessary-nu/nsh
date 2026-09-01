@@ -13,6 +13,17 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const TERM_GRACE_MS: u64 = 100;
 const POLL_MS: u64 = 5;
+
+/// How much longer than the case's own budget the outer deadline waits.
+///
+/// The case's budget is enforced *inside* the boundary now, so this one
+/// only has to outlast `timeout`'s own `TERM` and its `KILL` a second
+/// later. It fires when the sandbox never reached the point of running
+/// anything, which is the one situation the inner budget cannot cover.
+const BACKSTOP_MS: u64 = 2_000;
+
+/// What `timeout` reports when it fired.
+const TIMED_OUT_STATUS: i32 = 124;
 const CONTAINMENT_CANARY: &[u8] = b"__NSH_SURVEY_CONTAINED__\n";
 const CONTAINMENT_PROBE: &str = r#"
 fail() {
@@ -226,8 +237,22 @@ pub(crate) fn run(request: &Request<'_>) -> Result<Output> {
     for (name, value) in request.environment {
         command.arg("--setenv").arg(name).arg(value);
     }
+    /* The budget is spent inside the boundary rather than by signalling
+     * it from outside. Killing the sandbox process is only reliable once
+     * the sandbox has finished setting up: a signal delivered during that
+     * window reaps the process this side holds and leaves the tree inside
+     * it running, which leaked a background descendant 6 times in 20 at
+     * load 30 and never once when the same signal was 50 ms later. There
+     * is no readiness this side can wait for, so nothing is timed from
+     * here that can be timed from in there -- and a case whose command
+     * exits is torn down by the sandbox's own reaper, which is the path
+     * `normal_exit_kills_background_descendants` already covers. */
     command
         .arg("--")
+        .arg("/usr/bin/timeout")
+        .arg("--signal=TERM")
+        .arg("--kill-after=1")
+        .arg(format!("{:.3}", request.timeout.as_secs_f64()))
         .arg("/usr/bin/env")
         .arg("--default-signal")
         .arg("--")
@@ -249,7 +274,7 @@ pub(crate) fn run(request: &Request<'_>) -> Result<Output> {
     let stdout_reader = thread::spawn(move || capture(stdout));
     let stderr_reader = thread::spawn(move || capture(stderr));
 
-    let deadline = started + request.timeout;
+    let deadline = started + request.timeout + Duration::from_millis(BACKSTOP_MS);
     let mut timed_out = false;
     let status = 'wait: loop {
         if let Some(status) = child.try_wait()? {
@@ -279,6 +304,11 @@ pub(crate) fn run(request: &Request<'_>) -> Result<Output> {
         }
         thread::sleep(Duration::from_millis(POLL_MS));
     };
+    /* `timeout` reports 124 when it fired, and a case is free to exit 124
+     * on its own -- so the elapsed time has to agree before that is read
+     * as a timeout. */
+    let timed_out = timed_out
+        || (status.code() == Some(TIMED_OUT_STATUS) && started.elapsed() >= request.timeout);
     let writer_error = writer
         .join()
         .map_err(|_| "stdin writer thread panicked")?
@@ -465,8 +495,14 @@ mod tests {
 
         assert!(sentinel_survived);
         assert!(!output.timed_out);
-        assert_eq!(output.status.code(), Some(0));
         assert_eq!(output.stdout.bytes, b"survived");
+        /* The case's own budget stands inside the boundary with it, so
+         * `kill -KILL -1` reaches that too and the sandbox reports the
+         * wrapper's death rather than the shell's exit. That ends the
+         * case early rather than extending it, which is the direction
+         * that matters: a case cannot disarm its budget and keep
+         * running. The shell still ran, which is what the output says. */
+        assert_eq!(output.status.code(), Some(137));
     }
 
     #[test]
