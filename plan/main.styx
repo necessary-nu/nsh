@@ -7202,6 +7202,38 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id run-the-fuzz-oracle-against-this-tree
+                                title "Run the differential oracle against the tree it is meant to judge"
+                                kind @test
+                                log (
+                                    {
+                                        at 2026-09-01T17:22:21.766689073Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
+                                )
+                            }
+
+                            {
+                                id stop-the-forking-tests-from-flaking
+                                title "Stop the tests that fork from failing for reasons that are not the shell"
+                                kind @test
+                            }
+
+                            {
+                                id catch-a-test-whose-input-is-not-its-name
+                                title "Catch a test whose input does not construct what its name claims"
+                                kind @test
+                            }
+
+                            {
+                                id split-the-files-at-the-density-cap
+                                title "Split the files sitting on the function-density cap"
+                                kind @refactor
+                            }
                         )
                     }
                 )

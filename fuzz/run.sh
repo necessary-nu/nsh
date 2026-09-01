@@ -70,12 +70,31 @@ if (($#)) && [[ $1 != -* ]]; then
     shift
 fi
 
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# The name reaches a path and a cargo argument, so the characters are
+# checked first; but a well-formed name that is not a target is the error
+# that actually happened. `fuzz/run.sh parse 240` typed as
+# `fuzz/run.sh 240` used to seed a corpus, create an artifact directory
+# and hand `240` to cargo, which is a fuzzing session that measures
+# nothing -- the shape `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`
+# exists to refuse.
 case $target in
     *[![:alnum:]_-]*|'')
         echo "fuzz/run.sh: invalid target: $target" >&2
         exit 2
         ;;
 esac
+targets=$(cd "$root/fuzz" && cargo +nightly fuzz list) || {
+    echo "fuzz/run.sh: cannot list the fuzz targets" >&2
+    exit 2
+}
+if ! printf '%s\n' "$targets" | grep -qxF -- "$target"; then
+    echo "fuzz/run.sh: no such target: $target" >&2
+    echo "fuzz/run.sh: targets are:" >&2
+    printf '%s\n' "$targets" | sed 's/^/  /' >&2
+    exit 2
+fi
 case $seconds in
     *[!0-9]*|'')
         echo "fuzz/run.sh: SECONDS must be a non-negative integer" >&2
@@ -105,7 +124,6 @@ case $containment in
         ;;
 esac
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 corpus="$root/fuzz/corpus/$target"
 if $build_only; then
     # `fuzz/sweep.sh` replays stored artifacts by executing the target binary
