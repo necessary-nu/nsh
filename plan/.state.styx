@@ -1399,7 +1399,7 @@ assertions (
     {id split-the-printer-by-node-family, kind @complete, author "brendan@necessary.nu", at 2026-09-01T20:43:20.243898239Z}
     {id split-the-evaluator-by-form, kind @complete, author "brendan@necessary.nu", at 2026-09-01T20:59:22.399648222Z}
     {id split-the-parser-by-layer, kind @complete, author "brendan@necessary.nu", at 2026-09-01T21:24:22.160233529Z}
-    {id split-jobs-by-subject, kind @doing, author "brendan@necessary.nu", at 2026-09-01T21:37:06.210695851Z}
+    {id split-jobs-by-subject, kind @complete, author "brendan@necessary.nu", at 2026-09-01T21:46:36.25064196Z}
 )
 
 impl_evidence (

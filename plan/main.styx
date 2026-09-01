@@ -7463,12 +7463,20 @@ children (
                                         id split-jobs-by-subject
                                         title "Separate job control's terminal, reporting and forking subjects"
                                         kind @refactor
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T21:37:06.210695851Z
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-01T21:46:36.25064196Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
