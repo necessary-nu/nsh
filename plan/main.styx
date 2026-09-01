@@ -7317,6 +7317,7 @@ children (
                                         id move-the-inline-test-modules-out
                                         title "Give each inline test module a file of its own"
                                         kind @refactor
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T19:43:47.501380998Z
@@ -7330,6 +7331,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-01T20:11:37.320701653Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -7379,6 +7387,14 @@ children (
                                         id split-parameter-expansion-out
                                         title "Give parameter expansion the submodule its siblings already have"
                                         kind @refactor
+                                        log (
+                                            {
+                                                at 2026-09-01T20:12:36.205809695Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
+                                        )
                                     }
 
                                     {
