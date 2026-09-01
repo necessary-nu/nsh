@@ -7500,6 +7500,15 @@ children (
                                         id split-the-platform-modules-by-subject
                                         title "Give the two platform modules a subject structure"
                                         kind @refactor
+                                        sealed true
+                                        log (
+                                            {
+                                                at 2026-09-01T23:24:37.021261895Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
+                                            }
+                                        )
                                     }
 
                                     {
