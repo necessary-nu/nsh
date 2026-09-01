@@ -1403,6 +1403,7 @@ assertions (
     {id read-a-module-not-a-file-in-the-lints, kind @complete, author "brendan@necessary.nu", at 2026-09-01T22:40:42.311121729Z}
     {id split-input-reading-from-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:01:48.395678455Z}
     {id split-the-platform-modules-by-subject, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:24:37.021261895Z}
+    {id register-a-file-nearing-the-density-cap, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:49:32.93929508Z}
 )
 
 impl_evidence (

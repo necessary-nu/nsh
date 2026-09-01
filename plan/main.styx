@@ -7515,12 +7515,20 @@ children (
                                         id register-a-file-nearing-the-density-cap
                                         title "Present the density bill five functions before it is due"
                                         kind @test
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T19:44:03.271286084Z
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "THE CAP IS NOT THE PROBLEM, ITS TIMING IS. `[spec:np:req:dod.function-density]` charges growth rather than level -- probed at `cc887df` -- so a file costs nothing until someone adds to it, and then it costs everything at once. The bill arrives at fifty, during whatever change happened to come next, in a commit about something else. That was five bugfixes in a row in the week of 2026-08-25, and eight files out of about two hundred sitting on exactly fifty is what an attractor looks like rather than a distribution.\n\nWHAT TO BUILD, and it is the same shape as `gate-bash` rather than a second cap. A structural lint kept as a test, beside `oracle_measurement.rs`, `idiomatic_control_flow.rs`, `rust_naming.rs` and `port_provenance.rs`:\n\n  * a file under `crates/` with 45 or more functions must have an entry in a checked-in register, with a reason;\n  * a registered file that has fallen below 45 fails until its entry is removed.\n\nThe second half is what stops it becoming a place to hide, and it is exactly the symmetry `gate-bash` already has -- a registered case that starts passing fails the gate. Registering costs one line and a sentence, and it is the signal to plan the split: five functions of headroom rather than none.\n\nCOUNT IT THE WAY THE GATE DOES, which means inline test functions count. The lint would be lying if it disagreed with the thing it exists to give warning of, and `options.rs` at 28 production functions and 22 tests is precisely the case where the two counts differ.\n\nWATCH IT FAIL BEFORE TRUSTING IT, per this repository's standing bar: point it at a file at 45 with no entry, and at an entry for a file at 30.\n\nDONE WHEN. The register exists with an entry for every file at or above 45 after the splits land, a file crossing 45 without an entry fails the suite, a stale entry fails it too, and both have been seen to."
+                                            }
+
+                                            {
+                                                at 2026-09-01T23:49:32.93929508Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -7660,6 +7668,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "TWO DOC COMMENTS SPLICED INTO ONE, found 2026-09-02 while splitting `crates/nsh/src/input.rs` and confirmed identical in `HEAD` before the split, so it is not that change's doing.\n\nThe comment above `input_frame_at` opens with the documentation for `InputStack::alias_boundary` -- \"Set when `popstring` finishes an alias whose text ended in a blank ... The parser consults it at the two points it consumed the flag before\" -- and then jumps mid-sentence into `input_frame_at`'s own text, \"Frame `i`. Index 0 is `basepf` ...\".\n\nThe `alias_boundary` field carries only `/// See [InputStack::take_alias_boundary].`, so the explanation of what the flag is *for* is stranded on an unrelated function, and a reader of the field is sent to a third place that does not have it either.\n\nIt is two lines of cut-and-paste to undo and was deliberately left alone: `split-input-reading-from-the-stack` claimed to be a move and `scripts/moved-only` is only worth something if the commits that claim it did nothing else.\n\nDONE WHEN. The first half is back on `alias_boundary`, `input_frame_at` keeps only its own, and neither sentence has lost its beginning."
+                                    }
+                                )
+                            }
+
+                            {
+                                id settle-whether-the-workspace-unwinds
+                                title "Settle whether anything in the workspace relies on unwinding"
+                                kind @chore
+                                log (
+                                    {
+                                        at 2026-09-01T23:49:51.246522056Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "`Cargo.toml`'s workspace comment ends \"Nothing in this workspace relies on unwinding\", and that stopped being true on 2026-09-02 at `1b12fa6`.\n\nThe comment is worth reading in full, because it is a good one and its subject is exactly this: `panic = \"unwind\"` used to be pinned on both profiles, and the pin was the constraint `[dec:nsh:errors-are-values]` existed to remove -- the port implemented C's `longjmp` as an unwind carrying a typed payload, so every shell error, every `exit` and every `^C` was a panic, and `panic = \"abort\"` would have turned each of them into a dead shell. The mechanism is gone, a failure is a value, and the pin went with it. The last sentence is the claim that made removing it safe.\n\nWHAT MADE IT UNTRUE. `crates/nsh-lint`'s `main` runs each source-shape check under `std::panic::catch_unwind` so that a failing run reports *all* the failures rather than stopping at the first. Those checks assert, because they were `#[test]` functions until that commit and the assertion message is the report. Under `panic = \"abort\"` the first failing check would take the process down and the other twenty-five would not run -- which is a worse check, not a broken one, and the crate is `publish = false` tooling that never ships.\n\nSo this is small, and it is exactly the kind of stale sentence this repository has been finding all week: a claim written next to the thing it justified, still there after what it depended on changed. Four were found in the week of 2026-08-25 and `check-that-a-cited-decision-is-live` exists because of them.\n\nTHREE ANSWERS, and the choice is the work:\n\n  * amend the comment to say that nothing *shipped* relies on unwinding and name `nsh-lint` as the exception;\n  * have `nsh-lint` collect reports as values rather than catching panics -- each check returns `Vec<String>` instead of asserting, which is also what `[dec:nsh:errors-are-values]` would say if the crate were in scope for it;\n  * leave the reporting loop and pin `panic = \"unwind\"` for that crate alone.\n\nThe second is the one that agrees with the repository's own decision, and it is a rewrite of twenty-six check bodies rather than a comment edit, which is why this is a node.\n\nDONE WHEN. The sentence in `Cargo.toml` is true again, by whichever route, and the route is written down with the reason."
                                     }
                                 )
                             }
