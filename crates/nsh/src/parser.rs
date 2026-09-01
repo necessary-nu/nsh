@@ -2598,7 +2598,7 @@ fn parse_command_substitution(
          */
         shell.input.token_pushed_back = false;
     }
-    lexer.output.push(WordToken::Command(parsed?));
+    lexer.output.push(WordToken::Command(parsed?.map(Box::new)));
     Ok(())
 }
 

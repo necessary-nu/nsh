@@ -382,18 +382,20 @@ pub(super) fn process_substitutions(
         shell.input.pending_here_documents = saved_heredocs;
         let body = parsed?;
 
-        lexer.output.push(WordToken::Command(Some(Node::Bash(
-            BashNode::ProcessSubstitution(BashProcessSubstitution {
-                /* `<(list)` is inside a word, and the reader cuts words
-                 * whole: the run that spells this is the enclosing
-                 * word's, and cutting a second one for it would record
-                 * the same bytes twice. */
-                // [spec:nsh:def:idiom.token-stream]
-                tokens: SourceTokens::none(),
-                direction,
-                body: body.map(Box::new),
-            }),
-        ))));
+        lexer
+            .output
+            .push(WordToken::Command(Some(Box::new(Node::Bash(
+                BashNode::ProcessSubstitution(BashProcessSubstitution {
+                    /* `<(list)` is inside a word, and the reader cuts words
+                     * whole: the run that spells this is the enclosing
+                     * word's, and cutting a second one for it would record
+                     * the same bytes twice. */
+                    // [spec:nsh:def:idiom.token-stream]
+                    tokens: SourceTokens::none(),
+                    direction,
+                    body: body.map(Box::new),
+                }),
+            )))));
         lexer.input = super::read_unit_for_syntax(shell, lexer.current_syntax())?;
     }
 }

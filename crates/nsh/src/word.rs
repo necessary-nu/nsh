@@ -121,7 +121,15 @@ pub(crate) enum WordToken {
         indirect: bool,
     },
     ParameterEnd,
-    Command(Option<Node>),
+    /// A command substitution, boxed.
+    ///
+    /// A `Node` is seventy-two bytes and this variant held one inline,
+    /// which made every `WordToken` seventy-two bytes -- including
+    /// `Literal(u8)`, of which a literal word holds one per source byte.
+    /// One command substitution per word costs an allocation; a million
+    /// literal bytes cost seventy-two megabytes, so the box is paid by
+    /// the rare case and refunded to the common one.
+    Command(Option<Box<Node>>),
     ArithmeticStart,
     ArithmeticEnd,
 }
@@ -507,7 +515,7 @@ impl TokenDecoder<'_> {
                 }
                 WordToken::Command(command) => {
                     parts.push(WordPart::Command {
-                        command: command.clone().map(Box::new),
+                        command: command.clone(),
                         quoted: depth > 0,
                     });
                 }
