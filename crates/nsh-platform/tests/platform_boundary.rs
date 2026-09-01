@@ -1,5 +1,36 @@
 use std::path::Path;
 
+/// A module's whole text: the file, and every file in the directory
+/// beside it.
+///
+/// Every assertion below is about how the platform boundary is
+/// *written*, not about which file a declaration lands in, so splitting
+/// `unix.rs` or `windows.rs` by subject must not change the answer.
+/// Reading one file would let a forbidden shape stop being seen by
+/// moving it one file down, and would fail a commit that moved code and
+/// changed nothing.
+fn module(relative: &str) -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates");
+    let mut text = std::fs::read_to_string(root.join(format!("{relative}.rs"))).unwrap_or_default();
+    let directory = root.join(relative);
+    let mut nested = Vec::new();
+    if directory.is_dir() {
+        for entry in std::fs::read_dir(&directory).expect("a module directory is readable") {
+            let path = entry.expect("a module entry is readable").path();
+            if path.extension().is_some_and(|extension| extension == "rs") {
+                nested.push(path);
+            }
+        }
+        nested.sort();
+    }
+    for path in nested {
+        text.push('\n');
+        text.push_str(&std::fs::read_to_string(path).expect("a module file is readable"));
+    }
+    assert!(!text.is_empty(), "no source at crates/{relative}.rs");
+    text
+}
+
 const FORBIDDEN_SOURCE_FRAGMENTS: &[&str] = &[
     "std::os::unix",
     "std::os::windows",
@@ -89,13 +120,12 @@ fn platform_errors_are_typed() {
     assert_eq!(nsh_platform::command_exec_failure_status(&missing), 127);
     assert_eq!(nsh_platform::command_exec_failure_status(&denied), 126);
 
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for source in [
-        "crates/nsh-platform/src/locale.rs",
-        "crates/nsh-platform/src/unix.rs",
-        "crates/nsh-platform/src/windows.rs",
+        "nsh-platform/src/locale",
+        "nsh-platform/src/unix",
+        "nsh-platform/src/windows",
     ] {
-        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+        let text = module(source);
         for fragment in RAW_ERROR_API_FRAGMENTS {
             assert!(
                 !text.contains(fragment),
@@ -118,9 +148,8 @@ fn exec_boundary_owns_native_values() {
 
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let core = std::fs::read_to_string(workspace.join("crates/nsh/src/execution.rs")).unwrap();
-    let unix = std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix.rs")).unwrap();
-    let windows =
-        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/windows.rs")).unwrap();
+    let unix = module("nsh-platform/src/unix");
+    let windows = module("nsh-platform/src/windows");
 
     assert!(core.contains("ProgramImage::new("));
     assert!(!core.contains("CString"));
@@ -135,10 +164,8 @@ fn exec_boundary_owns_native_values() {
 // [spec:nsh:req:idiom.descriptor-materialization/test]
 #[test]
 fn descriptor_materialization_is_transactional() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let unix = std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix.rs")).unwrap();
-    let windows =
-        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/windows.rs")).unwrap();
+    let unix = module("nsh-platform/src/unix");
+    let windows = module("nsh-platform/src/windows");
 
     for source in [&unix, &windows] {
         assert!(source.contains("pub struct ProcessDescriptorTransaction"));
@@ -163,12 +190,8 @@ fn descriptor_materialization_is_transactional() {
 // [spec:nsh:req:idiom.filesystem-account-bytes/test]
 #[test]
 fn filesystem_apis_keep_native_strings() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for source in [
-        "crates/nsh-platform/src/unix.rs",
-        "crates/nsh-platform/src/windows.rs",
-    ] {
-        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+    for source in ["nsh-platform/src/unix", "nsh-platform/src/windows"] {
+        let text = module(source);
         assert!(text.contains("pub fn named_user_home(name: &OsStr) -> Option<PathBuf>"));
         assert!(text.contains("pub name: OsString"));
         assert!(text.contains("pub fn anonymous_file(name: impl AsRef<OsStr>)"));
@@ -176,6 +199,7 @@ fn filesystem_apis_keep_native_strings() {
         assert!(!text.contains("pub fn create_temporary_file(name: &str"));
     }
 
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut violations = Vec::new();
     inspect_tree(
         &workspace.join("crates/nsh/src"),
@@ -192,12 +216,8 @@ fn filesystem_apis_keep_native_strings() {
 // [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot/test]
 #[test]
 fn logical_parent_requires_directory() {
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for source in [
-        "crates/nsh-platform/src/unix.rs",
-        "crates/nsh-platform/src/windows.rs",
-    ] {
-        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+    for source in ["nsh-platform/src/unix", "nsh-platform/src/windows"] {
+        let text = module(source);
         let parent_arm = text
             .split_once("[spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]")
             .expect("logical parent handling carries its POSIX rule")
@@ -251,12 +271,8 @@ fn process_identities_are_typed() {
         nsh_platform::ProcessGroupState,
     ) -> std::io::Result<()> = nsh_platform::set_process_group;
 
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for source in [
-        "crates/nsh-platform/src/unix.rs",
-        "crates/nsh-platform/src/windows.rs",
-    ] {
-        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+    for source in ["nsh-platform/src/unix", "nsh-platform/src/windows"] {
+        let text = module(source);
         for fragment in [
             "pub fn send_signal(pid: i32",
             "pub fn set_process_group(pid: i32",
@@ -271,6 +287,7 @@ fn process_identities_are_typed() {
         }
     }
 
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut violations = Vec::new();
     inspect_tree(
         &workspace.join("crates/nsh/src"),
@@ -333,12 +350,8 @@ fn signal_and_wait_values_are_typed() {
         -> std::io::Result<Option<(nsh_platform::ProcessId, nsh_platform::ChildStatus)>> =
         nsh_platform::wait_for_any_child;
 
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for source in [
-        "crates/nsh-platform/src/unix.rs",
-        "crates/nsh-platform/src/windows.rs",
-    ] {
-        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+    for source in ["nsh-platform/src/unix", "nsh-platform/src/windows"] {
+        let text = module(source);
         for fragment in [
             "pub fn interrupt_signal() -> i32",
             "pub fn send_signal(target: ProcessTarget, signal: i32",
@@ -353,6 +366,7 @@ fn signal_and_wait_values_are_typed() {
         }
     }
 
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut violations = Vec::new();
     inspect_tree(
         &workspace.join("crates/nsh/src"),

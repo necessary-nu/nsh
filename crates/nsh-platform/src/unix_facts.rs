@@ -1,15 +1,61 @@
-//! Host identity and descriptor readiness, for the shell's own
-//! variables and for a bounded `read`.
+//! Who the process is, what the host is called, and whether a
+//! descriptor has anything to read.
 //!
-//! Three questions that share nothing with each other except that they
-//! are the ones this platform answers for the Bash-compatibility
-//! surface, and that none of them belongs in a file already at its
-//! size and density caps.
+//! Questions that share nothing with each other except that they are
+//! the ones this platform answers for the Bash-compatibility surface.
+//! `windows_facts` answers the same list, which is why the user and
+//! group identities live here rather than beside the process code that
+//! reads them: a constructor belongs with the private field it fills,
+//! and on the Windows side that field can only be reached from the
+//! facts module.
 
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt as _;
 
-use super::{AsDescriptor, UserId};
+use super::AsDescriptor;
+
+#[inline]
+pub fn effective_uid() -> UserId {
+    UserId(rustix::process::geteuid().as_raw())
+}
+
+#[inline]
+pub fn effective_gid() -> GroupId {
+    GroupId(rustix::process::getegid().as_raw())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UserId(u32);
+
+impl UserId {
+    pub fn is_root(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn as_raw(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GroupId(u32);
+
+impl GroupId {
+    pub fn as_raw(self) -> u32 {
+        self.0
+    }
+}
+
+pub fn supplementary_groups() -> std::io::Result<Vec<GroupId>> {
+    rustix::process::getgroups()
+        .map(|groups| {
+            groups
+                .into_iter()
+                .map(|group| GroupId(group.as_raw()))
+                .collect()
+        })
+        .map_err(std::io::Error::from)
+}
 
 /// The identity the process was started with, which `$UID` reports.
 #[inline]

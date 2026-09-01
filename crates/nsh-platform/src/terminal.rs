@@ -1,4 +1,10 @@
-//! Safe terminal-settings snapshots.
+//! Terminal-settings snapshots, and the two questions asked of a
+//! descriptor before one is taken.
+//!
+//! `is_terminal` and `terminal_canonical_mode` are the same `tcgetattr`
+//! call the snapshot makes, asked for an answer rather than for the
+//! settings: whether there is a terminal there at all, and whether it is
+//! in the line-buffered mode that decides how the shell reads from it.
 
 use crate::AsDescriptor;
 
@@ -45,6 +51,22 @@ impl TerminalSettings {
             }
         }
     }
+}
+
+/// Whether a terminal descriptor is in canonical input mode. `None` means
+/// the descriptor is not a terminal (or its attributes cannot be queried).
+pub fn terminal_canonical_mode(fd: &impl AsDescriptor) -> Option<bool> {
+    let attributes = rustix::termios::tcgetattr(fd.as_platform_descriptor().0).ok()?;
+    Some(
+        attributes
+            .local_modes
+            .contains(rustix::termios::LocalModes::ICANON),
+    )
+}
+
+/// Whether an endpoint is attached to a terminal.
+pub fn is_terminal(fd: &impl AsDescriptor) -> bool {
+    rustix::termios::tcgetattr(fd.as_platform_descriptor().0).is_ok()
 }
 
 #[cfg(test)]
