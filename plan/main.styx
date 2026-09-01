@@ -7409,6 +7409,14 @@ children (
                                         id split-the-printer-by-node-family
                                         title "Split the printer's impl by the node family it prints"
                                         kind @refactor
+                                        log (
+                                            {
+                                                at 2026-09-01T20:31:33.599096617Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
+                                        )
                                     }
 
                                     {

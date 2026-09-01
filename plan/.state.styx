@@ -1396,6 +1396,7 @@ assertions (
     {id split-the-survey-spec-parser, kind @complete, author "brendan@necessary.nu", at 2026-09-01T19:51:52.113252181Z}
     {id move-the-inline-test-modules-out, kind @complete, author "brendan@necessary.nu", at 2026-09-01T20:11:37.320701653Z}
     {id split-parameter-expansion-out, kind @complete, author "brendan@necessary.nu", at 2026-09-01T20:21:26.239807779Z}
+    {id split-the-printer-by-node-family, kind @doing, author "brendan@necessary.nu", at 2026-09-01T20:31:33.599096617Z}
 )
 
 impl_evidence (
