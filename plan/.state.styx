@@ -1404,6 +1404,7 @@ assertions (
     {id split-input-reading-from-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:01:48.395678455Z}
     {id split-the-platform-modules-by-subject, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:24:37.021261895Z}
     {id register-a-file-nearing-the-density-cap, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:49:32.93929508Z}
+    {id unsplice-the-input-frame-doc-comment, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:57:28.877716878Z}
 )
 
 impl_evidence (

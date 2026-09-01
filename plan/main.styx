@@ -7662,12 +7662,20 @@ children (
                                 id unsplice-the-input-frame-doc-comment
                                 title "Put the alias-boundary documentation back on the field it describes"
                                 kind @docs
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-01T23:02:14.492059143Z
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "TWO DOC COMMENTS SPLICED INTO ONE, found 2026-09-02 while splitting `crates/nsh/src/input.rs` and confirmed identical in `HEAD` before the split, so it is not that change's doing.\n\nThe comment above `input_frame_at` opens with the documentation for `InputStack::alias_boundary` -- \"Set when `popstring` finishes an alias whose text ended in a blank ... The parser consults it at the two points it consumed the flag before\" -- and then jumps mid-sentence into `input_frame_at`'s own text, \"Frame `i`. Index 0 is `basepf` ...\".\n\nThe `alias_boundary` field carries only `/// See [InputStack::take_alias_boundary].`, so the explanation of what the flag is *for* is stranded on an unrelated function, and a reader of the field is sent to a third place that does not have it either.\n\nIt is two lines of cut-and-paste to undo and was deliberately left alone: `split-input-reading-from-the-stack` claimed to be a move and `scripts/moved-only` is only worth something if the commits that claim it did nothing else.\n\nDONE WHEN. The first half is back on `alias_boundary`, `input_frame_at` keeps only its own, and neither sentence has lost its beginning."
+                                    }
+
+                                    {
+                                        at 2026-09-01T23:57:28.877716878Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
                                     }
                                 )
                             }
