@@ -7375,12 +7375,20 @@ children (
                                         id split-the-parser-by-layer
                                         title "Separate the parser's lexer, grammar and expansion layers"
                                         kind @refactor
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T21:10:06.782588285Z
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-01T21:24:22.160233529Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
