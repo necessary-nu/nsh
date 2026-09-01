@@ -7525,6 +7525,7 @@ children (
                                         id read-a-module-not-a-file-in-the-lints
                                         title "Move the source-shape checks out of the test suite"
                                         kind @test
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T21:44:50.0567977Z
@@ -7545,6 +7546,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-01T22:40:42.311121729Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
