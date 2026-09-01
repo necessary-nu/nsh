@@ -236,7 +236,17 @@ pub struct InputStack {
     pub(crate) prompt: Option<PromptKind>,
     /// Whether standard input is a terminal, once queried.
     pub(crate) standard_input_is_terminal: Option<bool>,
-    /// See [`InputStack::take_alias_boundary`].
+    /// Set when `popstring` finishes an alias whose text ended in a blank.
+    ///
+    /// dash spells this `checkkwd |= CHKALIAS` — the input layer reaching
+    /// into a parser global. The bit is per-*input-position* state (it
+    /// describes the alias that just ended, not the parse that will read
+    /// the next token), so it belongs on this side of the seam, and
+    /// putting it here is what leaves `input.rs` naming nothing in
+    /// `parser.rs`. The parser consults it at the two points it consumed
+    /// the flag before: one takes it through
+    /// [`InputStack::take_alias_boundary`], and one drops it unread
+    /// through [`InputStack::clear_alias_boundary`].
     alias_boundary: bool,
     /// Every byte the parse in progress has consumed, cut into tokens.
     ///
@@ -345,14 +355,6 @@ impl InputStack {
     }
 }
 
-/// Set when `popstring` finishes an alias whose text ended in a blank.
-///
-/// dash spells this `checkkwd |= CHKALIAS` — the input layer reaching
-/// into a parser global. The bit is per-*input-position* state (it
-/// describes the alias that just ended, not the parse that will read the
-/// next token), so it belongs on this side of the seam, and putting it
-/// here is what leaves `input.rs` naming nothing in `parser.rs`. The
-/// parser consults it at the two points it consumed the flag before —
 /// Frame `i`. Index 0 is `basepf`, which is not in `FRAMES` because it
 /// outlives every push and the C gives it a different `popfile`.
 #[inline(always)]
