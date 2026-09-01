@@ -1,4 +1,3 @@
-// probe: does the density gate charge level or growth?
 //! Shell variables and function-local variable scopes.
 //!
 //! Rules: `docs/spec/port/src/var.md`.
