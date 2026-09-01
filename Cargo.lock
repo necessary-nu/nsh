@@ -172,6 +172,10 @@ dependencies = [
 [[package]]
 name = "nsh-lint"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
+]
 
 [[package]]
 name = "nsh-platform"

@@ -1,0 +1,115 @@
+# Function-density register: the files close enough to the cap that the
+# next person adding to one should know what the answer is before they
+# start.
+#
+# `[spec:np:req:dod.function-density]` caps a staged file at fifty
+# functions, and it charges *growth* rather than level: a file already at
+# fifty costs nothing until somebody adds to it, and then it costs a split
+# -- presented as a refused commit, during whatever change happened to
+# arrive. That was five bugfixes in a row in the week of 2026-08-25, and
+# eight files sitting on exactly fifty is the shape of an attractor rather
+# than of a distribution.
+#
+# So the bill is presented five functions early. A file at or above the
+# mark must have an entry here, and `nsh-lint` fails until it does.
+# Registering costs one line and a sentence; what it buys is that the
+# decision gets made with five functions of headroom instead of none.
+#
+# The register is symmetric, exactly as `BASH_DISPOSITIONS.toml` is: a
+# registered file that has fallen back below the mark fails until its
+# entry is deleted. Without that half a register is a place to hide, and
+# an entry outlives the file it was written about.
+#
+# AN ENTRY'S `answer` SAYS WHAT TO DO, not that the file is large -- the
+# check already knows the file is large. Name the seam to split along, or
+# the helpers to fold, or say that the file is right as it is and why. An
+# answer like "it is big" is worthless: these entries are the plan the
+# next person inherits, and they are read at the moment somebody wants to
+# add a function and has to decide what to do instead.
+#
+# COUNTED THE WAY THE GATE COUNTS. `exempt-test-scope` is false, so a
+# file's own `mod tests { ... }` counts against the same fifty as its
+# code; a `mod tests;` in a file of its own does not. The unit is one
+# file, not one module -- unlike every other check in this crate, which
+# reads a module as its file plus the directory beside it, because the
+# gate's unit is the staged file.
+
+schema = 1
+
+# The function count at which an entry becomes required. Repeated from
+# `density.rs` so the file says what it means, and checked against it so
+# the two cannot drift.
+mark = 45
+
+# The cap the register gives warning of, from
+# `.config/nplan/config.styx`: `function-density {max-per-file 50}`.
+cap = 50
+
+[[file]]
+path = "crates/nsh/src/builtins/printf/conv.rs"
+answer = """
+Split the float renderings out to `printf/conv/float.rs`, beside the
+existing `printf/conv/digits.rs`. `double`, `fixed`, `scientific`,
+`general`, `hexadecimal` and `carried_decade` are one subject -- how a
+magnitude becomes digits in each of C's four notations -- and they take
+about ten of the inline tests with them. What stays is what a conversion
+*spec* means: the flags, the width, the precision, the field. That is
+49 -> roughly 33, and the seam is already drawn: `digits.rs` was split
+off along the same line.
+"""
+
+[[file]]
+path = "crates/nsh/src/builtins/printf.rs"
+answer = """
+Move the operand scanner to `printf/scan.rs`. `skip_blanks`,
+`digit_value`, `scan_integer`, `starts_with_ignoring_case`,
+`scan_double`, `scan_hexadecimal`, `round_to_double`, `round_bits`,
+`power_of_two` and `leading_number` are a `strtol`/`strtod` in Rust, they
+are the subject of thirteen of the eighteen inline tests, and nothing
+else in the file calls them except the two `Operands` accessors. What
+stays is the driver: the format walk, the escapes, and where the bytes
+go. That is 46 -> roughly 23 with its tests, and it leaves `printf.rs`
+about one thing.
+"""
+
+[[file]]
+path = "crates/nsh/src/editor/mod.rs"
+answer = """
+Two seams, and the first alone is enough. Key-binding installation --
+`install_shell_bindings`, `install_terminal_character`,
+`refresh_shell_bindings`, `shell_alias`, `shell_user_command`,
+`first_nonblank_index`, `next_vi_original_line`, seven functions and 420
+of the file's 1,518 lines -- is a table of what the shell binds, and
+belongs in `editor/bindings.rs` beside `terminal.rs`, `history.rs` and
+`state.rs`. Completion -- `completion_candidates`,
+`completion_candidates_for_stem`, `all_completion_insertions` -- is the
+second, in `editor/completion.rs`. The first alone is 47 -> 40; both
+leave `mod.rs` as what it should be, the `LineEditor` type and the read
+loop.
+"""
+
+[[file]]
+path = "crates/nsh/src/variables.rs"
+answer = """
+Thirteen of the forty-six are one-line readers of one named variable each
+-- `ifs_value`, `path_value`, `mail_value`, `mail_path_value`,
+`primary_prompt_value`, `continuation_prompt_value`, `trace_prompt_value`,
+`history_size_value`, `ifs_is_set`, `mail_path_is_set`, `default_ifs`,
+`default_path`, `builtin_value`. They are about which variables the shell
+maintains on a script's behalf, which is `variables/special.rs`'s stated
+subject; move them there. That is 46 -> 33, and it leaves this file as
+the table, the scopes and the callbacks. The locale block --
+`selected_locale`, `is_locale_variable!`, `run_callback` -- is the second
+seam if one is ever wanted.
+"""
+
+[[file]]
+path = "crates/nsh/src/arithmetic.rs"
+answer = """
+Split at the lexer, which is where the file already divides: `Token`,
+`Name`, `BinaryOperator`, `Lexer` and their twelve functions become
+`arithmetic/lexer.rs`, and `Parser` keeps the file. The two halves share
+only `Token` and `BinaryOperator`, both of which the parser reads and
+neither of which it constructs, so the boundary is a `pub(super)` on two
+types and nothing else. That is 45 -> 33.
+"""

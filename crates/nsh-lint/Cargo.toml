@@ -16,3 +16,11 @@ publish = false
 [[bin]]
 name = "nsh-lint"
 path = "src/main.rs"
+
+# Only the function-density register needs these, and it needs them for
+# the same reason `nsh-survey` does: a register a person maintains by hand
+# should be in the format this repository already keeps registers in, and
+# a hand-rolled parser for it would be a second thing to trust.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

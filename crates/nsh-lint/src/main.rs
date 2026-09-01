@@ -15,6 +15,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+/// The one check whose unit is a file rather than a module, and whose
+/// subject is how much of a file there is rather than what is in it. It
+/// keeps its own module because it is the only check here that reads a
+/// checked-in register, and because adding it to this file would have
+/// walked `main.rs` into the very cap it exists to give warning of.
+mod density;
+
 /// A module's whole text: the file, and every file in the directory beside it.
 ///
 /// Every check here is about how a subsystem is *written*, not about which
@@ -1543,6 +1550,10 @@ fn main() {
         (
             "the_expression_engine_bounds_its_work",
             the_expression_engine_bounds_its_work,
+        ),
+        (
+            "files_near_the_cap_are_registered",
+            density::files_near_the_cap_are_registered,
         ),
     ];
     std::panic::set_hook(Box::new(|_| {}));
