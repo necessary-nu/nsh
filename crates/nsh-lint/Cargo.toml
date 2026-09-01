@@ -1,0 +1,18 @@
+# The repository's source-shape checks, as a check rather than as a test.
+#
+# `[spec:nsh:req:idiom.regression-gates]` asks for *repository checks* that
+# fail when a translated C idiom comes back. They lived in
+# `crates/nsh/tests/idiomatic_control_flow.rs` and ran under `cargo test`,
+# where a red run meant either "the shell is broken" or "you renamed a
+# function". Here a red run means one thing.
+[package]
+name = "nsh-lint"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "nsh-lint"
+path = "src/main.rs"

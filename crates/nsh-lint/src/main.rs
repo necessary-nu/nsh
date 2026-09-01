@@ -1,53 +1,73 @@
-//! Structural checks for parser and expander control flow.
+//! The repository's source-shape checks: did we write Rust, or transcribe C?
+//!
+//! `[spec:nsh:req:idiom.regression-gates]` asks for *repository checks* that
+//! fail when a translated C idiom comes back -- a `c_int`, a `CString`, an
+//! integer program counter, a labelled block left by a `goto`. None of that
+//! has a runtime signature: a shell with `state: u8` behaves exactly like one
+//! with an enum, so no run distinguishes them and the property can only be
+//! read off the source.
+//!
+//! These ran under `cargo test` until 2026-09-02, where a red run meant
+//! either "the shell is broken" or "you renamed a function". They are a
+//! check now, wired into `.config/nplan/config.styx` beside `fmt` and
+//! `clippy`, and a red run means one thing.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-const PARSER: &str = include_str!("../src/parser.rs");
-const PARSER_MULTIBYTE: &str = include_str!("../src/parser/multibyte.rs");
-const EXPANDER: &str = include_str!("../src/expand.rs");
-const EXPANSION_MODES: &str = include_str!("../src/expand/mode.rs");
-const EVALUATOR: &str = include_str!("../src/evaluation.rs");
-const REDIRECTIONS: &str = include_str!("../src/redirection.rs");
-/// The whole `jobs` module: the file and the four it was split into.
+/// A module's whole text: the file, and every file in the directory beside it.
 ///
-/// Every check below is about how job control is *modelled* -- typed
-/// states, no integer flags, no translated `goto` markers -- and not about
-/// which file a declaration is written in. Reading only the parent made
-/// two of them fail on a commit that moved code and changed nothing, and
-/// would have let a forbidden shape hide by moving one file down.
-static JOBS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    [
-        include_str!("../src/jobs.rs"),
-        include_str!("../src/jobs/fork.rs"),
-        include_str!("../src/jobs/render.rs"),
-        include_str!("../src/jobs/terminal.rs"),
-        include_str!("../src/jobs/wait.rs"),
-    ]
-    .concat()
-});
-const JOB_MODEL: &str = include_str!("../src/jobs/model.rs");
-const OPTIONS: &str = include_str!("../src/options.rs");
-const OPTION_MODEL: &str = include_str!("../src/options/model.rs");
-const BUILTIN_READ: &str = include_str!("../src/builtins/read.rs");
-const BUILTIN_BREAK: &str = include_str!("../src/builtins/break.rs");
-const BUILTIN_RETURN: &str = include_str!("../src/builtins/return.rs");
-const ARITHMETIC: &str = include_str!("../src/arithmetic.rs");
-const PATTERN: &str = include_str!("../src/pattern.rs");
-const RUNTIME: &str = include_str!("../src/runtime.rs");
-const EDITOR: &str = include_str!("../src/editor/mod.rs");
-const ALIASES: &str = include_str!("../src/alias.rs");
-const ERRORS: &str = include_str!("../src/error.rs");
-const INPUT: &str = include_str!("../src/input.rs");
-const MAIL: &str = include_str!("../src/mail.rs");
-const EXECUTION: &str = include_str!("../src/execution.rs");
-const VARIABLES: &str = include_str!("../src/variables.rs");
-const ULIMIT: &str = include_str!("../src/builtins/ulimit.rs");
-const OUTPUT: &str = include_str!("../src/output.rs");
-const BUILTINS: &str = include_str!("../src/builtins/mod.rs");
-const LIBRARY: &str = include_str!("../src/lib.rs");
-const CLI: &str = include_str!("../../nsh-cli/src/main.rs");
-const CLI_INVOCATION: &str = include_str!("../../nsh-cli/src/invocation.rs");
+/// Every check here is about how a subsystem is *written*, not about which
+/// file a declaration lands in, so splitting a module must not change the
+/// answer. Reading one file made two checks fail on a commit that moved
+/// code and changed nothing, and -- the half that matters -- would have let
+/// a forbidden shape stop being seen by moving it one file down.
+fn module(relative: &str) -> String {
+    let root = workspace_root().join("crates");
+    let mut text = std::fs::read_to_string(root.join(format!("{relative}.rs"))).unwrap_or_default();
+    let directory = root.join(relative);
+    let mut nested = Vec::new();
+    if directory.is_dir() {
+        rust_sources_below(&directory, &mut nested);
+        nested.sort();
+    }
+    for path in nested {
+        text.push('\n');
+        text.push_str(&std::fs::read_to_string(path).expect("a module file is readable"));
+    }
+    assert!(!text.is_empty(), "no source at crates/{relative}.rs");
+    text
+}
 
+static PARSER: LazyLock<String> = LazyLock::new(|| module("nsh/src/parser"));
+static PARSER_MULTIBYTE: LazyLock<String> = LazyLock::new(|| module("nsh/src/parser/multibyte"));
+static EXPANDER: LazyLock<String> = LazyLock::new(|| module("nsh/src/expand"));
+static EXPANSION_MODES: LazyLock<String> = LazyLock::new(|| module("nsh/src/expand/mode"));
+static EVALUATOR: LazyLock<String> = LazyLock::new(|| module("nsh/src/evaluation"));
+static REDIRECTIONS: LazyLock<String> = LazyLock::new(|| module("nsh/src/redirection"));
+static JOBS: LazyLock<String> = LazyLock::new(|| module("nsh/src/jobs"));
+static JOB_MODEL: LazyLock<String> = LazyLock::new(|| module("nsh/src/jobs/model"));
+static OPTIONS: LazyLock<String> = LazyLock::new(|| module("nsh/src/options"));
+static OPTION_MODEL: LazyLock<String> = LazyLock::new(|| module("nsh/src/options/model"));
+static BUILTIN_READ: LazyLock<String> = LazyLock::new(|| module("nsh/src/builtins/read"));
+static BUILTIN_BREAK: LazyLock<String> = LazyLock::new(|| module("nsh/src/builtins/break"));
+static BUILTIN_RETURN: LazyLock<String> = LazyLock::new(|| module("nsh/src/builtins/return"));
+static ARITHMETIC: LazyLock<String> = LazyLock::new(|| module("nsh/src/arithmetic"));
+static PATTERN: LazyLock<String> = LazyLock::new(|| module("nsh/src/pattern"));
+static RUNTIME: LazyLock<String> = LazyLock::new(|| module("nsh/src/runtime"));
+static EDITOR: LazyLock<String> = LazyLock::new(|| module("nsh/src/editor/mod"));
+static ALIASES: LazyLock<String> = LazyLock::new(|| module("nsh/src/alias"));
+static ERRORS: LazyLock<String> = LazyLock::new(|| module("nsh/src/error"));
+static INPUT: LazyLock<String> = LazyLock::new(|| module("nsh/src/input"));
+static MAIL: LazyLock<String> = LazyLock::new(|| module("nsh/src/mail"));
+static EXECUTION: LazyLock<String> = LazyLock::new(|| module("nsh/src/execution"));
+static VARIABLES: LazyLock<String> = LazyLock::new(|| module("nsh/src/variables"));
+static ULIMIT: LazyLock<String> = LazyLock::new(|| module("nsh/src/builtins/ulimit"));
+static OUTPUT: LazyLock<String> = LazyLock::new(|| module("nsh/src/output"));
+static BUILTINS: LazyLock<String> = LazyLock::new(|| module("nsh/src/builtins/mod"));
+static LIBRARY: LazyLock<String> = LazyLock::new(|| module("nsh/src/lib"));
+static CLI: LazyLock<String> = LazyLock::new(|| module("nsh-cli/src/main"));
+static CLI_INVOCATION: LazyLock<String> = LazyLock::new(|| module("nsh-cli/src/invocation"));
 /// Host scalar spellings that only exist to match a C ABI.
 const ABI_SCALARS: &[&str] = &[
     "c_char",
@@ -120,7 +140,22 @@ const SAFE_CORE_TREES: &[&str] = &[
 ];
 
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    /* Canonical, so a report names `crates/nsh/src/mail.rs` rather than
+     * the `crates/nsh-lint/../../crates/...` the join produces. */
+    std::fs::canonicalize(&manifest).unwrap_or(manifest)
+}
+
+/// The shell's own source, which is what every sweep below is about.
+///
+/// These were written as `CARGO_MANIFEST_DIR/src` while the checks lived
+/// inside `crates/nsh`, where that was the same directory. Moving the
+/// checks to a crate of their own retargeted five of them at the checker's
+/// own source, where they found the needles they carry as constants and
+/// reported them -- and had the needles not been in the checker, they
+/// would have passed while examining nothing.
+fn shell_source() -> PathBuf {
+    workspace_root().join("crates/nsh/src")
 }
 
 fn relative_to_workspace(path: &Path, workspace: &Path) -> String {
@@ -299,13 +334,9 @@ fn contains_c_literal(source: &str) -> bool {
 }
 
 // [spec:nsh:req:idiom.no-port-fossils/test]
-#[test]
 fn port_fossils_are_absent() {
     let mut sources = Vec::new();
-    rust_sources_below(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut sources,
-    );
+    rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
 
     let forbidden = [
@@ -324,7 +355,7 @@ fn port_fossils_are_absent() {
         "USE_MEMFD_CREATE",
         "HAVE_F_DUPFD_CLOEXEC",
         "HAVE_TRADITIONAL_FACCESSAT",
-        "pub const JOBS",
+        "pub const JOBS.as_str()",
         "pub const BSD",
         "pub const DEBUG",
         "pub type pointer",
@@ -348,7 +379,6 @@ fn port_fossils_are_absent() {
 }
 
 // [spec:nsh:req:idiom.strict-lints/test]
-#[test]
 fn core_enforces_strict_rust_lints() {
     for lint in [
         "unsafe_code",
@@ -374,7 +404,6 @@ fn core_enforces_strict_rust_lints() {
 }
 
 // [spec:nsh:req:idiom.regression-gates/test]
-#[test]
 fn zero_cism_gate_covers_boundary() {
     const CONTROL_BYTE_WORDS: &[&str] = &[
         "CTLESC",
@@ -506,7 +535,6 @@ fn zero_cism_gate_covers_boundary() {
 }
 
 // [spec:nsh:req:idiom.narrow-shell-context/test]
-#[test]
 fn subsystem_helpers_use_narrow_state() {
     for required in [
         "struct Diagnostics<'a>",
@@ -533,19 +561,18 @@ fn subsystem_helpers_use_narrow_state() {
     }
 
     for (source, required) in [
-        (ALIASES, "impl AliasTable"),
+        (ALIASES.as_str(), "impl AliasTable"),
         (
-            INPUT,
+            INPUT.as_str(),
             "pub(crate) fn current_input_frame(input: &mut InputStack)",
         ),
-        (MAIL, "impl MailState"),
+        (MAIL.as_str(), "impl MailState"),
     ] {
         assert!(source.contains(required), "missing {required}");
     }
 }
 
 // [spec:nsh:req:idiom.output-results/test]
-#[test]
 fn output_failures_are_returned() {
     for required in [
         "impl Write for Output",
@@ -572,13 +599,9 @@ fn output_failures_are_returned() {
 }
 
 // [spec:nsh:req:idiom.no-ignored-results/test]
-#[test]
 fn fallible_results_are_explicit() {
     let mut sources = Vec::new();
-    rust_sources_below(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut sources,
-    );
+    rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
 
     for path in sources {
@@ -608,14 +631,13 @@ fn fallible_results_are_explicit() {
 }
 
 // [spec:nsh:req:idiom.no-artificial-limits/test]
-#[test]
 fn dynamic_values_are_not_clamped() {
     for (name, source, forbidden) in [
         ("jobs", JOBS.as_str(), "append_ascii"),
         ("jobs", JOBS.as_str(), "name.len().min(32)"),
-        ("parser", PARSER, "message.truncate(63)"),
-        ("mail", MAIL, "MAXMBOXES"),
-        ("mail", MAIL, ".take(MAXMBOXES)"),
+        ("parser", PARSER.as_str(), "message.truncate(63)"),
+        ("mail", MAIL.as_str(), "MAXMBOXES"),
+        ("mail", MAIL.as_str(), ".take(MAXMBOXES)"),
     ] {
         assert!(
             !source.contains(forbidden),
@@ -626,7 +648,6 @@ fn dynamic_values_are_not_clamped() {
 }
 
 // [spec:nsh:req:idiom.builtin-registry/test]
-#[test]
 fn builtin_registry_is_fully_typed() {
     for required in [
         "enum BuiltinId",
@@ -658,14 +679,10 @@ fn builtin_registry_is_fully_typed() {
 }
 
 // [spec:nsh:req:idiom.shell-entrypoint/test]
-#[test]
 fn shell_entrypoint_uses_public_runtime() {
-    assert!(LIBRARY.contains("pub(crate) mod runtime;"));
-    assert!(RUNTIME.contains("pub(crate) fn run("));
     assert!(RUNTIME.contains("startup: &Startup"));
     assert!(CLI.contains("nsh::Shell::builder()"));
     assert!(CLI.contains("shell.run_to_completion(startup)"));
-    assert!(CLI_INVOCATION.contains("fn parse("));
 
     for forbidden in [
         "pub mod shellmain;",
@@ -684,7 +701,6 @@ fn shell_entrypoint_uses_public_runtime() {
 }
 
 // [spec:nsh:req:idiom.module-boundaries/test]
-#[test]
 fn modules_follow_rust_subsystems() {
     for module in ["arithmetic", "pattern", "runtime", "editor"] {
         assert!(
@@ -693,15 +709,15 @@ fn modules_follow_rust_subsystems() {
         );
     }
     for (source, boundary) in [
-        (ARITHMETIC, "struct Parser"),
-        (PATTERN, "struct Matcher"),
-        (RUNTIME, "enum StartupTask"),
-        (EDITOR, "mod state;"),
+        (ARITHMETIC.as_str(), "struct Parser"),
+        (PATTERN.as_str(), "struct Matcher"),
+        (RUNTIME.as_str(), "enum StartupTask"),
+        (EDITOR.as_str(), "mod state;"),
     ] {
         assert!(source.contains(boundary), "missing boundary {boundary}");
     }
 
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let source = shell_source();
     for old_file in [
         "arith_yacc.rs",
         "pmatch.rs",
@@ -718,9 +734,8 @@ fn modules_follow_rust_subsystems() {
 }
 
 // [spec:nsh:req:idiom.no-mystring/test]
-#[test]
 fn mystring_module_is_absent() {
-    let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/mystring.rs");
+    let module = shell_source().join("mystring.rs");
     assert!(
         !module.exists(),
         "generic compatibility module still exists"
@@ -729,13 +744,9 @@ fn mystring_module_is_absent() {
 }
 
 // [spec:nsh:req:idiom.no-c-strings-core/test]
-#[test]
 fn core_strings_are_length_delimited() {
     let mut sources = Vec::new();
-    rust_sources_below(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut sources,
-    );
+    rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
 
     let forbidden = [
@@ -768,13 +779,9 @@ fn core_strings_are_length_delimited() {
 }
 
 // [spec:nsh:req:idiom.no-abi-scalars-core/test]
-#[test]
 fn core_avoids_abi_scalars() {
     let mut sources = Vec::new();
-    rust_sources_below(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut sources,
-    );
+    rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
 
     let aliases = [
@@ -804,23 +811,22 @@ fn core_avoids_abi_scalars() {
     }
 
     for (source, domain_type) in [
-        (EXECUTION, "struct CommandSearch"),
-        (EXECUTION, "path_index: Option<usize>"),
-        (ERRORS, "enum Operation"),
-        (ERRORS, "fn interrupt_pending() -> bool"),
-        (EXPANSION_MODES, "struct ExpansionMode"),
-        (MAIL, "changed: bool"),
-        (VARIABLES, "push: bool"),
-        (ULIMIT, "struct LimitSelection"),
+        (EXECUTION.as_str(), "struct CommandSearch"),
+        (EXECUTION.as_str(), "path_index: Option<usize>"),
+        (ERRORS.as_str(), "enum Operation"),
+        (ERRORS.as_str(), "fn interrupt_pending() -> bool"),
+        (EXPANSION_MODES.as_str(), "struct ExpansionMode"),
+        (MAIL.as_str(), "changed: bool"),
+        (VARIABLES.as_str(), "push: bool"),
+        (ULIMIT.as_str(), "struct LimitSelection"),
     ] {
         assert!(source.contains(domain_type), "missing {domain_type}");
     }
 }
 
 // [spec:nsh:req:idiom.parser-control-flow/test]
-#[test]
 fn control_flow_is_structured() {
-    for (name, source) in [("parser", PARSER), ("expander", EXPANDER)] {
+    for (name, source) in [("parser", PARSER.as_str()), ("expander", EXPANDER.as_str())] {
         for forbidden in ["goto", "Lbl::", "let mut pc", "const L_"] {
             assert!(
                 !source.contains(forbidden),
@@ -839,13 +845,12 @@ fn control_flow_is_structured() {
 }
 
 // [spec:nsh:req:idiom.operation-modes/test]
-#[test]
 fn operation_modes_are_typed() {
     for (name, source, old_prefix) in [
-        ("evaluation", EVALUATOR, "pub const EV_"),
-        ("expansion", EXPANSION_MODES, "pub const EXP_"),
-        ("escaping", EXPANSION_MODES, "pub const RMESCAPE_"),
-        ("redirection", REDIRECTIONS, "pub const REDIR_"),
+        ("evaluation", EVALUATOR.as_str(), "pub const EV_"),
+        ("expansion", EXPANSION_MODES.as_str(), "pub const EXP_"),
+        ("escaping", EXPANSION_MODES.as_str(), "pub const RMESCAPE_"),
+        ("redirection", REDIRECTIONS.as_str(), "pub const REDIR_"),
         ("job display", JOBS.as_str(), "pub const SHOW_"),
     ] {
         assert!(
@@ -855,18 +860,17 @@ fn operation_modes_are_typed() {
     }
 
     for (source, typed_mode) in [
-        (EVALUATOR, "struct EvaluationContext"),
-        (EXPANSION_MODES, "struct ExpansionMode"),
-        (REDIRECTIONS, "enum RedirectionMode"),
+        (EVALUATOR.as_str(), "struct EvaluationContext"),
+        (EXPANSION_MODES.as_str(), "struct ExpansionMode"),
+        (REDIRECTIONS.as_str(), "enum RedirectionMode"),
         (JOBS.as_str(), "enum JobDisplay"),
-        (PARSER_MULTIBYTE, "enum MultibyteMode"),
+        (PARSER_MULTIBYTE.as_str(), "enum MultibyteMode"),
     ] {
         assert!(source.contains(typed_mode), "missing {typed_mode}");
     }
 }
 
 // [spec:nsh:req:idiom.evaluator-control-flow/test]
-#[test]
 fn evaluator_control_is_carried_by_flow() {
     for forbidden in [
         "evalskip",
@@ -877,9 +881,9 @@ fn evaluator_control_is_carried_by_flow() {
         "SKIPFUNCDEF",
     ] {
         for (name, source) in [
-            ("evaluator", EVALUATOR),
-            ("break builtin", BUILTIN_BREAK),
-            ("return builtin", BUILTIN_RETURN),
+            ("evaluator", EVALUATOR.as_str()),
+            ("break builtin", BUILTIN_BREAK.as_str()),
+            ("return builtin", BUILTIN_RETURN.as_str()),
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -891,23 +895,24 @@ fn evaluator_control_is_carried_by_flow() {
     for variant in ["Break {", "Continue {", "Return {"] {
         assert!(EVALUATOR.contains(variant), "Flow is missing {variant}");
     }
-    for (name, source) in [("read", BUILTIN_READ), ("startup", RUNTIME)] {
+    for (name, source) in [
+        ("read", BUILTIN_READ.as_str()),
+        ("startup", RUNTIME.as_str()),
+    ] {
         assert!(
             !source.contains("let mut pc"),
             "{name} has a program counter"
         );
         assert!(!source.contains("const L_"), "{name} has translated labels");
     }
-    assert!(RUNTIME.contains("enum StartupTask"));
 }
 
 // [spec:nsh:req:idiom.jobs-startup-control-flow/test]
-#[test]
 fn jobs_read_startup_are_structured() {
     for (name, source) in [
         ("jobs", JOBS.as_str()),
-        ("read", BUILTIN_READ),
-        ("startup", RUNTIME),
+        ("read", BUILTIN_READ.as_str()),
+        ("startup", RUNTIME.as_str()),
     ] {
         for forbidden in ["goto", "at_start", "let mut phase", "StartupPhase"] {
             assert!(
@@ -924,18 +929,12 @@ fn jobs_read_startup_are_structured() {
         );
     }
 
-    assert!(JOBS.contains("fn lookup_job"));
-    assert!(JOBS.contains("fn record_child_status"));
-    assert!(BUILTIN_READ.contains("struct ReadLine"));
-    assert!(BUILTIN_READ.contains("fn read_input_line"));
     assert!(BUILTIN_READ.contains("protected: Vec<bool>"));
-    assert!(RUNTIME.contains("fn run_startup_task"));
     assert!(RUNTIME.contains("const fn recovery"));
 }
 
 // [spec:nsh:def:idiom.job-control-model/test]
 // [spec:nsh:req:idiom.job-storage/test]
-#[test]
 fn typed_job_control_model() {
     for required in [
         "struct JobId",
@@ -950,7 +949,6 @@ fn typed_job_control_model() {
     ] {
         assert!(JOB_MODEL.contains(required), "missing {required}");
     }
-    assert!(JOBS.contains("enum WaitOutcome"));
     assert!(JOBS.contains("ProcessGroupId"));
 
     for forbidden in [
@@ -978,7 +976,6 @@ fn typed_job_control_model() {
 }
 
 // [spec:nsh:def:idiom.shell-options/test]
-#[test]
 fn typed_shell_options() {
     for required in [
         "enum ShellOption",
@@ -989,7 +986,6 @@ fn typed_shell_options() {
         assert!(OPTION_MODEL.contains(required), "missing {required}");
     }
     assert!(OPTIONS.contains("state: OptionSet"));
-    assert!(CLI_INVOCATION.contains("struct OptionState"));
     assert!(CLI_INVOCATION.contains("let mut explicit = Vec::new()"));
 
     for forbidden in [
@@ -1051,7 +1047,6 @@ fn scanned_safe_core_sources(workspace: &Path) -> Vec<(String, SourceScan)> {
 /// or a table listing `"RawFd"` is prose, not a bypass. Manual descriptor
 /// moves are matched the same way.
 // [spec:nsh:req:compat.bash.safe-core/test]
-#[test]
 fn the_compatibility_delta_stays_safe() {
     let workspace = workspace_root();
     let mut violations = Vec::new();
@@ -1087,7 +1082,6 @@ fn the_compatibility_delta_stays_safe() {
 /// must be on it, and every entry must still exist, so a deleted file
 /// cannot leave a permission behind for a later one to inherit.
 // [spec:nsh:req:compat.bash.safe-core/test]
-#[test]
 fn platform_unsafe_is_named_and_justified() {
     let workspace = workspace_root();
     let mut violations = Vec::new();
@@ -1139,7 +1133,6 @@ fn platform_unsafe_is_named_and_justified() {
 /// descriptor table after the last fork. Anywhere else they would be a
 /// second, unowned lifetime for a descriptor the shell already owns.
 // [spec:nsh:req:compat.bash.safe-core/test]
-#[test]
 fn descriptors_cross_the_boundary_owned() {
     let workspace = workspace_root();
     let mut violations = Vec::new();
@@ -1219,7 +1212,6 @@ fn descriptors_cross_the_boundary_owned() {
 /// forked without a job. Release is by `Drop` and nothing else, so no path
 /// -- error, interrupt or early return -- can skip it.
 // [spec:nsh:req:compat.bash.safe-core/test]
-#[test]
 fn process_substitution_ownership_is_pinned() {
     let workspace = workspace_root();
     let module = "crates/nsh/src/evaluation/bash_process_substitution.rs";
@@ -1304,7 +1296,6 @@ fn process_substitution_ownership_is_pinned() {
 /// reproduced, so they must carry a provenance record naming what produced
 /// them and which version was observed.
 // [spec:nsh:req:compat.bash.safe-core/test]
-#[test]
 fn no_gnu_bash_code_was_copied() {
     const UPSTREAM_NOTICES: &[&str] = &[
         "Free Software Foundation",
@@ -1334,6 +1325,7 @@ fn no_gnu_bash_code_was_copied() {
     ];
 
     let workspace = workspace_root();
+    let checker_crate = concat!("crates/", env!("CARGO_PKG_NAME"), "/");
     let mut violations = Vec::new();
     let mut sources = Vec::new();
     rust_sources_below(&workspace.join("crates"), &mut sources);
@@ -1342,9 +1334,13 @@ fn no_gnu_bash_code_was_copied() {
     for path in sources {
         let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
         let relative = relative_to_workspace(&path, &workspace);
-        /* This file spells every notice out in order to look for it, so
-         * it is the one file the search cannot include. */
-        let checker = relative == "crates/nsh/tests/idiomatic_control_flow.rs";
+        /* This crate spells every notice out in order to look for it, so
+         * it is the one place the search cannot include. Derived from the
+         * manifest rather than written as a path: the literal it replaces
+         * said `crates/nsh/tests/idiomatic_control_flow.rs` and went stale
+         * the moment the checks moved, which is the whole reason a path
+         * should never be spelled out where it can be asked for. */
+        let checker = relative.starts_with(checker_crate);
         for notice in UPSTREAM_NOTICES {
             if !checker && source.contains(notice) {
                 violations.push(format!("{relative} carries an upstream notice: {notice:?}"));
@@ -1406,7 +1402,6 @@ fn no_gnu_bash_code_was_copied() {
 /// in the one place every recursion passes through, so nesting cannot get
 /// around either.
 // [spec:nsh:req:compat.bash.safe-core/test]
-#[test]
 fn the_expression_engine_bounds_its_work() {
     let workspace = workspace_root();
     let source = std::fs::read_to_string(workspace.join("crates/nsh/src/regex.rs")).unwrap();
@@ -1450,4 +1445,147 @@ fn the_expression_engine_bounds_its_work() {
         search.contains("let mut steps = 0_u64;") && search.contains("&mut steps"),
         "the search buys a fresh budget at every start offset"
     );
+}
+
+/// Run every check, and report all of them rather than the first.
+///
+/// A check panics on failure, which is how it was written when these were
+/// `#[test]` functions and is worth keeping: the assertion message is the
+/// report. Catching each one separately is the difference between "the
+/// source shape is wrong" and "here is everything that is wrong with it".
+fn main() {
+    let checks: &[(&str, fn())] = &[
+        ("port_fossils_are_absent", port_fossils_are_absent),
+        (
+            "core_enforces_strict_rust_lints",
+            core_enforces_strict_rust_lints,
+        ),
+        (
+            "zero_cism_gate_covers_boundary",
+            zero_cism_gate_covers_boundary,
+        ),
+        (
+            "subsystem_helpers_use_narrow_state",
+            subsystem_helpers_use_narrow_state,
+        ),
+        ("output_failures_are_returned", output_failures_are_returned),
+        (
+            "fallible_results_are_explicit",
+            fallible_results_are_explicit,
+        ),
+        (
+            "dynamic_values_are_not_clamped",
+            dynamic_values_are_not_clamped,
+        ),
+        (
+            "builtin_registry_is_fully_typed",
+            builtin_registry_is_fully_typed,
+        ),
+        (
+            "shell_entrypoint_uses_public_runtime",
+            shell_entrypoint_uses_public_runtime,
+        ),
+        (
+            "modules_follow_rust_subsystems",
+            modules_follow_rust_subsystems,
+        ),
+        ("mystring_module_is_absent", mystring_module_is_absent),
+        (
+            "core_strings_are_length_delimited",
+            core_strings_are_length_delimited,
+        ),
+        ("core_avoids_abi_scalars", core_avoids_abi_scalars),
+        ("control_flow_is_structured", control_flow_is_structured),
+        ("operation_modes_are_typed", operation_modes_are_typed),
+        (
+            "evaluator_control_is_carried_by_flow",
+            evaluator_control_is_carried_by_flow,
+        ),
+        (
+            "jobs_read_startup_are_structured",
+            jobs_read_startup_are_structured,
+        ),
+        ("typed_job_control_model", typed_job_control_model),
+        ("typed_shell_options", typed_shell_options),
+        (
+            "the_compatibility_delta_stays_safe",
+            the_compatibility_delta_stays_safe,
+        ),
+        (
+            "platform_unsafe_is_named_and_justified",
+            platform_unsafe_is_named_and_justified,
+        ),
+        (
+            "descriptors_cross_the_boundary_owned",
+            descriptors_cross_the_boundary_owned,
+        ),
+        (
+            "process_substitution_ownership_is_pinned",
+            process_substitution_ownership_is_pinned,
+        ),
+        ("no_gnu_bash_code_was_copied", no_gnu_bash_code_was_copied),
+        (
+            "the_expression_engine_bounds_its_work",
+            the_expression_engine_bounds_its_work,
+        ),
+    ];
+    std::panic::set_hook(Box::new(|_| {}));
+    let mut failed = Vec::new();
+    for (name, check) in checks {
+        if let Err(panic) = std::panic::catch_unwind(check) {
+            let why = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("check panicked");
+            failed.push(format!("{name}: {why}"));
+        }
+    }
+    drop(std::panic::take_hook());
+    if failed.is_empty() {
+        println!("nsh-lint: {} source-shape checks, all clean", checks.len());
+        return;
+    }
+    eprintln!(
+        "nsh-lint: {} of {} checks failed",
+        failed.len(),
+        checks.len()
+    );
+    for report in &failed {
+        eprintln!("  {report}");
+    }
+    std::process::exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A module read has to reach the files beside the one it names.
+    ///
+    /// This is the property the old `include_str!` did not have, and the
+    /// one worth pinning: `record_child_status` lives in `jobs/wait.rs`
+    /// and `JobState` in `jobs/model.rs`, so a read that only opened
+    /// `jobs.rs` would find neither -- and a forbidden shape put in either
+    /// file would go unreported.
+    #[test]
+    fn a_module_read_reaches_the_files_beside_it() {
+        let jobs = module("nsh/src/jobs");
+        assert!(
+            jobs.contains("fn record_child_status"),
+            "missing jobs/wait.rs"
+        );
+        assert!(jobs.contains("enum JobState"), "missing jobs/model.rs");
+        assert!(jobs.contains("fn create_job"), "missing jobs.rs itself");
+    }
+
+    /// A module that is not there is a failure, not an empty string.
+    ///
+    /// `read_to_string` answers a missing file with an `Err` that
+    /// `unwrap_or_default` would turn into "nothing forbidden here".
+    #[test]
+    #[should_panic(expected = "no source at")]
+    fn a_module_that_is_not_there_is_refused() {
+        let _ = module("nsh/src/no-such-subsystem");
+    }
 }

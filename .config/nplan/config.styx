@@ -40,6 +40,17 @@ platforms (
             lint {
                 cmd "cargo clippy --workspace --all-targets -- -D warnings"
             }
+            // `[spec:nsh:req:idiom.regression-gates]` asks for repository
+            // checks that fail when a translated C idiom comes back -- a
+            // `c_int`, a `CString`, an integer program counter, a labelled
+            // block left by a `goto`. None of that has a runtime signature,
+            // so it is read off the source rather than run. It lived in
+            // `cargo test` until 2026-09-02, where a red run meant either
+            // "the shell is broken" or "somebody renamed a function"; here
+            // a red run means one thing.
+            idiom {
+                cmd "cargo run -q -p nsh-lint"
+            }
         }
     }
 )

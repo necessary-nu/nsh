@@ -170,6 +170,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-lint"
+version = "0.1.0"
+
+[[package]]
 name = "nsh-platform"
 version = "0.1.0"
 dependencies = [
