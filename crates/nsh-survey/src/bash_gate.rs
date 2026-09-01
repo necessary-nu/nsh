@@ -30,6 +30,8 @@ use crate::oils_runner::{GateCase, GateOutcome, run_gate_group};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const REGISTER_FILE: &str = "BASH_DISPOSITIONS.toml";
+/// How many times the control asks the reference before it believes it.
+const CONTROL_RUNS: usize = 3;
 const GROUP: &str = "bash-extension";
 
 /// The categories a non-passing eligible case may carry.
@@ -166,6 +168,68 @@ struct Findings {
     counts: BTreeMap<Category, usize>,
     out_of_contract: usize,
     reference_excluded: BTreeMap<String, usize>,
+    contended: BTreeSet<String>,
+}
+
+/// Where the pinned Bash is, for the control run.
+///
+/// The gate already depends on this build: `BASH_REFERENCE_CASES.json` is
+/// what it produced. Naming the binary too is the difference between
+/// comparing this shell against a recording made on a quiet machine and
+/// comparing it against the reference on the machine the gate is running
+/// on.
+fn pinned_reference(root: &Path) -> Result<PathBuf> {
+    let path = env::var_os("NSH_FUZZ_BASH").map_or_else(
+        || root.join("../../../target/bash-reference/bash"),
+        PathBuf::from,
+    );
+    let path = fs::canonicalize(&path).map_err(|error| {
+        format!(
+            "the gate needs the pinned Bash for its control run and {} is not there ({error}); \
+             build it with `nsh-survey build-bash-reference` or name it with NSH_FUZZ_BASH",
+            path.display()
+        )
+    })?;
+    Ok(path)
+}
+
+/// The cases this run cannot decide, because the reference did not
+/// reproduce its own recorded result on this machine.
+///
+/// Not a retry. A retry would hide a real regression that only shows up
+/// under contention; this asks a different question -- whether the case
+/// is still measuring the shell at all -- and answers it with the one
+/// thing that can tell the difference, which is the reference.
+///
+/// `process-sub.test.sh:1` is the case that made this necessary:
+/// `seq 3 > >(tac)` writes from a process the shell does not wait for, so
+/// the sandbox can tear the process substitution down before it writes.
+/// Measured 2026-09-01 at load 65, this shell lost that race in 15 runs
+/// of 20 and the pinned Bash lost it in 4 of 20. Neither number is a
+/// property of either shell.
+fn contended_cases(
+    root: &Path,
+    manifest: &crate::OilsManifest,
+    eligible: &BTreeSet<String>,
+) -> Result<BTreeSet<String>> {
+    let reference = pinned_reference(root)?;
+    require_bash_basename(&reference)?;
+    let mut contended = BTreeSet::new();
+    /* Three runs rather than one, because a race the reference happens to
+     * win once is still a race. One run at load 175 let
+     * `process-sub.test.sh:1` be recorded against this shell while the
+     * reference won it, which is the failure this whole control exists to
+     * stop; the reference loses the same case about one run in five at
+     * that load, so asking three times is the difference between a
+     * coin-flip and a question. */
+    for _ in 0..CONTROL_RUNS {
+        let live = run_gate_group(root, manifest, &reference, GROUP)?;
+        contended.extend(live.into_iter().filter_map(|case| {
+            let passed = case.outcome == GateOutcome::Pass;
+            (passed != eligible.contains(&case.id)).then_some(case.id)
+        }));
+    }
+    Ok(contended)
 }
 
 // [spec:nsh:req:compat.bash.survey-closure]
@@ -198,7 +262,26 @@ fn gate(root: &Path, shell: &Path) -> Result<bool> {
     let (eligible, reference_excluded) = crate::bash_reference::calibration(&root)?;
 
     let observed = run_gate_group(&root, &manifest, shell, GROUP)?;
-    let findings = judge(&register, &observed, &eligible, &reference_excluded);
+    let mut findings = judge(
+        &register,
+        &observed,
+        &eligible,
+        &reference_excluded,
+        &BTreeSet::new(),
+    );
+    /* The control costs a second run of the group, so it is only paid for
+     * when there is something to decide. A clean gate is the common case
+     * and is exactly as fast as it was. */
+    if !findings.violations.is_empty() {
+        let contended = contended_cases(&root, &manifest, &eligible)?;
+        findings = judge(
+            &register,
+            &observed,
+            &eligible,
+            &reference_excluded,
+            &contended,
+        );
+    }
     report(&register, &observed, &findings);
     Ok(findings.violations.is_empty())
 }
@@ -208,6 +291,7 @@ fn judge(
     observed: &[GateCase],
     eligible: &BTreeSet<String>,
     reference_excluded: &BTreeMap<String, String>,
+    contended: &BTreeSet<String>,
 ) -> Findings {
     let out_of_scope: BTreeSet<&str> = register
         .scope
@@ -225,6 +309,7 @@ fn judge(
         counts: BTreeMap::new(),
         out_of_contract: 0,
         reference_excluded: BTreeMap::new(),
+        contended: BTreeSet::new(),
     };
 
     let specs: BTreeSet<&str> = observed.iter().map(|case| case.spec.as_str()).collect();
@@ -249,6 +334,10 @@ fn judge(
     for case in observed {
         if out_of_scope.contains(case.spec.as_str()) {
             findings.out_of_contract += 1;
+            continue;
+        }
+        if contended.contains(&case.id) {
+            findings.contended.insert(case.id.clone());
             continue;
         }
         judge_in_scope_case(
@@ -342,6 +431,17 @@ fn report(register: &Register, observed: &[GateCase], findings: &Findings) {
     );
     for (category, count) in &findings.counts {
         println!("  {}: {count}", category.label());
+    }
+    if !findings.contended.is_empty() {
+        println!(
+            "undecided this run: {} -- the pinned Bash did not reproduce its own \
+             recorded result on this machine, so these measure the machine rather \
+             than the shell",
+            findings.contended.len()
+        );
+        for id in &findings.contended {
+            println!("  {id}");
+        }
     }
     if findings.violations.is_empty() {
         println!("gate: PASS -- no unexpected failure, timeout or harness error");
@@ -459,8 +559,21 @@ mod tests {
                 })
                 .collect()
         };
-        let passing = judge(&register, &observe(GateOutcome::Pass), &eligible, &excluded);
-        let failing = judge(&register, &observe(GateOutcome::Fail), &eligible, &excluded);
+        let quiet = BTreeSet::new();
+        let passing = judge(
+            &register,
+            &observe(GateOutcome::Pass),
+            &eligible,
+            &excluded,
+            &quiet,
+        );
+        let failing = judge(
+            &register,
+            &observe(GateOutcome::Fail),
+            &eligible,
+            &excluded,
+            &quiet,
+        );
         let unexpected = |findings: &Findings| {
             findings
                 .violations
@@ -478,6 +591,24 @@ mod tests {
             "a shell that fails every eligible case must be seen to fail: {} unexpected",
             unexpected(&failing),
         );
+        /* A case the reference did not reproduce this run is not evidence
+         * about the shell, and the gate must be seen to stop counting it
+         * rather than merely to say so. */
+        let one: BTreeSet<String> = eligible.iter().take(1).cloned().collect();
+        let contended = judge(
+            &register,
+            &observe(GateOutcome::Fail),
+            &eligible,
+            &excluded,
+            &one,
+        );
+        assert_eq!(
+            unexpected(&contended),
+            unexpected(&failing) - 1,
+            "marking one case undecided did not take it out of the verdict",
+        );
+        assert_eq!(contended.contended, one);
+
         assert_ne!(
             passing.violations.len(),
             failing.violations.len(),

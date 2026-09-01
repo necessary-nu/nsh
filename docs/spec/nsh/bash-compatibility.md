@@ -257,3 +257,32 @@ as an unregistered case that stops passing does. A stale excuse is how a real
 regression eventually gets waved through. The gate also refuses to run a shell
 whose basename is not exactly `bash`, because `argv[0]` selects the dialect and
 any other name would measure the profile with the profile turned off.
+
+### The control run
+
+The three files above are a recording, made on a quiet machine. A case whose
+expectation depends on a race is a case where that recording and the machine
+the gate is running on can disagree, and then the gate's verdict is a property
+of the load rather than of the shell.
+
+So when -- and only when -- the gate has found something to report, it runs the
+group again with the pinned Bash itself, three times, on the machine it is
+running on. A case where that live reference does not reproduce its own
+recorded result is *undecided this run*: it is named in the report, it is not
+counted as a pass, and it is not counted against this shell either.
+
+This is not a retry. A retry would hide a real regression that only appears
+under contention, which is the objection that matters; this asks a different
+question -- whether the case is still measuring the shell at all -- and answers
+it with the only thing that can tell the difference, which is the reference
+under the same conditions. A regression the reference does not share still
+fails the gate, at any load.
+
+`process-sub.test.sh:1` is the case that made it necessary. `seq 3 > >(tac)`
+writes from a process the shell does not wait for, so the sandbox can tear the
+process substitution down before it writes. Measured 2026-09-01 at load 65 and
+run on its own, this shell lost that race in 15 runs of 20 and the pinned Bash
+lost it in 4 of 20. Neither number is a property of either shell, and the gate
+used to report the first as a compatibility failure. That this shell loses it
+nearly four times as often as Bash is a separate finding and a real one; the
+control keeps the gate honest about the machine, not about that.

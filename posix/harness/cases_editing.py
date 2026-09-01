@@ -224,7 +224,14 @@ CASES: tuple[Case, ...] = (
         environment=TERMINAL,
         files=R,
         status="any",
-        timeout=2.0,
+        # The only editing case that did not use TIMEOUT, with no recorded
+        # reason for the difference. It costs 0.25 s at load 10, the same
+        # order as its siblings, so 2.0 s was an eight-fold margin where
+        # theirs is sixteen -- and it timed out in 2 runs of 12 at load 30
+        # to 50 while they did not. A budget is a wall clock and measures
+        # the machine as much as the shell; this one is now the same wall
+        # clock as every other case here.
+        timeout=TIMEOUT,
         requires=("UP",),
         pace=0.02,
     ),

@@ -7114,6 +7114,13 @@ children (
                                         kind @blocker
                                         text "`gate-bash` is the closure criterion for `[spec:nsh:req:compat.bash.survey-closure]`, and its verdict currently depends on what else the machine is doing. That is the objection `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` makes to a check that cannot fail, seen from the other side: a check that fails for a reason that is not the shell.\n\nMEASURED 2026-08-30, all on the same tree:\n\n* `process-sub.test.sh:1` (\"Process sub from external process to stdin\") failed **one gate run in eight** under load average above 20, and passed 5 of 5 interleaved against the previous commit's binary, 5 of 5 for the current one at lower load, and 6 of 6 in isolation. The agent that did `bound-word-parsing-cost` independently measured it failing 1 run in 4 on an unmodified tree at load ~40. So it is pre-existing and load-dependent, and it takes the whole gate to FAIL with it.\n* `process-sub.test.sh:2` and `sh-options.test.sh:23` flake the other way in `run-oils`: both *passed* once in a run where they normally fail, which is how `1cd91c3`'s message came to credit two fixes that were not real. A flake that produces a false pass is worse than one that produces a false fail, because nothing goes red.\n* `posix/harness`'s `edit-insert-end-of-file` (`cases_editing.py:216`) timed out in 2 of 12 runs at load 30 to 50 and 0 of 6 below load 20. It is an interactive pseudo-terminal case with a 2.0-second timeout and a 0.02-second keystroke pace.\n\n`inv-input-file-long-lines` was a fourth and is now fixed at the source rather than at the timeout (`2a822b5`): the shell was quadratic on a long word, so three invocations under a 20-second budget went over. That is the model to follow where it applies -- fix the shell, not the clock -- and it does not apply to these, which are process-timing races rather than costs.\n\nDONE WHEN. The gate's verdict is the same at load 5 and at load 50, over ten consecutive runs each. Whether that means a per-case retry with a recorded reason, a longer timeout for the pseudo-terminal cases, or removing the timing dependency itself is the decision this node has to make -- and a blanket retry is the wrong answer, because it would also hide a real regression that only shows up under contention."
                                     }
+
+                                    {
+                                        at 2026-09-01T18:03:20.697560216Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -7221,12 +7228,20 @@ children (
                                 id stop-the-forking-tests-from-flaking
                                 title "Stop the tests that fork from failing for reasons that are not the shell"
                                 kind @test
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-01T17:38:47.495519955Z
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-01T18:03:14.668188673Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -7277,6 +7292,48 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @blocker
                                         text "AN EMBEDDED `Shell` REAPS CHILDREN THE HOST PROCESS FORKED. Found 2026-09-01 while chasing `stop-the-forking-tests-from-flaking`, and it is not a flake: it is deterministic, and it only looked like a flake because whether it fires depends on another thread's timing.\n\nREPRODUCED IN TWELVE LINES, first run, every run:\n\n    let mut theirs = Command::new(\"/bin/sleep\").arg(\"0.2\").spawn().unwrap();\n    let mut shell = Shell::builder()...build().unwrap();\n    let _ = shell.run(b\"/bin/sleep 1\\n\");\n    theirs.wait()   ->  Err(ECHILD, \"No child processes\")\n\n`jobs.rs:1338` calls `nsh_platform::wait_for_any_child`, which is `waitpid(-1)`. It takes whatever the kernel hands back. When the pid is not in the job table the status is dropped -- but the child has already been *reaped*, so its owner's `wait()` gets `ECHILD`, or blocks forever if it was already in `wait()`.\n\nWHAT IT EXPLAINS. Two of the three \"tests that fork are flaky\" items on `stop-the-forking-tests-from-flaking` are this, and neither is a timing problem:\n\n  * `an_unpinned_bash_is_refused` (`crates/nsh/src/fuzzing.rs`) runs `Command::output()` for the ambient Bash. It is a *lib* test, so it shares one process with 391 others, several of which build a `Shell`. Its child is stolen whenever one of those is in a wait. The `ECHILD` seen on 2026-08-31 is exactly this error.\n  * the `errors_are_values.rs` hang is the same theft seen from the other side: a thread already blocked in `wait()` on a child another thread's shell reaped never wakes.\n\nNeither reproduces when the test is run alone, which is why thirty runs of each in isolation found nothing today. The suite has to be running for another shell to be there to steal.\n\nIT IS A LIBRARY DEFECT AND NOT A TEST DEFECT. `[dec:nsh:shell-as-library]` says a `Shell` is embeddable in a host process. A shell binary owns every child in its process and `waitpid(-1)` is right for it; an embedded shell does not, and there `waitpid(-1)` is a shell reaching into its host's process table. The test suite is only the first host to notice.\n\nWHY THERE IS NO SMALL FIX, which is why this is a node rather than a patch. Peeking with `waitid(WNOWAIT)` and skipping a foreign pid does not work: the same zombie is reported again on the next call, so the loop spins. The shell has to wait on the pids it owns, and it does not currently know them all -- `record_forked_child` returns early when `job_id` is `None`, so every job-less fork (command substitution, `ForkMode::WithoutJob`) is recorded nowhere. So the work is:\n\n  1. a set of every pid this shell forked, maintained in `fork_shell` / `fork_and_execute` and cleared on reap, beside the job table rather than inside it;\n  2. `nsh_platform::wait_for_child(pid, nonblocking, report_stopped)` to sit beside `wait_for_any_child`;\n  3. `wait_for_process` scanning that set instead of calling `waitpid(-1)`, with the blocking case suspending on `SIGCHLD` and rescanning -- the sigsuspend machinery is already there for `WaitMode::suspends_for_signal` and has to cover the plain blocking case too.\n\nDONE WHEN. The twelve-line reproducer above is a test that fails on the tree before the change; `an_unpinned_bash_is_refused` and `errors_are_values` survive twenty consecutive runs of the whole suite under load; and job control is re-measured in full -- `gate-bash`, `run-oils --group bash-comparison`, the POSIX harness and Smoosh all identical -- because `wait_for_process` is reached by every foreground command, every pipeline and every `wait`."
+                                    }
+                                )
+                            }
+
+                            {
+                                id bound-the-cost-of-matching-a-pattern
+                                title "Bound what matching one pattern against one word can cost"
+                                kind @perf
+                                log (
+                                    {
+                                        at 2026-09-01T18:51:55.97170855Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "FOUR INPUTS OF ABOUT FOUR HUNDRED BYTES TAKE BETWEEN ELEVEN AND NINETY-TWO SECONDS TO MATCH. Found by the `matcher` fuzz target on 2026-09-01, in the first campaign this repository had run against the current tree. libFuzzer files these as `slow-unit` rather than `crash`, so they are not failures and the replay exits zero -- which is why they need reading rather than sweeping.\n\n    fuzz/artifacts/matcher/slow-unit-08eff04...   417 bytes   92.44 s\n    fuzz/artifacts/matcher/slow-unit-2abfc17...   404 bytes   53.54 s\n    fuzz/artifacts/matcher/slow-unit-8712dff...   382 bytes   14.17 s\n    fuzz/artifacts/matcher/slow-unit-be14ca8...   413 bytes   11.47 s\n\nThe inputs are in the tree and reproduce; replay one with\n\n    fuzz/run.sh --build matcher\n    fuzz/target/x86_64-unknown-linux-gnu/release/matcher fuzz/artifacts/matcher/slow-unit-...\n\nThree of the four share a shape: `*+(` , a long run of `*` inside `(...)`, then a run of `|`, then a long run of high bytes, ending `aa`. The fourth is `*aa*(*aaa)a` followed by sixty `R`s. Extended-glob alternation with nested stars, in other words, which is the classic backtracking shape -- but the obvious classic case is *not* where this shell is slow, and that is the interesting part:\n\n    [[ aaaa...a == *(a*)*(a*)b ]]      n=16   n=20    n=24\n      pinned Bash                      0.07s  1.20s  24.21s\n      nsh                              0.01s  0.00s   0.01s\n\nSo nsh already avoids the textbook exponential that Bash walks straight into, and whatever these four exploit is something else -- the `|` alternations, the high bytes and the multibyte decoding they force, or an interaction between them. Reading one of them is the first task, and the shell being fast on the textbook case means the cause is not the one anybody will guess.\n\nWHY IT MATTERS BEYOND THE FUZZER. A pattern reaches the matcher from `case`, from `[[ ]]`, from `${v#pat}` and `${v/pat/rep}`, and from pathname expansion -- so a four-hundred-byte pattern in a script is a ninety-second stall in a shell that has no way to interrupt it. `[dec:nsh:safety-trumps-compatibility]` is the decision that governs the answer, and `bound-repeated-evaluation-work`'s lesson applies before any budget is written: stop doing the work rather than bound it, and measure before choosing.\n\nDONE WHEN. All four replay in a time proportional to their length rather than to their structure; a test pins whichever shape turns out to be the cause, and fails on the tree before the change; and `[[ ]]`, `case`, `${v/}` and pathname expansion are re-measured, because they share the matcher."
+                                    }
+                                )
+                            }
+
+                            {
+                                id close-the-pattern-replacement-divergence
+                                title "Close the divergence the fuzzer found in pattern replacement"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-01T18:52:16.834509892Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "`${X/$P/$R}` PRODUCES DIFFERENT BYTES FROM THE PINNED BASH. Found by the `parameter` fuzz target on 2026-09-01, artifact `fuzz/artifacts/parameter/crash-66f41d7cd54a8445df30ee7f6d936950a4a7646c`, in the first campaign run against the current tree.\n\nThe script is one line -- `printf '[%s]\\n' \"${X/$P/$R}\"` -- and the interest is entirely in the three variables the target sets, which is why it needs reducing rather than reading. Both shells exit 0. The outputs share a prefix and then diverge:\n\n    nsh:  [**************\\nq#uras >/dev/ouhcnull 2>&1\\necho ${x-unse \"fo\\312*[\"/]\n    bash: [**************\\nq#uras >/dev/ouhcnull 2>nt/*\\nmcho 'a'/*\\014# success8...\n\nSo the match was found in the same place and the *replacement* differs -- this shell appears to have substituted a shorter span, or a different one, than Bash chose. A pattern with `*` and `[` in it and a replacement containing `/` and `&` are all in the input, and `&` in a replacement is Bash's back-reference to the whole match, which is the first thing to check.\n\nHOW TO REDUCE IT. Replay it with the target, which now prints the script and both outputs rather than fingerprints:\n\n    fuzz/run.sh --build parameter\n    fuzz/target/x86_64-unknown-linux-gnu/release/parameter fuzz/artifacts/parameter/crash-66f4...\n\nthen shrink by hand against `target/bash-reference/bash`. `${v/pat/rep}` is shared with `${v//pat/rep}`, `${v/#pat}` and `${v/%pat}`, so the sweep wants all four spellings and both an anchored and an unanchored pattern.\n\nWHY NO SURVEY SAW IT. The Oils corpus exercises `${v/}` with literal patterns and short values. This is a long value with a pattern made of metacharacters, which is the region a generator reaches and a corpus does not -- the same reason the unquoted `$@` defect closed on `run-the-fuzz-oracle-against-this-tree` had survived every survey.\n\nDONE WHEN. The artifact is reduced to a line of script, the rule Bash follows is written down with the measurement behind it, a differential test pins it against the pinned build, and `fuzz/sweep.sh --prune parameter` reports the artifact dead."
+                                    }
+                                )
+                            }
+
+                            {
+                                id wait-for-a-process-substitution-to-finish
+                                title "Lose the process-substitution race no more often than Bash does"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-01T18:53:30.28315006Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "THIS SHELL LOSES A RACE THAT BASH MOSTLY WINS. Measured 2026-09-01 at load 65, running the case on its own through the survey harness, twenty runs each:\n\n    seq 3 > >(tac)        this shell failed 15/20      pinned Bash failed 4/20\n\nBoth shells have the race -- neither waits for a `>(...)` child before exiting -- so this is a difference of degree, and the survey corpus expects the output. `stop-the-closure-gate-flaking` handles the *gate's* half: a case the reference also loses in the same run is now undecided rather than a failure. That keeps the verdict honest about the machine and says nothing about this, which is the shell's half and is separate.\n\nWHAT IS NOT THE CAUSE, measured rather than assumed. Run directly rather than through the harness, both shells produce `3\\\\n2\\\\n1` in 60 of 60 runs at load 17, and 20 of 20 with a deliberately slow substitution (`> >(sleep 0.25; tac)`) at load 65. So the shell does not simply drop the output: it is losing a race against the *teardown* of the containment the survey runs it in, which starts when the shell exits. Bash apparently leaves the child a little more room, and the interesting question is what it does that this does not.\n\nWHERE TO LOOK. Bash's exit path reaps process substitutions in `unlink_fifo_list` / `reap_procsubs` before the shell's own exit completes, and the FIFO or pipe is closed in an order that gives the writer a chance to finish. This shell's `bash_process_substitution` module and whatever runs at shell exit are the two ends of it. The measurement to make first is where the output is lost -- whether the child is killed, whether the write fails, or whether the parent closes the read end before draining it -- because those want three different fixes.\n\nDONE WHEN. The case fails no more often than the pinned Bash does over twenty harness runs at load 65, measured the same way as above; the mechanism is written down rather than the timing merely improved; and the gate's `undecided this run` line stops naming `process-sub.test.sh:1` at that load."
                                     }
                                 )
                             }

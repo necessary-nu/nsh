@@ -1390,7 +1390,8 @@ assertions (
     {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
     {id run-the-fuzz-oracle-against-this-tree, kind @doing, author "brendan@necessary.nu", at 2026-09-01T17:22:21.766689073Z}
     {id catch-a-test-whose-input-is-not-its-name, kind @complete, author "brendan@necessary.nu", at 2026-09-01T17:38:04.784601289Z}
-    {id stop-the-forking-tests-from-flaking, kind @doing, author "brendan@necessary.nu", at 2026-09-01T17:38:47.495519955Z}
+    {id stop-the-forking-tests-from-flaking, kind @complete, author "brendan@necessary.nu", at 2026-09-01T18:03:14.668188673Z}
+    {id stop-the-closure-gate-flaking, kind @doing, author "brendan@necessary.nu", at 2026-09-01T18:03:20.697560216Z}
 )
 
 impl_evidence (
