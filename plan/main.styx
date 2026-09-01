@@ -7387,12 +7387,20 @@ children (
                                         id split-parameter-expansion-out
                                         title "Give parameter expansion the submodule its siblings already have"
                                         kind @refactor
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T20:12:36.205809695Z
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-01T20:21:26.239807779Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
