@@ -36,6 +36,10 @@ enum Scope {
 #[derive(Clone, Copy, Default)]
 struct Requested {
     kind: Option<VariableKind>,
+    /// `+a` or `+A`: the kind the invocation asks to take away, which
+    /// Bash refuses for a name that has it.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    destroyed_kind: Option<VariableKind>,
     integer: Option<bool>,
     lowercase: Option<bool>,
     uppercase: Option<bool>,
@@ -138,11 +142,13 @@ fn parse<'a>(args: &'a [&'a BStr]) -> Result<(Requested, &'a [&'a BStr]), u8> {
         }
         for letter in letters {
             match letter {
-                /* `+a` asks for the attribute to go rather than for an
-                 * array; it does not make the operand a compound one. */
+                /* `+a` asks for the kind to go rather than for an array;
+                 * it does not make the operand a compound one, and Bash
+                 * refuses it for a name that holds the kind. */
                 b'a' if enable => requested.kind = Some(VariableKind::Indexed),
                 b'A' if enable => requested.kind = Some(VariableKind::Associative),
-                b'a' | b'A' => {}
+                b'a' => requested.destroyed_kind = Some(VariableKind::Indexed),
+                b'A' => requested.destroyed_kind = Some(VariableKind::Associative),
                 b'i' => requested.integer = Some(enable),
                 b'l' => requested.lowercase = Some(enable),
                 b'u' => requested.uppercase = Some(enable),
@@ -178,8 +184,8 @@ fn apply(
 ) -> Result<bool, Error> {
     let (name, value, append) = arrays::split_assignment_operand(operand);
     // A subscripted operand keeps its brackets out of the stored name.
-    let base = operand_name(BStr::new(name.as_slice())).to_owned();
-    let base = BStr::new(base.as_slice());
+    let written = operand_name(BStr::new(name.as_slice())).to_owned();
+    let base = BStr::new(written.as_slice());
     /* An operand that does not name a variable is reported and skipped;
      * the operands beside it are unaffected, as they are in Bash. */
     if !crate::parser::is_valid_name(&shell.locale, base) {
@@ -212,6 +218,25 @@ fn apply(
         target
     };
     let base = BStr::new(base.as_slice());
+
+    /* An array's kind is how its value is held rather than a flag over
+     * it, so Bash will not take it away: `declare +a` on an indexed
+     * array reports and answers 1 with the variable exactly as it was,
+     * before any other letter of the same command has landed and before
+     * any value it carries is stored. `+a` on an *associative* array,
+     * and either letter on a name that is neither, are ordinary. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    if requested.destroyed_kind.is_some()
+        && requested.destroyed_kind == crate::variables::value::variable_kind(shell, base)
+    {
+        /* Bash names the operand it was given rather than the array a
+         * reference led it to. */
+        let mut message = b"declare: ".to_vec();
+        message.extend_from_slice(written.as_slice());
+        message.extend_from_slice(b": cannot destroy array variables in this way\n");
+        shell.write_output(OutputDestination::Stderr, &message)?;
+        return Ok(false);
+    }
 
     if scope == Scope::Local {
         let held = if value.is_some() {
