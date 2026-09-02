@@ -18,3 +18,32 @@ license = "BSD-3-Clause"
 # The mechanism is gone -- a failure is a value and it is returned -- so
 # the pin is gone with it and the strategy is the consumer's choice again.
 # Nothing in this workspace relies on unwinding.
+#
+# That last sentence is load-bearing and it has been false once. On
+# 2026-09-02 the source-shape checks moved out of `cargo test` into
+# `crates/nsh-lint`, where they kept the shape they had as tests: each one
+# asserted, and `main` ran it under `catch_unwind` so a red run would name
+# every failing check rather than stopping at the first. Under
+# `panic = "abort"` the first failure would have taken the other
+# twenty-five with it, and this comment would have been wrong.
+#
+# It was settled by making the sentence true rather than by amending it,
+# because the amendment would have been the worse half of the trade. A
+# check now returns its findings -- `Vec<String>`, empty when the shape is
+# right -- and `main` concatenates. That removed the empty panic hook the
+# reporting loop needed, which had been swallowing the location of any
+# genuine bug in the checker along with the assertion messages it was
+# installed to deduplicate; and because an assertion stops at the first
+# thing it finds, it also turned a report of one violation per check into
+# a report of all of them. The unwinding was not paying for itself.
+#
+# So: no profile pins a panic strategy, and no shipped code here needs
+# one. Checked rather than asserted -- both profiles were set to
+# `panic = "abort"`, the workspace built, and `nsh-lint` reported every
+# planted failure and exited 1. The one `catch_unwind` a grep still finds,
+# in `nsh-platform`'s `locale.rs`, is inside `#[cfg(test)]`: it is the test
+# that proves the thread's locale selection is restored while a panic
+# passes through, and cargo ignores this setting for the test profile.
+#
+# If you find yourself reaching for `catch_unwind` outside a test, you are
+# editing this comment too.

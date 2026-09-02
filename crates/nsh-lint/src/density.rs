@@ -63,7 +63,7 @@ struct Entry {
 }
 
 /// Every file at or above the mark is registered, and every register entry
-/// is still about a file at or above the mark.
+/// is still about a file at or above the mark, reported as findings.
 ///
 /// Deliberately unannotated. Every other check in this crate carries a
 /// `[spec:nsh:req:...]` reference because it enforces a rule this
@@ -71,26 +71,36 @@ struct Entry {
 /// nplan's `dod.function-density`, which belongs to the tool rather than
 /// to the shell, and claiming coverage of it from here would be a lie
 /// about who implements what.
-pub(crate) fn files_near_the_cap_are_registered() {
+pub(crate) fn files_near_the_cap_are_registered() -> Vec<String> {
     let workspace = workspace_root();
-    let text = std::fs::read_to_string(workspace.join(REGISTER))
-        .unwrap_or_else(|error| panic!("{REGISTER} is readable: {error}"));
-    let register: Register =
-        toml::from_str(&text).unwrap_or_else(|error| panic!("{REGISTER} does not parse: {error}"));
-    assert_eq!(
-        register.schema, 1,
-        "{REGISTER} is a schema this check knows"
-    );
-    assert_eq!(
-        register.mark, MARK,
-        "{REGISTER} states a mark this check does not enforce"
-    );
-    assert_eq!(
-        register.cap, CAP,
-        "{REGISTER} states a cap the density gate does not enforce"
-    );
+    let text = match std::fs::read_to_string(workspace.join(REGISTER)) {
+        Ok(text) => text,
+        Err(error) => return vec![format!("{REGISTER} is not readable: {error}")],
+    };
+    let register: Register = match toml::from_str(&text) {
+        Ok(register) => register,
+        Err(error) => return vec![format!("{REGISTER} does not parse: {error}")],
+    };
 
     let mut reported = Vec::new();
+    if register.schema != 1 {
+        reported.push(format!(
+            "{REGISTER} states schema {}, which this check does not know",
+            register.schema
+        ));
+    }
+    if register.mark != MARK {
+        reported.push(format!(
+            "{REGISTER} states a mark of {}, not the {MARK} this check enforces",
+            register.mark
+        ));
+    }
+    if register.cap != CAP {
+        reported.push(format!(
+            "{REGISTER} states a cap of {}, not the {CAP} the density gate enforces",
+            register.cap
+        ));
+    }
     let mut registered = BTreeSet::new();
     for entry in &register.file {
         if !registered.insert(entry.path.as_str()) {
@@ -144,11 +154,7 @@ pub(crate) fn files_near_the_cap_are_registered() {
         }
     }
 
-    assert!(
-        reported.is_empty(),
-        "function-density register is out of date:\n{}",
-        reported.join("\n")
-    );
+    reported
 }
 
 /// How many `function_item`s a Rust file holds.

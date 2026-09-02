@@ -11,6 +11,12 @@
 //! either "the shell is broken" or "you renamed a function". They are a
 //! check now, wired into `.config/nplan/config.styx` beside `fmt` and
 //! `clippy`, and a red run means one thing.
+//!
+//! A check answers with what it found: `Vec<String>`, empty when the
+//! source shape is right. It does not assert, and nothing here catches a
+//! panic. A panic reaching `main` means the checker could not read the
+//! repository at all, which is a different thing from a check failing and
+//! is reported as itself, with a location.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -188,6 +194,17 @@ fn relative_to_workspace(path: &Path, workspace: &Path) -> String {
         .replace('\\', "/")
 }
 
+/// One named file's text, or the finding to make when it is not there.
+///
+/// Several checks name a particular file -- `regex.rs`, `descriptor.rs`,
+/// the two shell manifests -- because the property is about what that file
+/// says. A file that has moved is therefore a finding about the source
+/// shape, reported beside every other finding rather than ending the run.
+fn text_at(workspace: &Path, relative: &str) -> Result<String, String> {
+    std::fs::read_to_string(workspace.join(relative))
+        .map_err(|error| format!("{relative} is not readable: {error}"))
+}
+
 fn rust_sources_in(workspace: &Path, tree: &str) -> Vec<PathBuf> {
     let mut sources = Vec::new();
     rust_sources_below(&workspace.join(tree), &mut sources);
@@ -357,7 +374,7 @@ fn contains_c_literal(source: &str) -> bool {
 }
 
 // [spec:nsh:req:idiom.no-port-fossils/test]
-fn port_fossils_are_absent() {
+fn port_fossils_are_absent() -> Vec<String> {
     let mut sources = Vec::new();
     rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
@@ -389,20 +406,21 @@ fn port_fossils_are_absent() {
         "fn onsigchild(",
     ];
 
+    let mut reported = Vec::new();
     for path in sources {
         let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
         for fossil in forbidden {
-            assert!(
-                !source.contains(fossil),
-                "{} retains port fossil {fossil:?}",
-                path.display()
-            );
+            if source.contains(fossil) {
+                reported.push(format!("{} retains port fossil {fossil:?}", path.display()));
+            }
         }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.strict-lints/test]
-fn core_enforces_strict_rust_lints() {
+fn core_enforces_strict_rust_lints() -> Vec<String> {
+    let mut reported = Vec::new();
     for lint in [
         "unsafe_code",
         "dead_code",
@@ -414,20 +432,19 @@ fn core_enforces_strict_rust_lints() {
         "clippy::correctness",
     ] {
         let directive = format!("#![deny({lint})]");
-        assert!(
-            LIBRARY.contains(&directive),
-            "missing strict lint {directive}"
-        );
+        if !LIBRARY.contains(&directive) {
+            reported.push(format!("missing strict lint {directive}"));
+        }
     }
 
-    assert!(
-        !LIBRARY.lines().any(|line| line.starts_with("#![allow(")),
-        "core crate root retains a blanket lint allowance"
-    );
+    if LIBRARY.lines().any(|line| line.starts_with("#![allow(")) {
+        reported.push("core crate root retains a blanket lint allowance".to_owned());
+    }
+    reported
 }
 
 // [spec:nsh:req:idiom.regression-gates/test]
-fn zero_cism_gate_covers_boundary() {
+fn zero_cism_gate_covers_boundary() -> Vec<String> {
     const CONTROL_BYTE_WORDS: &[&str] = &[
         "CTLESC",
         "CTLVAR",
@@ -537,7 +554,13 @@ fn zero_cism_gate_covers_boundary() {
     }
 
     for manifest in ["crates/nsh/Cargo.toml", "crates/nsh-cli/Cargo.toml"] {
-        let text = std::fs::read_to_string(workspace.join(manifest)).unwrap();
+        let text = match text_at(&workspace, manifest) {
+            Ok(text) => text,
+            Err(report) => {
+                violations.push(report);
+                continue;
+            }
+        };
         for dependency in ["libc", "rustix", "windows-sys", "ntapi"] {
             if text.lines().any(|line| {
                 line.split_once('=')
@@ -550,15 +573,12 @@ fn zero_cism_gate_covers_boundary() {
         }
     }
 
-    assert!(
-        violations.is_empty(),
-        "zero-C-ism gate violations:\n{}",
-        violations.join("\n")
-    );
+    violations
 }
 
 // [spec:nsh:req:idiom.narrow-shell-context/test]
-fn subsystem_helpers_use_narrow_state() {
+fn subsystem_helpers_use_narrow_state() -> Vec<String> {
+    let mut reported = Vec::new();
     for required in [
         "struct Diagnostics<'a>",
         "impl Diagnostics<'_>",
@@ -566,7 +586,9 @@ fn subsystem_helpers_use_narrow_state() {
         "fn run_with<S, T>",
         "fn poll_interrupt(context: InterruptContext)",
     ] {
-        assert!(ERRORS.contains(required), "missing {required}");
+        if !ERRORS.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
     }
 
     for forbidden in [
@@ -577,10 +599,11 @@ fn subsystem_helpers_use_narrow_state() {
         "pub fn take_alias_boundary(sh:",
         "pub fn clear_alias_boundary(sh:",
     ] {
-        assert!(
-            !ERRORS.contains(forbidden) && !INPUT.contains(forbidden),
-            "low-level helper retains universal shell access: {forbidden}"
-        );
+        if ERRORS.contains(forbidden) || INPUT.contains(forbidden) {
+            reported.push(format!(
+                "low-level helper retains universal shell access: {forbidden}"
+            ));
+        }
     }
 
     for (source, required) in [
@@ -591,18 +614,24 @@ fn subsystem_helpers_use_narrow_state() {
         ),
         (MAIL.as_str(), "impl MailState"),
     ] {
-        assert!(source.contains(required), "missing {required}");
+        if !source.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.output-results/test]
-fn output_failures_are_returned() {
+fn output_failures_are_returned() -> Vec<String> {
+    let mut reported = Vec::new();
     for required in [
         "impl Write for Output",
         "pub(crate) fn flush_all(&mut self) -> io::Result<()> {",
         "self.stdout.flush()",
     ] {
-        assert!(OUTPUT.contains(required), "missing {required}");
+        if !OUTPUT.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
     }
 
     for forbidden in [
@@ -614,27 +643,29 @@ fn output_failures_are_returned() {
         "pub fn outmem(",
         "pub fn xwrite(",
     ] {
-        assert!(
-            !OUTPUT.contains(forbidden),
-            "output retains error side channel {forbidden:?}"
-        );
+        if OUTPUT.contains(forbidden) {
+            reported.push(format!("output retains error side channel {forbidden:?}"));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.no-ignored-results/test]
-fn fallible_results_are_explicit() {
+fn fallible_results_are_explicit() -> Vec<String> {
     let mut sources = Vec::new();
     rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
 
+    let mut reported = Vec::new();
     for path in sources {
         let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
         for discarded in ["let _ =", "#[allow(unused_must_use)]"] {
-            assert!(
-                !source.contains(discarded),
-                "{} discards a fallible result with {discarded:?}",
-                path.display()
-            );
+            if source.contains(discarded) {
+                reported.push(format!(
+                    "{} discards a fallible result with {discarded:?}",
+                    path.display()
+                ));
+            }
         }
     }
 
@@ -645,16 +676,19 @@ fn fallible_results_are_explicit() {
         "fn flush_output(",
         "result.map_err(|error| self.command_output_error(error))",
     ] {
-        assert!(OUTPUT.contains(required), "missing {required}");
+        if !OUTPUT.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
     }
-    assert!(
-        !JOBS.contains("unwrap_or(ChildStatus::Exited(0))"),
-        "missing child status is still hidden as numeric success"
-    );
+    if JOBS.contains("unwrap_or(ChildStatus::Exited(0))") {
+        reported.push("missing child status is still hidden as numeric success".to_owned());
+    }
+    reported
 }
 
 // [spec:nsh:req:idiom.no-artificial-limits/test]
-fn dynamic_values_are_not_clamped() {
+fn dynamic_values_are_not_clamped() -> Vec<String> {
+    let mut reported = Vec::new();
     for (name, source, forbidden) in [
         ("jobs", JOBS.as_str(), "append_ascii"),
         ("jobs", JOBS.as_str(), "name.len().min(32)"),
@@ -662,16 +696,19 @@ fn dynamic_values_are_not_clamped() {
         ("mail", MAIL.as_str(), "MAXMBOXES"),
         ("mail", MAIL.as_str(), ".take(MAXMBOXES)"),
     ] {
-        assert!(
-            !source.contains(forbidden),
-            "{name} retains artificial limit {forbidden:?}"
-        );
+        if source.contains(forbidden) {
+            reported.push(format!("{name} retains artificial limit {forbidden:?}"));
+        }
     }
-    assert!(MAIL.contains("mailtime: Vec<i64>"));
+    if !MAIL.contains("mailtime: Vec<i64>") {
+        reported.push("missing mailtime: Vec<i64>".to_owned());
+    }
+    reported
 }
 
 // [spec:nsh:req:idiom.builtin-registry/test]
-fn builtin_registry_is_fully_typed() {
+fn builtin_registry_is_fully_typed() -> Vec<String> {
+    let mut reported = Vec::new();
     for required in [
         "enum BuiltinId",
         "struct BuiltinAttributes",
@@ -680,7 +717,9 @@ fn builtin_registry_is_fully_typed() {
         "name: &'static [u8]",
         "static BUILTINS: &[BuiltinSpec]",
     ] {
-        assert!(BUILTINS.contains(required), "missing {required}");
+        if !BUILTINS.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
     }
 
     for forbidden in [
@@ -694,18 +733,27 @@ fn builtin_registry_is_fully_typed() {
         "static builtincmd",
         ".flags",
     ] {
-        assert!(
-            !BUILTINS.contains(forbidden),
-            "builtin registry retains C representation {forbidden:?}"
-        );
+        if BUILTINS.contains(forbidden) {
+            reported.push(format!(
+                "builtin registry retains C representation {forbidden:?}"
+            ));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.shell-entrypoint/test]
-fn shell_entrypoint_uses_public_runtime() {
-    assert!(RUNTIME.contains("startup: &Startup"));
-    assert!(CLI.contains("nsh::Shell::builder()"));
-    assert!(CLI.contains("shell.run_to_completion(startup)"));
+fn shell_entrypoint_uses_public_runtime() -> Vec<String> {
+    let mut reported = Vec::new();
+    for (source, required) in [
+        (RUNTIME.as_str(), "startup: &Startup"),
+        (CLI.as_str(), "nsh::Shell::builder()"),
+        (CLI.as_str(), "shell.run_to_completion(startup)"),
+    ] {
+        if !source.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
+    }
 
     for forbidden in [
         "pub mod shellmain;",
@@ -713,23 +761,26 @@ fn shell_entrypoint_uses_public_runtime() {
         "fn procargs(",
         "shellmain::main_fn",
     ] {
-        assert!(
-            !LIBRARY.contains(forbidden)
-                && !RUNTIME.contains(forbidden)
-                && !OPTIONS.contains(forbidden)
-                && !CLI.contains(forbidden),
-            "startup retains translated public entrypoint {forbidden:?}"
-        );
+        if LIBRARY.contains(forbidden)
+            || RUNTIME.contains(forbidden)
+            || OPTIONS.contains(forbidden)
+            || CLI.contains(forbidden)
+        {
+            reported.push(format!(
+                "startup retains translated public entrypoint {forbidden:?}"
+            ));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.module-boundaries/test]
-fn modules_follow_rust_subsystems() {
+fn modules_follow_rust_subsystems() -> Vec<String> {
+    let mut reported = Vec::new();
     for module in ["arithmetic", "pattern", "runtime", "editor"] {
-        assert!(
-            LIBRARY.contains(&format!("mod {module};")),
-            "missing subsystem module {module}"
-        );
+        if !LIBRARY.contains(&format!("mod {module};")) {
+            reported.push(format!("missing subsystem module {module}"));
+        }
     }
     for (source, boundary) in [
         (ARITHMETIC.as_str(), "struct Parser"),
@@ -737,7 +788,9 @@ fn modules_follow_rust_subsystems() {
         (RUNTIME.as_str(), "enum StartupTask"),
         (EDITOR.as_str(), "mod state;"),
     ] {
-        assert!(source.contains(boundary), "missing boundary {boundary}");
+        if !source.contains(boundary) {
+            reported.push(format!("missing boundary {boundary}"));
+        }
     }
 
     let source = shell_source();
@@ -749,25 +802,27 @@ fn modules_follow_rust_subsystems() {
         "histedit.rs",
         "linedit.rs",
     ] {
-        assert!(
-            !source.join(old_file).exists(),
-            "compatibility module {old_file} still exists"
-        );
+        if source.join(old_file).exists() {
+            reported.push(format!("compatibility module {old_file} still exists"));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.no-mystring/test]
-fn mystring_module_is_absent() {
-    let module = shell_source().join("mystring.rs");
-    assert!(
-        !module.exists(),
-        "generic compatibility module still exists"
-    );
-    assert!(!LIBRARY.contains("mod mystring"));
+fn mystring_module_is_absent() -> Vec<String> {
+    let mut reported = Vec::new();
+    if shell_source().join("mystring.rs").exists() {
+        reported.push("generic compatibility module still exists".to_owned());
+    }
+    if LIBRARY.contains("mod mystring") {
+        reported.push("the core crate root still declares mod mystring".to_owned());
+    }
+    reported
 }
 
 // [spec:nsh:req:idiom.no-c-strings-core/test]
-fn core_strings_are_length_delimited() {
+fn core_strings_are_length_delimited() -> Vec<String> {
     let mut sources = Vec::new();
     rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
@@ -784,25 +839,26 @@ fn core_strings_are_length_delimited() {
         "extend_from_slice(b\"\\0\")",
         "last(), Some(&0)",
     ];
+    let mut reported = Vec::new();
     for path in sources {
         let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
-        assert!(
-            !contains_c_literal(&source),
-            "{} contains a C string literal",
-            path.display()
-        );
+        if contains_c_literal(&source) {
+            reported.push(format!("{} contains a C string literal", path.display()));
+        }
         for framing in forbidden {
-            assert!(
-                !source.contains(framing),
-                "{} retains C-string framing {framing:?}",
-                path.display()
-            );
+            if source.contains(framing) {
+                reported.push(format!(
+                    "{} retains C-string framing {framing:?}",
+                    path.display()
+                ));
+            }
         }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.no-abi-scalars-core/test]
-fn core_avoids_abi_scalars() {
+fn core_avoids_abi_scalars() -> Vec<String> {
     let mut sources = Vec::new();
     rust_sources_below(&shell_source(), &mut sources);
     sources.sort();
@@ -823,13 +879,16 @@ fn core_avoids_abi_scalars() {
         "c_double",
         "c_void",
     ];
+    let mut reported = Vec::new();
     for path in sources {
         let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
         for alias in aliases {
             let retained = source
                 .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
                 .any(|identifier| identifier == alias);
-            assert!(!retained, "{} retains ABI scalar {alias}", path.display());
+            if retained {
+                reported.push(format!("{} retains ABI scalar {alias}", path.display()));
+            }
         }
     }
 
@@ -843,32 +902,40 @@ fn core_avoids_abi_scalars() {
         (VARIABLES.as_str(), "push: bool"),
         (ULIMIT.as_str(), "struct LimitSelection"),
     ] {
-        assert!(source.contains(domain_type), "missing {domain_type}");
+        if !source.contains(domain_type) {
+            reported.push(format!("missing {domain_type}"));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.parser-control-flow/test]
-fn control_flow_is_structured() {
+fn control_flow_is_structured() -> Vec<String> {
+    let mut reported = Vec::new();
     for (name, source) in [("parser", PARSER.as_str()), ("expander", EXPANDER.as_str())] {
         for forbidden in ["goto", "Lbl::", "let mut pc", "const L_"] {
-            assert!(
-                !source.contains(forbidden),
-                "{name} contains forbidden C-style control marker {forbidden:?}"
-            );
+            if source.contains(forbidden) {
+                reported.push(format!(
+                    "{name} contains forbidden C-style control marker {forbidden:?}"
+                ));
+            }
         }
 
-        assert!(
-            !source.lines().any(|line| {
-                let line = line.trim_start();
-                line.starts_with('\'') && line.contains(": {")
-            }),
-            "{name} contains a labelled block instead of structured control flow"
-        );
+        if source.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with('\'') && line.contains(": {")
+        }) {
+            reported.push(format!(
+                "{name} contains a labelled block instead of structured control flow"
+            ));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.operation-modes/test]
-fn operation_modes_are_typed() {
+fn operation_modes_are_typed() -> Vec<String> {
+    let mut reported = Vec::new();
     for (name, source, old_prefix) in [
         ("evaluation", EVALUATOR.as_str(), "pub const EV_"),
         ("expansion", EXPANSION_MODES.as_str(), "pub const EXP_"),
@@ -876,10 +943,11 @@ fn operation_modes_are_typed() {
         ("redirection", REDIRECTIONS.as_str(), "pub const REDIR_"),
         ("job display", JOBS.as_str(), "pub const SHOW_"),
     ] {
-        assert!(
-            !source.contains(old_prefix),
-            "{name} still declares integer operation flags with {old_prefix:?}"
-        );
+        if source.contains(old_prefix) {
+            reported.push(format!(
+                "{name} still declares integer operation flags with {old_prefix:?}"
+            ));
+        }
     }
 
     for (source, typed_mode) in [
@@ -889,12 +957,16 @@ fn operation_modes_are_typed() {
         (JOBS.as_str(), "enum JobDisplay"),
         (PARSER_MULTIBYTE.as_str(), "enum MultibyteMode"),
     ] {
-        assert!(source.contains(typed_mode), "missing {typed_mode}");
+        if !source.contains(typed_mode) {
+            reported.push(format!("missing {typed_mode}"));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.evaluator-control-flow/test]
-fn evaluator_control_is_carried_by_flow() {
+fn evaluator_control_is_carried_by_flow() -> Vec<String> {
+    let mut reported = Vec::new();
     for forbidden in [
         "evalskip",
         "skipcount",
@@ -908,57 +980,69 @@ fn evaluator_control_is_carried_by_flow() {
             ("break builtin", BUILTIN_BREAK.as_str()),
             ("return builtin", BUILTIN_RETURN.as_str()),
         ] {
-            assert!(
-                !source.contains(forbidden),
-                "{name} contains ambient control marker {forbidden:?}"
-            );
+            if source.contains(forbidden) {
+                reported.push(format!(
+                    "{name} contains ambient control marker {forbidden:?}"
+                ));
+            }
         }
     }
 
     for variant in ["Break {", "Continue {", "Return {"] {
-        assert!(EVALUATOR.contains(variant), "Flow is missing {variant}");
+        if !EVALUATOR.contains(variant) {
+            reported.push(format!("Flow is missing {variant}"));
+        }
     }
     for (name, source) in [
         ("read", BUILTIN_READ.as_str()),
         ("startup", RUNTIME.as_str()),
     ] {
-        assert!(
-            !source.contains("let mut pc"),
-            "{name} has a program counter"
-        );
-        assert!(!source.contains("const L_"), "{name} has translated labels");
+        if source.contains("let mut pc") {
+            reported.push(format!("{name} has a program counter"));
+        }
+        if source.contains("const L_") {
+            reported.push(format!("{name} has translated labels"));
+        }
     }
+    reported
 }
 
 // [spec:nsh:req:idiom.jobs-startup-control-flow/test]
-fn jobs_read_startup_are_structured() {
+fn jobs_read_startup_are_structured() -> Vec<String> {
+    let mut reported = Vec::new();
     for (name, source) in [
         ("jobs", JOBS.as_str()),
         ("read", BUILTIN_READ.as_str()),
         ("startup", RUNTIME.as_str()),
     ] {
         for forbidden in ["goto", "at_start", "let mut phase", "StartupPhase"] {
-            assert!(
-                !source.contains(forbidden),
-                "{name} retains translated control marker {forbidden:?}"
-            );
+            if source.contains(forbidden) {
+                reported.push(format!(
+                    "{name} retains translated control marker {forbidden:?}"
+                ));
+            }
         }
-        assert!(
-            !source.lines().any(|line| {
-                let line = line.trim_start();
-                line.starts_with('\'') && line.contains(": {")
-            }),
-            "{name} retains a labelled control block"
-        );
+        if source.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with('\'') && line.contains(": {")
+        }) {
+            reported.push(format!("{name} retains a labelled control block"));
+        }
     }
 
-    assert!(BUILTIN_READ.contains("protected: Vec<bool>"));
-    assert!(RUNTIME.contains("const fn recovery"));
+    if !BUILTIN_READ.contains("protected: Vec<bool>") {
+        reported.push("missing protected: Vec<bool>".to_owned());
+    }
+    if !RUNTIME.contains("const fn recovery") {
+        reported.push("missing const fn recovery".to_owned());
+    }
+    reported
 }
 
 // [spec:nsh:def:idiom.job-control-model/test]
 // [spec:nsh:req:idiom.job-storage/test]
-fn typed_job_control_model() {
+fn typed_job_control_model() -> Vec<String> {
+    let mut reported = Vec::new();
     for required in [
         "struct JobId",
         "enum JobState",
@@ -970,9 +1054,13 @@ fn typed_job_control_model() {
         "fn position_running",
         "fn remove",
     ] {
-        assert!(JOB_MODEL.contains(required), "missing {required}");
+        if !JOB_MODEL.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
     }
-    assert!(JOBS.contains("ProcessGroupId"));
+    if !JOBS.contains("ProcessGroupId") {
+        reported.push("missing ProcessGroupId".to_owned());
+    }
 
     for forbidden in [
         "JOBRUNNING",
@@ -991,25 +1079,34 @@ fn typed_job_control_model() {
         "CUR_STOPPED",
         "CUR_DELETE",
     ] {
-        assert!(
-            !JOB_MODEL.contains(forbidden) && !JOBS.contains(forbidden),
-            "job control retains legacy representation {forbidden:?}"
-        );
+        if JOB_MODEL.contains(forbidden) || JOBS.contains(forbidden) {
+            reported.push(format!(
+                "job control retains legacy representation {forbidden:?}"
+            ));
+        }
     }
+    reported
 }
 
 // [spec:nsh:def:idiom.shell-options/test]
-fn typed_shell_options() {
+fn typed_shell_options() -> Vec<String> {
+    let mut reported = Vec::new();
     for required in [
         "enum ShellOption",
         "struct OptionSet",
         "struct OptionSpec",
         "const OPTION_SPECS",
     ] {
-        assert!(OPTION_MODEL.contains(required), "missing {required}");
+        if !OPTION_MODEL.contains(required) {
+            reported.push(format!("missing {required}"));
+        }
     }
-    assert!(OPTIONS.contains("state: OptionSet"));
-    assert!(CLI_INVOCATION.contains("let mut explicit = Vec::new()"));
+    if !OPTIONS.contains("state: OptionSet") {
+        reported.push("missing state: OptionSet".to_owned());
+    }
+    if !CLI_INVOCATION.contains("let mut explicit = Vec::new()") {
+        reported.push("missing let mut explicit = Vec::new()".to_owned());
+    }
 
     for forbidden in [
         "flags: [c_char",
@@ -1021,11 +1118,13 @@ fn typed_shell_options() {
         "optletters",
         "NOPTS",
     ] {
-        assert!(
-            !OPTIONS.contains(forbidden) && !OPTION_MODEL.contains(forbidden),
-            "shell options retain legacy representation {forbidden:?}"
-        );
+        if OPTIONS.contains(forbidden) || OPTION_MODEL.contains(forbidden) {
+            reported.push(format!(
+                "shell options retain legacy representation {forbidden:?}"
+            ));
+        }
     }
+    reported
 }
 
 // ---- the Bash compatibility delta's safe-core gate ------------------
@@ -1070,7 +1169,7 @@ fn scanned_safe_core_sources(workspace: &Path) -> Vec<(String, SourceScan)> {
 /// or a table listing `"RawFd"` is prose, not a bypass. Manual descriptor
 /// moves are matched the same way.
 // [spec:nsh:req:compat.bash.safe-core/test]
-fn the_compatibility_delta_stays_safe() {
+fn the_compatibility_delta_stays_safe() -> Vec<String> {
     let workspace = workspace_root();
     let mut violations = Vec::new();
 
@@ -1092,11 +1191,7 @@ fn the_compatibility_delta_stays_safe() {
         }
     }
 
-    assert!(
-        violations.is_empty(),
-        "safe-core violations in the shell crates:\n{}",
-        violations.join("\n")
-    );
+    violations
 }
 
 /// `unsafe` lives in the platform crate, in named files, with a reason.
@@ -1105,7 +1200,7 @@ fn the_compatibility_delta_stays_safe() {
 /// must be on it, and every entry must still exist, so a deleted file
 /// cannot leave a permission behind for a later one to inherit.
 // [spec:nsh:req:compat.bash.safe-core/test]
-fn platform_unsafe_is_named_and_justified() {
+fn platform_unsafe_is_named_and_justified() -> Vec<String> {
     let workspace = workspace_root();
     let mut violations = Vec::new();
 
@@ -1142,11 +1237,7 @@ fn platform_unsafe_is_named_and_justified() {
         }
     }
 
-    assert!(
-        violations.is_empty(),
-        "platform unsafe violations:\n{}",
-        violations.join("\n")
-    );
+    violations
 }
 
 /// A descriptor crosses the platform boundary as an owner, never a number.
@@ -1156,20 +1247,24 @@ fn platform_unsafe_is_named_and_justified() {
 /// descriptor table after the last fork. Anywhere else they would be a
 /// second, unowned lifetime for a descriptor the shell already owns.
 // [spec:nsh:req:compat.bash.safe-core/test]
-fn descriptors_cross_the_boundary_owned() {
+fn descriptors_cross_the_boundary_owned() -> Vec<String> {
     let workspace = workspace_root();
     let mut violations = Vec::new();
 
-    let descriptor =
-        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/descriptor.rs")).unwrap();
-    for required in [
-        "pub(crate) fn number(&self) -> i32",
-        "pub(crate) fn borrowed(&self) -> BorrowedFd<'_>",
-    ] {
-        assert!(
-            descriptor.contains(required),
-            "the descriptor number stopped being private: {required}"
-        );
+    match text_at(&workspace, "crates/nsh-platform/src/descriptor.rs") {
+        Err(report) => violations.push(report),
+        Ok(descriptor) => {
+            for required in [
+                "pub(crate) fn number(&self) -> i32",
+                "pub(crate) fn borrowed(&self) -> BorrowedFd<'_>",
+            ] {
+                if !descriptor.contains(required) {
+                    violations.push(format!(
+                        "the descriptor number stopped being private: {required}"
+                    ));
+                }
+            }
+        }
     }
 
     let mut manual_moves = 0_usize;
@@ -1191,80 +1286,86 @@ fn descriptors_cross_the_boundary_owned() {
             }
         }
     }
-    assert_eq!(
-        manual_moves, 2,
-        "manual descriptor moves are no longer the two in the materialization transaction"
-    );
-
-    for (function, borrow) in [
-        ("descriptor_name", "fd: &Descriptor"),
-        ("publish_descriptor_across_exec", "fd: &Descriptor"),
-    ] {
-        let source =
-            std::fs::read_to_string(workspace.join("crates/nsh-platform/src/descriptor_name.rs"))
-                .unwrap();
-        assert!(
-            source.contains(&format!("pub fn {function}({borrow}")),
-            "{function} stopped borrowing its descriptor"
-        );
+    if manual_moves != 2 {
+        violations.push(format!(
+            "manual descriptor moves are no longer the two in the materialization \
+             transaction: {manual_moves}"
+        ));
     }
 
-    let facts =
-        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix_facts.rs")).unwrap();
+    match text_at(&workspace, "crates/nsh-platform/src/descriptor_name.rs") {
+        Err(report) => violations.push(report),
+        Ok(source) => {
+            for (function, borrow) in [
+                ("descriptor_name", "fd: &Descriptor"),
+                ("publish_descriptor_across_exec", "fd: &Descriptor"),
+            ] {
+                if !source.contains(&format!("pub fn {function}({borrow}")) {
+                    violations.push(format!("{function} stopped borrowing its descriptor"));
+                }
+            }
+        }
+    }
+
     /* The terminal entry point that stood beside this one arrived with the
      * interactive surface and left with it; `wait_for_input` stayed because
      * `read -t` is a script-visible builtin. */
     let required = "pub fn wait_for_input(fd: &impl AsDescriptor";
-    assert!(
-        facts.contains(required),
-        "missing borrowed signature: {required}"
-    );
+    match text_at(&workspace, "crates/nsh-platform/src/unix_facts.rs") {
+        Err(report) => violations.push(report),
+        Ok(facts) => {
+            if !facts.contains(required) {
+                violations.push(format!("missing borrowed signature: {required}"));
+            }
+        }
+    }
 
-    assert!(
-        violations.is_empty(),
-        "raw descriptors cross the platform boundary:\n{}",
-        violations.join("\n")
-    );
+    violations
 }
 
 /// The process-substitution ownership edges, pinned where they are made.
 ///
-/// Each assertion here is one edge the audit walked: the name's scope has
+/// Each finding here is one edge the audit walked: the name's scope has
 /// a single opening, close-on-exec is cleared at a single site, the
 /// substitution's own child disowns its parent's names, and the child is
 /// forked without a job. Release is by `Drop` and nothing else, so no path
 /// -- error, interrupt or early return -- can skip it.
 // [spec:nsh:req:compat.bash.safe-core/test]
-fn process_substitution_ownership_is_pinned() {
+fn process_substitution_ownership_is_pinned() -> Vec<String> {
     let workspace = workspace_root();
     let module = "crates/nsh/src/evaluation/bash_process_substitution.rs";
-    let source = std::fs::read_to_string(workspace.join(module)).unwrap();
+    let mut violations = Vec::new();
 
-    for required in [
-        "pub(crate) struct SubstitutionStack(Arc<Mutex<Vec<Descriptor>>>)",
-        "impl Drop for NameScope",
-        "self.stack.open().truncate(self.mark)",
-        "shell.process_substitutions.open().clear()",
-        "crate::jobs::ForkMode::WithoutJob",
-        "fork_shell(shell, None, None,",
-        "drop(shell_end)",
-        "drop(child_end)",
-    ] {
-        assert!(
-            source.contains(required),
-            "{module} no longer states {required:?}"
-        );
-    }
-    for forbidden in [
-        "ManuallyDrop",
-        "std::mem::forget",
-        "into_raw",
-        "fn release(",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "{module} released a name outside Drop with {forbidden:?}"
-        );
+    match text_at(&workspace, module) {
+        Err(report) => violations.push(report),
+        Ok(source) => {
+            for required in [
+                "pub(crate) struct SubstitutionStack(Arc<Mutex<Vec<Descriptor>>>)",
+                "impl Drop for NameScope",
+                "self.stack.open().truncate(self.mark)",
+                "shell.process_substitutions.open().clear()",
+                "crate::jobs::ForkMode::WithoutJob",
+                "fork_shell(shell, None, None,",
+                "drop(shell_end)",
+                "drop(child_end)",
+            ] {
+                if !source.contains(required) {
+                    violations.push(format!("{module} no longer states {required:?}"));
+                }
+            }
+            for forbidden in [
+                "ManuallyDrop",
+                "std::mem::forget",
+                "into_raw",
+                "fn release(",
+            ] {
+                if source.contains(forbidden) {
+                    violations.push(format!(
+                        "{module} released a name outside Drop with {forbidden:?}"
+                    ));
+                }
+            }
+        }
     }
 
     let mut scopes = 0_usize;
@@ -1276,34 +1377,51 @@ fn process_substitution_ownership_is_pinned() {
         let published = text
             .matches("bash_process_substitution::publish_before_exec(")
             .count();
-        assert!(
-            opened == 0 || relative == "crates/nsh/src/evaluation.rs",
-            "{relative} opens a second substitution scope"
-        );
-        assert!(
-            published == 0 || relative == "crates/nsh/src/execution.rs",
-            "{relative} publishes substitution names outside the exec terminus"
-        );
+        if opened != 0 && relative != "crates/nsh/src/evaluation.rs" {
+            violations.push(format!("{relative} opens a second substitution scope"));
+        }
+        if published != 0 && relative != "crates/nsh/src/execution.rs" {
+            violations.push(format!(
+                "{relative} publishes substitution names outside the exec terminus"
+            ));
+        }
         scopes += opened;
         publishes += published;
     }
-    assert_eq!(scopes, 1, "the name scope has more than one opening");
-    assert_eq!(
-        publishes, 1,
-        "close-on-exec is cleared at more than one site"
-    );
+    if scopes != 1 {
+        violations.push(format!(
+            "the name scope has {scopes} openings rather than the one"
+        ));
+    }
+    if publishes != 1 {
+        violations.push(format!(
+            "close-on-exec is cleared at {publishes} sites rather than the one"
+        ));
+    }
 
-    let execution = std::fs::read_to_string(workspace.join("crates/nsh/src/execution.rs")).unwrap();
-    let publish = execution
-        .find("bash_process_substitution::publish_before_exec(")
-        .expect("the exec terminus publishes");
-    let materialize = execution
-        .find("shell.descriptors.materialize()")
-        .expect("the exec terminus materializes");
-    assert!(
-        publish < materialize,
-        "names are published after the descriptor table is materialized"
-    );
+    match text_at(&workspace, "crates/nsh/src/execution.rs") {
+        Err(report) => violations.push(report),
+        Ok(execution) => {
+            let publish = execution.find("bash_process_substitution::publish_before_exec(");
+            let materialize = execution.find("shell.descriptors.materialize()");
+            match (publish, materialize) {
+                (None, _) => {
+                    violations.push("the exec terminus no longer publishes".to_owned());
+                }
+                (_, None) => {
+                    violations.push("the exec terminus no longer materializes".to_owned());
+                }
+                (Some(publish), Some(materialize)) if publish >= materialize => {
+                    violations.push(
+                        "names are published after the descriptor table is materialized".to_owned(),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    violations
 }
 
 /// No GNU Bash or Readline code was copied into this workspace.
@@ -1319,7 +1437,7 @@ fn process_substitution_ownership_is_pinned() {
 /// reproduced, so they must carry a provenance record naming what produced
 /// them and which version was observed.
 // [spec:nsh:req:compat.bash.safe-core/test]
-fn no_gnu_bash_code_was_copied() {
+fn no_gnu_bash_code_was_copied() -> Vec<String> {
     const UPSTREAM_NOTICES: &[&str] = &[
         "Free Software Foundation",
         "GNU General Public License",
@@ -1383,12 +1501,12 @@ fn no_gnu_bash_code_was_copied() {
      * not here and advertised commands the editor cannot run. The tables
      * were removed rather than relicensed; this keeps them from returning
      * under any name. */
-    assert!(
-        !workspace
-            .join("crates/nsh/src/builtins/bind/tables.rs")
-            .exists(),
-        "the Readline reference tables came back"
-    );
+    if workspace
+        .join("crates/nsh/src/builtins/bind/tables.rs")
+        .exists()
+    {
+        violations.push("the Readline reference tables came back".to_owned());
+    }
     for name in [
         "accept-line",
         "blink-matching-paren",
@@ -1410,11 +1528,7 @@ fn no_gnu_bash_code_was_copied() {
         }
     }
 
-    assert!(
-        violations.is_empty(),
-        "GNU Bash provenance violations:\n{}",
-        violations.join("\n")
-    );
+    violations
 }
 
 /// The expression engine bounds its own work, in steps and in stack.
@@ -1425,15 +1539,18 @@ fn no_gnu_bash_code_was_copied() {
 /// in the one place every recursion passes through, so nesting cannot get
 /// around either.
 // [spec:nsh:req:compat.bash.safe-core/test]
-fn the_expression_engine_bounds_its_work() {
+fn the_expression_engine_bounds_its_work() -> Vec<String> {
     let workspace = workspace_root();
-    let source = std::fs::read_to_string(workspace.join("crates/nsh/src/regex.rs")).unwrap();
+    let source = match text_at(&workspace, "crates/nsh/src/regex.rs") {
+        Ok(source) => source,
+        Err(report) => return vec![report],
+    };
     let scan = scan_rust_source(&source);
 
-    assert!(
-        !scan.identifiers.iter().any(|name| name == "unsafe"),
-        "the expression engine is no longer safe Rust"
-    );
+    let mut reported = Vec::new();
+    if scan.identifiers.iter().any(|name| name == "unsafe") {
+        reported.push("the expression engine is no longer safe Rust".to_owned());
+    }
     for required in [
         "const STEP_BUDGET: u64",
         "const MAX_DEPTH: u32",
@@ -1441,43 +1558,64 @@ fn the_expression_engine_bounds_its_work() {
         "depth: u32",
         "if *self.steps > STEP_BUDGET || self.depth >= MAX_DEPTH {",
     ] {
-        assert!(
-            source.contains(required),
-            "the engine lost its bound: {required:?}"
-        );
+        if !source.contains(required) {
+            reported.push(format!("the engine lost its bound: {required:?}"));
+        }
     }
-    assert_eq!(
-        source.matches("STEP_BUDGET").count(),
-        2,
-        "the step budget is read somewhere other than its single guard"
-    );
-    assert_eq!(
-        source.matches("MAX_DEPTH").count(),
-        2,
-        "the depth bound is read somewhere other than its single guard"
-    );
+    for (bound, what) in [
+        ("STEP_BUDGET", "the step budget"),
+        ("MAX_DEPTH", "the depth bound"),
+    ] {
+        let occurrences = source.matches(bound).count();
+        if occurrences != 2 {
+            reported.push(format!(
+                "{what} is named {occurrences} times rather than twice, so it is \
+                 read somewhere other than its single guard"
+            ));
+        }
+    }
 
-    let search = source
+    match source
         .split_once("pub(crate) fn search(")
-        .expect("the engine has a search")
-        .1
-        .split_once("    fn match_at(")
-        .expect("the search is followed by the attempt it makes")
-        .0;
-    assert!(
-        search.contains("let mut steps = 0_u64;") && search.contains("&mut steps"),
-        "the search buys a fresh budget at every start offset"
-    );
+        .and_then(|(_, after)| after.split_once("    fn match_at("))
+    {
+        None => {
+            reported.push("the engine has no search followed by the attempt it makes".to_owned())
+        }
+        Some((search, _)) => {
+            if !search.contains("let mut steps = 0_u64;") || !search.contains("&mut steps") {
+                reported.push(
+                    "the search no longer buys a fresh budget at every start offset".to_owned(),
+                );
+            }
+        }
+    }
+    reported
 }
 
-/// Run every check, and report all of them rather than the first.
+/// One source-shape check: it reads the repository and answers with what it
+/// found, which is nothing when the shape is right.
+type Check = fn() -> Vec<String>;
+
+/// Run every check, and report every finding rather than the first.
 ///
-/// A check panics on failure, which is how it was written when these were
-/// `#[test]` functions and is worth keeping: the assertion message is the
-/// report. Catching each one separately is the difference between "the
-/// source shape is wrong" and "here is everything that is wrong with it".
+/// Until 2026-09-02 a check asserted and `main` ran it under
+/// `catch_unwind`, which was how these were written when they were
+/// `#[test]` functions. That cost three things. `Cargo.toml` says nothing
+/// in this workspace relies on unwinding, and it stopped being true: under
+/// `panic = "abort"` the first failing check would have taken the other
+/// twenty-five with it. An empty panic hook had to be installed so the
+/// runtime would not print each failure beside the report that already
+/// carried it, and that hook swallowed the location of a genuine bug in
+/// the checker too -- a checker that crashed and a check that failed
+/// looked the same, and neither said where. And an assertion
+/// stops at the first thing it finds, so a run reported one fossil out of
+/// however many there were, and finding the next one cost another run.
+///
+/// A check returns its findings instead. Every check runs, every finding
+/// is reported, one per line, named by the check that made it.
 fn main() {
-    let checks: &[(&str, fn())] = &[
+    let checks: &[(&str, Check)] = &[
         ("port_fossils_are_absent", port_fossils_are_absent),
         (
             "core_enforces_strict_rust_lints",
@@ -1556,30 +1694,32 @@ fn main() {
             density::files_near_the_cap_are_registered,
         ),
     ];
-    std::panic::set_hook(Box::new(|_| {}));
-    let mut failed = Vec::new();
+    let mut failed = 0_usize;
+    let mut findings = Vec::new();
     for (name, check) in checks {
-        if let Err(panic) = std::panic::catch_unwind(check) {
-            let why = panic
-                .downcast_ref::<String>()
-                .map(String::as_str)
-                .or_else(|| panic.downcast_ref::<&str>().copied())
-                .unwrap_or("check panicked");
-            failed.push(format!("{name}: {why}"));
+        let reports = check();
+        if reports.is_empty() {
+            continue;
         }
+        failed += 1;
+        findings.extend(
+            reports
+                .into_iter()
+                .map(|report| format!("{name}: {report}")),
+        );
     }
-    drop(std::panic::take_hook());
-    if failed.is_empty() {
+    if findings.is_empty() {
         println!("nsh-lint: {} source-shape checks, all clean", checks.len());
         return;
     }
     eprintln!(
-        "nsh-lint: {} of {} checks failed",
-        failed.len(),
-        checks.len()
+        "nsh-lint: {} of {} checks failed, {} findings",
+        failed,
+        checks.len(),
+        findings.len()
     );
-    for report in &failed {
-        eprintln!("  {report}");
+    for finding in &findings {
+        eprintln!("  {finding}");
     }
     std::process::exit(1);
 }
