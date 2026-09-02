@@ -27,6 +27,43 @@
 # next person inherits, and they are read at the moment somebody wants to
 # add a function and has to decide what to do instead.
 #
+# AN ANSWER IS A PREDICTION, AND EVERY ONE WRITTEN SO FAR WAS WRONG
+# SOMEWHERE. Naming a seam is a claim about the code on *both* sides of
+# it, and the first five entries here were written from the half that
+# moves. Each was found by the person who acted on it:
+#
+#   * `arithmetic.rs` predicted "a `pub(super)` on two types and nothing
+#     else". It was four types and eight annotations. `Name` and `Lexer`
+#     were listed among the things that move and are also used by what
+#     stays -- the parser takes `Name` in three signatures and builds a
+#     `Lexer` in `Parser::new` -- and `Name`'s two fields are read at
+#     eight sites, so the type alone would not have been enough. The
+#     closing "neither of which it constructs" was false as well:
+#     `Parser::power` constructs a `BinaryOperator`.
+#
+#   * `printf.rs` said "nothing else in the file calls them except the
+#     two `Operands` accessors". `run` calls `leading_number` twice, in
+#     the width and precision branches of the format walk, so the seam is
+#     three `pub(super)` and not two. Its arithmetic was short as well,
+#     omitting the two test helpers that have to travel with the tests
+#     they serve: 22 functions left, not the 23 predicted.
+#
+#   * `nsh-platform/src/locale.rs` was measured at 49 and is 41. Eight of
+#     its declarations sit inside an `unsafe extern "C"` block, which the
+#     gate does not count. It never became an entry at all, and only
+#     because the figure was checked before this file was written.
+#
+# None of those made an entry useless -- every seam was in the right
+# place, and all five splits landed. But an entry that is wrong about
+# what crosses the boundary understates the work, and the numbers being
+# right is no evidence that the prose is: the first two were wrong in
+# prose alone.
+#
+# So write the answer from the code that *stays* as much as from the code
+# that goes, count with `density.rs`'s counter rather than by eye, and if
+# you are picking an entry up, verify it rather than trust it. That is
+# what caught all three.
+#
 # COUNTED THE WAY THE GATE COUNTS. `exempt-test-scope` is false, so a
 # file's own `mod tests { ... }` counts against the same fifty as its
 # code; a `mod tests;` in a file of its own does not. The unit is one
