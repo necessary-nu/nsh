@@ -64,6 +64,76 @@ while (($#)); do
 done
 (($#)) || usage
 
+# An abandoned case is one this wrapper can still see. Everything the
+# repository runs against shell-controlled input goes into a PID namespace
+# and dies with it, so a shell built into a `target/` directory, sitting at
+# ppid 1, in *this* process's PID namespace, was started outside every
+# boundary the repository has -- by hand, or by a harness that has since
+# been killed. Nothing else then bounds it: on 2026-08-31 four such shells
+# spun at 98% CPU for forty-seven hours after their worktree, their binary
+# and their case files had all been deleted, and no timeout could reach
+# them because none had ever been put in front of them.
+#
+# The fingerprint names the binaries this repository builds and points at
+# hostile input, rather than everything under a `target/` directory: this
+# machine carries checkouts of other projects whose own orphaned test
+# binaries are none of our business. Worktrees are why the path is not
+# anchored at $ROOT -- nplan keeps this repository's worktrees outside it.
+#
+# The check runs here rather than inside the boundary because inside it
+# there is nothing to see: the sandbox mounts a fresh /proc in a fresh PID
+# namespace, so a contained run cannot observe the host's leftovers. It
+# runs before the containment canary so that a machine in this state costs
+# a refusal rather than a test run.
+abandoned_processes() {
+    local own line rest pid parent exe stat
+    own=$(/usr/bin/readlink /proc/self/ns/pid) || return 0
+    for stat in /proc/[0-9]*/stat; do
+        pid=${stat#/proc/}
+        pid=${pid%/stat}
+        read -r line 2>/dev/null < "$stat" || continue
+        # Field 2 is the command in parentheses and may contain spaces and
+        # ')', so the fields after it start at the *last* ") ".
+        rest=${line##*') '}
+        parent=${rest#* }
+        parent=${parent%% *}
+        [[ $parent == 1 ]] || continue
+        exe=$(/usr/bin/readlink "/proc/$pid/exe" 2>/dev/null) || continue
+        [[ $exe == */target/* ]] || continue
+        case ${exe% (deleted)} in
+            */nsh | */nsh-survey | */bash | */dash) ;;
+            *) continue ;;
+        esac
+        [[ $(/usr/bin/readlink "/proc/$pid/ns/pid" 2>/dev/null) == "$own" ]] || continue
+        printf '%s\n' "$pid"
+    done
+}
+
+ABANDONED=${NSH_TEST_ABANDONED:-refuse}
+case $ABANDONED in
+    refuse | kill | ignore) ;;
+    *)
+        echo "scripts/sandboxed: NSH_TEST_ABANDONED must be refuse, kill or ignore" >&2
+        exit 2
+        ;;
+esac
+if [[ $ABANDONED != ignore ]]; then
+    mapfile -t ABANDONED_PIDS < <(abandoned_processes)
+    if ((${#ABANDONED_PIDS[@]})); then
+        echo "scripts/sandboxed: uncontained processes from an earlier run are still alive:" >&2
+        /usr/bin/ps -o pid=,etime=,pcpu=,args= -p "${ABANDONED_PIDS[@]}" >&2 || :
+        if [[ $ABANDONED == kill ]]; then
+            kill -KILL "${ABANDONED_PIDS[@]}" 2>/dev/null || :
+            echo "scripts/sandboxed: killed ${#ABANDONED_PIDS[@]} abandoned process(es)" >&2
+        else
+            echo "scripts/sandboxed: they are outside every boundary here and nothing bounds" >&2
+            echo "them; refusing to measure a machine that is carrying them. Re-run with" >&2
+            echo "NSH_TEST_ABANDONED=kill to clear them, or =ignore to keep them." >&2
+            exit 1
+        fi
+    fi
+fi
+
 SANDBOX_ARGS=(
     "$SANDBOX" --quiet
     --unshare all

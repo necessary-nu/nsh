@@ -141,6 +141,25 @@ scripts/sandboxed -- target/release/nsh-survey run-oils \
     --group bash-comparison --expect-shell bash
 ```
 
+One case runs the same way. The runner selects it by the id the baseline and
+the gate use, so there is never a reason to start a shell on a case by hand:
+
+```sh
+scripts/sandboxed -- target/release/nsh-survey run-oils \
+    --group bash-comparison --case process-sub.test.sh:2 \
+    --shell target/release/nsh --verbose
+```
+
+A case started by hand has none of this: no PID namespace, no read-only root
+and, above all, no budget. On 2026-08-31 four such shells spun at 98% CPU for
+forty-seven hours after the worktree, the binary and the case files they came
+from had all been deleted. `scripts/sandboxed` now refuses to run while any
+of them is on the machine, because nothing else can see them — inside the
+boundary the process table is the sandbox's own. `NSH_TEST_ABANDONED=kill`
+clears them and continues; `=ignore` skips the check.
+`tests/harness/abandoned-selftest.sh` is its self-test and is the one script
+here that must not be run through the wrapper.
+
 ## Repository layout
 
 ```text
