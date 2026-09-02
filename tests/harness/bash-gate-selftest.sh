@@ -60,16 +60,30 @@ refuses() { # NAME EXPECTED-SUBSTRING
 # The case named here is a divergence taken on purpose rather than a gap,
 # so it stays non-passing and the mutation stays meaningful as the
 # not-implemented backlog shrinks.
-python3 - "$REGISTER" <<'PY'
+#
+# The mutation checks that it mutated, because it stopped being one and
+# nothing noticed: it named `unicode.test.sh:3` until 2026-09-02, that
+# entry had been removed from the register when the case started passing,
+# the substitution matched nothing, and an unmutated register passing the
+# gate read as "the gate accepted the mutation".
+if ! python3 - "$REGISTER" <<'PY'
 import re, sys
 path = sys.argv[1]
 text = open(path).read()
-text = re.sub(
-    r'\[\[case\]\]\nid = "unicode\.test\.sh:3"\ndisposition = [^\n]*\nreason = [^\n]*\n\n',
+text, count = re.subn(
+    r'\[\[case\]\]\nid = "var-op-patsub\.test\.sh:23"\ndisposition = [^\n]*\nreason = [^\n]*\n\n?',
     '', text, count=1)
+if count != 1:
+    sys.exit('the dropped-entry mutation matched nothing; name a case the register still has')
 open(path, 'w').write(text)
 PY
-refuses "dropped entry" "unicode.test.sh:3 is an unexpected"
+then
+    printf 'FAIL %-36s the mutation could not be applied\n' "dropped entry"
+    failures=1
+    restore
+else
+    refuses "dropped entry" "var-op-patsub.test.sh:23 is an unexpected"
+fi
 
 # An entry survives the fix it was written to excuse.
 printf '\n[[case]]\nid = "append.test.sh:0"\ndisposition = "not-implemented"\nreason = "stale"\n' >>"$REGISTER"

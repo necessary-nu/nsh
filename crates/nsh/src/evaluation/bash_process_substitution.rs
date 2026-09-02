@@ -24,6 +24,38 @@
 //!   substitution and does not set `$!` to it, so there is no job record for
 //!   `jobs` to print or `wait` to block on; the generic reaper collects it
 //!   alongside the here-document writers.
+//!
+//! # The child can outlive the shell, and in a container that loses its output
+//!
+//! Neither shell waits for a `>(list)` child at exit — measured 2026-09-02,
+//! `seq 3 > >(sleep 1; tac)` returns in 4 ms under the pinned Bash 5.3.15 and
+//! under this shell alike — so the child writes to a standard output whose
+//! reader may already be tearing down. Under the survey's containment that is
+//! a PID namespace whose init dies with the shell, and the child is killed
+//! mid-write. `process-sub.test.sh:1` is that race and both shells lose it:
+//! interleaved, 100 harness runs each at load 87, the pinned Bash lost it 11
+//! times and this shell 9.
+//!
+//! What the window is made of, from `strace -f -tt` on an idle machine. For
+//! `seq 3 > >(tac)` the child needs about 5 ms after its `execve` — almost
+//! all of it dynamic linking and locale opening, none of it under the shell's
+//! control — and the shell exits 2.3 ms before it finishes. For
+//! `{ echo 1; echo 2; echo 3; } > >(tac)` the child is forked later and needs
+//! about 22 ms, which is why that case is lost far more often by both shells.
+//!
+//! One structural difference is the shell's, and it is small. Bash expands a
+//! forked command's *redirection* words in the child, so for `seq 3 > >(tac)`
+//! the pipe is created inside the `seq` process and Bash's shell never holds
+//! the write end at all: the child sees end-of-file the instant `seq` exits,
+//! 883 µs before the shell exits. Here the redirection is expanded in the
+//! parent, so the shell holds the write end until this module's [`NameScope`]
+//! drops — after the command has been reaped — and the child sees
+//! end-of-file only 237 µs before the shell exits. That is a real handicap of
+//! roughly 0.6 ms, and it is about 3% of the smaller window and 0.3% of the
+//! larger, which is why it does not show up in the rates above. Closing the
+//! shell's end sooner would mean deciding, per node, that every process which
+//! could open the name has already been forked — which is false for a builtin,
+//! a loop body and `exec 3> >(list)` — so it is not worth the invariant.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 

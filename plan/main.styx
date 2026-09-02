@@ -7695,6 +7695,7 @@ children (
                                 id bound-the-cost-of-matching-a-pattern
                                 title "Bound what matching one pattern against one word can cost"
                                 kind @perf
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-01T18:51:55.97170855Z
@@ -7708,6 +7709,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T06:02:11.3527777Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "CLOSED IN TWO COMMITS, AND THE SECOND ONE EXISTS BECAUSE OF THE FIRST.\n\n`2c40a0e` fixed the four artifacts: `alternative_ends` asked \"does this alternative match `subject[from..end]`\" once per candidate `end`, each with a fresh matcher and a fresh memo, and one traversal that records every end it reaches answers all of them at once. `e6551ef` fixed a fifth artifact that a 300-second campaign on the fixed tree filed within five minutes -- a repeated group whose closure recomputed `alternative_ends` for every offset it had already asked about. It was eleven seconds on the tree before either commit, so it was always there; it had simply never been reached.\n\nTHE LESSON FOR THE NEXT ONE OF THESE. The campaign that finds the next shape is the one you run *after* you think you are done, and it is cheap: five minutes bought a finding that four hundred seconds of triage would not have. Neither `fuzz/sweep.sh` nor the test suite would have shown it -- see `let-the-sweep-see-a-slow-unit` for why the sweep cannot.\n\nWHAT THE BUDGET IS NOW FOR. `EXTENDED_MATCH_BUDGET` was doing a job it was not written for: both defects were held only by it, and both therefore returned a *truncated* answer -- 4,000,000 units spent and \"no match\" reported without the question having been settled. It now holds only the depth that nested groups multiply, which is what its comment always claimed. Two fences (`extended_alternation_costs_a_multiple_of_its_input`, `a_repeated_group_asks_each_offset_once`) assert the work stays under sixteen times pattern length times subject length, which is a bound on the exponent rather than on the clock.\n\nSTILL OPEN, and filed rather than folded in: `stop-selecting-the-locale-per-character`. With the algorithmic cost gone, what a match now spends most of its time on is `character_end` taking and releasing the thread locale around a single `mbrlen` -- 482,532 times for one 293-byte subject. That is a constant factor on all matching, not just extended matching, and it is the reason the fifth artifact still replays in 1.16s rather than in tenths."
+                                    }
+
+                                    {
+                                        at 2026-09-02T06:02:16.12059663Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

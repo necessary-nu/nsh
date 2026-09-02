@@ -21,7 +21,7 @@ mod reference;
 
 pub(crate) use reference::{
     CatalogCase, GateCase, GateOutcome, ReferenceCase, ReferenceOutcome, ReferenceReport,
-    ReferenceTotals, bash_case_catalog, run_gate_group, run_reference_group,
+    ReferenceTotals, bash_case_catalog, run_gate_group, run_gate_specs, run_reference_group,
 };
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;

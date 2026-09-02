@@ -64,8 +64,26 @@ pub(crate) fn run_reference_group(
     shell: &Path,
     group: &str,
 ) -> Result<ReferenceReport> {
+    run_reference_specs(root, manifest, shell, group, &BTreeSet::new())
+}
+
+/// Run a group, or the named spec files within it, in the reference
+/// environment.
+///
+/// An empty `specs` is the whole group and insists that nothing was
+/// skipped -- a calibration that silently measured a subset would be
+/// worth less than no calibration. A non-empty one is a deliberate
+/// subset, so the skips are the point rather than a fault.
+pub(crate) fn run_reference_specs(
+    root: &Path,
+    manifest: &crate::OilsManifest,
+    shell: &Path,
+    group: &str,
+    specs: &BTreeSet<String>,
+) -> Result<ReferenceReport> {
     let root = fs::canonicalize(root)?;
     let shell = fs::canonicalize(shell)?;
+    let whole_group = specs.is_empty();
     let options = Options {
         root,
         group: group.to_owned(),
@@ -73,7 +91,7 @@ pub(crate) fn run_reference_group(
         expectation_shell: "bash".to_owned(),
         timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),
         format: OutputFormat::Text,
-        specs: BTreeSet::new(),
+        specs: specs.clone(),
         case_filter: None,
         max_cases: None,
         summary: None,
@@ -86,7 +104,7 @@ pub(crate) fn run_reference_group(
         locale_archive: Some(OsString::new()),
     };
     let report = run_manifest(&options, manifest)?;
-    if report.totals.skip != 0 {
+    if whole_group && report.totals.skip != 0 {
         return Err(format!(
             "reference group {} unexpectedly skipped {} cases",
             report.group, report.totals.skip
@@ -238,7 +256,23 @@ pub(crate) fn run_gate_group(
     shell: &Path,
     group: &str,
 ) -> Result<Vec<GateCase>> {
-    let report = run_reference_group(root, manifest, shell, group)?;
+    run_gate_specs(root, manifest, shell, group, &BTreeSet::new())
+}
+
+/// The same run, narrowed to the spec files named.
+///
+/// The control run needs this: it re-asks the reference about the cases
+/// a verdict turned on, and re-running the whole group to ask about one
+/// file buys three samples where the question needs a dozen.
+// [spec:nsh:req:compat.bash.survey-closure]
+pub(crate) fn run_gate_specs(
+    root: &Path,
+    manifest: &crate::OilsManifest,
+    shell: &Path,
+    group: &str,
+    specs: &BTreeSet<String>,
+) -> Result<Vec<GateCase>> {
+    let report = run_reference_specs(root, manifest, shell, group, specs)?;
     Ok(report
         .cases
         .into_iter()

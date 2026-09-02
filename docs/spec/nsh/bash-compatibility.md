@@ -278,6 +278,34 @@ it with the only thing that can tell the difference, which is the reference
 under the same conditions. A regression the reference does not share still
 fails the gate, at any load.
 
+**Correction, 2026-09-02.** "The group again, three times" was both too much
+work and too few samples, and the gate still failed about one run in nine on
+`process-sub.test.sh:1` because of it. The control now re-runs only the spec
+files the verdict actually turned on, and spends a budget of one group run on
+them: fifteen runs for a single nine-case file, fewer as the dispute widens,
+one when it spans the group. How much that buys was measured rather than
+reasoned: at load 84 to 87 the pinned Bash lost `process-sub.test.sh:1` in 45
+of 300 runs, and cutting that record into consecutive blocks says what each
+size of control would have concluded -- three runs saw the race in 37 of 100
+blocks, fifteen in 19 of 20. Nothing else about the control changed -- it still
+asks only the reference, and a case this shell loses that the reference wins
+every time still fails the gate.
+
+What that bought is less than the arithmetic predicts, and the gate says so
+rather than claiming otherwise. Over 48 runs at load 78 to 84 it failed 3
+times, always on `process-sub.test.sh:1`, against the 1 run in 9 recorded on
+`750758b`; the control fired 5 times and excused 2. The three it did not excuse
+each saw the reference lose the case 0 times in 15, which at the 10% per-run
+rate measured at that load is a 1-in-1000 coincidence -- so the control's
+samples are probably not independent of the moment the gate's own run lost the
+case. A larger count is not therefore the fix, and would make the control
+likelier to excuse a barely-flaky case where this shell has a real regression.
+
+Each undecided case is now reported with the count behind it -- *the pinned
+Bash lost it in 6 of 15 control runs* -- because "the reference lost this six
+times in fifteen" and "the reference lost it once in fifteen" are different
+claims and only the first says the case cannot measure a shell.
+
 `process-sub.test.sh:1` is the case that made it necessary. `seq 3 > >(tac)`
 writes from a process the shell does not wait for, so the sandbox can tear the
 process substitution down before it writes. Measured 2026-09-01 at load 65 and
@@ -286,3 +314,26 @@ lost it in 4 of 20. Neither number is a property of either shell, and the gate
 used to report the first as a compatibility failure. That this shell loses it
 nearly four times as often as Bash is a separate finding and a real one; the
 control keeps the gate honest about the machine, not about that.
+
+**Correction, 2026-09-02.** The last sentence is wrong: there is no such
+finding. Those two numbers were taken one shell after the other, and a rate
+measured under load means nothing unless both shells meet the same load. Run
+interleaved, 100 harness runs each at load 87: the pinned Bash lost the case 11
+times, this shell 9, and the pre-`750758b` build 10. Those three shells were
+built for the measurement and kept where nothing else writes, which matters on
+a shared checkout: `target/bash-mode/bash` was rebuilt by another agent
+mid-session, so three earlier runs cannot vouch for which binary they scored.
+They agree in direction anyway -- at load 71, Bash 18 and this shell 4 in 100;
+at load 81, Bash 29, this shell 17 and pre-`750758b` 12 in 100; under a
+fork-heavy load at 88, Bash 11 and this shell 6 in 60.
+
+This shell does not lose the race more often than the reference does, on either
+tree, under a spinning load or a forking one. The surviving gate failure was
+the control missing the reference's own loss, which the correction above fixes.
+
+What the gate cannot be asked for is for the case to stop appearing. Both
+shells lose it, and the only way this one could stop would be to wait for a
+`>(list)` child at exit, which Bash does not do -- measured, `seq 3 > >(sleep
+1; tac)` returns in 4 ms under both -- and which would hang the shell on
+`exec 3> >(sleep 5); exec 3>&-`. A run that names the case as undecided is the
+control working, not the gate failing.
