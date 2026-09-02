@@ -8805,6 +8805,7 @@ children (
                                 id quote-a-subscript-the-way-bash-quotes-one
                                 title "Refuse a single-quoted subscript on an indexed array as Bash refuses it"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T11:50:27.421970624Z
@@ -8818,6 +8819,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T15:34:06.01782486Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -8897,6 +8905,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing `list-readonly-names-as-bash-lists-them`: with the listing form fixed, the only thing left between the two shells' `readonly -p` output is *which names are in it*. Measured against the pinned Bash 5.3.15 on `dea4a93`; pre-existing.\n\n    bash: declare -r  BASHOPTS=\"...\"\n          declare -ar BASH_VERSINFO=([0]=\"5\" [1]=\"3\" ...)\n          declare -ir EUID=\"1000\"\n          declare -ir PPID=\"...\"\n          declare -r  SHELLOPTS=\"...\"\n          declare -ir UID=\"1000\"\n\n    nsh:  declare -r  BASHOPTS=\"...\"\n          declare -r  SHELLOPTS=\"...\"\n\nSo four of Bash's six are missing the read-only attribute here, and three of them are missing `-i` as well: `EUID`, `UID` and `PPID` are integers there and plain scalars here, and `BASH_VERSINFO` is a read-only array here only in that it is an array. The values are all correct; it is the attributes that are not published with them.\n\nWHY IT IS MORE THAN A LISTING. A read-only `UID` is what makes `UID=0` fail, and a script that checks `[ \"$UID\" = 0 ]` after something tried to set it is relying on that refusal. Measured: `UID=0; echo $UID` is `0` here and an error there. The `-i` half is smaller but real: `EUID+=1` is arithmetic there and string concatenation here.\n\nWHERE. `variables::special::publish`, which enters the facts when the dialect turns on. It has `mark_dynamic` for the recomputed names and enters the rest as ordinary values; the attributes are simply not passed. `set_pipeline_status` and `publish_directory_stack` show the array form.\n\nMEASURE THE WHOLE SET BEFORE FIXING SIX NAMES. The six above are what a read-only listing shows; `declare -p` in Bash also carries `-i` on `BASHPID`, `HISTCMD`, `OPTIND`, `RANDOM` and `SRANDOM`, and `-a` on `BASH_ARGC`, `BASH_ARGV`, `BASH_LINENO`, `BASH_SOURCE`, `DIRSTACK`, `FUNCNAME`, `GROUPS` and `PIPESTATUS`. A `declare -p` diff of the two shells' startup sets is the right way to find them all at once, and is what this node should start with rather than a list transcribed by hand.\n\nDONE WHEN. Every name this shell publishes carries the attributes the reference publishes it with, `UID=0` and the other refusals follow, and a differential test compares the two shells' `declare -p` for the names both of them have."
+                                    }
+
+                                    {
+                                        at 2026-09-02T15:34:17.545778385Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }
@@ -9100,6 +9115,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @blocker
                                         text "`. FILE` AT AN INTERACTIVE PROMPT PRINTS A BLANK LINE dash DOES NOT. Found 2026-09-02 while closing `deliver-a-prompt-interrupt-without-eating-the-next-line`, as the one case out of fifteen in that node's signal matrix that still differed from dash after the fix -- and then found to have nothing to do with signals at all.\n\nMEASURED on a pseudo-terminal with `TERM=dumb`, `PS1='$ '`, against `/usr/bin/dash`, with a shell built at `a81455c` and with one built from its parent, identically:\n\n    file holds `echo IN-DOT`\n      dash  $ . d1.sh <nl> IN-DOT <nl> $ echo b\n      nsh   $ . d1.sh <nl> IN-DOT <nl> <nl> $ echo b\n\n    file holds `:` and prints nothing\n      dash  $ . d3.sh <nl> $ echo b\n      nsh   $ . d3.sh <nl> <nl> $ echo b\n\nSo it is not about what the file printed and not about a missing final newline: the extra line is there when the file produces no output at all. It is the `.` itself.\n\nIT IS THE BUILT-IN AND NOT THE GENERAL CASE, which is what makes it worth a node rather than a shrug. The two other ways of running shell text from a prompt agree with dash exactly: `eval 'echo IN-EVAL'` and `x=$(echo sub); echo $x` both give byte-identical transcripts in both shells. Only the input-frame that `.` pushes leaves the extra newline behind, so the place to look is where that frame is popped and where the prompt decides whether the cursor is at the start of a line -- not in `eval`'s or the substitution's path, which share most of the rest.\n\nWHY IT IS EASY TO MISATTRIBUTE, and this cost a measurement here. Under a signal test the extra line lands next to the newline an interrupt prints, and reads as the interrupt printing two. Both binaries above were measured with no signal involved, one line of script each, which is what told the two apart.\n\nNOT MEASURED YET, and worth doing before fixing: whether the pinned Bash 5.3 prints the extra line (this repository's `.` is dash's, but the Bash profile has to agree with whichever answer is chosen), whether a non-interactive `.` is affected at all -- no survey case has moved, so probably not -- and whether `source` in Bash mode takes the same path.\n\nDONE WHEN `. FILE` at an interactive prompt writes exactly what dash writes for a file that prints something and for one that prints nothing, and a case covers both so the blank line cannot come back beside a signal where nobody will see it."
+                                    }
+                                )
+                            }
+
+                            {
+                                id mark-seconds-when-it-is-read
+                                title "Give `SECONDS` the integer letter its first read gives it in Bash"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:52:02.697415115Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "THE ONE NAME `mark-the-shell-facts-bash-marks` LEFT, AND IT IS LEFT BECAUSE IT IS A DIFFERENT MECHANISM. Found 2026-09-02 while closing that node; measured against the pinned Bash 5.3.15 on `7265a96`.\n\n`SECONDS` carries no letter in Bash until something reads it, and `-i` afterwards. Measured with `env -i` on both shells:\n\n    (fresh)              declare -p | grep SECONDS   bash: declare -- SECONDS\n    : $SECONDS; same                                 bash: declare -i SECONDS\n    (fresh)              declare -p SECONDS          bash: declare -i SECONDS\n    (fresh)              echo \"${SECONDS@a}\"         bash: i\n    nsh, all four                                    declare -- SECONDS / (empty)\n\nSo the reference's *listing* and its *named* lookup disagree about the same name in the same shell, and they disagree because the named lookup is a read and the listing is not. `BASHPID`, `RANDOM`, `SRANDOM` and `OPTIND` carry `-i` from the start in both shells and are not part of this; `EPOCHSECONDS`, `EPOCHREALTIME`, `LINENO` and `BASH_SUBSHELL` carry nothing in either, read or not.\n\nTWO HALVES, AND THE SECOND IS THE EXPENSIVE ONE.\n\n1. The read has to set the attribute. `variables::special::refresh` is the read path and already recomputes `SECONDS`; one `set_bash_attribute(Integer, true)` beside the recomputation would make `: $SECONDS; declare -p | grep SECONDS` right.\n\n2. `declare -p NAME` and `${name@a}` have to *be* reads, and they are not. Neither calls `special::refresh`, which is visible without `SECONDS` at all:\n\n    x=$BASHPID; declare -p BASHPID\n      bash: declare -i BASHPID=\"886412\"   (the live pid)\n      nsh:  declare -i BASHPID=\"0\"        (the seed `mark_dynamic` wrote)\n\n    declare -p RANDOM\n      bash: declare -i RANDOM=\"27226\"     nsh: declare -i RANDOM=\"0\"\n\nA NAME WHOSE VALUE IS RECOMPUTED SPELLS ITS SEED BACK, in other words, and that is worth fixing on its own account: `declare -p` exists to say what the shell holds, and for five names it says `0`. The values are unpredictable, so no differential row can compare them directly -- but `x=$BASHPID; declare -p BASHPID | grep -c \"$x\"` is 1 in the reference and 0 here, and that is a row.\n\nWHERE. `builtins/declare.rs`'s `print` and `variables::show_vars`'s declaration branch both hold `&mut Shell` and both call `declaration::declaration_line`; a `special::refresh(shell, name)` in front of each is the whole of half 2. Watch what that does to the *listing*: refreshing every name in a bare `declare -p` would give `SECONDS` its `-i` in a fresh listing, where the reference prints `--`. So the refresh belongs to the named lookup and not to the listing, which is exactly the asymmetry Bash itself has.\n\nDONE WHEN. `declare -p SECONDS`, `${SECONDS@a}` and a listing taken after a read all carry `-i`, a listing taken before one does not, `declare -p BASHPID` names the running process rather than zero, and a differential table holds the four rows above."
                                     }
                                 )
                             }

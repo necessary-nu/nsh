@@ -237,7 +237,48 @@ fn publish(shell: &mut Shell) {
     for name in [b"SHELLOPTS".as_slice(), b"BASHOPTS"] {
         mark_dynamic(shell, BStr::new(name), VariableAttributes::READ_ONLY);
     }
+    mark_published_facts(shell);
     publish_directory_stack(shell);
+}
+
+/// Give the published facts the attributes Bash publishes them with.
+///
+/// The attributes are observable well beyond a listing. A read-only
+/// `UID` is what makes `UID=0` fail, which a script testing
+/// `[ "$UID" = 0 ]` after something tried to set it is relying on; an
+/// integer `OPTIND` is what makes `OPTIND=abc` zero rather than `abc`
+/// and `OPTIND+=1` arithmetic rather than concatenation.
+///
+/// The names are the answer to a `declare -p` diff of the two shells'
+/// start-up sets rather than a list transcribed by hand, which is what
+/// the node asked for and what turned its six names into eight:
+/// `BASHPID`, `OPTIND`, `RANDOM` and `SRANDOM` carry `-i` in the
+/// reference and appear in no read-only listing, so nothing that read
+/// `readonly -p` would have found them.
+///
+/// Last in `publish`, and after the value in every case: a name marked
+/// read-only before the shell seeds it refuses the shell's own seed,
+/// which is the reason `mark_dynamic` orders itself the same way.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+fn mark_published_facts(shell: &mut Shell) {
+    use super::value::BashAttribute;
+
+    for name in [
+        b"BASHPID".as_slice(),
+        b"EUID",
+        b"OPTIND",
+        b"PPID",
+        b"RANDOM",
+        b"SRANDOM",
+        b"UID",
+    ] {
+        super::value::set_bash_attribute(shell, BStr::new(name), BashAttribute::Integer, true);
+    }
+    /* `BASH_VERSINFO` is read-only and not an integer: it is an array,
+     * and `declare -ar` is what the reference prints for it. */
+    for name in [b"BASH_VERSINFO".as_slice(), b"EUID", b"PPID", b"UID"] {
+        super::add_attributes(shell, BStr::new(name), VariableAttributes::READ_ONLY);
+    }
 }
 
 /// `$DIRSTACK`: the directory stack as an ordinary indexed array.
