@@ -2,7 +2,7 @@
 #
 # Generated. Do not edit the list by hand: re-record it with
 #
-#     nsh-survey run-oils --shell target/gate/bash --expect-shell bash \
+#     nsh-survey run-oils --expect-shell bash \
 #       --group bash-comparison --baseline tests/surveys/oils/BASH_COMPARISON_FAILURES.toml --update-baseline
 #
 # and read the difference the refresh prints before you keep it. Drop
@@ -15,12 +15,26 @@
 # `command_.test.sh:3` and `command_.test.sh:12` sat silently outside every
 # comparison made with it.
 #
+# A case the pinned Bash could not reproduce its own recorded result on is
+# undecided: the comparison names it and does not count it, and a refresh
+# keeps whatever this file already said about it rather than taking the
+# lucky run's answer. `process-sub.test.sh:2` was deleted from here that way
+# on 2026-09-01 and had to be measured again by hand.
+#
 # The pins are what make the list mean something. A run whose group,
 # expectation namespace, POSIX mode, per-case timeout or Oils commit differs
 # from these is refused rather than compared, and a filtered run (`--spec`,
 # `--case`, `--max-cases`) is refused outright because every unselected case
 # would read as fixed. The shell's hash is not pinned; it changes with every
 # build.
+#
+# `nsh_commit`, `shell_sha256` and `uncommitted` are the opposite of a pin:
+# they say what this list came from and are never compared against anything.
+# A refresh refuses a checkout carrying uncommitted work, because the shell
+# it measured was built from that work and no commit explains the result;
+# `--update-baseline-from-dirty-tree` records the list anyway and names every
+# such path in `uncommitted`. `ee98cec` had no way to do that and attributed
+# two entries it removed to a commit that did not remove them.
 
 schema = 1
 group = "bash-comparison"
@@ -28,6 +42,8 @@ expectation_shell = "bash"
 posix = false
 timeout_ms = 5000
 oils_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
+shell_sha256 = "134d07c8c43d71b5929cbbba085000ef20180c20b37e7e506e180dc52b3f5658"
+nsh_commit = "50312f66bee8812ec7e4c92906c5ae1cd0197d02"
 failing = [
     "alias.test.sh:0",
     "alias.test.sh:10",
@@ -255,7 +271,6 @@ failing = [
     "builtin-meta.test.sh:17",
     "builtin-meta.test.sh:2",
     "builtin-misc.test.sh:0",
-    "builtin-misc.test.sh:2",
     "builtin-misc.test.sh:5",
     "builtin-misc.test.sh:6",
     "builtin-printf.test.sh:25",
@@ -371,7 +386,6 @@ failing = [
     "interactive.test.sh:8",
     "interactive.test.sh:9",
     "introspect.test.sh:1",
-    "known-differences.test.sh:0",
     "known-differences.test.sh:1",
     "loop.test.sh:16",
     "loop.test.sh:17",
@@ -444,9 +458,6 @@ failing = [
     "sh-options.test.sh:1",
     "sh-options.test.sh:22",
     "sh-options.test.sh:23",
-    "sh-options.test.sh:24",
-    "sh-options.test.sh:25",
-    "sh-options.test.sh:26",
     "sh-options.test.sh:35",
     "sh-options.test.sh:36",
     "sh-options.test.sh:38",
