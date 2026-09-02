@@ -14,6 +14,7 @@ use bstr::BStr;
 
 use crate::evaluation::Flow;
 use crate::options::Options;
+use crate::variables::value::VariableKind;
 use crate::variables::{
     VariableAttributes, VariableSelection, add_attributes, set_bytes, show_vars,
     variable_attributes,
@@ -51,8 +52,26 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         (VariableAttributes::EXPORTED, VariableSelection::Exported)
     };
 
+    /* `-a` and `-A` are Bash's, and they are not attributes here: they
+     * say how a compound operand is to be read, which is why
+     * `readonly -A m` with no value leaves `m` a plain name. The POSIX
+     * dialect has no arrays and keeps refusing both letters. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    let letters: &[u8] = if shell.options.dialect() == crate::options::Dialect::Bash {
+        b"paA"
+    } else {
+        b"p"
+    };
     let mut option_scan = Options::new(args);
-    let export_operands = option_scan.next(&mut shell.diagnostics(), b"p")?.is_none();
+    let mut print = false;
+    while let Some(letter) = option_scan.next(&mut shell.diagnostics(), letters)? {
+        match letter {
+            b'a' => shell.evaluation.declared_kind = Some(VariableKind::Indexed),
+            b'A' => shell.evaluation.declared_kind = Some(VariableKind::Associative),
+            _ => print = true,
+        }
+    }
+    let export_operands = !print;
     let operands = option_scan.operands();
     if export_operands && !operands.is_empty() {
         for word in operands {

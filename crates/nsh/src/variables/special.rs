@@ -568,6 +568,103 @@ pub(crate) fn attribute_letters(shell: &Shell, name: &BStr) -> BString {
     letters
 }
 
+/// The attribute letters a `declare -p` line carries for `name`, or
+/// `None` for a name with no entry at all.
+///
+/// Bash writes these in a different order from the `${name@a}` letters
+/// above -- `declare -Ar`, but `${m@a}` is `Ar` only by coincidence and
+/// `-rx` is `rx` there and `rx` here while `-lu` is `lu` there and `ul`
+/// here. `attribute_string` and `var_attribute_string` are two tables in
+/// Bash and they are two here, next to each other so that the difference
+/// is visible rather than surprising. A name that carries nothing takes
+/// `-`, which is what makes `declare -- x="1"`.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn declaration_flags(shell: &Shell, name: &BStr) -> Option<BString> {
+    use super::value::BashAttribute;
+
+    // A name declared without a value still has a declaration to print;
+    // only a name with no entry at all is missing.
+    let attributes = super::variable_attributes(shell, name)?;
+    let bash = super::value::bash_attributes(shell, name).unwrap_or_default();
+    let mut flags = BString::default();
+    match super::value::variable_kind(shell, name) {
+        Some(VariableKind::Indexed) => flags.push(b'a'),
+        Some(VariableKind::Associative) => flags.push(b'A'),
+        Some(VariableKind::Scalar) | None => {}
+    }
+    for (attribute, letter) in [
+        (BashAttribute::Integer, b'i'),
+        (BashAttribute::Lowercase, b'l'),
+        (BashAttribute::Nameref, b'n'),
+        (BashAttribute::Trace, b't'),
+        (BashAttribute::Uppercase, b'u'),
+    ] {
+        if bash.contains(attribute) {
+            flags.push(letter);
+        }
+    }
+    if attributes.read_only {
+        flags.push(b'r');
+    }
+    if attributes.exported {
+        flags.push(b'x');
+    }
+    if flags.is_empty() {
+        flags.push(b'-');
+    }
+    Some(flags)
+}
+
+/// The `=value` a `declare -p` line writes for a stored value, and
+/// nothing at all for a name that holds none.
+///
+/// This is the spelling that has to read back: the key goes through
+/// [`crate::escape::bash::subscript_quote`] and the element beside it
+/// through `declaration_quote`, so a blank or a metacharacter on either
+/// side comes back as itself. `${name[@]@A}` asks the same question by a
+/// different route and is answered from here, which is what keeps the
+/// two spellings from drifting apart.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn declaration_value(shell: &Shell, value: &VariableValue) -> BString {
+    let mut text = BString::default();
+    if value.kind() == VariableKind::Scalar {
+        if let Some(scalar) = value.scalar_ref() {
+            text.push(b'=');
+            text.extend_from_slice(&crate::escape::bash::declaration_quote(
+                &shell.locale,
+                scalar,
+            ));
+        }
+        return text;
+    }
+    text.extend_from_slice(b"=(");
+    let keys = super::arrays::keys(value);
+    let elements = super::arrays::elements(value);
+    for (position, (key, element)) in keys.iter().zip(elements.iter()).enumerate() {
+        if position > 0 {
+            text.push(b' ');
+        }
+        text.push(b'[');
+        text.extend_from_slice(&crate::escape::bash::subscript_quote(
+            &shell.locale,
+            BStr::new(key.as_slice()),
+        ));
+        text.extend_from_slice(b"]=");
+        text.extend_from_slice(&crate::escape::bash::declaration_quote(
+            &shell.locale,
+            BStr::new(element.as_slice()),
+        ));
+    }
+    /* Bash pads the closing paren for associative arrays only, and only
+     * when there is an element to pad away from: an empty one prints
+     * `=()` like an indexed array. */
+    if value.kind() == VariableKind::Associative && !keys.is_empty() {
+        text.push(b' ');
+    }
+    text.push(b')');
+    text
+}
+
 /// Whether `name` currently holds a value, which `test -v` asks.
 ///
 /// The name may carry a subscript, and `a[0]` is a different question
@@ -815,6 +912,7 @@ mod tests {
             name,
             VariableKind::Indexed,
             VariableAttributes::NONE,
+            arrays::ReadOnlyGuard::Enforce,
         )
         .unwrap();
         assert_eq!(attribute_letters(&shell, name), BString::from("a"));

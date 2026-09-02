@@ -800,7 +800,10 @@ pub(super) fn transform(
      * `@A` answers for one that is set but has no scalar to read. */
     let available = match operator.as_slice() {
         b"a" => true,
-        b"A" => !value.is_unset(),
+        /* `@A` prints a declaration, and a name that has none prints
+         * nothing: `${undeclared[@]@A}` and `${1@A}` are both empty in
+         * Bash, where `${x[@]@A}` on a plain scalar is `x='...'`. */
+        b"A" => !value.is_unset() && declaration_target(shell, name).is_some(),
         _ => has_transformable_bytes(&value),
     };
     if !available {
@@ -823,9 +826,34 @@ pub(super) fn transform(
         /* `@A` prints the assignment that would recreate the name, so
          * unlike every other transform it needs the name itself. */
         b"A" => {
-            let assignment = assignment_text(shell, name, &value, context);
+            let words = assignment_fields(shell, name, &value, context);
+            /* The declaration is a *word list* -- `declare`, `-A`,
+             * `m=(...)` -- so `"${m[@]@A}"` is three fields even with
+             * `IFS` empty, and `[*]` joins them as it joins any other.
+             * The same test `map_value` makes, because it is the same
+             * question about the same two subscripts. */
+            let separate = match &value {
+                Value::At(_) => context.full,
+                Value::Star(_) => context.full && !context.quoted,
+                Value::Unset | Value::Variable(_) => false,
+            };
+            if separate {
+                return Ok(Expansion {
+                    fields: words
+                        .iter()
+                        .map(|word| {
+                            Field::from_bytes(
+                                word,
+                                context.protects(),
+                                !context.quoted,
+                                context.quoted,
+                            )
+                        })
+                        .collect(),
+                });
+            }
             Ok(Expansion::one(Field::from_bytes(
-                &assignment,
+                &super::join_parameters(&words, super::first_ifs_character(shell)),
                 context.protects(),
                 context.splits(),
                 context.quoted,
@@ -863,42 +891,112 @@ pub(super) fn transform(
     }
 }
 
-/// `${name@A}`: `name='value'`, the assignment that would put the value
-/// back.
+/// The variable `${name@A}` prints the declaration of, following a
+/// reference to what it names.
 ///
-/// An unset name has no assignment to print, which the caller has
-/// already handled; an empty one prints `name=''`.
-fn assignment_text(shell: &mut Shell, name: &BStr, value: &Value, context: Context) -> BString {
+/// `None` is a parameter that has no declaration to print: a positional,
+/// a special parameter, a name that was never declared. `$@` and `$*`
+/// have no entry either and are handled before this is asked.
+fn declaration_target(shell: &Shell, name: &BStr) -> Option<BString> {
     let base = match super::split_subscript(name) {
         Some((base, _)) => base.to_owned(),
         None => name.to_owned(),
     };
-    let text = super::value_bytes(shell, value.clone(), context);
-    let mut assignment = base;
-    assignment.push(b'=');
-    assignment.extend_from_slice(&crate::escape::bash::readable_quote(
-        &shell.locale,
-        BStr::new(text.as_slice()),
-    ));
-    assignment
+    if base == "@" || base == "*" {
+        return Some(base);
+    }
+    let target = crate::variables::nameref::read_name(shell, BStr::new(base.as_slice()))
+        .unwrap_or_else(|| base.clone());
+    let target = match super::split_subscript(BStr::new(target.as_slice())) {
+        Some((base, _)) => base.to_owned(),
+        None => target,
+    };
+    crate::variables::variable_attributes(shell, BStr::new(target.as_slice())).map(|_| target)
+}
+
+/// `${name@A}`: the assignment that would put the value back.
+///
+/// Three shapes, and which one is Bash's depends on what was read rather
+/// than on how it was written. `$@` and `$*` spell `set -- 'a' 'b'`. An
+/// array read whole -- `${a[@]@A}`, `${a[*]@A}` -- spells the `declare
+/// -p` line, and spells it as *three* fields: `declare`, `-a`, and
+/// `a=(...)`, so `"${a[@]@A}"` is a three-word list even with `IFS`
+/// empty. Everything else spells the scalar that was read, prefixed by
+/// `declare -flags ` when the name carries any attribute at all --
+/// `declare -i n='3'`, but a plain `x='hi'`.
+///
+/// The array line comes from [`crate::variables::special`], which is
+/// where `declare -p` gets it, so a key needing quotes is quoted the
+/// same by both.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn assignment_fields(
+    shell: &mut Shell,
+    name: &BStr,
+    value: &Value,
+    context: Context,
+) -> Vec<BString> {
+    let Some(base) = declaration_target(shell, name) else {
+        return Vec::new();
+    };
+    let quote =
+        |shell: &Shell, text: &BStr| crate::escape::bash::readable_quote(&shell.locale, text);
+    if base == "@" || base == "*" {
+        let words = match value {
+            Value::At(words) | Value::Star(words) => words.as_slice(),
+            Value::Unset | Value::Variable(_) => &[],
+        };
+        // No positionals is no assignment to print, not `set --`.
+        if words.is_empty() {
+            return Vec::new();
+        }
+        let mut fields = vec![BString::from("set"), BString::from("--")];
+        fields.extend(words.iter().map(|word| quote(shell, word.as_bstr())));
+        return fields;
+    }
+    let base = BStr::new(base.as_slice());
+    let stored = crate::variables::value::variable_value(shell, base);
+    let whole_array = matches!(value, Value::At(_) | Value::Star(_))
+        && stored
+            .is_some_and(|stored| stored.kind() != crate::variables::value::VariableKind::Scalar);
+    let flags = crate::variables::special::declaration_flags(shell, base).unwrap_or_default();
+    if whole_array {
+        let mut assignment = base.to_owned();
+        if let Some(stored) = stored {
+            assignment
+                .extend_from_slice(&crate::variables::special::declaration_value(shell, stored));
+        }
+        let mut letters = BString::from("-");
+        letters.extend_from_slice(&flags);
+        return vec![BString::from("declare"), letters, assignment];
+    }
+    /* An array with no element to read as a scalar has no `=` at all:
+     * `declare -a z` prints itself, where `z=''` would claim an element
+     * zero the array does not have. */
+    let mut assignment = base.to_owned();
+    if !matches!(value, Value::Variable(stored) if stored.scalar_ref().is_none()) {
+        let text = super::value_bytes(shell, value.clone(), context);
+        assignment.push(b'=');
+        assignment.extend_from_slice(&quote(shell, BStr::new(text.as_slice())));
+    }
+    if flags == "-" {
+        return vec![assignment];
+    }
+    let mut line = BString::from("declare -");
+    line.extend_from_slice(&flags);
+    line.push(b' ');
+    line.extend_from_slice(&assignment);
+    vec![line]
 }
 
 /// The attribute letters of the variable a parameter names.
 ///
-/// The name may carry a subscript -- `${a[0]@a}` asks about `a` -- and
-/// may be a positional or special parameter, which has no declaration
-/// and therefore no letters.
-fn attributes_of(shell: &mut Shell, name: &BStr) -> BString {
-    let base = match super::split_subscript(name) {
-        Some((base, _)) => base.to_owned(),
-        None => name.to_owned(),
-    };
-    let base = BStr::new(base.as_slice());
-    let target =
-        crate::variables::nameref::read_name(shell, base).unwrap_or_else(|| base.to_owned());
-    let target = match super::split_subscript(BStr::new(target.as_slice())) {
-        Some((base, _)) => base.to_owned(),
-        None => target,
+/// `@a` and `@A` ask about the same variable and find it the same way --
+/// through the subscript and through a reference -- and differ only in
+/// what they then print of it. A positional or special parameter has no
+/// declaration and therefore no letters.
+fn attributes_of(shell: &Shell, name: &BStr) -> BString {
+    let Some(target) = declaration_target(shell, name) else {
+        return BString::default();
     };
     crate::variables::special::attribute_letters(shell, BStr::new(target.as_slice()))
 }

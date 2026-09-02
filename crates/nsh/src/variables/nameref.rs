@@ -547,6 +547,7 @@ mod tests {
             BStr::new("Tnr_arr"),
             VariableKind::Indexed,
             VariableAttributes::NONE,
+            arrays::ReadOnlyGuard::Enforce,
         )
         .unwrap();
         arrays::assign_element(

@@ -16,7 +16,7 @@ use crate::output::OutputDestination;
 use crate::status::ExitStatus;
 use crate::variables::arrays;
 use crate::variables::nameref::{self, LocalValue};
-use crate::variables::value::{BashAttribute, VariableKind, VariableValue};
+use crate::variables::value::{BashAttribute, VariableKind};
 use crate::variables::{VariableAttributes, add_attributes};
 
 mod compound;
@@ -215,7 +215,13 @@ fn apply(
             reject_conversion(shell, base, kind)?;
             return Ok(false);
         }
-        arrays::ensure_kind(shell, base, kind, VariableAttributes::NONE)?;
+        arrays::ensure_kind(
+            shell,
+            base,
+            kind,
+            VariableAttributes::NONE,
+            arrays::ReadOnlyGuard::Enforce,
+        )?;
     }
 
     for (attribute, enabled) in [
@@ -374,76 +380,12 @@ fn selected(shell: &Shell, requested: &Requested, name: &BStr) -> bool {
 }
 
 fn render(shell: &Shell, name: &BStr) -> Option<BString> {
-    let double_quote = |value: &BStr| crate::escape::bash::declaration_quote(&shell.locale, value);
-    let subscript = |key: &BStr| crate::escape::bash::subscript_quote(&shell.locale, key);
-    // A name that was declared without a value still has a declaration
-    // to print; only a name with no entry at all is missing.
-    let attributes = crate::variables::variable_attributes(shell, name)?;
-    let value = crate::variables::value::variable_value(shell, name);
-    let bash = crate::variables::value::bash_attributes(shell, name).unwrap_or_default();
-
-    let mut flags = Vec::new();
-    match value.map(VariableValue::kind) {
-        Some(VariableKind::Indexed) => flags.push(b'a'),
-        Some(VariableKind::Associative) => flags.push(b'A'),
-        Some(VariableKind::Scalar) | None => {}
-    }
-    for (attribute, letter) in [
-        (BashAttribute::Integer, b'i'),
-        (BashAttribute::Lowercase, b'l'),
-        (BashAttribute::Nameref, b'n'),
-        (BashAttribute::Trace, b't'),
-        (BashAttribute::Uppercase, b'u'),
-    ] {
-        if bash.contains(attribute) {
-            flags.push(letter);
-        }
-    }
-    if attributes.read_only {
-        flags.push(b'r');
-    }
-    if attributes.exported {
-        flags.push(b'x');
-    }
-    if flags.is_empty() {
-        flags.push(b'-');
-    }
-
     let mut line = BString::from("declare -");
-    line.extend_from_slice(&flags);
+    line.extend_from_slice(&crate::variables::special::declaration_flags(shell, name)?);
     line.push(b' ');
     line.extend_from_slice(name.as_ref());
-    let Some(value) = value else {
-        return Some(line);
-    };
-    match value.kind() {
-        VariableKind::Scalar => {
-            if let Some(scalar) = value.scalar_ref() {
-                line.extend_from_slice(b"=");
-                line.extend_from_slice(&double_quote(scalar));
-            }
-        }
-        VariableKind::Indexed | VariableKind::Associative => {
-            line.extend_from_slice(b"=(");
-            let keys = arrays::keys(value);
-            let elements = arrays::elements(value);
-            for (position, (key, element)) in keys.iter().zip(elements.iter()).enumerate() {
-                if position > 0 {
-                    line.push(b' ');
-                }
-                line.push(b'[');
-                line.extend_from_slice(&subscript(BStr::new(key.as_slice())));
-                line.extend_from_slice(b"]=");
-                line.extend_from_slice(&double_quote(BStr::new(element.as_slice())));
-            }
-            /* Bash pads the closing paren for associative arrays only, and
-             * only when there is an element to pad away from: an empty one
-             * prints `=()` like an indexed array. */
-            if value.kind() == VariableKind::Associative && !keys.is_empty() {
-                line.push(b' ');
-            }
-            line.push(b')');
-        }
+    if let Some(value) = crate::variables::value::variable_value(shell, name) {
+        line.extend_from_slice(&crate::variables::special::declaration_value(shell, value));
     }
     Some(line)
 }

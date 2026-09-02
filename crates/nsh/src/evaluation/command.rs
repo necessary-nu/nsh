@@ -308,6 +308,7 @@ fn evaluate_command_in_scope(
      * setup below: the trap runs shell code, and a command inside it
      * fills this on its own behalf. */
     shell.evaluation.refused_declarations.clear();
+    shell.evaluation.declared_kind = None;
     record_command_line(shell, command.line.get());
     // [spec:nsh:req:compat.bash.traps-introspection]
     flow!(crate::trap::bash::run_debug(shell));

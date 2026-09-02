@@ -11,8 +11,12 @@ use bstr::{BStr, BString};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::expand::{ExpandedField, ExpandedFields, ExpansionMode, expand_argument};
-use crate::nodes::{BashArrayAssignment, BashArrayValue, BashAssignmentOperator, Node, WordNode};
-use crate::variables::arrays::{self, ArraySelector, CompoundElement, ReadOnlyGuard};
+use crate::nodes::{
+    BashArrayAssignment, BashArrayElement, BashArrayValue, BashAssignmentOperator, Node,
+    SourceTokens, WordNode,
+};
+use crate::variables::arrays::{self, ArraySelector, CompoundElement, CompoundForm, ReadOnlyGuard};
+use crate::word::{ParsedWord, WordUnit};
 
 /// Apply one `a=(...)`, `a[i]=v`, or `a+=(...)` assignment.
 ///
@@ -104,38 +108,104 @@ pub(crate) fn assign(
             Ok(false)
         }
         BashArrayValue::Compound(elements) => {
-            let mut resolved = Vec::with_capacity(elements.len());
-            for element in elements {
-                let subscript = match &element.subscript {
-                    Some(word) => {
-                        Some(expand_scalar(shell, word, ExpansionMode::ASSIGNMENT_TILDE)?)
-                    }
-                    None => None,
-                };
-                // `[k]=v` makes the value an assignment operand rather
-                // than an ordinary word: it is not brace-expanded, not
-                // split, and its tildes follow the assignment rule. An
-                // element with no subscript is a plain word and splits,
-                // so `a=($x)` yields one element per field.
-                if subscript.is_some() {
-                    resolved.push(CompoundElement {
-                        subscript,
-                        value: expand_value(shell, &element.value)?,
-                        append: element.operator == BashAssignmentOperator::Append,
-                    });
-                    continue;
-                }
-                for value in expand_fields(shell, &element.value)? {
-                    resolved.push(CompoundElement {
-                        subscript: None,
-                        value,
-                        append: element.operator == BashAssignmentOperator::Append,
-                    });
-                }
-            }
-            arrays::assign_compound(shell, BStr::new(name.as_slice()), resolved, append, guard)?;
+            let name = BStr::new(name.as_slice());
+            let form = arrays::compound_form(
+                shell,
+                name,
+                elements
+                    .first()
+                    .is_some_and(|element| element.subscript.is_some()),
+            );
+            let resolved = if form == CompoundForm::Pairs {
+                pair_words(shell, elements)?
+            } else {
+                subscripted_elements(shell, elements)?
+            };
+            arrays::assign_compound(shell, name, resolved, form, append, guard)?;
             Ok(true)
         }
+    }
+}
+
+/// Expand a `[subscript]=value` list, one element at a time.
+///
+/// `[k]=v` makes the value an assignment operand rather than an ordinary
+/// word: it is not brace-expanded, not split, and its tildes follow the
+/// assignment rule. An element with no subscript is a plain word and
+/// splits, so `a=($x)` yields one element per field.
+fn subscripted_elements(
+    shell: &mut Shell,
+    elements: &[BashArrayElement],
+) -> Result<Vec<CompoundElement>, Error> {
+    let mut resolved = Vec::with_capacity(elements.len());
+    for element in elements {
+        let append = element.operator == BashAssignmentOperator::Append;
+        let Some(word) = &element.subscript else {
+            for value in expand_fields(shell, &element.value)? {
+                resolved.push(CompoundElement {
+                    subscript: None,
+                    value,
+                    append,
+                });
+            }
+            continue;
+        };
+        resolved.push(CompoundElement {
+            subscript: Some(expand_scalar(shell, word, ExpansionMode::ASSIGNMENT_TILDE)?),
+            value: expand_value(shell, &element.value)?,
+            append,
+        });
+    }
+    Ok(resolved)
+}
+
+/// Expand a `( key value ... )` list, one field per element.
+///
+/// Bash's key/value form neither splits nor globs -- `p="a b"; m=($p)`
+/// is the single key `a b`, and `m=(* v)` is the key `*` -- and a
+/// `[k]=v` element is not an element here at all: it is the word it was
+/// written as, brackets and operator included, which is why
+/// `m=(foo [a]=1)` stores `[foo]="[a]=1"`. So the element is put back
+/// together from the pieces the parser cut it into and expanded once,
+/// the way an assignment's right-hand side is.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn pair_words(
+    shell: &mut Shell,
+    elements: &[BashArrayElement],
+) -> Result<Vec<CompoundElement>, Error> {
+    let mut words = Vec::with_capacity(elements.len());
+    for element in elements {
+        let word = match &element.subscript {
+            Some(subscript) => rejoin(subscript, element.operator, &element.value),
+            None => element.value.clone(),
+        };
+        words.push(CompoundElement {
+            subscript: None,
+            value: expand_value(shell, &word)?,
+            append: false,
+        });
+    }
+    Ok(words)
+}
+
+/// Put a `[subscript]=value` element back together as the one word it
+/// was written as, so that the key/value form can read it as text.
+fn rejoin(subscript: &WordNode, operator: BashAssignmentOperator, value: &WordNode) -> WordNode {
+    let literal = |byte| WordUnit::Literal {
+        byte,
+        quoted: false,
+    };
+    let mut units = vec![literal(b'[')];
+    units.extend(subscript.word.units());
+    units.push(literal(b']'));
+    if operator == BashAssignmentOperator::Append {
+        units.push(literal(b'+'));
+    }
+    units.push(literal(b'='));
+    units.extend(value.word.units());
+    WordNode {
+        tokens: SourceTokens::none(),
+        word: ParsedWord::from_units(&units),
     }
 }
 
@@ -259,6 +329,7 @@ pub(crate) fn apply_declarations(
     accepted_all: bool,
 ) -> Result<(), Error> {
     let refused = core::mem::take(&mut shell.evaluation.refused_declarations);
+    let kind = shell.evaluation.declared_kind.take();
     if !accepted_all && refused.is_empty() {
         return Ok(());
     }
@@ -289,6 +360,25 @@ pub(crate) fn apply_declarations(
         } else {
             ReadOnlyGuard::Declaration
         };
+        /* `readonly -A m=([a b]=1)` is associative only because `-A` was
+         * seen, and the letter reaches the name here rather than in the
+         * built-in: `export` and `readonly` were handed the bare name
+         * and cannot tell an operand that carries a compound value from
+         * one that does not. Bash consults the letter only for the
+         * former, which is why `readonly -A m` is `declare -r m` there. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        if let Some(kind) = kind
+            && matches!(declaration.assignment.value, BashArrayValue::Compound(_))
+        {
+            let name = declaration.assignment.name.as_bstr();
+            arrays::ensure_kind(
+                shell,
+                name,
+                kind,
+                crate::variables::VariableAttributes::NONE,
+                guard,
+            )?;
+        }
         if !assign(shell, declaration.assignment, guard)? {
             shell.status = crate::status::ExitStatus::FAILURE;
         }

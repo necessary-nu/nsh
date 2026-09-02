@@ -42,6 +42,67 @@ pub(crate) enum ArraySelector {
     Missing,
 }
 
+/// How the elements of `name=(...)` are read.
+///
+/// Bash 5.1 gave an associative array a second spelling for its compound
+/// value -- `m=(k v k v)` -- and chooses between the two by the *first*
+/// element alone. A leading `[key]=value` makes every element one of
+/// those, and a bare word beside them is refused; a leading bare word
+/// makes every element a key or a value, a written `[a]=1` among them,
+/// which is then the literal key `[a]=1`.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CompoundForm {
+    /// `[index]=value` against an indexed array, where a bare word takes
+    /// the index after the last one assigned.
+    Indexed,
+    /// `[key]=value` against an associative array, where a bare word
+    /// names no element at all.
+    Keyed,
+    /// `( key value ... )` against an associative array.
+    Pairs,
+}
+
+impl CompoundForm {
+    /// The kind of value the form builds.
+    const fn kind(self) -> VariableKind {
+        match self {
+            Self::Indexed => VariableKind::Indexed,
+            Self::Keyed | Self::Pairs => VariableKind::Associative,
+        }
+    }
+}
+
+/// Which of the three spellings a compound assignment to `name` is.
+///
+/// `subscripted` is whether the list opens with a `[...]=` element. A
+/// name that holds no array yet, or holds a scalar, takes the value as
+/// an indexed one, which is what makes `a=(x y)` an array.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn compound_form(shell: &Shell, name: &BStr, subscripted: bool) -> CompoundForm {
+    let declared = super::value::variable_kind(shell, name);
+    match declared.filter(|kind| *kind != VariableKind::Scalar) {
+        Some(VariableKind::Associative) if subscripted => CompoundForm::Keyed,
+        Some(VariableKind::Associative) => CompoundForm::Pairs,
+        _ => CompoundForm::Indexed,
+    }
+}
+
+/// What Bash says about a compound element an associative array cannot
+/// place, so that the two callers that meet one word it the same way.
+///
+/// One reached through the command's own words abandons the list, and
+/// one that arrived inside an operand the built-in had to read as text
+/// is only reported -- but the sentence is Bash's either way.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn missing_subscript_message(name: &BStr, value: &BStr) -> BString {
+    let mut message = BString::from(name);
+    message.extend_from_slice(b": '");
+    message.extend_from_slice(value.as_ref());
+    message.extend_from_slice(b"': must use subscript when assigning associative array");
+    message
+}
+
 /// Whether an existing read-only attribute refuses an assignment.
 ///
 /// A declaration built-in sets `-r` before its own value lands, so
@@ -219,9 +280,10 @@ pub(crate) fn ensure_kind(
     name: &BStr,
     kind: VariableKind,
     attributes: VariableAttributes,
+    guard: ReadOnlyGuard,
 ) -> Result<(), Error> {
     reject_bad_name(shell, name)?;
-    reject_read_only(shell, name, ReadOnlyGuard::Enforce)?;
+    reject_read_only(shell, name, guard)?;
 
     let existing = super::value::variable_value(shell, name).cloned();
     let converted = match existing {
@@ -229,7 +291,7 @@ pub(crate) fn ensure_kind(
         Some(value) => convert(value, kind),
         None => VariableValue::empty(kind),
     };
-    store(shell, name, converted, attributes, ReadOnlyGuard::Enforce)
+    store(shell, name, converted, attributes, guard)
 }
 
 fn convert(value: VariableValue, kind: VariableKind) -> VariableValue {
@@ -262,6 +324,7 @@ pub(crate) fn assign_element(
 ) -> Result<(), Error> {
     reject_bad_name(shell, name)?;
     reject_read_only(shell, name, guard)?;
+    reject_empty_key(shell, name, selector)?;
 
     let kind = match selector {
         ArraySelector::Key(_) => VariableKind::Associative,
@@ -390,6 +453,51 @@ fn existing_element(value: &VariableValue, selector: &ArraySelector) -> Option<B
     }
 }
 
+/// Refuse the empty key, which names no element of an associative array.
+///
+/// An indexed array has no such refusal to make: `a[""]` is the
+/// arithmetic expression `""`, which is zero, and both shells write
+/// element zero for it. `m[""]` is a key, and the empty one is the key
+/// Bash does not have -- it reports the subscript and abandons the
+/// list, which is what a written `m[]` already does here.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+// [spec:nsh:req:compat.bash.error-boundary]
+fn reject_empty_key(shell: &mut Shell, name: &BStr, selector: &ArraySelector) -> Result<(), Error> {
+    if !matches!(selector, ArraySelector::Key(key) if key.is_empty()) {
+        return Ok(());
+    }
+    let mut message = BString::from(name);
+    message.extend_from_slice(b"[\"\"]: bad array subscript");
+    Err(shell.diagnostics().dialect_error(&message))
+}
+
+/// Read a `( key value key value )` list as `[key]=value` elements.
+///
+/// An odd list leaves its last key holding nothing, which is what
+/// `m=(foo)` stores. A key that expanded to nothing names no element,
+/// and this is the one place where that is not fatal: Bash reports the
+/// subscript, drops the pair and keeps reading the list.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn key_value_pairs(shell: &mut Shell, elements: Vec<CompoundElement>) -> Vec<CompoundElement> {
+    let mut pairs = Vec::with_capacity(elements.len().div_ceil(2));
+    let mut elements = elements.into_iter();
+    while let Some(key) = elements.next() {
+        let value = elements.next().map(|element| element.value);
+        if key.value.is_empty() {
+            shell
+                .diagnostics()
+                .shell_warning(b"'': bad array subscript");
+            continue;
+        }
+        pairs.push(CompoundElement {
+            subscript: Some(key.value),
+            value: value.unwrap_or_default(),
+            append: false,
+        });
+    }
+    pairs
+}
+
 /// One element of a compound assignment, after expansion.
 pub(crate) struct CompoundElement {
     pub(crate) subscript: Option<BString>,
@@ -401,19 +509,26 @@ pub(crate) struct CompoundElement {
 ///
 /// Unsubscripted elements continue from the highest index assigned so
 /// far, so `a=(x [5]=y z)` puts `z` at 6 rather than at 1.
+///
+/// `form` is what the caller expanded the elements for: it decides
+/// whether a bare word is the next index, one half of a key/value pair,
+/// or the element an associative array refuses.
 pub(crate) fn assign_compound(
     shell: &mut Shell,
     name: &BStr,
     elements: Vec<CompoundElement>,
+    form: CompoundForm,
     append: bool,
     guard: ReadOnlyGuard,
 ) -> Result<(), Error> {
     reject_bad_name(shell, name)?;
     reject_read_only(shell, name, guard)?;
 
-    let declared = super::value::variable_kind(shell, name);
-    let kind = declared.filter(|kind| *kind != VariableKind::Scalar);
-    let kind = kind.unwrap_or(VariableKind::Indexed);
+    let kind = form.kind();
+    let elements = match form {
+        CompoundForm::Pairs => key_value_pairs(shell, elements),
+        CompoundForm::Indexed | CompoundForm::Keyed => elements,
+    };
 
     let mut current = if append {
         match super::value::variable_value(shell, name).cloned() {
@@ -434,8 +549,54 @@ pub(crate) fn assign_compound(
         0
     };
 
+    /* Bash reads a `+=` element of an *associative* compound assignment
+     * against the value its key held before the assignment began rather
+     * than against the one the elements before it have built:
+     * `m=([k]=z)` then `m=([k]+=1 [k]+=2)` is `z2` there, where both
+     * elements append to `z`. An appending assignment has no separate
+     * before -- its elements build on the array that is still in place,
+     * and `m+=([k]+=1 [k]+=2)` is `z12` in both shells -- and an indexed
+     * array reads the running value either way. Measured against the
+     * pinned 5.3.15; without the snapshot this shell loses the `z`. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    let previous = (kind == VariableKind::Associative && !append)
+        .then(|| super::value::variable_value(shell, name).cloned())
+        .flatten();
+
     for element in elements {
+        /* A bare word names no key, and an associative array reading
+         * `[key]=value` elements has nowhere to put it. Bash keeps the
+         * elements before it and abandons the list there. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        // [spec:nsh:req:compat.bash.error-boundary]
+        if form == CompoundForm::Keyed && element.subscript.is_none() {
+            let message = missing_subscript_message(name, BStr::new(element.value.as_slice()));
+            store(shell, name, current, VariableAttributes::NONE, guard)?;
+            return Err(shell.diagnostics().dialect_error(&message));
+        }
+        /* A written `[]=` names no element whatever the array's kind:
+         * `declare -a a=([""]=x)` is refused by Bash where the same
+         * subscript in a statement -- `a[""]=x` -- is the expression
+         * `""` and writes element zero. The elements before it are kept,
+         * as they are for the refusal above. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        // [spec:nsh:req:compat.bash.error-boundary]
+        if element
+            .subscript
+            .as_ref()
+            .is_some_and(|subscript| subscript.is_empty())
+        {
+            let mut message = BString::from(name);
+            message.extend_from_slice(b"[]: bad array subscript");
+            store(shell, name, current, VariableAttributes::NONE, guard)?;
+            return Err(shell.diagnostics().dialect_error(&message));
+        }
         let selector = match &element.subscript {
+            /* A pair's key was never a written subscript, so nothing in
+             * it is syntax: `m=(* v)` stores the key `*`, where the
+             * subscript `m[*]` names the whole array. */
+            // [spec:nsh:req:compat.bash.arrays-declarations]
+            Some(key) if form == CompoundForm::Pairs => ArraySelector::Key(key.clone()),
             // A subscript is an expression, and Bash evaluates it
             // against the array the preceding elements have already
             // built: in `a=([0]=1 [a[0]]=x)` the second subscript reads
@@ -456,7 +617,8 @@ pub(crate) fn assign_compound(
         let value = BStr::new(element.value.as_slice());
         let combined;
         let value = if element.append {
-            let mut existing = existing_element(&current, &selector).unwrap_or_default();
+            let base = previous.as_ref().unwrap_or(&current);
+            let mut existing = existing_element(base, &selector).unwrap_or_default();
             existing.extend_from_slice(value);
             combined = existing;
             BStr::new(combined.as_slice())
@@ -743,7 +905,15 @@ mod tests {
                 append: false,
             },
         ];
-        assign_compound(shell, name, elements, false, ReadOnlyGuard::Enforce).unwrap();
+        assign_compound(
+            shell,
+            name,
+            elements,
+            CompoundForm::Indexed,
+            false,
+            ReadOnlyGuard::Enforce,
+        )
+        .unwrap();
 
         let value = variable_value(shell, name).expect("the name exists");
         assert_eq!(value.indexed_keys(), Some(vec![0, 5, 6]));
@@ -790,6 +960,7 @@ mod tests {
                 value: BString::from("two"),
                 append: false,
             }],
+            CompoundForm::Indexed,
             true,
             ReadOnlyGuard::Enforce,
         )
@@ -836,6 +1007,7 @@ mod tests {
             name,
             VariableKind::Associative,
             VariableAttributes::NONE,
+            ReadOnlyGuard::Enforce,
         )
         .unwrap();
         let selector = resolve_selector(shell, name, BStr::new("1+1")).unwrap();
@@ -866,7 +1038,14 @@ mod tests {
 
         super::super::set_bytes(shell, name, Some(BStr::new("v")), VariableAttributes::NONE)
             .unwrap();
-        ensure_kind(shell, name, VariableKind::Indexed, VariableAttributes::NONE).unwrap();
+        ensure_kind(
+            shell,
+            name,
+            VariableKind::Indexed,
+            VariableAttributes::NONE,
+            ReadOnlyGuard::Enforce,
+        )
+        .unwrap();
 
         let value = variable_value(shell, name).expect("the name exists");
         assert_eq!(value.kind(), VariableKind::Indexed);
@@ -891,7 +1070,15 @@ mod tests {
         };
 
         super::super::set_bytes(shell, name, None, VariableAttributes::READ_ONLY).unwrap();
-        assign_compound(shell, name, element(), false, ReadOnlyGuard::Declaration).unwrap();
+        assign_compound(
+            shell,
+            name,
+            element(),
+            CompoundForm::Indexed,
+            false,
+            ReadOnlyGuard::Declaration,
+        )
+        .unwrap();
 
         assert_eq!(
             variable_value(shell, name).and_then(|value| value.indexed(0)),
@@ -902,7 +1089,17 @@ mod tests {
                 .expect("the name exists")
                 .read_only
         );
-        assert!(assign_compound(shell, name, element(), false, ReadOnlyGuard::Enforce).is_err());
+        assert!(
+            assign_compound(
+                shell,
+                name,
+                element(),
+                CompoundForm::Indexed,
+                false,
+                ReadOnlyGuard::Enforce,
+            )
+            .is_err()
+        );
     }
 
     /// `unset a[i]` removes one element and leaves the rest in place.

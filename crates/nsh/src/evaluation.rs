@@ -198,6 +198,17 @@ pub struct EvaluationState {
     /// refused has to survive the return.
     // [spec:nsh:req:compat.bash.arrays-declarations]
     pub(crate) refused_declarations: Vec<BString>,
+    /// The array kind `export -a` or `readonly -A` asked for, waiting
+    /// for the compound operand it applies to.
+    ///
+    /// Those two built-ins take `-a` and `-A` only to say how a compound
+    /// value is to be read, and Bash consults the letter *only* then:
+    /// `readonly -A m` with no value leaves `m` a plain read-only name.
+    /// `declare` has no need of this because it applies its attributes
+    /// to the operand it was written with; these two are handed the bare
+    /// name and the value arrives after they have returned.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    pub(crate) declared_kind: Option<crate::variables::value::VariableKind>,
     /// How many string re-entries into the evaluator are active.
     ///
     /// `eval`, a trap action and `fc -e` all parse a string and run it on
@@ -244,6 +255,7 @@ impl EvaluationState {
             trap_default_exit_status: None,
             diagnostic_line: 0,
             refused_declarations: Vec::new(),
+            declared_kind: None,
             nested_evaluations: 0,
             live_evaluation_bytes: 0,
             command_name: None,

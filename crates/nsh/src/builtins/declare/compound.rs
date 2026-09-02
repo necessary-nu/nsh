@@ -11,7 +11,7 @@ use bstr::{BStr, BString};
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::variables::arrays::{self, CompoundElement, ReadOnlyGuard};
+use crate::variables::arrays::{self, CompoundElement, CompoundForm, ReadOnlyGuard};
 
 /// The text of a compound value, without its parentheses.
 ///
@@ -26,9 +26,14 @@ pub(super) fn parenthesised(value: &BStr) -> Option<&BStr> {
 /// Assign the elements a compound operand spells out.
 // [spec:nsh:req:compat.bash.arrays-declarations]
 pub(super) fn assign(shell: &mut Shell, name: &BStr, inner: &BStr) -> Result<(), Error> {
+    let words = split(inner);
+    let opens_subscripted = words
+        .first()
+        .is_some_and(|word| split_element(BStr::new(word.as_slice())).0.is_some());
+    let form = arrays::compound_form(shell, name, opens_subscripted);
     let mut elements = Vec::new();
-    for word in split(inner) {
-        let (subscript, value) = split_element(BStr::new(word.as_slice()));
+    for word in words {
+        let (subscript, append, value) = split_element(BStr::new(word.as_slice()));
         let subscript = match subscript {
             Some(text) => Some(arrays::text_word(shell, text)?),
             None => None,
@@ -36,10 +41,33 @@ pub(super) fn assign(shell: &mut Shell, name: &BStr, inner: &BStr) -> Result<(),
         elements.push(CompoundElement {
             subscript,
             value: arrays::text_word(shell, value)?,
-            append: false,
+            append,
         });
     }
-    arrays::assign_compound(shell, name, elements, false, ReadOnlyGuard::Declaration)
+    /* An operand read as text is not the command's own words, and Bash
+     * treats a refused element in it more gently: `declare -A
+     * "m=([k]=v x)"` reports `x`, keeps `[k]=v` and answers 0, where
+     * the same list written out abandons the command list. Truncating
+     * here is what leaves the refusal to the report alone. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    if form == CompoundForm::Keyed
+        && let Some(at) = elements
+            .iter()
+            .position(|element| element.subscript.is_none())
+    {
+        let message =
+            arrays::missing_subscript_message(name, BStr::new(elements[at].value.as_slice()));
+        shell.diagnostics().shell_warning(&message);
+        elements.truncate(at);
+    }
+    arrays::assign_compound(
+        shell,
+        name,
+        elements,
+        form,
+        false,
+        ReadOnlyGuard::Declaration,
+    )
 }
 
 /// Split a compound value into its element words.
@@ -91,11 +119,16 @@ fn split(inner: &BStr) -> Vec<BString> {
     words
 }
 
-/// Split one element into its `[subscript]` and its value.
-fn split_element(word: &BStr) -> (Option<&BStr>, &BStr) {
+/// Split one element into its `[subscript]`, its operator and its value.
+///
+/// The middle answer is whether the operator was `+=`, which the text
+/// form has to read for itself: `declare -A "m=([k]+=1 [k]+=2)"` is the
+/// same assignment as the one the parser cuts up, and dropping the `+`
+/// left this shell with an element it could not place at all.
+fn split_element(word: &BStr) -> (Option<&BStr>, bool, &BStr) {
     let bytes: &[u8] = word.as_ref();
     if bytes.first() != Some(&b'[') {
-        return (None, word);
+        return (None, false, word);
     }
     let mut depth = 0usize;
     for (at, byte) in bytes.iter().enumerate() {
@@ -104,14 +137,16 @@ fn split_element(word: &BStr) -> (Option<&BStr>, &BStr) {
             b']' => {
                 depth -= 1;
                 if depth == 0 {
-                    return match bytes.get(at + 1) {
-                        Some(b'=') => (Some(BStr::new(&bytes[1..at])), BStr::new(&bytes[at + 2..])),
-                        _ => (None, word),
+                    let subscript = Some(BStr::new(&bytes[1..at]));
+                    return match (bytes.get(at + 1), bytes.get(at + 2)) {
+                        (Some(b'='), _) => (subscript, false, BStr::new(&bytes[at + 2..])),
+                        (Some(b'+'), Some(b'=')) => (subscript, true, BStr::new(&bytes[at + 3..])),
+                        _ => (None, false, word),
                     };
                 }
             }
             _ => {}
         }
     }
-    (None, word)
+    (None, false, word)
 }

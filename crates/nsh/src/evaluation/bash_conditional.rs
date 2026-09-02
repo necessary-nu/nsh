@@ -206,10 +206,13 @@ fn regex_match(shell: &mut Shell, subject: &BStr, word: &WordNode) -> Result<Tru
             })
             .collect()
     });
+    /* The captures are a numbered list whatever `BASH_REMATCH` was
+     * declared as, so the form is the list's rather than the name's. */
     arrays::assign_compound(
         shell,
         BStr::new(b"BASH_REMATCH"),
         elements,
+        arrays::CompoundForm::Indexed,
         false,
         arrays::ReadOnlyGuard::Enforce,
     )?;
