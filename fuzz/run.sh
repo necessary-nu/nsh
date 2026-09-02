@@ -21,7 +21,10 @@ usage: fuzz/run.sh [--containment auto|outer|new] [--build] [--dry-run] TARGET [
   --build build the target and stop, so a replay can run the binary itself
 
 A campaign builds before its clock starts, under a wall clock of its own:
-NSH_FUZZ_BUILD_TIMEOUT seconds, 1800 by default.
+NSH_FUZZ_BUILD_TIMEOUT seconds, 1800 by default. It then replays the whole
+corpus before it mutates anything, under a second clock of its own:
+NSH_FUZZ_REPLAY_ALLOWANCE seconds, 900 by default. SECONDS is the mutation
+that follows, and buys nothing else.
 EOF
     exit 2
 }
@@ -111,6 +114,13 @@ case $build_timeout in
         exit 2
         ;;
 esac
+replay_allowance=${NSH_FUZZ_REPLAY_ALLOWANCE:-900}
+case $replay_allowance in
+    *[!0-9]*|'')
+        echo "fuzz/run.sh: NSH_FUZZ_REPLAY_ALLOWANCE must be a non-negative integer" >&2
+        exit 2
+        ;;
+esac
 
 case $containment in
     auto)
@@ -146,18 +156,40 @@ contain() {
     fi
     contained=(
         "$root/scripts/sandboxed" --timeout "$clock" --writable "$root/fuzz" --
-        # cargo-fuzz's -jobs supervisor writes worker logs in its working
-        # directory. The repository root is read-only inside this sandbox,
-        # while fuzz/ is the wrapper's explicit writable bind.
+        # libFuzzer's -jobs supervisor writes one worker log per job in its
+        # working directory. The repository root is read-only inside this
+        # sandbox, while fuzz/ is the wrapper's explicit writable bind.
         /usr/bin/env --chdir="$root/fuzz" "$@"
     )
 }
 
 corpus="$root/fuzz/corpus/$target"
+artifacts="$root/fuzz/artifacts/$target"
+# `cargo fuzz build` puts the target here, and `fuzz/sweep.sh` already
+# replays artifacts by executing it. A campaign runs it directly too, so
+# that the clock it is on covers fuzzing and nothing else: `cargo fuzz run`
+# compiles again before it hands over, and two campaigns started at once
+# spend one of the two clocks waiting on the other's Cargo build lock.
+triple=$(rustc -vV | sed -n 's/^host: //p')
+binary="$root/fuzz/target/$triple/release/$target"
+
 # The sandbox gets a wall clock of its own so an unattended run cannot
-# outlive its budget; `0` there means "no limit", which is what an
-# open-ended session wants.
-if [ "$seconds" -gt 0 ]; then wall=$((seconds + 120)); else wall=0; fi
+# outlive its budget. It has to cover the corpus replay as well as the
+# budget, because the replay comes first and is not free.
+#
+# An open-ended session is on no clock at all, which is what "run until
+# interrupted" means: no wall clock, and no allowance on the replay either,
+# because the allowance exists to keep a *budget* honest and there is no
+# budget here.
+if [ "$seconds" -gt 0 ]; then
+    wall=$((replay_allowance + seconds + 120))
+    allowance=$replay_allowance
+    backstop=$((replay_allowance + seconds))
+else
+    wall=0
+    allowance=0
+    backstop=0
+fi
 
 if $build_only; then
     # `fuzz/sweep.sh` replays stored artifacts by executing the target binary
@@ -174,12 +206,24 @@ else
     # part-way through the campaign at exit 124 -- which is exactly what the
     # fuzzer stopping at its own timeout looks like, so a run that barely
     # ran reported as a short campaign that found nothing. The build goes
-    # first, under a clock of its own, and the budget then buys only fuzzing.
+    # first, under a clock of its own, and the campaign below then runs the
+    # built binary rather than `cargo fuzz run`, so no part of a second
+    # compile -- or of waiting on another campaign's Cargo build lock, which
+    # cost a `differential 20` all 140 seconds of its wall clock on
+    # 2026-09-02 -- can land inside the clock the budget is on.
     contain "$build_timeout" cargo +nightly fuzz build "$target"
     build=("${contained[@]}")
-    contain "$wall" \
-        cargo +nightly fuzz run "$target" "$corpus" -- \
-        -max_total_time="$seconds" \
+    # libFuzzer runs the whole seed corpus before it first consults
+    # `-max_total_time`, and that clock is measured from process start-up,
+    # so on a corpus larger than the budget the budget buys no mutation at
+    # all. `fuzz/budget.sh` starts the budget where the mutation starts,
+    # which it reads off the fuzzer's own `INITED` line. `-max_total_time`
+    # stays as the fail-safe under it, for a supervisor that has died.
+    contain "$wall" "$root/fuzz/budget.sh" "$allowance" "$seconds" -- \
+        "$binary" "$corpus" \
+        -artifact_prefix="$artifacts/" \
+        -max_total_time="$backstop" \
+        -print_final_stats=1 \
         -rss_limit_mb=4096 \
         -max_len=65536 \
         "$@"
@@ -218,7 +262,15 @@ if ((build_status != 0)); then
     exit "$build_status"
 fi
 
-mkdir -p "$corpus" "$root/fuzz/artifacts/$target"
+mkdir -p "$corpus" "$artifacts"
+
+# The build reported success, so the binary the campaign is about to run
+# exists. Saying so here is what stops a wrong triple reaching libFuzzer's
+# argument parser, where the missing path would be read as an input file.
+[[ -x $binary ]] || {
+    printf 'fuzz/run.sh: the build left no target binary at %s\n' "$binary" >&2
+    exit 1
+}
 
 # Seed from the shell text the repository already has. Real scripts are
 # far better starting points than random bytes: they reach constructs a
@@ -241,7 +293,11 @@ status=0
 campaign_elapsed=$(($(date +%s) - campaign_started))
 
 if [ "$seconds" -gt 0 ]; then budget="a ${seconds}s budget"; else budget="an open-ended budget"; fi
-printf 'fuzz/run.sh: build %ss before the clock; campaign %ss for %s\n' \
+# The replay and the mutation are both inside this number, and only the
+# second of the two is what the budget bought. `fuzz/budget.sh` has already
+# printed which was which, off the clock it started at the fuzzer's own
+# `INITED` line.
+printf 'fuzz/run.sh: build %ss before the clock; replay and campaign %ss for %s\n' \
     "$build_elapsed" "$campaign_elapsed" "$budget" >&2
 
 # A run stopped by the boundary's wall clock exits 124, and so does a

@@ -38,33 +38,68 @@ workspace sandbox already supplies that outer boundary in Codex sessions.
 
 ## Clocks
 
-A campaign builds before its clock starts. `cargo fuzz run` compiles first
-and only then hands the binary its `-max_total_time`, so a build inside the
-campaign's wall clock is paid for out of the fuzzing budget: a cold-cache
-`differential 60` spent 54 of its 180 seconds compiling and was killed
-part-way through the campaign at exit 124 -- which is exactly what the
-fuzzer stopping at its own timeout looks like, so a run that had barely
-started reported as a short campaign that found nothing. The build now goes
-first under a clock of its own (`NSH_FUZZ_BUILD_TIMEOUT`, 1800 seconds by
-default), and the budget buys only fuzzing.
+`SECONDS` is mutation and nothing else. A campaign builds, then replays its
+corpus, then spends its budget, and each of the three is on a clock of its
+own and says what it cost -- because the three were once one number, and one
+number cannot tell a campaign that measured nothing from a campaign that
+measured and found nothing.
 
-The runner then says what each clock cost:
+**The build.** `cargo fuzz run` compiles first and only then hands the
+binary its `-max_total_time`, so a build inside the campaign's wall clock is
+paid for out of the fuzzing budget: a cold-cache `differential 60` spent 54
+of its 180 seconds compiling and was killed part-way through the campaign at
+exit 124 -- which is exactly what the fuzzer stopping at its own timeout
+looks like, so a run that had barely started reported as a short campaign
+that found nothing. The build goes first under a clock of its own
+(`NSH_FUZZ_BUILD_TIMEOUT`, 1800 seconds by default). The campaign then runs
+the built binary directly, the way `fuzz/sweep.sh` already replays
+artifacts, rather than through `cargo fuzz run` -- which would compile a
+second time inside the budget's clock, or, with another campaign already
+running, spend that clock waiting on its Cargo build lock. A `differential
+20` measured 2026-09-02 spent all 140 seconds of its wall clock doing
+exactly that, and never started.
 
-    fuzz/run.sh: build 56s before the clock; campaign 145s for a 60s budget
+**The replay.** libFuzzer runs every input in the seed corpus before it
+first consults `-max_total_time`, and that clock is measured from process
+start-up, so the replay is charged to the budget -- and the budget can be
+gone before a single input has been mutated. Measured 2026-09-02 on a warm
+build, `fuzz/run.sh parse 10` reached the fuzzing loop at run #21259 and
+stopped at run #21259: the corpus exactly, and not one mutation past it. Ten
+seconds bought nothing at all, and added nothing to the corpus.
 
-and when the containment wall clock rather than the fuzzer's own budget is
-what stopped the run, it says that too, so a truncated campaign cannot pass
-for one that measured and found nothing.
+The replay is not waste. It is every stored input run against the build in
+front of it, which is the regression check the corpus exists to be, and a
+campaign that skipped it would be fuzzing against evidence it had not looked
+at. So it is kept in full, and given a clock of its own
+(`NSH_FUZZ_REPLAY_ALLOWANCE`, 900 seconds by default), rather than minimised
+away. `fuzz/budget.sh` reads the `#N INITED` line libFuzzer prints at the
+moment the replay ends and starts the budget there; at the end of it the
+campaign is sent `SIGTERM`, which libFuzzer answers by printing its final
+statistics and exiting zero. The same `parse 10`, after:
 
-A campaign is longer than its budget, and can still be stopped by the wall
-clock for a reason that has nothing to do with the build. libFuzzer runs
-the whole corpus before it first looks at `-max_total_time`, and that cost
-scales with the corpus rather than with the budget: `differential` holds
-2938 inputs and spends over two minutes reaching the end of them, and
-`parse` has grown to 21259 and does not reach the end inside `SECONDS +
-120` at all. A short budget against a large corpus therefore buys no
-mutation whatsoever -- which is now something the runner says, rather than
-an exit 124 that reads as a campaign that found nothing.
+    fuzz/budget.sh: the corpus replay ended after 219s; the 10s budget starts here
+    ...
+    ==4== libFuzzer: run interrupted; exiting
+    stat::number_of_executed_units: 23325
+    stat::new_units_added:          8
+    fuzz/budget.sh: replay 219s, then 11s of mutation for a 10s budget
+    fuzz/run.sh: build 91s before the clock; replay and campaign 230s for a 10s budget
+
+2067 mutations where there had been none, and eight of them kept. The start
+of the budget is read off the fuzzer rather than estimated from the corpus,
+so it stays right however large the corpus grows.
+
+What this costs is wall time: a campaign is its budget plus a replay that
+grows with the corpus, and `NSH_FUZZ_REPLAY_ALLOWANCE` has to be raised as
+that happens. It fails loudly and names itself when it is too low, which is
+the trade the obvious alternative does not offer: `cargo fuzz cmin` would
+keep short campaigns short by *discarding* inputs, and this corpus was
+seeded from the Smoosh and Oils suites precisely because real scripts reach
+constructs a generator takes a very long time to stumble into.
+
+When the containment wall clock rather than the fuzzer's own budget is what
+stopped a run, the runner says so, so a truncated campaign cannot pass for
+one that measured and found nothing.
 
 ## What a campaign has found
 
