@@ -7737,6 +7737,51 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id split-the-files-the-register-names
+                                title "Split the five files the density register names"
+                                kind @refactor
+                                children (
+                                    {
+                                        id split-the-printf-conversions
+                                        title "Give the float renderings a file beside the digits"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-the-printf-operand-scanner
+                                        title "Separate printf's operand scanner from its driver"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-the-editor-bindings
+                                        title "Separate what the editor binds from the editor itself"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id move-the-special-variable-readers
+                                        title "Put the named-variable readers with the variables they read"
+                                        kind @refactor
+                                    }
+
+                                    {
+                                        id split-the-arithmetic-lexer
+                                        title "Split arithmetic at the lexer, where it already divides"
+                                        kind @refactor
+                                    }
+                                )
+                                log (
+                                    {
+                                        at 2026-09-02T01:03:39.825751508Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "THE SECOND TRANCHE, AND THE REGISTER IS THE PLAN. `split-the-files-at-the-density-cap` cleared the files sitting *on* the cap of fifty. `register-a-file-nearing-the-density-cap` then wrote down the five at or above the mark of forty-five, each with the seam to split along -- and those entries are exactly this node's children. `crates/nsh-lint/FUNCTION_DENSITY.toml` carries them in full; the entries are the brief, not a summary of one.\n\n    crates/nsh/src/builtins/printf/conv.rs   49 -> ~33   float renderings to conv/float.rs\n    crates/nsh/src/editor/mod.rs             47 -> ~40   key bindings to editor/bindings.rs\n    crates/nsh/src/builtins/printf.rs        46 -> ~23   operand scanner to printf/scan.rs\n    crates/nsh/src/variables.rs              46 -> ~33   named readers to variables/special.rs\n    crates/nsh/src/arithmetic.rs             45 -> ~33   the lexer to arithmetic/lexer.rs\n\nAn entry is deleted when its file falls below forty-five, because the register is symmetric and will fail while a stale one stands.\n\nTHE PROCEDURE IS THE ONE THE FIRST TRANCHE SETTLED, and it is on the parent node in full. In short: split *downward* into child modules, never sideways, because a private item is visible in its defining module and every descendant -- so only the moved entry points need `pub(super)` and a sideways split would force every dependency to `pub(crate)`. Cut byte ranges with a script that asserts the first and last line of each range; never retype code. `scripts/moved-only` must report the function set unchanged, which is what makes a seven-hundred-line diff reviewable as the move it claims to be.\n\n`crates/nsh/src/variables/special.rs` ALREADY EXISTS, so that one appends to a file rather than creating one -- the readers are being put with the subject the file already states.\n\nVERIFIED AS A BATCH, DELIBERATELY. The five are disjoint in the files they touch and each is a pure move, so the workspace suite and the survey set are run once over the union rather than five times: `scripts/moved-only` reporting the set unchanged across all of them is the evidence that no single one changed anything, and five separate survey runs would cost two hours of machine time to establish what one establishes. Each commit says so rather than implying it measured alone.\n\nDONE WHEN. All five files are below the mark, their register entries are deleted, `nsh-lint` is clean with the register empty or holding only what is genuinely left, and the survey set is unmoved -- `run-oils` compared as a *list* of failing case ids, at the widened `[a-z0-9_-]` extraction that `widen-the-survey-failure-list-extraction` exists because I got wrong."
+                                    }
+                                )
+                            }
                         )
                     }
                 )
