@@ -27,7 +27,7 @@ use spawn::spawn_program_here;
 
 mod broker;
 mod children;
-pub use children::{fork_process, run_in_child, wait_for_any_child};
+pub use children::{fork_process, run_in_child, wait_for_any_child, wait_for_child};
 mod descriptor;
 pub use descriptor::{
     AsDescriptor, BorrowedDescriptor, Descriptor, duplicate_cloexec, duplicate_fd, duplicate_file,

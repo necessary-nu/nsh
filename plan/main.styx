@@ -7650,12 +7650,20 @@ children (
                                 title "Close the divergence the fuzzer found in pattern replacement"
                                 kind @fix
                                 deps (split-parameter-expansion-out)
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-01T18:52:16.834509892Z
                                         author "brendan@necessary.nu"
                                         kind @blocker
                                         text "`${X/$P/$R}` PRODUCES DIFFERENT BYTES FROM THE PINNED BASH. Found by the `parameter` fuzz target on 2026-09-01, artifact `fuzz/artifacts/parameter/crash-66f41d7cd54a8445df30ee7f6d936950a4a7646c`, in the first campaign run against the current tree.\n\nThe script is one line -- `printf '[%s]\\n' \"${X/$P/$R}\"` -- and the interest is entirely in the three variables the target sets, which is why it needs reducing rather than reading. Both shells exit 0. The outputs share a prefix and then diverge:\n\n    nsh:  [**************\\nq#uras >/dev/ouhcnull 2>&1\\necho ${x-unse \"fo\\312*[\"/]\n    bash: [**************\\nq#uras >/dev/ouhcnull 2>nt/*\\nmcho 'a'/*\\014# success8...\n\nSo the match was found in the same place and the *replacement* differs -- this shell appears to have substituted a shorter span, or a different one, than Bash chose. A pattern with `*` and `[` in it and a replacement containing `/` and `&` are all in the input, and `&` in a replacement is Bash's back-reference to the whole match, which is the first thing to check.\n\nHOW TO REDUCE IT. Replay it with the target, which now prints the script and both outputs rather than fingerprints:\n\n    fuzz/run.sh --build parameter\n    fuzz/target/x86_64-unknown-linux-gnu/release/parameter fuzz/artifacts/parameter/crash-66f4...\n\nthen shrink by hand against `target/bash-reference/bash`. `${v/pat/rep}` is shared with `${v//pat/rep}`, `${v/#pat}` and `${v/%pat}`, so the sweep wants all four spellings and both an anchored and an unanchored pattern.\n\nWHY NO SURVEY SAW IT. The Oils corpus exercises `${v/}` with literal patterns and short values. This is a long value with a pattern made of metacharacters, which is the region a generator reaches and a corpus does not -- the same reason the unquoted `$@` defect closed on `run-the-fuzz-oracle-against-this-tree` had survived every survey.\n\nDONE WHEN. The artifact is reduced to a line of script, the rule Bash follows is written down with the measurement behind it, a differential test pins it against the pinned build, and `fuzz/sweep.sh --prune parameter` reports the artifact dead."
+                                    }
+
+                                    {
+                                        at 2026-09-02T03:54:38.807236466Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
                                     }
                                 )
                             }

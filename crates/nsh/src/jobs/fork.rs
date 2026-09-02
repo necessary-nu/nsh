@@ -50,6 +50,13 @@ fn initialize_child_process(
 ) {
     nsh_platform::reset_coverage_counters();
 
+    /* The set arrived here by copy, and every pid in it names a sibling
+     * of this process rather than a child of it. A child that kept them
+     * would be claiming the right to reap processes it did not fork,
+     * which is the whole of what this shell must not do. */
+    // [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
+    shell.forked_children.clear();
+
     let parent_shell_level = shell.shell_level;
     shell.shell_level += 1;
 
@@ -218,6 +225,10 @@ pub fn fork_shell(
             nsh_platform::ForkResult::Child
         }
         Ok(nsh_platform::ForkResult::Parent(process_id)) => {
+            /* Before `record_forked_child`, which is allowed to fail and
+             * is allowed to be given no job: this is the record that must
+             * exist for every fork, because it is what the wait reads. */
+            shell.forked_children.record(process_id);
             record_forked_child(shell, job_id, node, mode, process_id)?;
             nsh_platform::ForkResult::Parent(process_id)
         }
@@ -266,6 +277,7 @@ pub fn fork_and_execute(
             return Err(shell.diagnostics().shell_error(b"Cannot fork"));
         }
     };
+    shell.forked_children.record(process_id);
     record_forked_child(
         shell,
         Some(job_id),

@@ -1414,6 +1414,7 @@ assertions (
     {id split-the-arithmetic-lexer, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:59.38751016Z}
     {id check-that-a-cited-decision-is-live, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:59:02.31920432Z}
     {id stop-the-fuzz-budget-paying-for-the-build, kind @complete, author "brendan@necessary.nu", at 2026-09-02T02:09:16.656636099Z}
+    {id close-the-pattern-replacement-divergence, kind @complete, author "brendan@necessary.nu", at 2026-09-02T03:54:38.807236466Z}
 )
 
 impl_evidence (

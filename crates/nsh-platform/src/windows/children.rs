@@ -315,7 +315,9 @@ fn accumulate_child_times(process: HANDLE) {
     }
 }
 
-fn reap_ready_child() -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
+fn reap_ready_child(
+    target: Option<ProcessId>,
+) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
     let owner = std::thread::current().id();
     let _clone_guard = PROCESS_CLONE_LOCK
         .lock()
@@ -325,7 +327,7 @@ fn reap_ready_child() -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         children.iter().find_map(|(&pid, child)| {
-            if child.owner != owner {
+            if child.owner != owner || target.is_some_and(|target| target != pid) {
                 return None;
             }
             // SAFETY: each handle is owned by the locked record for this call.
@@ -352,13 +354,52 @@ fn reap_ready_child() -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
     Ok(Some((pid, decode_child_status(code))))
 }
 
+/// Wait for one named child, and for no other.
+///
+/// The caller says which process it is entitled to reap, so a process
+/// this caller did not create keeps its status. `NotFound` means this
+/// thread has no such child registered.
+// [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
+pub fn wait_for_child(
+    process: ProcessId,
+    nonblocking: bool,
+    _report_stopped: bool,
+) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
+    let owner = std::thread::current().id();
+    loop {
+        if let Some(child) = reap_ready_child(Some(process))? {
+            return Ok(Some(child));
+        }
+        let is_ours = {
+            let _clone_guard = PROCESS_CLONE_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            CHILDREN
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&process)
+                .is_some_and(|child| child.owner == owner)
+        };
+        if !is_ours {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "there is no such child process",
+            ));
+        }
+        if nonblocking {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 pub fn wait_for_any_child(
     nonblocking: bool,
     _report_stopped: bool,
 ) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
     let owner = std::thread::current().id();
     loop {
-        if let Some(child) = reap_ready_child()? {
+        if let Some(child) = reap_ready_child(None)? {
             return Ok(Some(child));
         }
         let has_children = {
@@ -391,17 +432,15 @@ pub fn run_in_child(body: impl FnOnce()) -> std::io::Result<i32> {
             exit_immediately(0);
         }
         ForkResult::Parent(pid) => loop {
-            let Some((reaped, status)) = wait_for_any_child(false, false)? else {
+            let Some((_, status)) = wait_for_child(pid, false, false)? else {
                 continue;
             };
-            if reaped == pid {
-                return Ok(match status {
-                    ChildStatus::Exited(code) => i32::from(code),
-                    ChildStatus::Signaled { signal, .. } => 128 + signal.number(),
-                    ChildStatus::Stopped(signal) => 128 + signal.number(),
-                    ChildStatus::Continued => 0,
-                });
-            }
+            return Ok(match status {
+                ChildStatus::Exited(code) => i32::from(code),
+                ChildStatus::Signaled { signal, .. } => 128 + signal.number(),
+                ChildStatus::Stopped(signal) => 128 + signal.number(),
+                ChildStatus::Continued => 0,
+            });
         },
     }
 }

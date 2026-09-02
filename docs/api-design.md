@@ -726,22 +726,25 @@ There are further process-wide facts the API has to be honest about:
   the sense that the syscall is. Two shells in different directories is
   not achievable without `openat`-relative resolution everywhere, which is
   out of scope. Say so in the crate docs.
-* **The children of the process, which are one pool.** `waitproc` calls
-  `wait3(status, flags, NULL)` (`jobs.rs:1412`) — that is `waitpid(-1)`,
-  and it reaps *any* child of the process. Two `Shell`s reap each other's
-  children; a `Shell` and an embedder holding a `std::process::Child` do
-  the same, and the embedder is the one that loses, because its own `wait`
-  then answers `ECHILD` for a status that is sitting in a job table it
-  cannot see. **This is the first entry on the list that is the kernel's
-  rather than the C library's**, and it is the one an embedder is most
-  likely to trip over, because nothing about it looks like shared state.
-  It cannot be fixed by tracking pids: reaping is destructive, so the
-  ownership test has to happen before the reap, and the only primitive
-  that peeks without reaping (`waitid(P_ALL, …, WNOWAIT)`) returns the
-  same foreign child forever and turns a blocking wait into a spin. The
-  shell would have to own `SIGCHLD` for the whole process and dispatch by
-  pid, which is exactly the disposition `[dec:nsh:host-owns-signals]` says
-  it may not claim. `[dec:nsh:host-owns-the-process]` records it.
+* ~~**The children of the process, which are one pool.**~~ **Struck
+  2026-09-02; the pool divides after all.** It read: `waitproc` calls
+  `wait3(status, flags, NULL)` — that is `waitpid(-1)`, and it reaps *any*
+  child of the process, so two `Shell`s reap each other's children and an
+  embedder holding a `std::process::Child` loses its status to a job table
+  it cannot see. That was true of the code. What followed it was not: *it
+  cannot be fixed by tracking pids, because reaping is destructive, the
+  ownership test has to happen before the reap, `waitid(P_ALL, …,
+  WNOWAIT)` is the only primitive that peeks and it returns the same
+  foreign child forever, so the shell would have to own `SIGCHLD` for the
+  whole process and dispatch by pid.* Every step of that reasons about
+  what to do with `waitpid(-1)`'s answer, and never asks whether the
+  question had to be `waitpid(-1)`. It did not. Each `Shell` keeps the
+  pids it forked — beside the job table, so the jobless here-document and
+  process-substitution children are in it too — and asks `waitpid(pid)`
+  after those and no others. Nothing peeks, nothing dispatches, and
+  `SIGCHLD` stays [dec:nsh:host-owns-signals]'s. See the correction on
+  `[dec:nsh:host-owns-the-process]`, which recorded the entry and now
+  records its withdrawal.
 * **The process group and the controlling terminal.** `setjobctl(1)`
   performs `setpgid(0, rootpid)` (`jobs.rs:482`), `tcsetpgrp` (`:483`) and,
   on the way there, possibly `killpg(0, SIGTTIN)` (`:452`) — all three on
@@ -887,7 +890,9 @@ one of them is a category error the earlier list encouraged: the
 the shell's) and the **process group and controlling terminal**. Neither
 is a libc static, so neither would ever have been found by looking for
 one. §6 now states the test as "anything one `Shell` can change that
-another observes, whoever stores it".
+another observes, whoever stores it". *The first of the two was struck on
+2026-09-02: waiting names the pid, so the pool is divided rather than
+shared. The category the entry belongs to was right; the entry was not.*
 
 **`[dec:nsh:shell-as-library]`** — its first accepted consequence lists
 what moves into the frontend as "exit, signals, argv, the standard
@@ -1006,7 +1011,7 @@ So the test is **whose process is the object of the call**:
 | `tcsetpgrp` | **grant** — see below | **grant** — `jobs.rs:483` |
 | `killpg` | free — `builtins/fg.rs:87` (SIGCONT to a job) | **grant** — `jobs.rs:452` (SIGTTIN to our own group) |
 | `sigaction` / `signal` | free — 12 sites, all in a forked child | **host's** — 9 sites, `[dec:nsh:host-owns-signals]` |
-| `wait3` | free | n/a — but see §6, it reaps the host's children too |
+| `wait3` | free | n/a — the C reaped the host's children too; see §6 for why the Rust does not |
 | `kill` | free | free — the *script* named the target, not the library |
 
 `tcsetpgrp` is the one row where a child's operation still needs the

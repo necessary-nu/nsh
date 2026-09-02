@@ -15,6 +15,15 @@ while constructing and driving one or more `Shell` values.
 > shell variable table at the process-execution boundary; it MUST NOT be
 > published through the host's `environ` first.
 
+> [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
+> A `Shell` MUST wait only for processes it forked itself. It MUST NOT reap a
+> child of the host process that it did not create, and a child it did create
+> MUST cease to be its concern once its status has been collected. A forked
+> shell MUST NOT inherit its parent's claim on the parent's other children.
+> Waiting MUST name the process waited for; asking the operating system for
+> whichever child is ready does not satisfy this rule, because collecting a
+> status destroys it and the host cannot then observe its own child.
+
 > [spec:nsh:req:embedding-safety.process-locale-is-unchanged]
 > Every safe `nsh` library operation MUST return with the calling thread's
 > previously selected C-library locale restored, on success, on ordinary error,

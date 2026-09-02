@@ -173,7 +173,7 @@ fn wait_once(
     let mut reported_status = None;
 
     let waited = crate::error::with_interrupts_deferred(shell, |shell| {
-        let waited = wait_for_process(shell, mode)?;
+        let waited = wait_for_process(shell, mode, job_id)?;
         if let WaitOutcome::Reaped { process, status } = waited {
             reported_status = Some(status);
             for id in shell.jobs.order_snapshot() {
@@ -295,50 +295,159 @@ pub(crate) fn reap_children(
  * children have been reaped.  Otherwise zombies may linger.
  */
 
+/// What one pass over this shell's own children found.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ChildScan {
+    /// One of this shell's children had a status, and it has been taken.
+    Reaped {
+        process: ProcessId,
+        status: ChildStatus,
+    },
+    /// This shell has children, and none of them has a status waiting.
+    NoneReady,
+    /// This shell has no children left to wait for.
+    NoChildren,
+    /// A signal arrived before the wait could answer.
+    SignalArrived,
+}
+
+/// Give up a reaped child, unless it is still alive to be waited for.
+///
+/// A stop is reported by a process that is still there and will report
+/// again — when it is continued, and when it finally exits — so only a
+/// terminal status ends this shell's claim on the pid.
+fn release_reaped_child(
+    shell: &mut crate::context::Shell,
+    process: ProcessId,
+    status: ChildStatus,
+) {
+    if matches!(
+        status,
+        ChildStatus::Exited(_) | ChildStatus::Signaled { .. }
+    ) {
+        shell.forked_children.release(process);
+    }
+}
+
+/// Ask after each of this shell's own children in turn, and take the
+/// status of the first that has one.
+///
+/// The C asks `waitpid(-1)`, which answers with whichever child the
+/// operating system likes — including one an embedding host forked and is
+/// still holding. Naming the process is what makes the answer this
+/// shell's to take.
+// [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
+fn scan_forked_children(shell: &mut crate::context::Shell, report_stopped: bool) -> ChildScan {
+    for process in shell.forked_children.snapshot() {
+        match nsh_platform::wait_for_child(process, true, report_stopped) {
+            Ok(Some((process, status))) => {
+                release_reaped_child(shell, process, status);
+                return ChildScan::Reaped { process, status };
+            }
+            Ok(None) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                return ChildScan::SignalArrived;
+            }
+            /* The only way a child of this shell stops being waitable is
+             * that something else has reaped it, and a status that has
+             * been taken cannot be taken again. */
+            Err(_) => shell.forked_children.release(process),
+        }
+    }
+    if shell.forked_children.is_empty() {
+        ChildScan::NoChildren
+    } else {
+        ChildScan::NoneReady
+    }
+}
+
+/// A process of the job the caller is waiting for which has not reported
+/// yet, and so the one whose completion can end that wait.
+fn unfinished_process(shell: &crate::context::Shell, job_id: Option<JobId>) -> Option<ProcessId> {
+    shell.jobs[job_id?]
+        .processes
+        .iter()
+        .find(|child| child.status.is_none())
+        .map(|child| child.process_id)
+}
+
+/// Block until one named child of this shell reports.
+///
+/// Naming one process rather than blocking on all of them is what the
+/// operating system offers; the rest are not lost, because a shell that
+/// catches `SIGCHLD` without `SA_RESTART` has this wait interrupted when
+/// any of its children changes state, and the caller rescans.
+fn block_for_child(
+    shell: &mut crate::context::Shell,
+    target: ProcessId,
+    report_stopped: bool,
+) -> ChildScan {
+    match nsh_platform::wait_for_child(target, false, report_stopped) {
+        Ok(Some((process, status))) => {
+            release_reaped_child(shell, process, status);
+            ChildScan::Reaped { process, status }
+        }
+        /* A blocking wait has no "not yet" answer; treating it as one
+         * costs a rescan and cannot loop, because the scan that follows
+         * asks the same question. */
+        Ok(None) => ChildScan::NoneReady,
+        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => ChildScan::SignalArrived,
+        Err(_) => {
+            shell.forked_children.release(target);
+            ChildScan::NoneReady
+        }
+    }
+}
+
 // [spec:dash:sem:jobs.waitproc-fn]
+// [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
 fn wait_for_process(
     shell: &mut crate::context::Shell,
     mode: WaitMode,
+    job_id: Option<JobId>,
 ) -> Result<WaitOutcome, Error> {
-    let nonblocking = mode.kernel_nonblocking();
-    let mut waited: WaitOutcome;
-
+    let report_stopped = shell.jobs.job_control;
     let signals = crate::signal_inbox::signals();
+
     loop {
         signals.set_child_pending(false);
-        loop {
-            match nsh_platform::wait_for_any_child(nonblocking, shell.jobs.job_control) {
-                Ok(Some((process_id, child_status))) => {
-                    waited = WaitOutcome::Reaped {
-                        process: process_id,
-                        status: child_status,
-                    };
-                    break;
-                }
-                Ok(None) => {
-                    waited = WaitOutcome::Interrupted;
-                    break;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(_) => {
-                    waited = WaitOutcome::Exhausted;
-                    break;
-                }
-            }
-            /* One of the three EINTR sites the C retries blindly, and the
-             * one that matters for a ^C during a foreground command that
-             * does not itself die of it. */
-            if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
-                return Err(error);
-            }
+        let mut scanned = scan_forked_children(shell, report_stopped);
+        if scanned == ChildScan::NoneReady && !mode.kernel_nonblocking() {
+            /* The blocking caller wants a status rather than an answer,
+             * so come to rest on a process of the job it asked about —
+             * any other choice can outlive the wait it was meant to end. */
+            let preferred = unfinished_process(shell, job_id);
+            scanned = match shell.forked_children.blocking_target(preferred) {
+                Some(target) => block_for_child(shell, target, report_stopped),
+                None => ChildScan::NoChildren,
+            };
         }
 
-        if waited != WaitOutcome::Interrupted {
-            break;
+        match scanned {
+            ChildScan::Reaped { process, status } => {
+                return Ok(WaitOutcome::Reaped { process, status });
+            }
+            ChildScan::NoChildren => return Ok(WaitOutcome::Exhausted),
+            ChildScan::SignalArrived => {
+                /* One of the three EINTR sites the C retries blindly, and
+                 * the one that matters for a ^C during a foreground
+                 * command that does not itself die of it. */
+                if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
+                    return Err(error);
+                }
+                continue;
+            }
+            /* Only the blocking arm can arrive here without an answer,
+             * and only because the child it came to rest on stopped being
+             * this shell's between the scan and the wait. The set has one
+             * fewer member than it did, so the next pass asks a strictly
+             * smaller question and cannot circle. */
+            ChildScan::NoneReady if !mode.kernel_nonblocking() => continue,
+            ChildScan::NoneReady => {}
         }
+
         if !mode.suspends_for_signal() {
-            waited = WaitOutcome::Exhausted;
-            break;
+            return Ok(WaitOutcome::Exhausted);
         }
 
         let blocked =
@@ -356,11 +465,9 @@ fn wait_for_process(
         drop(blocked);
 
         if !signals.child_pending() {
-            break;
+            return Ok(WaitOutcome::Interrupted);
         }
     }
-
-    Ok(waited)
 }
 
 /*

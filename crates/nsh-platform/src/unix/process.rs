@@ -401,11 +401,7 @@ fn decode_child_status(status: rustix::process::WaitStatus) -> ChildStatus {
     }
 }
 
-/// Wait for any child. `None` is the successful nonblocking "not yet" case.
-pub fn wait_for_any_child(
-    nonblocking: bool,
-    report_stopped: bool,
-) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
+fn wait_options(nonblocking: bool, report_stopped: bool) -> rustix::process::WaitOptions {
     let mut options = rustix::process::WaitOptions::empty();
     if nonblocking {
         options.insert(rustix::process::WaitOptions::NOHANG);
@@ -413,7 +409,41 @@ pub fn wait_for_any_child(
     if report_stopped {
         options.insert(rustix::process::WaitOptions::UNTRACED);
     }
-    rustix::process::wait(options)
+    options
+}
+
+/// Wait for one named child, and for no other.
+///
+/// The caller says which process it is entitled to reap, so a process
+/// this caller did not fork keeps its status and stays waitable by
+/// whoever did. `None` is the successful nonblocking "not yet" case, and
+/// `NotFound` means the operating system has no such child of ours --
+/// either it was never one or somebody else has already reaped it.
+// [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
+pub fn wait_for_child(
+    process: ProcessId,
+    nonblocking: bool,
+    report_stopped: bool,
+) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
+    let identity = rustix::process::Pid::from_raw(raw_process_id(process)?)
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    rustix::process::waitpid(Some(identity), wait_options(nonblocking, report_stopped))
+        .map(|result| result.map(|(_, status)| (process, decode_child_status(status))))
+        .map_err(std::io::Error::from)
+}
+
+/// Wait for any child. `None` is the successful nonblocking "not yet" case.
+///
+/// Right for a process the caller owns entirely, and wrong for one it
+/// shares: it takes whichever child the operating system offers, which in
+/// an embedding host is somebody else's to reap. [`wait_for_child`] is
+/// what the shell uses; this remains for a caller that is the whole
+/// process.
+pub fn wait_for_any_child(
+    nonblocking: bool,
+    report_stopped: bool,
+) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
+    rustix::process::wait(wait_options(nonblocking, report_stopped))
         .map(|result| {
             result.map(|(pid, status)| {
                 (
@@ -436,17 +466,15 @@ pub fn run_in_child(body: impl FnOnce()) -> std::io::Result<i32> {
             exit_immediately(0);
         }
         ForkResult::Parent(pid) => {
-            let pid = rustix::process::Pid::from_raw(raw_process_id(pid)?)
-                .expect("a forked child identity fits pid_t");
             let status = loop {
-                match rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty()) {
+                match wait_for_child(pid, false, false) {
                     Ok(Some((_, status))) => break status,
                     Ok(None) => continue,
-                    Err(rustix::io::Errno::INTR) => continue,
-                    Err(error) => return Err(std::io::Error::from(error)),
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(error),
                 }
             };
-            Ok(match decode_child_status(status) {
+            Ok(match status {
                 ChildStatus::Exited(code) => i32::from(code),
                 ChildStatus::Signaled { signal, .. } => 128 + signal.number(),
                 ChildStatus::Stopped(signal) => 128 + signal.number(),

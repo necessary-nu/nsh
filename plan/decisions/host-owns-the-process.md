@@ -22,7 +22,7 @@ alternatives (
     }
     {
         option "Divide reaping per shell, so a `Shell` reaps only the children it forked."
-        rejected_because "`wait3(-1)`/`waitpid(-1)` is how the shell learns about the children it does *not* track -- the here-document writer forks with `FORK_NOJOB` and no job entry, and would become a zombie under per-pid waits. `waitid(WNOWAIT)` peeks without reaping but busy-loops when the only exited child is somebody else's. It is the same shape as the locale: a process-wide fact, recorded rather than designed away."
+        rejected_because "OVERTURNED 2026-09-02, and the refutation is kept verbatim because the way it was wrong is the useful part. It read: \"`wait3(-1)`/`waitpid(-1)` is how the shell learns about the children it does *not* track -- the here-document writer forks with `FORK_NOJOB` and no job entry, and would become a zombie under per-pid waits. `waitid(WNOWAIT)` peeks without reaping but busy-loops when the only exited child is somebody else's. It is the same shape as the locale: a process-wide fact, recorded rather than designed away.\" Neither half holds. The zombie does not follow, because the set of forked pids sits *beside* the job table rather than inside it: a fork with no job entry is still a fork, and it is recorded and reaped like every other. The spin does not arise, because nothing peeks -- a shell that names each of its own pids to `waitpid` never asks a question about a child it does not own, and so needs neither `WNOWAIT` nor a claim on the process's `SIGCHLD`. See \"Correction\" below."
     }
 )
 consequences {
@@ -32,8 +32,8 @@ consequences {
         "**Job control is off unless the host grants it, because `setjobctl(1)` operates on the host three times.** `libc::setpgid(0, rootpid)` (`jobs.rs:482`) moves the embedding process into its own process group; `xtcsetpgrp` (`:483`) takes the controlling terminal from whoever had it; `libc::killpg(0, SIGTTIN)` (`:452`) stops the whole process group -- the host and every sibling -- until someone foregrounds it. None of the three is undone by anything but `setjobctl(0)`, which is reached from `exitshell`."
         "**Terminal handoff is `setjobctl`'s alone, and everything downstream of it is safe by construction.** `xxtcsetpgrp` short-circuits on `ttyfd < 0` (`jobs.rs:351-357`), and `ttyfd` is set only by `setjobctl`. So `forkchild`'s handoff to a new job (`:994`) and `waitforjob`'s hand-back to `rootpid` (`:1211`) and `fg`'s (`builtins/fg.rs:85`) cannot reach `tcsetpgrp` at all unless job control was turned on first. Gating `setjobctl` gates the terminal entirely; no second gate is needed."
         "**The library ends a process in four places and three of them are correct.** `shellmain::exit_from_child`, `jobs::forkchild_fatal` and `redir.rs:483`'s here-document writer all `_exit` a child the library itself forked, which is [dec:nsh:fork-child-is-a-terminus] and is not the host's business. The fourth is `trap::exitshell` (`trap.rs:562`), which ends the *host's* process, and turning it into a return is `public-api`'s -- `docs/api-design.md` 5.4 already says terminating is not on the `Host` trait because after the builder the library never needs it."
-        "**Reaping is process-wide and the API has to say so.** `waitproc` calls `wait3(status, flags, NULL)` (`jobs.rs:1412`), which is `waitpid(-1)`: it reaps *any* child of the process, including children the embedder spawned and is holding a `std::process::Child` for. Those statuses are consumed by the shell and the embedder's own `wait` answers `ECHILD`. This joins the locale, `strtok`, `getopt`, the environment, the working directory and the signal inbox in `docs/api-design.md` 6."
-        "**The guarantees the library does give about waiting, stated positively.** Every child it forks is entered in the job table before it is waited for, except the here-document writer, which is deliberately jobless and is reaped by the same `wait3(-1)`. A foreground job is waited to completion before `run` returns. A background job is **not**: `sh -c 'sleep 10 &'` returns with the child alive, exactly as dash does, and dropping the `Shell` neither kills nor reaps it. A `Drop` that waited would block the host and a `Drop` that killed would exceed the grant, so `Shell::drop` does neither -- and that is a promise, not an omission."
+        "**Reaping is per shell, and the pids are what divide it.** CORRECTED 2026-09-02. This entry used to read \"reaping is process-wide and the API has to say so\", and it described `waitproc`'s `wait3(status, flags, NULL)` -- `waitpid(-1)` -- reaping *any* child of the process, an embedder's `std::process::Child` included, and the embedder's own `wait` then answering `ECHILD`. That was true of the code and false as a necessity. Each `Shell` now keeps the pids it forked and asks after those by name, so it is no longer an entry in `docs/api-design.md` 6 beside the locale, `strtok`, `getopt`, the environment, the working directory and the signal inbox. What remains process-wide about waiting is only the `SIGCHLD` disposition, which is [dec:nsh:host-owns-signals]'s and was always listed separately."
+        "**The guarantees the library does give about waiting, stated positively.** Every child it forks is recorded before it is waited for -- in the job table when it has a job, and in the shell's own set of forked pids either way, which is what covers the deliberately jobless here-document writer and the jobless process-substitution child. A foreground job is waited to completion before `run` returns. A background job is **not**: `sh -c 'sleep 10 &'` returns with the child alive, exactly as dash does, and dropping the `Shell` neither kills nor reaps it. A `Drop` that waited would block the host and a `Drop` that killed would exceed the grant, so `Shell::drop` does neither -- and that is a promise, not an omission."
         "**Prompt reaping needs a SIGCHLD disposition, which the library does not own.** `trap::mkinit_init` installs one unconditionally at startup (`trap.rs:148-149`), and `waitproc`'s blocking arm is `sigsuspend` on it (`jobs.rs:1437`). So the wait design and [dec:nsh:host-owns-signals] are one design: a host that grants no `SIGCHLD` handler gets a shell that can still block in `wait3` but cannot notice a background job finishing between commands."
         "**What the syscall floor inherits from this.** The floor crate's job is mechanism, not authority: it exposes `execve`, `setpgid`, `tcsetpgrp`, `killpg` and `_exit` as safe wrappers and knows nothing about grants. The gate lives in `nsh`, at the three call sites named above, because only the shell knows whether the process it is about to operate on is the host's or a child it just made."
     )
@@ -142,3 +142,41 @@ process and dispatch by pid -- which is precisely the disposition
 So it is documented, in the same sentence as the locale, with the same
 honesty: an embedder that spawns its own children and runs a `Shell` in
 the same process is sharing something it cannot divide.
+
+## Correction, 2026-09-02
+
+**The three paragraphs above are wrong, and the shell now divides the
+pool.** They are kept because the shape of the mistake is instructive: an
+argument about the *filter* was mistaken for an argument about the
+*question*.
+
+Every step reasons about `waitpid(-1)` and what to do with the answer.
+Given that call, all of it is correct -- the answer may be a foreign
+child, the reap has already happened by the time you can look, and
+`WNOWAIT` is the only way to look first, at the price of a spin. What was
+never asked is whether `waitpid(-1)` had to be the call. It did not.
+`waitpid(pid)` names the process, and a status this shell is not entitled
+to is one it never asks for. No filter, no peek, no dispatch, and no
+`SIGCHLD` claim.
+
+The one real obstacle was the one the refutation named and then drew the
+wrong conclusion from. The shell does fork children with no job entry --
+`record_forked_child` returns early when it is given no job, so the
+here-document writer and the process-substitution child are in no job
+table -- and a set derived from the job table would have left them
+unreaped. The answer is that the set is not derived from the job table.
+It is written by `fork_shell` and `fork_and_execute`, which is where a
+fork actually happens, and it holds every pid whether or not a job was
+made for it.
+
+What this changes about the decision: the decision itself stands
+unaltered -- creating a process is the library's, and replacing,
+regrouping or ending the host's is the host's to grant. What changes is
+that reaping is no longer one of the process-wide facts two shells share.
+`docs/api-design.md` 6 loses the entry; the locale, `strtok`, `getopt`,
+the environment, the working directory and the signal inbox keep theirs.
+
+What it does not change: a forked child inherits its parent's pid set by
+copy and must drop it, because those processes are its siblings and not
+its children. `jobs::fork::initialize_child_process` clears it, in the
+same place it turns off job control.

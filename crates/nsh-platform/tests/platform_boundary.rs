@@ -266,6 +266,20 @@ fn process_identities_are_typed() {
     )
         -> std::io::Result<Option<(nsh_platform::ProcessId, nsh_platform::ChildStatus)>> =
         nsh_platform::wait_for_any_child;
+    /* The wait a shell uses. It names the process, so the identity is in
+     * the signature rather than in the caller's head, and a status this
+     * caller is not entitled to is one it cannot ask for. */
+    #[expect(
+        clippy::type_complexity,
+        reason = "the spelled-out signature is what this test pins"
+    )]
+    let _: fn(
+        nsh_platform::ProcessId,
+        bool,
+        bool,
+    )
+        -> std::io::Result<Option<(nsh_platform::ProcessId, nsh_platform::ChildStatus)>> =
+        nsh_platform::wait_for_child;
     let _: fn(
         nsh_platform::ProcessSelector,
         nsh_platform::ProcessGroupState,

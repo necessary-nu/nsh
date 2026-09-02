@@ -79,6 +79,7 @@ pub use process::{
     process_arguments, process_environment, process_times, replace_creation_mask,
     reset_coverage_counters, resource_limit, restore_shell_process_runtime_state, run_in_child,
     set_foreground_process_group, set_process_group, set_resource_limit, wait_for_any_child,
+    wait_for_child,
 };
 #[path = "unix/signals.rs"]
 mod signals;

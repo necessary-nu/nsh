@@ -26,6 +26,8 @@ use crate::options::ShellOption;
 use crate::output::OutputDestination;
 // [spec:nsh:def:idiom.shell-options]
 
+mod children;
+pub(crate) use children::ForkedChildren;
 mod fork;
 pub use fork::fork_and_execute;
 pub use fork::fork_shell;

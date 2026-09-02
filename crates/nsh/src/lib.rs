@@ -35,16 +35,20 @@
 //! `docs/api-design.md` §6 and §11 carry these; they are here because a
 //! reader of the crate should not have to find the document first.
 //!
-//! **The shell reaps any child of the process.** `wait3(status, flags,
-//! NULL)` is `waitpid(-1)`, so a shell running in your process will reap
-//! a `std::process::Child` you were holding, and your `wait()` gets
-//! `ECHILD` for a status now sitting in a job table you cannot see. This
-//! is not fixable by tracking pids: reaping is destructive, the only
-//! peek-without-reap primitive returns the same foreign child forever and
-//! turns the blocking wait into a spin, and dispatching properly would
-//! need the shell to own `SIGCHLD` for the whole process, which
-//! [dec:nsh:host-owns-signals] forbids. Do not run other children
-//! concurrently with a shell you are driving.
+//! **The shell reaps only the children it forked.** It used to reap any
+//! child of the process, because `wait3(status, flags, NULL)` is
+//! `waitpid(-1)` and dash is a whole process rather than a library: a
+//! shell driven in your process would reap a `std::process::Child` you
+//! were holding, and your `wait()` got `ECHILD` for a status sitting in a
+//! job table you cannot see. It no longer does. Each `Shell` keeps the
+//! pids it forked and waits for those by name, so a child of yours keeps
+//! its status until you collect it.
+//!
+//! What was thought to make that unfixable was the peek: `WNOWAIT`
+//! reports the same foreign zombie on every call, so a loop that skips it
+//! spins. Nothing peeks. The shell asks after the processes it forked and
+//! after no others, which needs neither a peek nor ownership of the
+//! process's `SIGCHLD` — [dec:nsh:host-owns-signals] stands as it was.
 //!
 //! **`fork` from a multithreaded host carries only the calling thread**,
 //! and the library's children allocate before they `exec` -- or never

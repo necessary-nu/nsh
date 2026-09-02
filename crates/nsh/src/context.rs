@@ -67,6 +67,17 @@ pub struct Shell {
     /// The jobs, and the terminal state job control needs. `jobs.rs`
     /// owns the shape.
     pub(crate) jobs: crate::jobs::JobTable,
+    /// Every child this shell forked and has not yet reaped.
+    ///
+    /// Beside the job table rather than in it, because a fork is not
+    /// always given a job: a command substitution and a
+    /// `ForkMode::WithoutJob` child have no entry there, and those pids
+    /// are as much this shell's to reap as any other. It is what makes
+    /// the wait name a process instead of asking the operating system
+    /// for whichever child it likes — which in an embedding host is a
+    /// child the host forked.
+    // [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
+    pub(crate) forked_children: crate::jobs::ForkedChildren,
     /// `$!` — the process id of the last command the shell put in the
     /// background.
     ///
@@ -236,6 +247,7 @@ impl Shell {
             commands: crate::execution::CommandTable::new(),
             evaluation: crate::evaluation::EvaluationState::new(),
             jobs: crate::jobs::JobTable::new(),
+            forked_children: crate::jobs::ForkedChildren::new(),
             options: crate::options::ShellOptions::new(),
             redirections: crate::redirection::RedirectionStack::new(),
             process_substitutions:
