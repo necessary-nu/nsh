@@ -36,6 +36,36 @@ is to reach states nobody predicted, so "this target cannot execute
 anything" is precisely a claim it is trying to falsify. The managed
 workspace sandbox already supplies that outer boundary in Codex sessions.
 
+## Clocks
+
+A campaign builds before its clock starts. `cargo fuzz run` compiles first
+and only then hands the binary its `-max_total_time`, so a build inside the
+campaign's wall clock is paid for out of the fuzzing budget: a cold-cache
+`differential 60` spent 54 of its 180 seconds compiling and was killed
+part-way through the campaign at exit 124 -- which is exactly what the
+fuzzer stopping at its own timeout looks like, so a run that had barely
+started reported as a short campaign that found nothing. The build now goes
+first under a clock of its own (`NSH_FUZZ_BUILD_TIMEOUT`, 1800 seconds by
+default), and the budget buys only fuzzing.
+
+The runner then says what each clock cost:
+
+    fuzz/run.sh: build 56s before the clock; campaign 145s for a 60s budget
+
+and when the containment wall clock rather than the fuzzer's own budget is
+what stopped the run, it says that too, so a truncated campaign cannot pass
+for one that measured and found nothing.
+
+A campaign is longer than its budget, and can still be stopped by the wall
+clock for a reason that has nothing to do with the build. libFuzzer runs
+the whole corpus before it first looks at `-max_total_time`, and that cost
+scales with the corpus rather than with the budget: `differential` holds
+2938 inputs and spends over two minutes reaching the end of them, and
+`parse` has grown to 21259 and does not reach the end inside `SECONDS +
+120` at all. A short budget against a large corpus therefore buys no
+mutation whatsoever -- which is now something the runner says, rather than
+an exit 124 that reads as a campaign that found nothing.
+
 ## What a campaign has found
 
 The first campaign against the current tree ran on 2026-09-01: fifteen
