@@ -477,8 +477,6 @@ failing = [
     "var-op-bash.test.sh:25",
     "var-op-bash.test.sh:3",
     "var-op-patsub.test.sh:23",
-    "var-op-strip.test.sh:13",
-    "var-op-strip.test.sh:14",
     "var-op-test.test.sh:17",
     "var-op-test.test.sh:18",
     "var-op-test.test.sh:28",

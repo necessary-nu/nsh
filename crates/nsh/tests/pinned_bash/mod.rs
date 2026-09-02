@@ -67,3 +67,42 @@ pub fn path() -> PathBuf {
     );
     path
 }
+
+/// Run one script through one shell and return its standard output and status.
+///
+/// Three differential tests grew their own copy of this before the
+/// duplication gate noticed the third. It lives here because it is the
+/// other half of what these tests need from a pinned oracle: `path()`
+/// says which Bash, and this says how a script is put to a shell so the
+/// two answers are comparable. The environment is cleared to the same
+/// three variables on both sides, because a differential test that lets
+/// the caller's environment through is comparing two shells and a
+/// terminal.
+/// Included by test binaries that want only `path()`, so it is dead in
+/// theirs and live in the three that compare two shells. Narrower than a
+/// module-wide allowance, which `[spec:nsh:req:idiom.strict-lints]`
+/// reserves for nothing at all.
+#[allow(dead_code)]
+pub fn answer(shell: &std::path::Path, dialect: &[&str], script: &str) -> (Vec<u8>, i32) {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(shell)
+        .args(dialect)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("LC_ALL", "C")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap_or_else(|error| panic!("start {}: {error}", shell.display()));
+    child
+        .stdin
+        .take()
+        .expect("the child's standard input")
+        .write_all(script.as_bytes())
+        .expect("write the script");
+    let output = child.wait_with_output().expect("wait for the shell");
+    (output.stdout, output.status.code().unwrap_or(-1))
+}

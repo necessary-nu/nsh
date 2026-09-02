@@ -19,9 +19,7 @@
 #[path = "../../nsh/tests/pinned_bash/mod.rs"]
 mod pinned_bash;
 
-use std::io::Write as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 /// Every input the `%q` table names, in the order it names them.
 ///
@@ -55,35 +53,13 @@ const SLICED: &[(&str, &str)] = &[
     ("$'\\x8b\\xab'", "${x:0:14}"),
 ];
 
-/// One script's standard output and status from one shell.
-fn answer(shell: &Path, dialect: &[&str], script: &str) -> (Vec<u8>, i32) {
-    let mut child = Command::new(shell)
-        .args(dialect)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("LC_ALL", "C")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap_or_else(|error| panic!("start {}: {error}", shell.display()));
-    child
-        .stdin
-        .take()
-        .expect("the child's standard input")
-        .write_all(script.as_bytes())
-        .expect("write the script");
-    let output = child.wait_with_output().expect("wait for the shell");
-    (output.stdout, output.status.code().unwrap_or(-1))
-}
-
 /// Both shells on one script, as `(what nsh said, what the pinned Bash said)`.
 fn both(script: &str) -> ((Vec<u8>, i32), (Vec<u8>, i32)) {
     let nsh = Path::new(env!("CARGO_BIN_EXE_nsh"));
     let bash = pinned_bash::path();
     (
-        answer(nsh, &["-o", "bash"], script),
-        answer(&bash, &[], script),
+        pinned_bash::answer(nsh, &["-o", "bash"], script),
+        pinned_bash::answer(&bash, &[], script),
     )
 }
 

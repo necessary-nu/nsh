@@ -137,7 +137,7 @@ impl Field {
             .filter(|region| region.start <= at && at < region.end)
     }
 
-    fn quoted_at(&self, at: usize) -> bool {
+    pub(super) fn quoted_at(&self, at: usize) -> bool {
         self.region_at(at).is_some_and(|region| region.quoted)
     }
 

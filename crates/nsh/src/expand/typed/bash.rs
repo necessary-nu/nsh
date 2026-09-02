@@ -15,7 +15,12 @@ use crate::options::{BashShopt, Dialect};
 use crate::pattern::{Pattern, PatternOptions};
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, WordUnit};
 
-/// Pattern options for `case` and `[[ … ]]`, which read `nocasematch`.
+/// Pattern options for `case`, `[[ … ]]`, and `${name/pattern/…}`,
+/// which read `nocasematch`.
+///
+/// Bash's manual names the pattern substitution expansions beside the two
+/// commands and nothing else among the parameter operators: `${n#a}` on
+/// `ABC` strips nothing however the option is set.
 // [spec:nsh:req:compat.bash.expansion-globbing]
 pub(super) fn match_options(shell: &Shell) -> PatternOptions {
     if shell.options.dialect() != Dialect::Bash {
@@ -27,8 +32,11 @@ pub(super) fn match_options(shell: &Shell) -> PatternOptions {
     }
 }
 
-/// Pattern options for the parameter operators, which honour `extglob`
-/// but never fold case.
+/// Pattern options for the trimming and case-changing operators, which
+/// honour `extglob` but never fold case.
+///
+/// `${name/pattern/…}` is the one parameter operator that does fold it,
+/// and reads [`match_options`] instead.
 // [spec:nsh:req:compat.bash.expansion-globbing]
 pub(super) fn trim_options(shell: &Shell) -> PatternOptions {
     if shell.options.dialect() != Dialect::Bash {
@@ -504,25 +512,50 @@ pub(super) fn substitute(
     // The first byte of the pattern is always literal, so `${x///}`
     // replaces a slash rather than naming an empty pattern.
     let cut = separator_at(&units, b'/');
-    let (mut pattern_units, replacement_units) = match cut {
+    let (pattern_units, replacement_units) = match cut {
         Some(at) => (&units[..at], &units[at + 1..]),
         None => (units.as_slice(), &units[units.len()..]),
     };
-    let anchor = match pattern_units.first() {
-        Some(WordUnit::Literal { byte: b'#', .. }) => Anchor::Start,
-        Some(WordUnit::Literal { byte: b'%', .. }) => Anchor::End,
-        _ => Anchor::None,
-    };
-    if anchor != Anchor::None {
-        pattern_units = &pattern_units[1..];
-    }
-    let pattern =
-        expand_units(shell, pattern_units, context.pattern_operand())?.pattern(trim_options(shell));
-    let replacement = expand_units(shell, replacement_units, context.operand())?.bytes;
     let all = parameter.operation == ParameterOperation::SubstituteAll;
+    let expanded = expand_units(shell, pattern_units, context.pattern_operand())?;
+    let anchor = if all {
+        Anchor::None
+    } else {
+        anchor_of(&expanded)
+    };
+    let options = match_options(shell);
+    let pattern = match anchor {
+        Anchor::None => expanded.pattern(options),
+        _ => expanded.slice(1..expanded.bytes.len()).pattern(options),
+    };
+    let replacement = Replacement::read(&expand_units(
+        shell,
+        replacement_units,
+        context.replacement_operand(),
+    )?);
 
     if pattern.as_bytes().is_empty() {
-        return value_expansion(shell, name, value, context);
+        /* A pattern with no bytes matches nothing, but an anchor still
+         * names a place: Bash puts the replacement at that end of the
+         * value with an empty span behind its `&`. Unanchored there is
+         * nowhere to put it and the value stands -- and an unset
+         * parameter is not an empty one, having no value to put a
+         * replacement beside. */
+        // [spec:nsh:req:compat.bash.expansion-globbing]
+        if anchor == Anchor::None || matches!(value, Value::Unset) {
+            return value_expansion(shell, name, value, context);
+        }
+        return map_value(shell, value, context, |_, text| {
+            let mut result = BString::default();
+            if anchor == Anchor::Start {
+                replacement.write(&mut result, b"");
+            }
+            result.extend_from_slice(text);
+            if anchor == Anchor::End {
+                replacement.write(&mut result, b"");
+            }
+            result
+        });
     }
     map_value(shell, value, context, |locale, text| {
         replace(locale, text, &pattern, &replacement, all, anchor)
@@ -536,11 +569,87 @@ enum Anchor {
     End,
 }
 
+/// The anchor an already-expanded pattern opens with, if any.
+///
+/// Bash reads it from the expanded bytes rather than from the source, so
+/// `p='#a'; ${v/$p/x}` anchors at the front and matches `a` there. Only
+/// the unglobal spellings have one: the `/` of `${v//pattern/…}` has
+/// taken the position the anchor would occupy, which is why
+/// `${v//#a/x}` is the literal pattern `#a`.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+fn anchor_of(pattern: &Field) -> Anchor {
+    if pattern.quoted_at(0) {
+        return Anchor::None;
+    }
+    match pattern.bytes.first() {
+        Some(b'#') => Anchor::Start,
+        Some(b'%') => Anchor::End,
+        _ => Anchor::None,
+    }
+}
+
+/// A replacement word, cut at every `&` its source left unquoted.
+///
+/// Bash 5.2 gave `&` the meaning `sed` gives it -- the text the pattern
+/// matched -- so a replacement is a template rather than bytes, and what
+/// is fixed about it is the runs between the references. There is one
+/// more run than there are references, so writing one out is a join with
+/// the matched span as the separator.
+struct Replacement {
+    runs: Vec<BString>,
+}
+
+impl Replacement {
+    /// Read the template out of the expanded replacement.
+    ///
+    /// Two kinds of backslash arrive here. The ones the replacement's own
+    /// source wrote are gone already, having left the byte behind them
+    /// quoted, which is what keeps `${v/b/\&}` a literal `&`. The ones a
+    /// value carries are still data, and Bash gives those `sed`'s rule:
+    /// `\&` is a literal `&` and `\\` is one backslash, while a
+    /// backslash before anything else is a backslash.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn read(field: &Field) -> Self {
+        let mut runs = Vec::new();
+        let mut run = BString::default();
+        let mut at = 0;
+        while at < field.bytes.len() {
+            let escaped = field.bytes[at] == b'\\'
+                && !field.quoted_at(at)
+                && matches!(field.bytes.get(at + 1), Some(b'&' | b'\\'))
+                && !field.quoted_at(at + 1);
+            if escaped {
+                run.push(field.bytes[at + 1]);
+                at += 2;
+                continue;
+            }
+            if field.bytes[at] == b'&' && !field.quoted_at(at) {
+                runs.push(std::mem::take(&mut run));
+                at += 1;
+                continue;
+            }
+            run.push(field.bytes[at]);
+            at += 1;
+        }
+        runs.push(run);
+        Self { runs }
+    }
+
+    fn write(&self, result: &mut BString, matched: &[u8]) {
+        for (index, run) in self.runs.iter().enumerate() {
+            if index != 0 {
+                result.extend_from_slice(matched);
+            }
+            result.extend_from_slice(run);
+        }
+    }
+}
+
 fn replace(
     locale: &nsh_platform::Locale,
     text: &[u8],
     pattern: &Pattern,
-    replacement: &[u8],
+    replacement: &Replacement,
     all: bool,
     anchor: Anchor,
 ) -> BString {
@@ -555,7 +664,7 @@ fn replace(
             return BString::from(text);
         };
         result.extend_from_slice(&text[..start]);
-        result.extend_from_slice(replacement);
+        replacement.write(&mut result, &text[start..]);
         return result;
     }
 
@@ -567,7 +676,7 @@ fn replace(
             .flatten();
         match matched {
             Some(end) if end > at => {
-                result.extend_from_slice(replacement);
+                replacement.write(&mut result, &text[at..end]);
                 at = end;
                 replaced = true;
             }

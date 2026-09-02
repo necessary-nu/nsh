@@ -157,6 +157,27 @@ impl Context {
         }
     }
 
+    /// The context a `${name/pattern/replacement}` replacement expands in.
+    ///
+    /// Bash takes the surrounding double quotes off before expanding a
+    /// replacement, so `"${v/b/~}"` expands the tilde the outer quoting
+    /// would otherwise have made literal, and `$@` joins the way an
+    /// unsplit context joins rather than producing fields. What is left
+    /// on the bytes is the quoting the replacement's own source wrote,
+    /// which is the bit `&` reads to decide whether it names the match.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn replacement_operand(self) -> Self {
+        Self {
+            quoted: false,
+            full: false,
+            operand: true,
+            pattern: false,
+            tilde_at_start: true,
+            tilde_after_equal: false,
+            tilde_after_colon: false,
+        }
+    }
+
     fn protects(self) -> bool {
         self.quoted
     }
