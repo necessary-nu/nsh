@@ -7,12 +7,14 @@ set -euo pipefail
 usage() {
     echo "usage: scripts/sandboxed [--writable PATH]... [--timeout SECONDS] -- COMMAND [ARG...]" >&2
     echo "       scripts/sandboxed --cargo-runner -- PROGRAM [ARG...]" >&2
+    echo "SECONDS may be fractional; 0 means no limit." >&2
     exit 2
 }
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 SANDBOX=${NSH_TEST_SANDBOX:-sandbox}
-TIMEOUT=${NSH_TEST_TIMEOUT:-900}
+DEFAULT_BUDGET=900
+TIMEOUT=${NSH_TEST_TIMEOUT:-$DEFAULT_BUDGET}
 NPROC=${NSH_TEST_NPROC:-256}
 # Where the command starts. A command typed at this wrapper is a command about
 # the repository, so it starts at the root; a binary cargo hands us is one
@@ -24,10 +26,22 @@ CHDIR=$ROOT
 # rather than depending on somebody typing the wrapper first. See the comment
 # in `.cargo/config.toml` for why that indirection exists at all.
 RUNNER=false
+# How much longer than the command's own budget the outer deadline waits. It
+# only has to outlast the inner `timeout`'s TERM and the KILL a second behind
+# it; it fires for a sandbox that never got as far as running anything, which
+# is the one thing the inner budget cannot cover. Five seconds is what
+# `ds_sandboxed` uses, and there is no reason for the two shell wrappers to
+# disagree.
+BACKSTOP=5
 
-case $TIMEOUT in
-    ''|*[!0-9]*) usage ;;
-esac
+# A budget may be fractional, because a case-sized budget is exactly what a
+# focused run wants and `timeout` takes one; a run that means to be watched
+# rather than bounded says `0`, which is GNU `timeout`'s own spelling for no
+# limit and the one `fuzz/run.sh` passes for "run until interrupted".
+valid_seconds() { # valid_seconds VALUE
+    [[ $1 =~ ^[0-9]+(\.[0-9]+)?$ ]]
+}
+valid_seconds "$TIMEOUT" || usage
 case $NPROC in
     ''|*[!0-9]*|0) usage ;;
 esac
@@ -61,9 +75,7 @@ while (($#)); do
         --timeout)
             (($# >= 2)) || usage
             TIMEOUT=$2
-            case $TIMEOUT in
-                ''|*[!0-9]*) usage ;;
-            esac
+            valid_seconds "$TIMEOUT" || usage
             shift 2
             ;;
         --cargo-runner)
@@ -79,6 +91,13 @@ while (($#)); do
     esac
 done
 (($#)) || usage
+
+# No budget stays no budget on the way out as well as on the way in: adding
+# the backstop to zero would turn "run until interrupted" into a five-second
+# limit, which is the one way this change could have broken an open-ended
+# fuzzing campaign.
+OUTER_TIMEOUT=$(/usr/bin/awk -v t="$TIMEOUT" -v b="$BACKSTOP" \
+    'BEGIN { printf "%.3f\n", (t == 0 ? 0 : t + b) }')
 
 # An abandoned case is one this wrapper can still see. Everything the
 # repository runs against shell-controlled input goes into a PID namespace
@@ -164,7 +183,21 @@ case $ABANDONED in
         exit 2
         ;;
 esac
-ABANDONED_AFTER=${NSH_TEST_ABANDONED_AFTER:-$TIMEOUT}
+# The age threshold still follows this wrapper's own budget, and now has to
+# survive two budgets that could not be spelled before. A fractional one is
+# rounded up, because a threshold of zero calls every orphan on the machine
+# abandoned -- which is exactly the mistake the 2026-09-02 erratum on
+# `kill-a-survey-case-the-harness-abandoned` was written against, and it was
+# already reachable: `--timeout 0` set the threshold to zero, so
+# `fuzz/run.sh`'s open-ended campaign refused to start whenever any orphaned
+# repository binary sat at ppid 1, whatever its age. Measured against the old
+# shape: a one-second-old decoy was enough. A run on no budget has no budget
+# to compare against, so it falls back to this wrapper's default one, and
+# `NSH_TEST_ABANDONED_AFTER` is how any run says otherwise.
+ABANDONED_AFTER=${NSH_TEST_ABANDONED_AFTER:-$(
+    /usr/bin/awk -v t="$TIMEOUT" -v d="$DEFAULT_BUDGET" \
+        'BEGIN { if (t == 0) { print d; exit } c = int(t); if (c < t) c++; if (c < 1) c = 1; print c }'
+)}
 case $ABANDONED_AFTER in
     '' | *[!0-9]*)
         echo "scripts/sandboxed: NSH_TEST_ABANDONED_AFTER must be a number of seconds" >&2
@@ -275,5 +308,31 @@ kill "$sentinel" 2>/dev/null || :
 wait "$sentinel" 2>/dev/null || :
 trap - EXIT HUP INT TERM
 
-exec /usr/bin/timeout "$TIMEOUT" "${SANDBOX_ARGS[@]}" -- \
+# THE BUDGET IS SPENT INSIDE THE BOUNDARY, NOT BY SIGNALLING IT.
+#
+# This used to be `timeout "$TIMEOUT" sandbox ... -- env ... -- "$@"`, which
+# times the command by signalling the sandbox process from out here. That is
+# only reliable once the sandbox has finished setting up: a signal delivered
+# during that window reaps the process this side holds and leaves the process
+# tree inside it running, because the teardown that tree depends on had not
+# been armed yet. `86d2ce6` measured the same shape in the survey runner --
+# signalling 0 ms after spawn leaked a background descendant 6 times in 20 at
+# load 32, 10 ms after spawn 5 times in 20, 50 ms after spawn 0 in 15 -- and
+# fixed it by moving the budget inside. This wrapper was the last of the three
+# that had not been moved.
+#
+# It was not leaking at the 900-second default, and that is exactly why it
+# survived: the signal cannot land in a setup window nine hundred seconds
+# away. `--timeout` and `NSH_TEST_TIMEOUT` are the documented knobs, and a
+# focused run is where a small budget gets used, which is where the window
+# reopens.
+#
+# There is nothing out here to wait for -- the sandbox offers no readiness
+# this script can observe -- so nothing is timed from here that can be timed
+# from in there. The inner `timeout` stands in front of the command inside the
+# namespace, and the outer one is a backstop $BACKSTOP seconds wider, for a
+# sandbox that never got as far as running anything. A command that exits is
+# torn down by the sandbox's own reaper, as before.
+exec /usr/bin/timeout "$OUTER_TIMEOUT" "${SANDBOX_ARGS[@]}" -- \
+    /usr/bin/timeout --signal=TERM --kill-after=1 "$TIMEOUT" \
     /usr/bin/env --default-signal -- "$@"

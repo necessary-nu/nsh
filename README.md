@@ -173,11 +173,27 @@ from had all been deleted. `scripts/sandboxed` now refuses to run while one
 of them is on the machine, because nothing else can see them — inside the
 boundary the process table is the sandbox's own. Orphaned is not abandoned:
 a process qualifies only once it has outlived the wrapper's own budget
-(`NSH_TEST_ABANDONED_AFTER`, defaulting to `--timeout`), so a probe somebody
-is watching is left alone. `NSH_TEST_ABANDONED=kill` clears them and
-continues; `=ignore` skips the check.
-`tests/harness/abandoned-selftest.sh` is its self-test and is the one script
-here that must not be run through the wrapper.
+(`NSH_TEST_ABANDONED_AFTER`, defaulting to `--timeout` rounded up to a whole
+second), so a probe somebody is watching is left alone.
+`NSH_TEST_ABANDONED=kill` clears them and continues; `=ignore` skips the
+check. `tests/harness/abandoned-selftest.sh` is its self-test.
+
+The budget itself is spent inside the boundary: `timeout` stands in front of
+the command *within* the namespace, with a wider one outside as a backstop for
+a sandbox that never got as far as running anything. Stopping a command by
+signalling its sandbox from outside only works once the sandbox has finished
+setting up, and `--timeout`/`NSH_TEST_TIMEOUT` are exactly how a focused run
+asks for a budget short enough to land in that window — measured against the
+old shape at load 21, a five-millisecond budget left a descendant running 17
+times in 20. `--timeout` therefore takes a fractional number of seconds, so a
+focused run can ask for a case-sized budget without also giving the sandbox
+that long to start. Zero keeps GNU `timeout`'s own meaning — no limit, which
+is what `fuzz/run.sh` passes to run until interrupted — and no longer drags
+the abandoned-process threshold down with it.
+`tests/harness/budget-selftest.sh` is the self-test for that.
+
+Neither self-test may be run through the wrapper: both ask the host what
+survived a finished command, which is what the boundary hides.
 
 ## Repository layout
 

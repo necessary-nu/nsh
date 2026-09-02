@@ -70,7 +70,7 @@ if [[ -z $binary ]]; then
     echo "containment-selftest: could not find the built test binary" >&2
     exit 1
 fi
-output=$("$binary" --exact the_host_process_table_is_not_visible_to_a_test 2>&1)
+output=$("$binary" --exact the_host_process_table_is_hidden 2>&1)
 status=$?
 report "the same binary run by hand is not contained" \
     "$([[ $status -ne 0 && $output == *"session's own PID namespace"* ]] && echo y)" \

@@ -52,7 +52,7 @@ fn own_stat_fields() -> Vec<String> {
 }
 
 #[test]
-fn the_host_process_table_is_not_visible_to_a_test() {
+fn the_host_process_table_is_hidden() {
     let visible = fs::read_dir("/proc")
         .expect("read /proc")
         .filter_map(|entry| entry.ok())
@@ -72,7 +72,7 @@ fn the_host_process_table_is_not_visible_to_a_test() {
 }
 
 #[test]
-fn a_test_has_a_private_session_and_no_controlling_terminal() {
+fn a_test_has_no_controlling_terminal() {
     let fields = own_stat_fields();
     // `state` is index 0 here, so `session` is field 6 and `tty_nr` field 7.
     let session: i64 = fields[3].parse().expect("session id is a number");
@@ -86,7 +86,7 @@ fn a_test_has_a_private_session_and_no_controlling_terminal() {
 }
 
 #[test]
-fn a_test_may_write_into_target_and_nowhere_else_in_the_tree() {
+fn only_target_accepts_a_write() {
     let root = workspace_root();
     let refused = root.join(format!(".containment-probe-{}", std::process::id()));
     let allowed = root.join(format!("target/.containment-probe-{}", std::process::id()));
@@ -116,7 +116,7 @@ fn a_test_may_write_into_target_and_nowhere_else_in_the_tree() {
 /// `exe`; it can resolve the one the sandbox put at PID 1, which exists only
 /// for as long as this run does.
 #[test]
-fn an_orphan_a_test_leaves_behind_is_adopted_inside_the_boundary() {
+fn an_orphan_is_adopted_inside_the_boundary() {
     let own = fs::read_link("/proc/self/ns/pid").expect("read this test's PID namespace");
     let adopter = fs::read_link("/proc/1/exe");
     let record =
@@ -166,5 +166,38 @@ fn an_orphan_a_test_leaves_behind_is_adopted_inside_the_boundary() {
         "the process adopting this test's orphans is the machine's init \
          ({adopter:?} for /proc/1/exe), so an orphan outlives the run and \
          nothing on this machine is left waiting for it"
+    );
+}
+
+/// The command's budget is spent by a process standing inside the boundary.
+///
+/// A budget spent from outside is spent by signalling the sandbox, and that
+/// only works once the sandbox has finished setting up: a signal landing in
+/// that window reaps the process the caller holds and leaves the tree inside
+/// still running. Measured against the shape this replaced, a five-millisecond
+/// budget left a descendant running 17 times in 20.
+///
+/// Whether a descendant then survives is only answerable from the host, and
+/// `tests/harness/budget-selftest.sh` is where that is asked. What a test can
+/// see from in here is who would enforce its budget, and the two shapes are
+/// distinguishable: with the budget inside, the chain is `sandbox` at PID 1,
+/// then `timeout`, then this process; with it outside, this process is the
+/// child of PID 1 and there is nothing between them that a signal to the
+/// sandbox would not take with it.
+#[test]
+fn the_budget_is_spent_inside_the_boundary() {
+    let parent = own_stat_fields()[1]
+        .parse::<u32>()
+        .expect("the parent pid is a number");
+    let enforcer =
+        fs::read_to_string(format!("/proc/{parent}/comm")).expect("read the parent's command name");
+
+    assert_eq!(
+        enforcer.trim(),
+        "timeout",
+        "this test's parent is {} rather than a budget, so whatever bounds \
+         this run is outside the boundary and a signal to the sandbox can \
+         land before the sandbox is ready to pass it on",
+        enforcer.trim()
     );
 }
