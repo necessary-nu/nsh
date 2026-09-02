@@ -3,20 +3,21 @@
 //! Port of the `echo` half of `src/bltin/printf.c`.
 //! Rules: `docs/spec/port/src/bltin/printf.md`.
 //!
-//! The other half of that C file was the `printf` utility, and this shell
-//! does not have one: the utility's contract *is* a runtime
-//! `%`-conversion interpreter, and nsh carries no such machinery
-//! anywhere. Output is an `io::Write` and formatting happens through
+//! The other half of that C file is the `printf` utility, which lives in
+//! `builtins/printf.rs`. Reading a pattern at runtime is what POSIX
+//! defines that utility to do, and
+//! `[dec:nsh:printf-is-parsed-not-interpreted]` sanctions it there and
+//! nowhere else: nothing outside `builtins::printf` formats a value by a
+//! pattern chosen at runtime. `echo` is on the far side of that line.
+//! Output is an `io::Write` and what this file writes goes through
 //! `write!` at call sites where the arguments already have types.
-//! `printf` resolves through `PATH` like any other external utility. See
-//! `[dec:nsh:no-format-interpreters]`.
 //!
-//! What that removed: `printfcmd` and its scanning loop, `mklong`, the
-//! `PF`/`ASPF` arity switch, the C `snprintf` bridge behind them, the
-//! four `get*` argument readers and `check_conversion`.
-//! `print_escape_str` kept only what `echo` needs -- the C passed it a
-//! format string of which two bytes ever mattered, and it takes those
-//! directly now.
+//! What the split removed is the C's machinery rather than the utility:
+//! `mklong`, the `PF`/`ASPF` arity switch and the `snprintf` bridge
+//! behind them are gone, and the specification is parsed into typed
+//! fields instead. `print_escape_str` kept only what `echo` needs -- the
+//! C passed it a format string of which two bytes ever mattered, and it
+//! takes those directly now.
 //!
 //! The escape decoding itself is [`crate::escape`], because the parser
 //! shares it: `$\'...\'` is the same decoder with `mbchar` set.

@@ -28,6 +28,15 @@ use std::sync::LazyLock;
 /// walked `main.rs` into the very cap it exists to give warning of.
 mod density;
 
+/// The one check whose subject is not the source at all but the plan the
+/// source cites: a comment giving a decision as its reason, for a decision
+/// the corpus no longer holds in force. It keeps its own module for the
+/// same two reasons `density` does -- it reads a checked-in file rather
+/// than a needle carried here as a constant, and `main.rs` is close enough
+/// to the density cap that a check's worth of functions would push it over
+/// the register mark.
+mod citations;
+
 /// A module's whole text: the file, and every file in the directory beside it.
 ///
 /// Every check here is about how a subsystem is *written*, not about which
@@ -1692,6 +1701,10 @@ fn main() {
         (
             "files_near_the_cap_are_registered",
             density::files_near_the_cap_are_registered,
+        ),
+        (
+            "cited_decisions_are_live",
+            citations::cited_decisions_are_live,
         ),
     ];
     let mut failed = 0_usize;
