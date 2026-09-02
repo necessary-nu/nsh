@@ -22,6 +22,8 @@
 
 use bstr::BString;
 
+use crate::characters::Characters;
+
 /// How much of the search space one whole search may visit.
 const STEP_BUDGET: u64 = 400_000;
 
@@ -134,27 +136,32 @@ impl Regex {
          * pattern into an unbounded run. */
         let mut steps = 0_u64;
         let mut start = 0;
+        /* One width table for the whole search. Every start offset walks
+         * the same subject, and the engine backtracks within each, so an
+         * offset asked about once is asked about again -- by the next
+         * branch, by the next repetition, and by the next start. */
+        let mut characters = Characters::of(locale, subject);
         loop {
-            if let Some(captures) = self.match_at(locale, subject, start, &mut steps) {
+            if let Some(captures) = self.match_at(&mut characters, start, &mut steps) {
                 return Some(captures);
             }
             if start >= subject.len() {
                 return None;
             }
-            start = character_end(locale, subject, start);
+            start = characters.end(start);
         }
     }
 
     fn match_at(
         &self,
-        locale: &nsh_platform::Locale,
-        subject: &[u8],
+        characters: &mut Characters<'_>,
         start: usize,
         steps: &mut u64,
     ) -> Option<Captures> {
         let mut matcher = Matcher {
-            locale,
-            subject,
+            locale: characters.locale,
+            subject: characters.bytes,
+            characters,
             groups: vec![None; self.group_count + 1],
             steps,
             depth: 0,
@@ -465,31 +472,23 @@ fn fold_case(bytes: &[u8]) -> Vec<u8> {
     }
 }
 
-fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usize {
-    if at >= bytes.len() {
-        return at;
-    }
-    let width = locale
-        .multibyte_len(&bytes[at..])
-        .filter(|width| *width > 0)
-        .unwrap_or(1);
-    (at + width).min(bytes.len())
-}
-
 // ---- matching --------------------------------------------------------
 
-struct Matcher<'a> {
-    locale: &'a nsh_platform::Locale,
-    subject: &'a [u8],
+struct Matcher<'a, 'b> {
+    locale: &'b nsh_platform::Locale,
+    subject: &'b [u8],
+    /// Where the locale has already said this subject's characters end,
+    /// shared with every other start offset this search tries.
+    characters: &'a mut Characters<'b>,
     groups: Vec<Option<(usize, usize)>>,
     steps: &'a mut u64,
     depth: u32,
     ignore_case: bool,
 }
 
-type Continue<'a> = dyn FnMut(&mut Matcher<'_>, usize) -> bool + 'a;
+type Continue<'a> = dyn FnMut(&mut Matcher<'_, '_>, usize) -> bool + 'a;
 
-impl Matcher<'_> {
+impl Matcher<'_, '_> {
     /// Charge one step, take one frame, and explore the expression.
     ///
     /// Every recursion in this matcher passes through here, so the two
@@ -632,11 +631,11 @@ impl Matcher<'_> {
     }
 
     /// Match one single-character atom, returning where it ends.
-    fn single(&self, expr: &Expr, pos: usize) -> Option<usize> {
+    fn single(&mut self, expr: &Expr, pos: usize) -> Option<usize> {
         if pos >= self.subject.len() {
             return None;
         }
-        let end = character_end(self.locale, self.subject, pos);
+        let end = self.characters.end(pos);
         match expr {
             Expr::AnyCharacter => Some(end),
             Expr::Literal(bytes) => self

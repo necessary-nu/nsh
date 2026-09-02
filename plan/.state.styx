@@ -1447,7 +1447,7 @@ assertions (
     {id quote-the-set-listing-as-bash-quotes-it, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:59:17.63390239Z}
     {id quote-a-subscript-the-way-bash-quotes-one, kind @complete, author "brendan@necessary.nu", at 2026-09-02T15:34:06.01782486Z}
     {id mark-the-shell-facts-bash-marks, kind @complete, author "brendan@necessary.nu", at 2026-09-02T15:52:55.903431341Z}
-    {id commit-only-the-paths-a-node-staged, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:16:46.524276819Z}
+    {id commit-only-the-paths-a-node-staged, kind @complete, author "brendan@necessary.nu", at 2026-09-02T18:08:17.33535695Z}
     {id stop-selecting-the-locale-per-byte-everywhere-else, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:17:27.44352099Z}
     {id bound-what-a-prefix-or-suffix-trim-costs, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:17:46.118950239Z}
     {id tell-a-full-disk-from-a-compiler-bug, kind @complete, author "brendan@necessary.nu", at 2026-09-02T17:29:43.392437073Z}

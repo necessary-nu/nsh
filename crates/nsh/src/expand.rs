@@ -4,6 +4,7 @@
 //! structural transformations over parsed word parts. The `read` builtin
 //! shares the IFS classifier through a byte string plus a protection mask.
 
+use crate::characters::width as character_width;
 use crate::context::Shell;
 
 use bstr::{BStr, BString};
@@ -225,25 +226,6 @@ fn classify_ifs(shell: &Shell, bytes: &[u8], multibyte_length: usize) -> IfsMemb
 
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
 // [spec:dash:sem:expand.mbnext-fn]
-fn character_length(locale: &nsh_platform::Locale, bytes: &[u8]) -> usize {
-    let Some(first) = bytes.first() else {
-        return 0;
-    };
-    if first.is_ascii() {
-        return 1;
-    }
-
-    let mut decoder = locale.decoder();
-    for (index, byte) in bytes.iter().copied().take(16).enumerate() {
-        match decoder.push(byte) {
-            nsh_platform::LocaleDecode::Incomplete => {}
-            nsh_platform::LocaleDecode::Complete(_) => return index + 1,
-            nsh_platform::LocaleDecode::Invalid => return 1,
-        }
-    }
-    1
-}
-
 fn split_fields_slow(
     shell: &Shell,
     split_state: &mut FieldSplitState,
@@ -252,8 +234,17 @@ fn split_fields_slow(
     mut cursor: usize,
 ) -> usize {
     let mut character_start = cursor;
-    let multibyte_length =
-        character_length(&shell.locale, string.get(cursor..).unwrap_or_default());
+    /* Where `mbnext` was, and one question rather than one per byte: an
+     * incremental decoder fed a byte at a time reaches the same width,
+     * because C accumulates the same conversion state either way, but
+     * takes a thread-locale selection for each byte it is fed. The ASCII
+     * test stays because it keeps the locale out of the common case
+     * entirely, which no width question can do. */
+    let multibyte_length = match string.get(cursor) {
+        None => 0,
+        Some(byte) if byte.is_ascii() => 1,
+        Some(_) => character_width(&shell.locale, &string[cursor..]),
+    };
 
     let membership = classify_ifs(
         shell,

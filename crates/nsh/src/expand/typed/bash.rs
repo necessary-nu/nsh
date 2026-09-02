@@ -6,7 +6,8 @@
 
 use bstr::{BStr, BString, ByteSlice as _};
 
-use super::{Context, Expansion, Field, Value, character_end, expand_parts, value_expansion};
+use super::{Context, Expansion, Field, Value, expand_parts, value_expansion};
+use crate::characters::Characters;
 use crate::context::Shell;
 use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
@@ -668,6 +669,7 @@ fn replace(
         return result;
     }
 
+    let mut characters = Characters::of(locale, text);
     let mut at = 0;
     let mut replaced = false;
     while at < text.len() {
@@ -681,7 +683,7 @@ fn replace(
                 replaced = true;
             }
             Some(_) | None => {
-                let next = character_end(locale, text, at);
+                let next = characters.end(at);
                 result.extend_from_slice(&text[at..next]);
                 at = next;
             }
@@ -748,10 +750,11 @@ fn recase(
     every: bool,
 ) -> BString {
     let mut result = BString::new(Vec::new());
+    let mut characters = Characters::of(locale, text);
     let mut at = 0;
     let mut first = true;
     while at < text.len() {
-        let end = character_end(locale, text, at);
+        let end = characters.end(at);
         let character = &text[at..end];
         if (every || first) && pattern.matches(locale, character) {
             result.extend_from_slice(&map_case(character, upper));

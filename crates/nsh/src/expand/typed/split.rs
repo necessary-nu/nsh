@@ -5,7 +5,8 @@
 
 use bstr::BString;
 
-use super::{Field, character_end, effective_ifs};
+use super::{Field, effective_ifs};
+use crate::characters::{Characters, width};
 use crate::context::Shell;
 
 // [spec:dash:sem:expand.removerecordregions-fn]
@@ -26,7 +27,7 @@ fn separators(locale: &nsh_platform::Locale, ifs: &[u8]) -> Vec<IfsCharacter> {
     let mut result = Vec::new();
     let mut at = 0;
     while at < ifs.len() {
-        let end = character_end(locale, ifs, at);
+        let end = at + width(locale, &ifs[at..]);
         let bytes = BString::from(&ifs[at..end]);
         let whitespace = locale
             .decode_exact(&bytes, bytes.len())
@@ -38,12 +39,12 @@ fn separators(locale: &nsh_platform::Locale, ifs: &[u8]) -> Vec<IfsCharacter> {
 }
 
 fn separator_at<'a>(
-    locale: &nsh_platform::Locale,
+    characters: &mut Characters<'_>,
     field: &Field,
     ifs: &'a [IfsCharacter],
     at: usize,
 ) -> Option<(&'a IfsCharacter, usize)> {
-    let end = character_end(locale, &field.bytes, at);
+    let end = characters.end(at);
     field
         .range_is_splittable(at..end)
         .then(|| {
@@ -67,24 +68,28 @@ fn field_into_fields(
         };
     }
 
+    /* One width table for the whole field: `separator_at` asks where the
+     * character at an offset ends, and the walk asks the same question
+     * again at every offset that is not a separator. */
+    let mut characters = Characters::of(locale, &field.bytes);
     let mut result = Vec::new();
     let mut start = 0;
     let mut at = 0;
     while at < field.bytes.len() {
-        let Some((separator, mut next)) = separator_at(locale, &field, ifs, at) else {
-            at = character_end(locale, &field.bytes, at);
+        let Some((separator, mut next)) = separator_at(&mut characters, &field, ifs, at) else {
+            at = characters.end(at);
             continue;
         };
 
         if separator.whitespace {
-            next = skip_whitespace(locale, &field, ifs, next);
+            next = skip_whitespace(&mut characters, &field, ifs, next);
             let following_nonwhite = (next < field.bytes.len())
-                .then(|| separator_at(locale, &field, ifs, next))
+                .then(|| separator_at(&mut characters, &field, ifs, next))
                 .flatten()
                 .filter(|(following, _)| !following.whitespace);
             if let Some((_, end)) = following_nonwhite {
                 result.push(field.slice(start..at));
-                start = skip_whitespace(locale, &field, ifs, end);
+                start = skip_whitespace(&mut characters, &field, ifs, end);
                 next = start;
             } else if at > start || field.has_empty_anchor(start..=at) {
                 result.push(field.slice(start..at));
@@ -97,7 +102,7 @@ fn field_into_fields(
         }
 
         result.push(field.slice(start..at));
-        start = skip_whitespace(locale, &field, ifs, next);
+        start = skip_whitespace(&mut characters, &field, ifs, next);
         at = start;
     }
 
@@ -112,13 +117,13 @@ fn field_into_fields(
 }
 
 fn skip_whitespace(
-    locale: &nsh_platform::Locale,
+    characters: &mut Characters<'_>,
     field: &Field,
     ifs: &[IfsCharacter],
     mut at: usize,
 ) -> usize {
     while at < field.bytes.len() {
-        let Some((following, end)) = separator_at(locale, field, ifs, at) else {
+        let Some((following, end)) = separator_at(characters, field, ifs, at) else {
             break;
         };
         if !following.whitespace {

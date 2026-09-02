@@ -11,6 +11,7 @@ use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 use super::{ExpandedField, ExpandedFields, ExpansionMode};
+use crate::characters::boundaries as character_boundaries;
 use crate::context::Shell;
 use crate::error::Error;
 use crate::nodes::Node;
@@ -560,27 +561,6 @@ use parameter::{
 
 fn character_count(locale: &nsh_platform::Locale, bytes: &[u8]) -> usize {
     character_boundaries(locale, bytes).len().saturating_sub(1)
-}
-
-fn character_boundaries(locale: &nsh_platform::Locale, bytes: &[u8]) -> Vec<usize> {
-    let mut boundaries = vec![0];
-    let mut at = 0;
-    while at < bytes.len() {
-        at = character_end(locale, bytes, at);
-        boundaries.push(at);
-    }
-    boundaries
-}
-
-fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usize {
-    if at >= bytes.len() {
-        return bytes.len();
-    }
-    let width = locale
-        .multibyte_len(&bytes[at..])
-        .filter(|width| *width > 0 && at + width <= bytes.len())
-        .unwrap_or(1);
-    at + width
 }
 
 // [spec:posix:req:expand.cmdsub-semantics]

@@ -561,7 +561,7 @@ pub(super) fn first_ifs_character(shell: &Shell) -> &[u8] {
     if ifs.is_empty() {
         return b"";
     }
-    let width = character_end(&shell.locale, ifs, 0);
+    let width = crate::characters::width(&shell.locale, ifs);
     &ifs[..width]
 }
 

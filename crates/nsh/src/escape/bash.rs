@@ -62,20 +62,16 @@ pub(crate) fn needs_ansi_c(locale: &nsh_platform::Locale, value: &BStr) -> bool 
 /// cover it. `print` is asked through the locale's own character classes
 /// rather than through a second entry point for the same question.
 fn printable_character_width(locale: &nsh_platform::Locale, bytes: &[u8]) -> Option<usize> {
-    let mut decoder = locale.decoder();
-    for (offset, byte) in bytes.iter().copied().enumerate() {
-        match decoder.push(byte) {
-            nsh_platform::LocaleDecode::Complete(_) => {
-                let width = offset + 1;
-                return locale
-                    .wide_class_matches(b"print", bytes, width)?
-                    .then_some(width);
-            }
-            nsh_platform::LocaleDecode::Invalid => return None,
-            nsh_platform::LocaleDecode::Incomplete => {}
-        }
-    }
-    None
+    /* One question rather than one per byte. Feeding an incremental
+     * decoder a byte at a time reaches the same width -- C accumulates
+     * the same conversion state either way -- but takes a thread-locale
+     * selection for each byte, and these bytes are already in hand. A
+     * width of zero is the null character, which the loop this replaced
+     * reported as undecodable and which has no printable form here. */
+    let width = locale.multibyte_len(bytes).filter(|width| *width > 0)?;
+    locale
+        .wide_class_matches(b"print", bytes, width)?
+        .then_some(width)
 }
 
 /// `$'...'`: the only rendering that can carry an unprintable character

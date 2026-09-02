@@ -176,6 +176,7 @@ pub(crate) mod working_directory;
 // ---- parsing and expansion -------------------------------------------
 // [spec:nsh:req:idiom.module-boundaries]
 pub(crate) mod arithmetic;
+pub(crate) mod characters;
 pub(crate) mod expand;
 pub(crate) mod parser;
 pub(crate) mod pattern;

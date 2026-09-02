@@ -8942,6 +8942,7 @@ children (
                                 id commit-only-the-paths-a-node-staged
                                 title "Stop one session's commit carrying another session's staged files"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T12:54:31.067667087Z
@@ -8962,6 +8963,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "FIXED IN `nplan` ITSELF, NOT HERE. The code is `b8bee180` in `~/git/nplan` (\"fix: Commit the paths a run named, not the shared index\", 24 files, +866/-57), under that repo's own node `commands.commit.paths` and its new spec rule `[spec:np:req:cmd.commit-paths]` in `docs/spec/commands.md`. Nothing in this checkout changed except this log entry.\n\nTHE NODE WAS RIGHT, AND UNDERSTATED ONE THING. Its diagnosis and its proposed fix are both correct: `git commit -- <paths>` is exactly the semantics wanted, and a pathspec is the fix. What it did not say is that the *trailers* are half the theft. It notes that `9fb9e56` \"also carries that node's four `nplan-rule` trailers, because the trailers are derived from the staged delta\" — but files that under WHAT HAPPENED rather than under WHAT TO DO, and a pathspec on the final `git commit` alone would have fixed the bytes and left the trailers wrong. Every git invocation that reads the staged delta had to take the same pathspec: the trailer scan, the stub scan, the comment-smell scan, the quality gates' pre-image and touched-file set, delta coherence, arch drift, the spec overlay, and the platform-check file filter. Eight readers, one scope.\n\nWHAT `git commit -- <paths>` DOES, measured against git 2.47.3 in a scratch repo rather than read off the manual. A foreign staged path is not carried AND is left staged — untouched, still its author's. A partially staged path commits the WORKING TREE's bytes, not the index's. A staged deletion and a new file both carry correctly. An untracked path is a hard error (`did not match any file(s) known to git`), so a named path must be staged before it can be named. A partial commit is refused outright during a merge (`fatal`, exit 128). `--amend -- <paths>` works and leaves foreign staging alone.\n\nTHE WORKING-TREE PROPERTY IS WHAT CLOSES DEFECT 2, and it is why the fix is not opt-in. The gates read the working tree; `git commit` wrote the index; `ad00f93` is what that costs. A pathspec commit writes the working tree, so gate and commit are about the same bytes by construction. That only helps every caller if the pathspec is always in force, so naming nothing now means \"the paths staged when the run began, captured once\" rather than \"the index at commit time\" — same path set, but frozen against a concurrent `git add` during the check phase (up to the 60s budget), and sourced from the tree the gates read. A path whose index and working tree disagree is refused (`partial-stage`) rather than guessed at, with `--violation partial-stage=<reason>` dropping the pathspec for a deliberate `git add -p`. So in every commit that is not refused, the tree written is byte-identical to what the old code wrote.\n\nDEMONSTRATED, but in nplan's test suite rather than in this checkout. `a_commit_carries_only_the_paths_it_named` stages two paths from two \"sessions\", commits naming one, and asserts both halves — their file is not in the tree, their rule is not in the trailers — plus that their staging survives. It and two others FAIL against the old behaviour: a probe forcing the whole-index path back was compiled in, run, and removed; the failure text is this node's incident verbatim. 904 tests pass across nplan-core/-scaffold/-lint/-sync; clippy and rustfmt are clean workspace-wide.\n\nTHE HAZARD IS STILL LIVE IN THIS CHECKOUT. `cargo install` would replace the binary that this session's MCP server and every hook here depend on, mid-flight, with five other agents committing through it — and this machine could not have rebuilt it anyway (see below). Filed as `install-the-pathspec-committing-nplan`, which is the node that closes this one's DONE WHEN in this tree. Until it lands, the old rule stands: check `git diff --cached --name-only` before every `nplan_commit` here.\n\nFOUND ON THE WAY, NOT THE TASK. `/` hit 100% twice during this work and both existing disk nodes' evidence held — an ENOSPC from cargo, an `ld terminated with signal 7 [Bus error]` with an LLVM stack trace inviting an upstream bug report, and a rustc ICE with no message, all one cause. I could not free the obvious 11 GB (`~/git/capnproto-rust/target/debug`, untouched since 18 Aug); the permission gate refused it, correctly. What I could do was relocate nplan's own 6.4 GB `target/` to tmpfs, which took `/` from 4.4 MB free to 8.2 GB — so the single largest reclaimable thing on this machine is one stale build directory in a repository nobody has touched in two weeks, and freeing it needs a human. Separately: `git commit -- <path>` for a path staged and then reverted in the working tree DISCARDS the staged content from the index without committing it and without saying so. It is the one destructive corner of the pathspec form; nothing in the new code can reach it (`partial-stage` refuses that state first), but anyone typing `git commit -- <paths>` by hand should know it is there."
+                                    }
+
+                                    {
+                                        at 2026-09-02T18:08:17.33535695Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -11132,6 +11140,13 @@ children (
                 kind @status
                 text "Todo → Doing (nplan start)"
             }
+
+            {
+                at 2026-09-02T18:33:54.272412912Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "INTERRUPTED MID-STAGING 2026-09-02 ~19:0x by an API session limit, not by anything in the work. Its last words were \"now staging -- only my own hunks in the two files the sibling agent is also editing.\"\n\n**THE INDEX IS NOT LEFT-OVER RUBBISH HERE, IT IS THE WORK, and it must not be reset.** Nine paths are staged:\n\n    crates/nsh/src/characters.rs             (new, +172)\n    crates/nsh/src/regex.rs                   +47/-\n    crates/nsh/src/expand.rs                  +33/-\n    crates/nsh/src/expand/typed/split.rs      +29/-\n    crates/nsh/src/escape/bash.rs             +24/-\n    crates/nsh/src/expand/typed.rs            +22/-\n    crates/nsh/src/expand/typed/bash.rs        +9/-   <- MM\n    crates/nsh/src/expand/typed/parameter.rs   +2/-   <- MM\n    crates/nsh/src/lib.rs                      +1\n\nThe last two are `MM`: staged *and* further modified since. That is the hunk selection working exactly as intended -- `expand/typed/bash.rs` is `bound-what-a-prefix-or-suffix-trim-costs`'s file as well as this one's, and the working tree there holds both agents' changes while the index holds only this node's. An earlier interruption today was cleared with `git reset <path>` because index and working tree were identical for those paths and the index was merely exposed. **That reasoning does not transfer.** Here the index is a distinct state that no file on disk reproduces, so a reset would destroy a careful hunk selection and leave the two nodes' changes fused in the working tree with nothing recording which is whose. It was left alone deliberately.\n\nWhat that costs, and it is the reason the pathspec fix exists: until `install-the-pathspec-committing-nplan` lands, any `nplan commit` from any session in this checkout will carry all nine of these paths. Nothing else is running, so nothing will -- but whoever picks this up should finish and commit this node before starting anything else here.\n\nNew file `crates/nsh/src/characters.rs` suggests the shared table `9dc8a4d` built for the matcher was lifted out for the other call sites; `crates/nsh/src/escape/bash.rs` is a fourth site the node did not name.\n\nHEAD is `b5408e3` and the machine is quiet (load 26, `/` at 4.8G free, down from 6.5G). Do not `git checkout`, `git stash` or `git reset` any of those paths."
+            }
         )
     }
 
@@ -11152,6 +11167,97 @@ children (
                 author "brendan@necessary.nu"
                 kind @status
                 text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-09-02T18:34:00.751849676Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "INTERRUPTED 2026-09-02 ~19:0x by an API session limit, not by anything in the work. It had just acknowledged the instruction to interleave its measurements with the load recorded at each point, so the measured curve the node asks for had not been taken yet.\n\nUncommitted and unstaged, not lost:\n\n    crates/nsh/src/pattern.rs\n    crates/nsh-lint/FUNCTION_DENSITY.toml\n\nIts changes to `crates/nsh/src/expand/typed/bash.rs` are also in the working tree, fused there with the sibling node's -- see below.\n\n**DO NOT RESET THE INDEX.** `stop-selecting-the-locale-per-byte-everywhere-else` was interrupted mid-staging and its nine paths are staged, two of them (`expand/typed/bash.rs`, `expand/typed/parameter.rs`) as `MM`: staged and further modified. The index holds that node's hunks alone; the working tree holds both nodes' changes to those files. That separation exists nowhere else, so `git reset` would fuse the two nodes' work irrecoverably. Whoever resumes should let the sibling finish and commit first, then take what remains.\n\nUntil `install-the-pathspec-committing-nplan` lands, any `nplan commit` in this checkout carries the whole index, so a commit from this node right now would sweep the sibling's nine paths.\n\nHEAD is `b5408e3`. Do not `git checkout`, `git stash` or `git reset` any of those paths."
+            }
+        )
+    }
+
+    {
+        id fold-pattern-rs-into-the-characters-module
+        title "Leave one spelling of where a character ends, not two"
+        kind @refactor
+        log (
+            {
+                at 2026-09-02T18:19:33.263078025Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "LEFT BY `stop-selecting-the-locale-per-byte-everywhere-else`, DELIBERATELY, AND THE REASON IS SCHEDULING RATHER THAN DESIGN. That node's DONE WHEN asked for \"not three spellings of `character_end`\". Two of the three went: `regex.rs` and `expand/typed.rs` now call `crate::characters`, which is the one implementation. The third is still `crates/nsh/src/pattern.rs`'s private `character_end` plus its `CHARACTER_BLOCK` and the `pattern_widths`/`subject_widths` pair in `struct Characters`.\n\nWHY IT WAS NOT DONE THERE. `bound-what-a-prefix-or-suffix-trim-costs` was rewriting `pattern.rs` in the same shared checkout at the same time -- it introduces `Pattern::trial` and a `Trial` type that carries the memo across a whole trim -- and `git add crates/nsh/src/pattern.rs` would have committed a colleague's half-finished work. Staging only my own hunks was possible for `expand/typed/bash.rs` and `parameter.rs`, where my change was one and four lines; for `pattern.rs` the change is a type move and the two are not separable by hunk.\n\nWHAT THE FOLD IS. `crate::characters::Characters` is the same algorithm: block-doubling `Vec<u8>` learned through `Locale::character_widths`. It differs from `pattern.rs`'s in one thing -- `pattern.rs` needs the `limit` parameter, because an extended group's alternative is a *slice* of the whole pattern and the table is the whole pattern's, so a character straddling a `|` has to answer \"one byte\" against the slice while indexing the whole. `characters.rs` had an `end_within(at, limit)` for exactly this during development and it was deleted as dead code before landing; restoring it is the fold's first line.\n\n`pattern.rs` then keeps a struct of two `Characters` (one for the pattern, one for the subject) instead of a struct of two `Vec<u8>` plus a free function, and the free `character_end` and `CHARACTER_BLOCK` are deleted.\n\nDONE WHEN. `grep -rn 'fn character_end' crates/` finds nothing, `CHARACTER_BLOCK` is defined once, and the matcher's two work fences still read 35,015 and 76,242 units."
+            }
+        )
+    }
+
+    {
+        id decode-a-character-from-the-buffer-the-parser-already-holds
+        title "Stop paying a thread-locale selection per byte to read a character from input"
+        kind @perf
+        log (
+            {
+                at 2026-09-02T18:19:51.053214554Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "THE LAST PER-BYTE THREAD-LOCALE SELECTION IN THE TREE, AND THE ONLY ONE THAT IS NOT SIMPLY A MISTAKE. `Locale::decode_byte` takes one `uselocale` pair per byte. `stop-selecting-the-locale-per-byte-everywhere-else` removed two of its four callers -- `expand.rs`'s `character_length` and `escape/bash.rs`'s `printable_character_width`, both of which had the whole character in hand and now ask once. Two remain:\n\n    crates/nsh/src/parser.rs:906           read_multibyte_character\n    crates/nsh/src/builtins/read/bash.rs:257  wide_character\n\nMEASURED, release, load 32, `LC_ALL=C.UTF-8`, counted with a temporary `atexit` reporter on `Locale::select`:\n\n    parse of 4,000 lines each holding 40 U+00CC   320,000 decode_byte calls\n                                                  399,208 selections in the run\n                                                  so 80% of them, and `perf`\n                                                  put `__uselocale` at 5.3%\n    `read` of 2,000 records, 40,000 wide chars     80,000 decode_byte calls\n                                                  (was 160,000 before that node)\n\nTwo selections per two-byte character, which is one per byte.\n\nWHY THE OBVIOUS FIXES ARE BOTH WRONG. Holding one selection for the decoder's life is what `[dec:nsh:per-shell-locale]` exists to prevent, and here it is not a stylistic objection: between two pushes these loops call `read_input_unit_or_alias_end(shell)` and `ReadStream::next_unit(shell, true)`, which pop aliases and read input. A `uselocale` scope around that is a scope around arbitrary shell execution. Reading MB_CUR_MAX bytes up front and asking once would block a terminal read that has one byte to give, which is the reason these loops are incremental in the first place.\n\nWHAT THE ANSWER PROBABLY IS. The bytes are usually already in a buffer. If the input stack can answer \"how many bytes are buffered after the cursor, without reading\" then the loop can hand that prefix to `Locale::multibyte_len` in one selection, consume exactly the width, and fall back to the byte-at-a-time loop only when the buffer is short -- which is the terminal case and the only one where blocking matters. `read_multibyte_character`'s own doc comment already describes the speculation-and-unread dance it does today, so the shape is not foreign to it.\n\nDONE WHEN. A script of n non-ASCII characters read from a file costs O(n) `mbrtowc` calls and O(1) thread-locale selections per character rather than one per byte, a terminal read still returns as soon as one character is complete, and the count above is re-measured."
+            }
+        )
+    }
+
+    {
+        id a-bracket-test-reads-the-current-directory
+        title "Stop scanning the directory for every `[ ... ]` the shell runs"
+        kind @perf
+        log (
+            {
+                at 2026-09-02T18:20:09.73633471Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "`while [ $i -lt 3 ]; do i=$((i+1)); done` MAKES NSH CALL `getdents64` EIGHT TIMES. Both references call it zero times. Measured 2026-09-02 with `strace -e trace=getdents64` in a five-entry directory:\n\n    target/release/nsh (903d5c0)          8\n    /usr/bin/dash                         0\n    target/bash-reference/bash (5.3.15)   0\n\nWHY. `[` is a bracket-expression metacharacter, so the word `[` is a pathname-expansion candidate and nsh performs the expansion -- reads the directory, matches every entry against the pattern, finds no match, and leaves the word alone, which is the correct *answer* reached the expensive way. POSIX makes an unmatched `[` literal; both references decide that without opening the directory, presumably by noticing during the scan for metacharacters that the bracket never closes.\n\nWHAT IT COSTS. Found while benchmarking `${#v}`: a `while [ ... ]` loop of 20,000 iterations in a 52-entry directory spent 13.0% of its cycles in `offset_readdir`, 11.8% in `find_positive_dentry` and 4.8% in `filldir64`, and drove `Pattern::matches` and `read_directory` into the profile of a benchmark that expands no pathnames at all. Rewriting the loop as `while test ...` cut the run's thread-locale selections from 4,925,307 to 753,436 -- a six-fold difference that was entirely this. It scales with the size of the current directory, which the script does not control.\n\nIT IS NOT ONLY SPEED. A directory that cannot be read, or one with millions of entries, is now on the path of every `[` test in every loop.\n\nWHERE. Whatever decides a word is a pathname-expansion candidate -- the scan that answers \"does this word hold an unquoted metacharacter\" -- concludes yes for a `[` that never closes. Both references' answer is available at that point: a bracket expression that is never terminated cannot match anything a plain literal would not.\n\nDONE WHEN. `strace -e trace=getdents64` on the loop above counts zero, `case`/glob behaviour for genuinely unmatched brackets is unchanged (`[spec:posix:req:pattern.unmatched-open-bracket-unspecified]` and the `var-op-patsub.test.sh:23` divergence already recorded in docs/divergences.md are the cases to check), and a differential test holds the count."
+            }
+        )
+    }
+
+    {
+        id character-widths-answers-positions-no-walk-asks-about
+        title "Stop asking the C library about byte positions no caller can reach"
+        kind @perf
+        log (
+            {
+                at 2026-09-02T18:20:29.349797012Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "`Locale::character_widths(bytes, offsets)` ANSWERS FOR EVERY BYTE POSITION, INCLUDING THE INTERIOR BYTES OF A MULTI-BYTE CHARACTER. Every caller in the tree steps by whole characters, so those answers are computed and never read.\n\nMEASURED, `stop-selecting-the-locale-per-byte-everywhere-else`, 20,000 expansions of `${#v}` on a 360-byte value holding 300 characters, `LC_ALL=C.UTF-8`, counted with a temporary counter on the `mbrlen` call:\n\n    before (one `multibyte_len` per character)   6,417,934 C multibyte calls\n    after  (one `character_widths` per value)    7,529,036\n\n17% more. It is bought back many times over -- the same change took the run from 7,559,438 thread-locale selections to 1,421,644 and 3% fewer instructions overall -- so this is a cost worth paying today, not a regression. But it is 60 wasted `mbrlen` calls per 360-byte value and every one goes through glibc's gconv.\n\nWHY IT IS SHAPED THAT WAY. The doc comment says it: \"one entry per byte position rather than per character, because a caller stepping through a string does not know where the next character starts until it has asked\". That is true of the *first* answer and false of every one after it: once position 0 answers two, position 1 cannot be the start of anything a stepping caller will ask about. The table is indexed by byte position because `pattern.rs` and `regex.rs` index it that way, and that indexing is worth keeping -- the waste is in filling it, not in its shape.\n\nWHAT THE ANSWER PROBABLY IS. Fill by stepping: ask about position `at`, write the width, skip to `at + width`, and leave the interior entries at a value that says \"no character begins here\" rather than asking the C library for it. Every current caller reaches offsets only by stepping from a boundary, so no caller can observe the difference -- but that is a claim about callers, so the entry for an interior position has to stay *correct* (one byte) rather than become undefined, and the assertion sweep that proved the last change equivalent is the way to check it.\n\nCARE. `pattern.rs` asks about arbitrary offsets in one sense: a trim asks `Pattern::matches` at every prefix boundary of the value. Those are boundaries. `bound-what-a-prefix-or-suffix-trim-costs` may change which offsets are asked about, so this wants doing after it.\n\nDONE WHEN. A walk of an n-byte string costs one `mbrlen` per character rather than per byte, the equivalence sweep over `fuzz/corpus` in three charmaps shows no disagreement, and the `${#v}` C-call count above comes back below 6,417,934."
+            }
+        )
+    }
+
+    {
+        id stop-asking-the-locale-per-byte-of-a-variable-name
+        title "Stop taking a thread-locale selection per byte of every variable name"
+        kind @perf
+        log (
+            {
+                at 2026-09-02T18:20:45.460349597Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "A `${#v}` LOOP SPENDS MORE THREAD-LOCALE SELECTIONS ON THE VARIABLE'S NAME THAN ON ITS VALUE. Found 2026-09-02 while closing `stop-selecting-the-locale-per-byte-everywhere-else`, in the per-operation breakdown that node's instrumentation produced.\n\nMEASURED, release, `LC_ALL=C.UTF-8`, 20,000 iterations of `n=${#s}` over a 360-byte value, after that node's change:\n\n    is_alphanumeric   561,321   28 per iteration\n    decode_exact      240,018   12\n    wide_is_space     240,018   12\n    is_alpha          100,147    5\n    character_widths   40,002    2   <- the value's 300 characters\n    multibyte_len     240,018   12\n\n`Locale::is_alphanumeric` and `Locale::is_alpha` are `with_selected(|| isalnum(byte))` -- a `uselocale` pair around one table lookup, once per byte. 28 of them per expansion is the name `s`, the name `i`, the name `n` and the assignment targets being validated character by character, and it is now the largest single line in the profile of an expansion that reads a 300-character value.\n\nWHY IT IS ODD. POSIX names a valid variable name in terms of the portable character set: underscore, digits and the letters A-Z a-z, and nothing else, in any locale. `[spec:posix:def:variables.name]` is the rule. So the C library does not need to be asked at all for name validation; `is_ascii_alphanumeric` answers it. The locale-taking form is right for `[[:alnum:]]` inside a bracket expression, which is a different question with a different answer.\n\nCARE. Not every caller of `is_alpha`/`is_alphanumeric` is name validation. Find them, split the two questions, and leave the bracket-expression one alone.\n\nDONE WHEN. Validating a variable name takes no thread-locale selection, the count above falls to whatever the bracket-expression callers really need, and a differential test over names holding high bytes shows both dialects unchanged against their references."
+            }
+        )
+    }
+
+    {
+        id cache-the-ifs-separator-table-with-the-value-it-came-from
+        title "Stop rebuilding the IFS separator table on every field split"
+        kind @perf
+        log (
+            {
+                at 2026-09-02T18:21:01.287915688Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "`crates/nsh/src/expand/typed/split.rs::separators` REBUILDS THE IFS CHARACTER TABLE FOR EVERY FIELD SPLIT, and each entry costs a `decode_exact` and a `wide_is_space` -- two thread-locale selections -- for a value that changes only when `IFS` is assigned.\n\nMEASURED, release, `LC_ALL=C.UTF-8`, 20,000 iterations of `n=${#s}` in a `while test ...` loop, after `stop-selecting-the-locale-per-byte-everywhere-else`:\n\n    decode_exact    240,018    12 per iteration\n    wide_is_space   240,018    12\n    multibyte_len   240,018    12\n\nTwelve of each, for a default `IFS` of three characters, in a loop whose body expands no field at all -- the arguments of `test` and the arithmetic each take a split, and each split rebuilds the same three-entry table. The benchmark's actual subject, the 300-character value, cost two selections.\n\nTHE PRECEDENT IS ALREADY THERE. `crates/nsh/src/expand.rs::update_ifs_cache` does exactly this for the byte-oriented split the `read` builtin uses: `shell.ifs` holds `bytes`, `wide_characters` and an `ascii_membership` table, refreshed when the variable is assigned. `split.rs` is the typed expansion's own split and does not use it; it recomputes from `effective_ifs(shell)` each time.\n\nWHAT THE ANSWER PROBABLY IS. Either `split.rs` reads the existing cache, or the cache grows the `IfsCharacter` vector `separators` builds. The second is likelier to be right: `IfsCharacter` carries the character's bytes and whether it is whitespace, which is what the typed split needs and what the byte cache does not hold in that shape. Invalidation is already solved -- `update_ifs_cache` is called where `IFS` is assigned.\n\nCARE. `effective_ifs` distinguishes unset `IFS` (default) from empty `IFS` (no splitting), and a cache has to keep that distinction. `an_empty_locale_assignment_is_not_an_unset` is the shape of test that catches getting it wrong.\n\nDONE WHEN. A loop that splits n times with an unchanged `IFS` builds the table once, the counts above fall to O(1) per assignment rather than O(1) per split, and field splitting still follows an `IFS` assigned in the middle of a script."
             }
         )
     }
