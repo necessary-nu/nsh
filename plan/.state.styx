@@ -1434,10 +1434,12 @@ assertions (
     {id stop-selecting-the-locale-per-character, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:18:13.776036539Z}
     {id accept-newlines-inside-a-conditional, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:19:12.153259249Z}
     {id build-the-survey-baseline-from-what-is-committed, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:54:43.617828026Z}
-    {id contain-the-workspace-tests-that-run-cases, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:25:06.793356084Z}
+    {id contain-the-workspace-tests-that-run-cases, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:55:17.219508871Z}
     {id spell-a-valueless-name-back, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:26:20.399911392Z}
     {id apply-a-declaring-builtin-through-the-reference, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:45:11.445443261Z}
     {id keep-allexport-off-an-array, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:46:17.138479862Z}
+    {id spend-the-wrappers-budget-inside-the-boundary, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:55:22.428429632Z}
+    {id refuse-to-regenerate-a-file-another-session-changed, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:55:46.697045361Z}
 )
 
 impl_evidence (
