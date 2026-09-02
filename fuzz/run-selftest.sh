@@ -63,6 +63,26 @@ if env NSH_FUZZ_REPLAY_ALLOWANCE=x "$runner" --dry-run parse 1 >/dev/null 2>&1; 
     fail 'a non-numeric NSH_FUZZ_REPLAY_ALLOWANCE was accepted'
 fi
 
+# A campaign seeds from whatever `fuzz/corpus.sh seed` says to seed from --
+# the campaign corpus once something has derived one, the whole archive until
+# then. Asserting they agree rather than asserting which is which is what
+# makes this independent of whether this checkout has derived anything.
+seeded_from=$("$root/fuzz/corpus.sh" seed "$root/fuzz/corpus/parse" \
+    "$root/fuzz/campaign/parse" 2>/dev/null | head -1)
+expect_contains "$budgeted" "release/parse $seeded_from "
+
+# Deriving is a third thing to stop after, and it is the archive that goes in
+# and the campaign corpus that comes out.
+derived=$(env -u CODEX_SESSION_ID -u CODEX_PERMISSION_PROFILE \
+    "$runner" --dry-run --derive parse 2>&1)
+expect_contains "$derived" "$root/fuzz/corpus.sh derive"
+expect_contains "$derived" "release/parse $root/fuzz/corpus/parse $root/fuzz/campaign/parse"
+[[ $derived != *budget.sh* ]] || fail 'a derivation went through the fuzzing budget'
+
+if "$runner" --build --derive --dry-run parse >/dev/null 2>&1; then
+    fail '--build and --derive were accepted together'
+fi
+
 # The clocks themselves, against a stand-in that replays for four seconds
 # and then mutates for ever. The budget must start at the fuzzer's INITED
 # line: a three-second budget behind a four-second replay ends at about
@@ -155,7 +175,7 @@ EOF
 chmod +x "$sweep_tree/fuzz/target/$sweep_triple/release/example"
 
 for i in $(seq 0 63); do
-    printf '20000\n' >"$sweep_tree/fuzz/corpus/example/seed-$i"
+    printf '5000\n' >"$sweep_tree/fuzz/corpus/example/seed-$i"
 done
 
 # The allowance is pinned low so the stand-in's "slow" input can be eighty
@@ -171,8 +191,8 @@ sweep_run() {
 # A slow unit that still costs eighty ordinary inputs is live and one that
 # costs eight of them is not. Neither replay fails, so the exit status says
 # nothing about either, which is the whole point.
-printf '1600000\n' >"$sweep_tree/fuzz/artifacts/example/slow-unit-still-slow"
-printf '160000\n' >"$sweep_tree/fuzz/artifacts/example/slow-unit-now-fast"
+printf '400000\n' >"$sweep_tree/fuzz/artifacts/example/slow-unit-still-slow"
+printf '40000\n' >"$sweep_tree/fuzz/artifacts/example/slow-unit-now-fast"
 sweep=$(sweep_run) || :
 expect_contains "$sweep" 'live      slow-unit-still-slow'
 [[ $sweep != *'live      slow-unit-now-fast'* ]] \
@@ -191,7 +211,7 @@ expect_contains "$sweep" 'against an allowance of 256x'
 # The status classes keep the status test: a crash artifact is live because
 # its replay fails, whatever it cost.
 printf 'crash\n' >"$sweep_tree/fuzz/artifacts/example/crash-still-crashing"
-printf '20000\n' >"$sweep_tree/fuzz/artifacts/example/crash-fixed"
+printf '5000\n' >"$sweep_tree/fuzz/artifacts/example/crash-fixed"
 sweep=$(sweep_run) || :
 expect_contains "$sweep" 'live      crash-still-crashing'
 expect_contains "$sweep" 'total: 2 live, 2 dead'
@@ -212,7 +232,7 @@ expect_contains "$sweep" 'pruned 1 closed artifact'
 # undecided rather than closed, and the sweep says so in its status.
 # `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`.
 mv "$sweep_tree/fuzz/corpus/example" "$sweep_tree/fuzz/corpus/example-kept"
-printf '160000\n' >"$sweep_tree/fuzz/artifacts/example/slow-unit-now-fast"
+printf '40000\n' >"$sweep_tree/fuzz/artifacts/example/slow-unit-now-fast"
 sweep=$(sweep_run) || :
 expect_contains "$sweep" 'undecided slow-unit-now-fast'
 expect_contains "$sweep" 'total: 0 live, 0 dead, 2 undecided'
@@ -220,3 +240,107 @@ if sweep_run >/dev/null; then
     fail 'a sweep that could measure nothing reported success'
 fi
 mv "$sweep_tree/fuzz/corpus/example-kept" "$sweep_tree/fuzz/corpus/example"
+
+# ---------------------------------------------------------------------------
+# fuzz/corpus.sh: two corpora, and keeping them in step.
+#
+# The archive is every input any campaign has kept and must never lose one;
+# the campaign corpus is what a campaign can afford to replay before it
+# mutates anything. A stand-in stands in for `-merge=1` here: what is being
+# checked is the bookkeeping around it -- that nothing leaves the archive,
+# that what a campaign finds gets back into it, that an input which reached
+# the archive after the derivation is still seeded, and that a merge which
+# files an artifact and exits zero is not read as a clean run.
+
+corpus_sh=$root/fuzz/corpus.sh
+archive=$work/archive
+campaign=$work/campaign/example
+artifacts=$work/artifacts
+mkdir -p "$archive" "$artifacts" "$work/campaign"
+for i in $(seq 0 19); do printf 'input %d\n' "$i" >"$archive/input-$i"; done
+
+cat >"$work/merges" <<'EOF'
+#!/usr/bin/env bash
+# Stand in for `TARGET -merge=1 OUT IN`. libFuzzer keeps the inputs that add
+# coverage; this keeps every other one, which is the same shape. An input
+# that says `crash` is skipped and filed as an artifact, and the merge still
+# exits zero -- which is the behaviour that makes the status unreadable.
+set -euo pipefail
+prefix=; out=; in=
+for argument in "$@"; do
+    case $argument in
+        -artifact_prefix=*) prefix=${argument#*=} ;;
+        -*) ;;
+        *) if [[ -z $out ]]; then out=$argument; else in=$argument; fi ;;
+    esac
+done
+kept=0
+for file in "$in"/*; do
+    [[ -f $file ]] || continue
+    if [[ $(cat "$file") == crash ]]; then
+        cp -- "$file" "$prefix/crash-${file##*/}"
+        continue
+    fi
+    if ((kept % 2 == 0)); then cp -- "$file" "$out/${file##*/}"; fi
+    kept=$((kept + 1))
+done
+exit 0
+EOF
+chmod +x "$work/merges"
+
+"$corpus_sh" derive "$work/merges" "$archive" "$campaign" "$artifacts" >/dev/null 2>&1 \
+    || fail 'a clean derivation reported failure'
+(($(ls -A "$archive" | wc -l) == 20)) || fail 'the derivation lost an archived input'
+(($(ls -A "$campaign" | wc -l) == 10)) || fail 'the derivation did not reduce the archive'
+(($(wc -l <"$campaign.archived") == 20)) \
+    || fail 'the derivation did not record what it was derived from'
+
+# With a campaign corpus in place a campaign seeds from it alone.
+seeds=$("$corpus_sh" seed "$archive" "$campaign" 2>/dev/null)
+[[ $seeds == "$campaign" ]] || fail "seeded from $seeds rather than the campaign corpus"
+
+# An input that reaches the archive out of band is seeded as well, so a
+# derivation going stale costs start-up and never costs coverage.
+printf 'arrived later\n' >"$archive/input-late"
+seeds=$("$corpus_sh" seed "$archive" "$campaign" 2>/dev/null)
+[[ $seeds == "$campaign"$'\n'"$campaign.delta" ]] \
+    || fail "an archived arrival was not seeded: $seeds"
+[[ -f $campaign.delta/input-late ]] || fail 'the arrival is not in the delta'
+(($(ls -A "$campaign.delta" | wc -l) == 1)) || fail 'the delta is not just the arrival'
+
+# What a campaign finds is written into the campaign corpus, and the archive
+# is the one that must not lose it.
+printf 'a new find\n' >"$campaign/found-by-the-campaign"
+"$corpus_sh" return "$archive" "$campaign" 2>/dev/null
+[[ -f $archive/found-by-the-campaign ]] || fail 'a campaign find never reached the archive'
+# ... and the record of what the campaign corpus stands for has to absorb it,
+# or the next campaign seeds its own last findings a second time.
+seeds=$("$corpus_sh" seed "$archive" "$campaign" 2>/dev/null)
+[[ $seeds == "$campaign"$'\n'"$campaign.delta" ]] || fail "seeded from $seeds after a return"
+(($(ls -A "$campaign.delta" | wc -l) == 1)) \
+    || fail 'a returned find was seeded back as an arrival'
+
+# With no campaign corpus at all, the archive is the seed -- the behaviour
+# every campaign had before there were two corpora.
+rm -rf "$campaign" "$campaign.archived" "$campaign.delta"
+seeds=$("$corpus_sh" seed "$archive" "$campaign" 2>/dev/null)
+[[ $seeds == "$archive" ]] || fail "without a campaign corpus it seeded from $seeds"
+
+# A merge is crash-resistant: it files the artifact, skips the input and
+# exits zero. Reading the status alone would call that a clean run, so the
+# artifact directory is what is read. `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`.
+printf 'crash\n' >"$archive/input-that-crashes"
+if "$corpus_sh" derive "$work/merges" "$archive" "$campaign" "$artifacts" >/dev/null 2>&1; then
+    fail 'a derivation that filed an artifact reported success'
+fi
+[[ -f $artifacts/crash-input-that-crashes ]] || fail 'the merge filed no artifact'
+[[ -f $archive/input-that-crashes ]] || fail 'the derivation removed the crashing input from the archive'
+[[ ! -f $campaign/input-that-crashes ]] || fail 'the campaign corpus kept the crashing input'
+compgen -G "$campaign/*" >/dev/null || fail 'a derivation that found something left no campaign corpus'
+
+if "$corpus_sh" derive "$work/merges" "$work/nothing" "$campaign" "$artifacts" >/dev/null 2>&1; then
+    fail 'a derivation from an archive that does not exist reported success'
+fi
+if "$corpus_sh" seed "$archive" >/dev/null 2>&1; then
+    fail 'fuzz/corpus.sh accepted seed with one argument'
+fi

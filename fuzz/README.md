@@ -89,17 +89,68 @@ statistics and exiting zero. The same `parse 10`, after:
 of the budget is read off the fuzzer rather than estimated from the corpus,
 so it stays right however large the corpus grows.
 
-What this costs is wall time: a campaign is its budget plus a replay that
-grows with the corpus, and `NSH_FUZZ_REPLAY_ALLOWANCE` has to be raised as
-that happens. It fails loudly and names itself when it is too low, which is
-the trade the obvious alternative does not offer: `cargo fuzz cmin` would
-keep short campaigns short by *discarding* inputs, and this corpus was
-seeded from the Smoosh and Oils suites precisely because real scripts reach
-constructs a generator takes a very long time to stumble into.
+What that left costing wall time is the replay itself, which grew with the
+corpus -- and the corpus grows every campaign. That is what the two corpora
+below are for.
 
 When the containment wall clock rather than the fuzzer's own budget is what
 stopped a run, the runner says so, so a truncated campaign cannot pass for
 one that measured and found nothing.
+
+## Two corpora
+
+`fuzz/corpus/TARGET` is the **archive**: every input any campaign has kept,
+seeded from the Smoosh and Oils suites, and it is the regression set. It
+grows without bound and nothing is ever deleted from it -- the seeded inputs
+are real scripts that reach constructs a generator takes a very long time to
+stumble into, which is exactly why `cargo fuzz cmin` is not the answer. It
+minimises in place and discards inputs; a minimised archive keeps the
+coverage and loses the provenance.
+
+`fuzz/campaign/TARGET` is the **campaign corpus**, derived from the archive
+and discarding nothing:
+
+    fuzz/run.sh --derive parse
+
+runs libFuzzer's own `-merge=1`, which executes every archived input against
+the current build and writes out a set reaching the same features -- so the
+expensive pass yields the regression evidence and the reduced set at once. A
+campaign then seeds from that set, whose size is bounded by how many distinct
+feature sets there are rather than by how many inputs have accumulated.
+Measured 2026-09-02, with the load beside every number because these are wall
+clocks:
+
+                     archive          campaign      replay before   after
+    parse         21,280  121 MB    2,639  15 MB    259s (load 93)   15s (load 107)
+    differential   2,949   12 MB    1,553   6 MB    146s (load 22)   88s (load 9)
+
+`fuzz/run.sh parse 10` went from 4m34 to 2m02 wall, and 95s of what is left
+is a build that was not on any clock either way; the campaign itself is 26s.
+`differential` gains less because its archive reduces by less -- the ratio of
+the two counts is the ratio of the two replays, which is what you would
+expect of a replay.
+
+Three things make it more than a one-liner, and all three are in
+`fuzz/corpus.sh`:
+
+* **Staleness.** The derivation records the archive listing it was derived
+  from. A campaign seeds from the campaign corpus *and* from whatever has
+  reached the archive since, so a derivation going stale costs start-up and
+  never costs coverage.
+* **Copy-back.** libFuzzer writes what it finds into the first corpus
+  directory it is given, which is now the campaign corpus. Every new input
+  goes back into the archive when the campaign ends, whatever the campaign's
+  status was.
+* **The merge is crash-resistant by design.** It skips an input that kills
+  the target, files the artifact and carries on -- so it writes findings and
+  exits zero. The derivation counts the artifact directory before and after
+  and reports on that rather than on the status, which is
+  `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`. The crashing input
+  stays in the archive and stays out of the campaign corpus, so no campaign
+  opens by re-running it, and `fuzz/sweep.sh` is what re-asks about it.
+
+With no campaign corpus the runner replays the whole archive, exactly as it
+always did, and says so.
 
 ## What a campaign has found
 

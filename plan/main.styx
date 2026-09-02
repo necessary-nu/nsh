@@ -8191,6 +8191,7 @@ children (
                                 id read-a-key-that-spells-an-assignment
                                 title "Read back the key a compound assignment wrote"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T05:36:28.406005593Z
@@ -8205,6 +8206,13 @@ children (
                                         kind @status
                                         text "Todo → Doing (nplan start)"
                                     }
+
+                                    {
+                                        at 2026-09-02T11:50:03.559380974Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
+                                    }
                                 )
                             }
 
@@ -8218,6 +8226,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found on 2026-09-02 while closing `close-associative-assignment-diagnostics`. The *assigning* half of `readonly -a`/`-A` was that node's item 6 and is done; the *listing* half is this, and it was out of that node's scope. Measured against the pinned Bash 5.3.15; pre-existing.\n\n`readonly` and `export` with no operands print the set. In Bash mode Bash prints declarations and this shell prints the POSIX form:\n\n    readonly -p\n      bash: declare -ar BASH_VERSINFO=([0]=\"5\" ...)\n            declare -ir EUID=\"1000\"      ... one `declare` line per name\n      nsh:  readonly BASHOPTS='...'      ... one `readonly NAME=value` line\n\nThe POSIX dialect's form is right and stays; it is Bash mode that has the wrong one. `variables::show_vars` writes one shape for both dialects and would take the renderer `declare -p` uses -- `variables::special::declaration_flags` and `declaration_value`, which `close-associative-assignment-diagnostics` extracted for `${name@A}` and which already exist for exactly this.\n\nAND THE ARRAY LETTERS FILTER THE LISTING, which is the second half:\n\n    readonly -a       bash: only the read-only *indexed* arrays (BASH_VERSINFO)\n    readonly -A       bash: nothing at all, there being no read-only associative one\n    readonly -pA      bash: nothing\n      nsh: all three print the whole read-only set\n\n`export`/`readonly` now accept `-a` and `-A` in Bash mode and use them to say how a compound operand is read; with no operand they still fall through to the unfiltered listing, because the listing's *form* has to be settled first -- filtering a listing that is in the wrong shape would only make it a shorter wrong shape.\n\nDONE WHEN. `readonly -p` and `export -p` print declarations in Bash mode and the POSIX form in the POSIX dialect, and `-a`/`-A` with no operands narrow the listing to that kind."
+                                    }
+
+                                    {
+                                        at 2026-09-02T11:50:37.286263943Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }
@@ -8466,6 +8481,34 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @blocker
                                         text "`--update-baseline` OVERWROTE ANOTHER SESSION'S UNCOMMITTED WORK, AND NOTHING COULD HAVE STOPPED IT. Done by me on 2026-09-02 while closing `give-the-failing-case-baseline-the-gates-control`; the file was reconstructed and restored within minutes, and the near-miss is the finding.\n\nWHAT HAPPENED. `tests/surveys/oils/BASH_COMPARISON_FAILURES.toml` had been re-recorded in the shared checkout by another session, which had dropped `assign.test.sh:19`, `assign.test.sh:45` and `glob.test.sh:37` from the failing list -- consistent with the uncommitted array and pathname work sitting in `crates/nsh/src/variables/*` and `crates/nsh/src/expand/typed/pathname.rs`, which is presumably fixing exactly those three. A comparison run against a shell built from HEAD reported all three as newly failing, which looked like a stale baseline; a refresh then wrote HEAD's answer over theirs. It was restored byte-for-byte from `HEAD` minus those three ids, which the comparison's own output proved was the whole of their change: 470 recorded, three `+` lines, no `-` lines.\n\nWHY IT IS THE TOOL'S PROBLEM AND NOT ONLY MINE. The generator's whole purpose is that the checked-in file is authoritative and machine-written. On a checkout with one worktree per session that is safe. On this one -- where five sessions share a tree and the house rules already forbid `git add -A`, `cargo fmt --all` and `git checkout <path>` for exactly this reason -- a generator that writes a tracked file is another way to discard work silently, and it is the one way that no rule currently covers.\n\nIt also produced a false diagnosis on the way through, which is the second cost: for twenty minutes the evidence said \"the checked-in baseline is stale by three deterministic failures\", and the three were bisected against a build of the commit that recorded it before the real explanation appeared.\n\nWHAT TO DO. `--update-baseline` should refuse when the file it is about to write differs from its committed content, unless the caller says to overwrite -- the same shape as the `mismatch` pins already in the file, one level up. It needs `git status --porcelain <path>` or an equivalent, which is more git than `nsh-survey` has today, so the alternative is a `--force` requirement plus printing the exact diff before writing. The same question applies to every generated tracked file in the repository, not only this one: `BASH_DISPOSITIONS.toml`, `BASH_REFERENCE_CASES.json` and `crates/nsh-lint/FUNCTION_DENSITY.toml` are all written or read as registers.\n\nDONE WHEN. A refresh of a tracked generated file that another session has modified is refused, names the difference, and says what to do -- and the refusal is tested rather than asserted."
+                                    }
+                                )
+                            }
+
+                            {
+                                id say-how-old-a-derived-corpus-is
+                                title "Say when the archive was last run against the build"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:50:15.941890913Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "THE RESIDUE OF `bound-what-a-campaign-pays-to-replay-its-corpus`, LEFT ON PURPOSE. That node moved the full-archive replay out of every campaign and into `fuzz/run.sh --derive`, which is what made `fuzz/run.sh parse 10` a 26-second campaign instead of a 274-second one. What it did not do is give anyone a reason to run the derivation again.\n\nWHAT IS TRACKED AND WHAT IS NOT. `fuzz/campaign/TARGET.archived` records the archive listing a derivation was made from, so a campaign knows what has *arrived* since and seeds those as well -- staleness never costs coverage. It records nothing about *when*, and nothing about *which build*. So:\n\n    fuzz/corpus.sh: seeding from 2659 campaign inputs standing for 21305 archived\n\nis printed every campaign and is true whether the archive was last run against this build or against the tree of three weeks ago. The archive is the regression set; a regression set nothing has run is not a regression set, and the honest reading of `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` is that a campaign should be able to say so.\n\nWHAT WOULD SAY IT. The derivation knows the commit it ran against and the time it ran; both belong beside the listing. A campaign could then print \"the archive was last run against 04582ce, 340 commits ago\" -- which is a fact, not a policy -- and a threshold could be argued about separately. The commit is the better half of the pair: wall-clock age says nothing when nothing has changed, and one commit to `crates/nsh/src/pattern.rs` says a great deal.\n\nNOT TO BE SOLVED BY RE-DERIVING AUTOMATICALLY. A derivation is a full replay -- 286s for `parse` at load 102, 149s for `differential` at load 22 -- and folding it back into every campaign would undo the node that removed it. The point is to make the cost visible, not to pay it silently.\n\nALSO HERE, because it is the same bookkeeping: the campaign corpus grows monotonically between derivations, by about twenty inputs a campaign, so the start-up it bounds creeps back up. Nothing reports that either, and the same stamp would.\n\nDONE WHEN. A campaign says what build the archive was last run against and how far the tree has moved since, the derivation records it, and neither answer costs a replay."
+                                    }
+                                )
+                            }
+
+                            {
+                                id quote-a-subscript-the-way-bash-quotes-one
+                                title "Refuse a single-quoted subscript on an indexed array as Bash refuses it"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:50:27.421970624Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `read-a-key-that-spells-an-assignment`, and not part of it: that node was about a *key*, and this is about an *index*. Measured against the pinned Bash 5.3.15 on `2a9d2e9`; pre-existing.\n\nAn indexed array's subscript is an arithmetic expression, and single quotes mean nothing in arithmetic, so Bash reports every one of these and this shell accepts them:\n\n    declare -a a=(1 2 3)\n    echo \"${a['1']}\"      bash: '1': arithmetic syntax error   nsh: 2\n    a['1']=z              bash: same, status 1                 nsh: assigns element 1\n    echo $(( a['1'] ))    bash: same                           nsh: 2\n    unset \"a['1']\"        bash: same                           nsh: removes element 1\n    n=1; echo \"${a['n']}\" bash: 'n': arithmetic syntax error   nsh: 2\n\nA *double*-quoted subscript is accepted by both -- `${a[\"1\"]}` is `2` everywhere -- because Bash removes double quotes from the subscript text before evaluating it and leaves single quotes in place, where they are an unknown token. `${zz['1']}` on a name that does not exist reports in Bash too, the kind defaulting to indexed.\n\nWHERE. `variables::arrays::text_word`, which is the shell's one answer to \"a subscript arrived as bytes and has to be read as a word\". Its rule -- quotes come off, text outside single quotes expands, a blank is data -- is right for an *associative* subscript, which is a key and not an expression, and is what `[spec:nsh:req:compat.bash.arrays-declarations]` measured for `m['a b']`. It is wrong for an indexed one, where Bash hands the bytes to the arithmetic evaluator with only double quotes taken off. `resolve_selector` is where the two part company: it already asks the target's kind to decide key-or-index, and that is where the two readings of the text belong.\n\nWATCH THE SHAPES THAT MUST NOT MOVE. `${a[\"1\"]}` and `${a[$n]}` stay accepted; `m['a b']` and `m['a=1']` are keys and keep their single quotes removed; `unset 'a[k]'` and `declare -n r='A[k]'` reach the same code and their associative forms are already pinned by tests.\n\nDONE WHEN. A single-quoted subscript on an indexed array reports and answers as the reference does, through `${a[..]}`, an assignment, `$(( ))` and `unset` alike, the associative forms are unmoved, and a differential table holds both halves."
                                     }
                                 )
                             }

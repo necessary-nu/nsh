@@ -100,8 +100,12 @@ matter live in programs people write.
 ## Operating it
 
 **Corpus.** Gitignored; seeded from the repository's own shell text by
-`fuzz/run.sh`. Minimise periodically with `cargo fuzz cmin` -- a corpus
-that grows without bound slows every run.
+`fuzz/run.sh`. It grows without bound and nothing is deleted from it: `cargo
+fuzz cmin` would minimise it in place and discard the seeded scripts, which
+are the provenance the archive exists to keep. `fuzz/run.sh --derive TARGET`
+instead derives a coverage-equivalent campaign corpus beside it, and running
+every archived input is how it does that -- so the reduction and the
+regression check are one pass. See the README.
 
 **Crashes.** Minimise, fix the cause, then sweep. `fuzz/sweep.sh TARGET`
 replays every stored artifact against the current build and reports which

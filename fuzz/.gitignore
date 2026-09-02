@@ -1,5 +1,9 @@
 target
 corpus
+# The campaign corpus is derived from corpus/ by `fuzz/run.sh --derive`, so
+# it is reproducible from the archive and belongs no more in git than the
+# archive does.
+campaign
 artifacts
 coverage
 
