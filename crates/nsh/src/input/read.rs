@@ -223,6 +223,25 @@ fn clear_standard_input_nonblocking(shell: &mut crate::context::Shell) -> bool {
         .is_some_and(|descriptor| nsh_platform::set_nonblocking(&descriptor, false).is_ok())
 }
 
+/// What one read of the input source produced.
+///
+/// Three outcomes and not two, because a read a signal cut short is
+/// neither bytes nor an end of input, and both mistakes have been made
+/// here. Answering "no bytes" for it ended the session on the editor's
+/// path -- `2a46bd5` -- because no bytes is what a real end of input
+/// says. Retrying instead is this path's mirror of that: the read blocks
+/// again inside the deferral scope, so an interrupt that has a value
+/// waiting cannot reach the polling boundary that would deliver it, and
+/// it is taken one line later against a line the user has already typed.
+// [spec:nsh:req:interactive.signal-does-not-end-the-session]
+enum DescriptorRead {
+    /// Bytes were read, or zero for an end of input.
+    Bytes(usize),
+    /// A signal with something to deliver cut the read short. The caller
+    /// has to leave the deferral scope for the boundary poll to take it.
+    Interrupted,
+}
+
 // [spec:dash:sem:input.preadfd-fn]
 // The retry below is the shell's answer to a signal that arrived while it was
 // waiting for a line, and the line editor's read owes the same answer.
@@ -235,7 +254,7 @@ fn clear_standard_input_nonblocking(shell: &mut crate::context::Shell) -> bool {
 // [spec:posix:req:xcurel.file-contents-nbytes]
 // [spec:posix:sem:xcurel.file-contents-read-error]
 // [spec:posix:req:exit.unrecoverable-read-error]
-fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Error> {
+fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<DescriptorRead, Error> {
     let uses_stdin = current_input_frame(&mut shell.input).uses_stdin;
     let dot_operand = current_input_frame(&mut shell.input).dot_operand;
     let mut use_standard_input_tee: bool;
@@ -261,7 +280,7 @@ fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Err
 
     let mut requested = INPUT_BUFFER_SIZE - buffered;
     if requested == 0 {
-        return Ok(0);
+        return Ok(DescriptorRead::Bytes(0));
     }
 
     /* The C's `fd == 0` means "this parse file is the shell's standard
@@ -285,7 +304,7 @@ fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Err
             );
             current_input_frame(&mut shell.input).buffer = buffer;
             return match result {
-                Ok(count) => Ok(count),
+                Ok(count) => Ok(DescriptorRead::Bytes(count)),
                 Err(error) => {
                     let mut message = BString::from("read error: ");
                     message.extend_from_slice(error.to_string().as_bytes());
@@ -347,11 +366,34 @@ fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Err
                 Ok(count) => count,
                 Err(error) => {
                     let error_kind = error.kind();
-                    if error_kind == std::io::ErrorKind::Interrupted
-                        && !(input_frame_at(&mut shell.input, 0).previous.is_some()
+                    if error_kind == std::io::ErrorKind::Interrupted {
+                        /* An interrupt already has a value waiting for the
+                         * polling boundary above, and this read is inside the
+                         * deferral scope that boundary ends -- so retrying
+                         * here does not delay the delivery by a moment, it
+                         * delays it by a whole line, and the line it is then
+                         * taken against is one the user typed after the `^C`.
+                         * dash retries in the same place and is right to,
+                         * because `onint` had already longjmped out of the
+                         * read from inside the handler;
+                         * `[dec:nsh:errors-are-values]` removed the jump and
+                         * left this the only way out.
+                         *
+                         * Every other signal has nothing for that boundary --
+                         * a `SIGCHLD`, a trapped signal whose action runs at
+                         * the next `dotrap` -- and for those the retry is
+                         * still the answer, which is what keeps a half-typed
+                         * line and runs a trap action after the next line
+                         * rather than in place of it. */
+                        // [spec:nsh:req:interactive.signal-does-not-end-the-session]
+                        if crate::error::interrupt_pending() {
+                            return Ok(DescriptorRead::Interrupted);
+                        }
+                        if !(input_frame_at(&mut shell.input, 0).previous.is_some()
                             && crate::signal_inbox::signals().pending_signal().is_some())
-                    {
-                        continue 'retry;
+                        {
+                            continue 'retry;
+                        }
                     }
                     if uses_stdin
                         && error_kind == std::io::ErrorKind::WouldBlock
@@ -388,9 +430,9 @@ fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Err
             };
             current_input_frame(&mut shell.input).buffer[buffer_offset..buffer_offset + count]
                 .copy_from_slice(&scratch[..count]);
-            return Ok(count);
+            return Ok(DescriptorRead::Bytes(count));
         }
-        return Ok(0);
+        return Ok(DescriptorRead::Bytes(0));
     }
 }
 
@@ -403,17 +445,57 @@ fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Err
  * 4) Process input up to the next newline, normally deleting nul characters.
  */
 
+/// What one refill produced.
+///
+/// The third value is the one that matters: a read a signal cut short is
+/// not an end of input, and the frame must not latch EOF for it. It says
+/// only that this attempt has nothing to hand back and that the caller
+/// should leave the deferral scope so the interrupt behind it can be
+/// taken at the boundary below.
+// [spec:nsh:req:interactive.signal-does-not-end-the-session]
+enum Refill {
+    Line(Vec<u8>),
+    EndOfInput,
+    Interrupted,
+}
+
 // [spec:dash:sem:input.preadbuffer-fn]
 fn refill_input_buffer(
     shell: &mut crate::context::Shell,
     preserve_nul: bool,
 ) -> Result<InputUnit, Error> {
+    loop {
+        match refill_once(shell, preserve_nul)? {
+            /* The read was abandoned so that an interrupt could be taken
+             * at the boundary inside `refill_once`, and the boundary
+             * found nothing to take -- so there is nothing to deliver and
+             * nothing has been read, and the answer is to read again.
+             * That is the same answer `read_effect` gives the editor's
+             * path for a signal with no value behind it, and it is the
+             * half of this that must not become "no line": no line is
+             * what an end of input says. */
+            // [spec:nsh:req:interactive.signal-does-not-end-the-session]
+            None => continue,
+            Some(unit) => return Ok(unit),
+        }
+    }
+}
+
+/// One attempt at a line, ending at the polling boundary.
+///
+/// `None` is "nothing read and nothing to deliver", which only a signal
+/// produces; every other outcome is a unit for the parser.
+// [spec:dash:sem:input.preadbuffer-fn]
+fn refill_once(
+    shell: &mut crate::context::Shell,
+    preserve_nul: bool,
+) -> Result<Option<InputUnit>, Error> {
     let first = shell.input.prompt == Some(PromptKind::Primary);
 
     if current_input_frame(&mut shell.input).eof_latched {
         /* eof: */
         current_input_frame(&mut shell.input).eof_observed = true;
-        return Ok(InputUnit::EndOfInput);
+        return Ok(Some(InputUnit::EndOfInput));
     }
     shell.flush_output()?;
 
@@ -428,7 +510,18 @@ fn refill_input_buffer(
                 /* again: */
                 let preserved_count = line_end - current_input_frame(&mut shell.input).position;
                 set_remaining_buffer_bytes(current_input_frame(&mut shell.input), preserved_count);
-                remaining = read_input_descriptor(shell)?;
+                remaining = match read_input_descriptor(shell)? {
+                    DescriptorRead::Bytes(count) => count,
+                    /* Leaving here is the delivery: the scope this runs
+                     * in answers `poll_interrupt` with `None` by
+                     * construction, so the only way an interrupt taken
+                     * during the read reaches a poll site is for the read
+                     * to stop and the scope to end. Whatever partial line
+                     * the buffer held goes with it, exactly as dash's
+                     * longjmp out of `onint` discarded it. */
+                    // [spec:nsh:req:interactive.signal-does-not-end-the-session]
+                    DescriptorRead::Interrupted => return Ok(Refill::Interrupted),
+                };
                 line_end = current_input_frame(&mut shell.input).position + preserved_count;
                 if remaining == 0 {
                     current_input_frame(&mut shell.input).line_remaining = 0;
@@ -437,7 +530,7 @@ fn refill_input_buffer(
                         preserve_buffer = true;
                         break 'outer;
                     }
-                    return Ok(None);
+                    return Ok(Refill::EndOfInput);
                 }
             }
 
@@ -516,7 +609,7 @@ fn refill_input_buffer(
             let bytes = bytes.to_vec();
             crate::editor::record_history_line(shell, &bytes, first, true);
         }
-        Ok::<_, Error>(Some(line))
+        Ok::<_, Error>(Refill::Line(line))
     })?;
 
     /* A read interrupted while this scope was active becomes deliverable at
@@ -526,11 +619,15 @@ fn refill_input_buffer(
         return Err(error);
     }
 
-    let Some(line) = buffered else {
-        let input_frame = current_input_frame(&mut shell.input);
-        input_frame.eof_latched = true;
-        input_frame.eof_observed = true;
-        return Ok(InputUnit::EndOfInput);
+    let line = match buffered {
+        Refill::Line(line) => line,
+        Refill::EndOfInput => {
+            let input_frame = current_input_frame(&mut shell.input);
+            input_frame.eof_latched = true;
+            input_frame.eof_observed = true;
+            return Ok(Some(InputUnit::EndOfInput));
+        }
+        Refill::Interrupted => return Ok(None),
     };
 
     if shell.options.enabled(ShellOption::Verbose) {
@@ -540,7 +637,7 @@ fn refill_input_buffer(
     let input_frame = current_input_frame(&mut shell.input);
     let byte = input_frame.buffer[input_frame.position];
     input_frame.position += 1;
-    Ok(InputUnit::Byte(byte))
+    Ok(Some(InputUnit::Byte(byte)))
 }
 
 // [spec:dash:sem:input.pungetn-fn]

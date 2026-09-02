@@ -37,3 +37,12 @@ the interruption is therefore what the session does with the signal.
 > An untrapped `SIGINT` remains the one signal that ends the *line*: the shell
 > abandons what was typed and prompts again. It MUST NOT end the session
 > either.
+>
+> That abandoning MUST happen where the signal arrives, and not once a further
+> line has been entered. A shell reading the terminal directly retries an
+> interrupted read, which is correct for every signal that has nothing to
+> deliver and wrong for this one: the retry blocks again, so the interrupt is
+> taken against the *next* line the user types, which is discarded in place of
+> the empty one and leaves the buffered input misaligned behind it. The read
+> MUST therefore end when an interrupt is waiting, so that delivery happens at
+> the shell's own polling boundary rather than a line later.

@@ -8481,6 +8481,7 @@ children (
                                 id give-each-gate-run-its-own-shell
                                 title "Give each gate run its own shell, not one fixed path"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T10:40:34.878138545Z
@@ -8494,6 +8495,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:45:07.595331614Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Closed on `dfc31d3`.\n\nTHE RECIPE HAS NO `cp` IN IT ANY MORE, which is the whole of the first half. `crate::shell::ShellUnderTest` installs the named binary under the name the run needs, in a directory nothing else writes and that goes when the run ends. `gate-bash` installs it as `bash` and therefore accepts any binary -- `--shell` defaults to `target/release/nsh` and the documented gate is one command. `run-oils` does the same, taking `bash` from `--expect-shell bash` and the binary's own name otherwise. The basename refusal that produced the fixed path is superseded rather than dropped: the shell cannot run under a name that turns the dialect off because the runner picks the name, and the source is resolved before it is copied so a link cannot be swung out from under a run.\n\nTHE INCIDENT REPLAYED, which is the evidence the node asked for. A gate run started against a shell path with another build landing on that path five seconds in. Pre-change: `gate: FAIL -- 532 violations`, eligible manifest collapsed from 873 to 341, because the second half of the run scored `/usr/bin/dash`. Post-change, identical swap at the same moment: `gate: PASS`, 873 eligible, 868 passing. And `gate-bash --shell target/release/nsh` is refused by the pre-change binary with \"must be named exactly `bash`\" and accepted by the post-change one at 868 of 873, so the dialect is demonstrably on.\n\nTHE SECOND HALF IS THE STALENESS CHECK the node asked for in the same sentence, and it catches a different failure: not two runs disagreeing, but one run measuring a binary that predates the change it is meant to test. A shell under this checkout's `target/` more than a minute older than the newest `.rs` or `Cargo.toml` under `crates/` is refused by the gate, naming the file it lost to, and warned about by `run-oils`, which also scores shells this repository did not build. Measured: with `pattern.rs` touched 170 seconds after the binary was written, the pre-change binary reports `gate: PASS -- no unexpected failure` and says nothing at all. `target/bash-reference/` is exempt with its reason in the code.\n\n`bash-gate-selftest.sh` loses the \"wrong basename\" mutation -- that command must now succeed -- and gains the property that replaces it: a shell called `nsh` must score the whole eligible manifest, which it cannot do with the dialect off. Eight of eight refused.\n\nWorkspace 842 passed 0 failed in the worktree; clippy, `nsh-lint` and `cargo fmt --all --check` clean. Gate PASS at 868 of 873 at load 9 and at load 25; `run-oils --group bash-comparison --baseline`, now a single command, matched on all 469 at load 13 in 48 seconds and again at load 25 with the control excusing `process-sub.test.sh:2` at 4 of 15. Spec coverage unchanged.\n\nONE SHARED PATH IS LEFT, ON PURPOSE. The control runs the pinned Bash from `target/bash-reference/bash`. `build-bash-reference` refuses a non-empty output directory, so it is not a path anybody rebuilds casually, and fifteen private copies per control run would cost more than the risk. If that ever stops being true, `ShellUnderTest` is the thing to reach for."
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:45:12.756467306Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

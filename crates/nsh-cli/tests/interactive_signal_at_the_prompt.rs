@@ -35,6 +35,11 @@ const PATIENCE: Duration = Duration::from_secs(20);
 /// Long enough for output the shell was going to write anyway to arrive.
 const SETTLE: Duration = Duration::from_millis(300);
 
+/// A prompt no echoed command line and no diagnostic can contain, so that
+/// counting it counts prompts. "The shell re-prompted" is the only way to
+/// say "it reacted where it stood" rather than one line later.
+const PROMPT: &str = "@nsh@ ";
+
 /// An interactive shell on its own pseudo-terminal, and the controller end.
 struct Session {
     child: Child,
@@ -43,15 +48,21 @@ struct Session {
 }
 
 impl Session {
-    fn start() -> Self {
+    /// Start an interactive shell whose terminal declares `term`.
+    ///
+    /// That name is what decides which of the two reading paths runs: the
+    /// editor starts only for a terminal whose declared capabilities can
+    /// host redisplay, so `xterm` exercises the editor's read and `dumb`
+    /// exercises `input::read_input_descriptor` directly. `nsh-cli`
+    /// enables the `edit` feature unconditionally, so this is how the
+    /// plain path is reached from a test at all.
+    fn start(term: &str) -> Self {
         let (controller, terminal) = nsh_platform::open_pseudoterminal().expect("open a terminal");
         nsh_platform::set_nonblocking(&controller, true).expect("poll the controller");
         let child = Command::new(env!("CARGO_BIN_EXE_nsh"))
             .arg("-i")
-            // The editor starts only for a terminal whose declared
-            // capabilities can host one, and that path is what is under test.
-            .env("TERM", "xterm")
-            .env("PS1", "$ ")
+            .env("TERM", term)
+            .env("PS1", PROMPT)
             // A session that reads the invoking user's start-up file or
             // their saved history is measuring their machine, not the shell.
             .env_remove("ENV")
@@ -136,6 +147,18 @@ impl Session {
         String::from_utf8_lossy(&self.transcript).into_owned()
     }
 
+    /// How many prompts the shell has written so far.
+    fn prompts(&self) -> usize {
+        self.text().matches(PROMPT).count()
+    }
+
+    /// How many times `text` appears in everything the terminal has shown,
+    /// which for a command line the shell never redisplays is how often the
+    /// terminal echoed it.
+    fn occurrences(&self, text: &str) -> usize {
+        self.text().matches(text).count()
+    }
+
     /// Run a command whose output names `marker` without the typed line
     /// containing it, so that seeing the marker means the shell *ran* the
     /// line rather than merely echoed it back.
@@ -176,13 +199,34 @@ impl Session {
         self.settle();
     }
 
-    /// Ask the shell to leave with a status only a live session can produce,
-    /// and report what it left with.
+    /// Ask the shell to leave with a status only a live session can
+    /// produce, and report what it left with. `None` is "it did not".
+    ///
+    /// Bounded, and that is not tidiness. A shell whose input buffer has
+    /// been left misaligned does not necessarily act on the `exit` it is
+    /// sent -- the defect below splits `exit 7` across two reads, so the
+    /// `exit` runs without its argument or not at all -- and closing the
+    /// controller does not reach it either, because a child spawned this
+    /// way is not a session leader and the pty is not its controlling
+    /// terminal, so it sees `EIO` rather than a hangup. Waiting for it
+    /// unbounded reports a defect as a hung test, which is the one
+    /// outcome a test must never have.
     fn finish(mut self) -> Option<i32> {
         self.send("exit 7\n");
         self.settle();
         drop(self.controller);
-        self.child.wait().expect("wait for the shell").code()
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            match self.child.try_wait().expect("wait for the shell") {
+                Some(status) => return status.code(),
+                None if Instant::now() >= deadline => {
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
+                    return None;
+                }
+                None => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
     }
 }
 
@@ -192,7 +236,7 @@ fn a_child_signal_does_not_end_the_session() {
     if !nsh_platform::supports_bidirectional_pseudoterminal_pair() {
         return;
     }
-    let mut session = Session::start();
+    let mut session = Session::start("xterm");
     session.run_printing("READYREADY");
     session.wait_at_the_prompt("READYREADY");
 
@@ -220,7 +264,7 @@ fn a_trapped_signal_runs_after_the_next_line() {
     if !nsh_platform::supports_bidirectional_pseudoterminal_pair() {
         return;
     }
-    let mut session = Session::start();
+    let mut session = Session::start("xterm");
     // The action prints its marker in halves for the same reason
     // `run_printing` does: the terminal echoes the `trap` command itself, so
     // an action spelling its own output would be "seen" before it ever ran.
@@ -252,6 +296,68 @@ fn a_trapped_signal_runs_after_the_next_line() {
          nor the pinned Bash's: {transcript:?}"
     );
     assert!(ran, "the trap action never ran: {transcript:?}");
+    assert_eq!(
+        status,
+        Some(7),
+        "the shell did not leave through its own `exit`: {transcript:?}"
+    );
+}
+
+/// With the line editor off, an interrupt has to be taken where it lands.
+///
+/// The mirror of the two cases above, and reachable only when
+/// `editing_active` is false: `TERM=dumb`, a terminal whose terminfo cannot
+/// host redisplay, or a `set +o emacs +o vi` session on such a terminal.
+/// `input::read_input_descriptor` retried its interrupted read, and the
+/// retry blocked again inside the deferral scope that
+/// `refill_input_buffer` polls at the end of -- so the interrupt could not
+/// be delivered until a line had been read, which means until the user had
+/// typed one. Measured on a pty against `/usr/bin/dash` before the fix:
+/// the `^C` printed nothing, the next command was swallowed, and the one
+/// after it was echoed twice with the swallowed command's output welded to
+/// the front of it. dash is right here only because `onint` longjmped out
+/// of the read from inside the handler, which
+/// `[dec:nsh:errors-are-values]` removed.
+// [spec:nsh:req:interactive.signal-does-not-end-the-session/test]
+#[test]
+fn a_plain_read_takes_its_interrupt_at_once() {
+    if !nsh_platform::supports_bidirectional_pseudoterminal_pair() {
+        return;
+    }
+    let mut session = Session::start("dumb");
+    session.run_printing("READYREADY");
+    session.wait_at_the_prompt("READYREADY");
+    let before = session.prompts();
+
+    session.deliver(nsh_platform::interrupt_signal());
+
+    // dash prints a newline and a fresh prompt the moment the interrupt
+    // arrives, with nothing typed in between, and `deliver` has already
+    // waited for anything the shell was going to write.
+    let reprompted = session.prompts() > before;
+
+    session.run_printing("ALIVEALIVE");
+    let survived = session.wait_for("ALIVEALIVE");
+    // A line the shell reads correctly is echoed once by the terminal.
+    // Twice is the misalignment: the defect left the input buffer holding
+    // bytes the parser had already consumed.
+    let echoes = session.occurrences("ALIVE ALIVE");
+    let transcript = session.text();
+    let status = session.finish();
+
+    assert!(
+        reprompted,
+        "the interrupt printed no fresh prompt where it arrived: {transcript:?}"
+    );
+    assert!(
+        survived,
+        "the command typed after the interrupt never ran: {transcript:?}"
+    );
+    assert_eq!(
+        echoes, 1,
+        "the line after the interrupt was echoed {echoes} times, so the \
+         input buffer was left misaligned: {transcript:?}"
+    );
     assert_eq!(
         status,
         Some(7),
