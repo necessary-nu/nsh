@@ -1422,7 +1422,7 @@ assertions (
     {id stop-the-corpus-eating-the-fuzzing-budget, kind @complete, author "brendan@necessary.nu", at 2026-09-02T05:33:51.082509878Z}
     {id wait-for-a-process-substitution-to-finish, kind @complete, author "brendan@necessary.nu", at 2026-09-02T07:17:03.531322482Z}
     {id close-associative-assignment-diagnostics, kind @complete, author "brendan@necessary.nu", at 2026-09-02T05:49:17.419364089Z}
-    {id stop-an-interactive-shell-exiting-on-sigchld, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:54:18.980090268Z}
+    {id stop-an-interactive-shell-exiting-on-sigchld, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:32:52.847819724Z}
     {id match-bash-dot-names-and-literal-paths, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:54:40.842077295Z}
     {id let-the-sweep-see-a-slow-unit, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:55:39.71182461Z}
     {id spell-an-unassigned-array-back, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:56:28.496773437Z}

@@ -13,7 +13,7 @@ use super::{Dialect, OPTION_SPECS, ShellOption, ShellOptions};
 /// Both kinds belong in one list because `shopt` has to answer "is this
 /// a shell option name?" identically for both -- bash-completion sets
 /// `progcomp` on the way in and gives up if the set is refused.
-pub(crate) const NAMES: [&[u8]; 40] = [
+pub(crate) const NAMES: [&[u8]; 41] = [
     b"autocd",
     b"cdable_vars",
     b"cdspell",
@@ -33,6 +33,7 @@ pub(crate) const NAMES: [&[u8]; 40] = [
     b"failglob",
     b"force_fignore",
     b"globasciiranges",
+    b"globskipdots",
     b"globstar",
     b"gnu_errfmt",
     b"histappend",
@@ -120,6 +121,8 @@ pub(crate) enum BashShopt {
     ExtGlob,
     /// Fail the command when a pattern matches nothing.
     FailGlob,
+    /// Never match `.` or `..`, whatever the pattern asks for.
+    GlobSkipDots,
     /// Let `**` cross directory boundaries.
     GlobStar,
     /// Run a pipeline's last stage in this shell rather than a child.
@@ -133,11 +136,12 @@ pub(crate) enum BashShopt {
 }
 
 impl BashShopt {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::DotGlob,
         Self::ExtDebug,
         Self::ExtGlob,
         Self::FailGlob,
+        Self::GlobSkipDots,
         Self::GlobStar,
         Self::LastPipe,
         Self::NoCaseGlob,
@@ -151,6 +155,7 @@ impl BashShopt {
             Self::ExtDebug => b"extdebug",
             Self::ExtGlob => b"extglob",
             Self::FailGlob => b"failglob",
+            Self::GlobSkipDots => b"globskipdots",
             Self::GlobStar => b"globstar",
             Self::LastPipe => b"lastpipe",
             Self::NoCaseGlob => b"nocaseglob",
@@ -174,7 +179,8 @@ pub(super) struct BashOptions {
     /// `None` selects Bash's default: on for interactive shells, off for
     /// non-interactive shells. `Some` records an explicit `shopt -s/-u`.
     expand_aliases: Option<bool>,
-    /// The plain on/off `shopt` names, as one bit each.
+    /// The plain on/off `shopt` names, as one bit each. All of them start
+    /// off except `globskipdots`, which Bash 5.2 added already on.
     flags: u16,
     /// The [`INERT`] names, as one bit each.
     inert: u32,
@@ -237,7 +243,7 @@ impl BashOptions {
     pub(super) const fn new() -> Self {
         Self {
             expand_aliases: None,
-            flags: 0,
+            flags: BashShopt::GlobSkipDots.mask(),
             inert: default_inert(),
         }
     }

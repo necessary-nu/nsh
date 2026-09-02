@@ -22,19 +22,55 @@ struct Candidate {
 
 /// The shell state one pathname expansion reads, gathered once.
 ///
-/// Bash's glob behaviour is spread over four `shopt` names and one
-/// variable; collecting them keeps the traversal free of shell lookups
-/// and makes the POSIX case a value with every bit off.
+/// Bash's glob behaviour is spread over five `shopt` names and one
+/// variable; collecting them keeps the traversal free of shell lookups.
+/// The POSIX case is not simply every bit off, because the two
+/// references disagree about the text of a pattern as well as about its
+/// options: dash copies a repeated slash through and Bash does not.
 // [spec:nsh:req:compat.bash.expansion-globbing]
 pub(super) struct GlobSettings {
     options: PatternOptions,
     dot_names: bool,
+    /// Bash's `globskipdots`, which is on unless a script turns it off
+    /// and then makes `.` and `..` names no pattern can match. POSIX
+    /// mode has no such option and matches them, as dash does.
+    skip_dots: bool,
     globstar: bool,
     nullglob: bool,
     failglob: bool,
+    /// Whether a run of slashes narrows to one once a component has had
+    /// to be matched. Bash copies the pattern's own text through only
+    /// while it is still reading literal text -- `a//*` is `a//b`, and
+    /// `*//*` is `a/b` -- where dash copies every run through, so this
+    /// is off in POSIX mode.
+    collapse_after_match: bool,
     /// `GLOBIGNORE`, already split into patterns. A non-empty list also
-    /// reveals dot names and always hides `.` and `..`.
+    /// reveals dot names, and hides any word whose last component is `.`
+    /// or `..` however the pattern spelled it.
     ignored: Vec<Pattern>,
+}
+
+impl GlobSettings {
+    /// Whether `.` and `..` are names a component can match at all.
+    ///
+    /// They are not directory entries here -- the platform's read does
+    /// not report them -- so a pattern that could match them has them
+    /// added back, and this is the question of whether to add them.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn skips_dot_entries(&self) -> bool {
+        self.skip_dots || !self.ignored.is_empty()
+    }
+
+    /// The slashes to write in front of one component, given whether
+    /// anything before it had to be matched.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn separator(&self, saw_meta: bool, slashes: usize) -> usize {
+        if self.collapse_after_match && saw_meta {
+            1
+        } else {
+            slashes
+        }
+    }
 }
 
 // [spec:nsh:req:compat.bash.expansion-globbing]
@@ -43,9 +79,11 @@ pub(super) fn settings(shell: &mut Shell) -> GlobSettings {
         return GlobSettings {
             options: PatternOptions::NONE,
             dot_names: false,
+            skip_dots: false,
             globstar: false,
             nullglob: false,
             failglob: false,
+            collapse_after_match: false,
             ignored: Vec::new(),
         };
     }
@@ -65,9 +103,11 @@ pub(super) fn settings(shell: &mut Shell) -> GlobSettings {
     GlobSettings {
         options,
         dot_names: !ignored.is_empty() || shell.options.shopt(BashShopt::DotGlob),
+        skip_dots: shell.options.shopt(BashShopt::GlobSkipDots),
         globstar: shell.options.shopt(BashShopt::GlobStar),
         nullglob: shell.options.shopt(BashShopt::NullGlob),
         failglob: shell.options.shopt(BashShopt::FailGlob),
+        collapse_after_match: true,
         ignored,
     }
 }
@@ -220,38 +260,53 @@ fn matches(
     pattern: &Pattern,
     settings: &GlobSettings,
 ) -> Vec<BString> {
-    let components = components(pattern);
-    let absolute = pattern.as_bytes().first() == Some(&b'/');
-    let trailing_slash = pattern.as_bytes().last() == Some(&b'/');
+    let split = split(pattern);
+    let absolute = split.leading > 0;
     let mut candidates = vec![Candidate {
         path: PathBuf::from(if absolute { "/" } else { "." }),
-        display: BString::from(if absolute { "/" } else { "" }),
+        display: slashes(split.leading),
     }];
     let mut saw_meta = false;
 
-    for (index, component) in components.iter().enumerate() {
-        if component.as_bytes().is_empty() {
-            continue;
-        }
+    for (index, step) in split.steps.iter().enumerate() {
+        let separator = settings.separator(saw_meta, step.slashes);
+        let component = &step.component;
         if settings.globstar && is_globstar(component) {
             saw_meta = true;
-            /* Nothing but empty components after a `**` means the word
-             * ends there, which is what decides both whether files can
-             * match and how the directory the walk starts from is
-             * written out. */
-            let ends_word = components[index + 1..]
-                .iter()
-                .all(|rest| rest.as_bytes().is_empty());
-            let start = if !ends_word {
+            let next = split.steps.get(index + 1);
+            /* The word ends at this `**` when nothing follows it, and
+             * Bash ends it at a repeated slash too. A `**` written with
+             * two slashes and then a name generates what the same `**`
+             * with one slash and no name generates, and looks for that
+             * name in each: the directory the walk starts from has to be
+             * a directory and is its own word, rather than only a place
+             * to carry on from. */
+            let ends_word = next.is_none();
+            let ends_here = next.is_none_or(|next| next.slashes > 1);
+            let start = if !ends_here {
                 StartMatch::Prefix
-            } else if components[..index].iter().any(Pattern::has_meta) {
+            } else if split.steps[..index]
+                .iter()
+                .any(|earlier| earlier.component.has_meta())
+            {
                 StartMatch::Matched
             } else {
                 StartMatch::Literal
             };
             let walk = Walk {
-                directories_only: !ends_word || trailing_slash,
+                directories_only: !ends_word || split.trailing > 0,
                 start,
+                separator,
+                /* Bash reads a pattern that opens with a `**` component
+                 * by walking the tree itself, and every other `**` by
+                 * expanding what precedes it into words and matching the
+                 * rest inside them, which resolves a link the way any
+                 * other component does. A leading `**` therefore stops
+                 * at a link to a directory and a later one carries the
+                 * word on through it. */
+                enter_links: split.steps[..index]
+                    .iter()
+                    .any(|earlier| !is_globstar(&earlier.component)),
                 settings,
             };
             candidates = walk.descendants(candidates);
@@ -259,17 +314,19 @@ fn matches(
         }
         if component.has_meta() {
             saw_meta = true;
-            candidates = children(locale, candidates, component, settings);
+            candidates = children(locale, candidates, separator, component, settings);
         } else {
             let Ok(name) = component.as_bytes().try_to_os_string() else {
                 return Vec::new();
             };
             for candidate in &mut candidates {
                 candidate.path = candidate.path.join(&name);
-                candidate.display = append_component(&candidate.display, component.as_bytes());
+                candidate.display =
+                    append_component(&candidate.display, separator, component.as_bytes());
             }
         }
     }
+    let trailing = settings.separator(saw_meta, split.trailing);
 
     if !saw_meta {
         return Vec::new();
@@ -277,15 +334,15 @@ fn matches(
     candidates
         .into_iter()
         .filter_map(|candidate| {
-            let exists = if trailing_slash {
+            let exists = if split.trailing > 0 {
                 nsh_platform::path_metadata(&candidate.path, true)
                     .is_ok_and(|metadata| metadata.kind == nsh_platform::FileKind::Directory)
             } else {
                 nsh_platform::path_metadata(&candidate.path, false).is_ok()
             };
             let mut display = candidate.display;
-            if trailing_slash && display.last() != Some(&b'/') {
-                display.push(b'/');
+            if split.trailing > 0 && display.last() != Some(&b'/') {
+                display.extend_from_slice(&slashes(trailing));
             }
             (exists && !is_ignored(locale, display.as_ref(), settings)).then_some(display)
         })
@@ -328,6 +385,13 @@ enum StartMatch {
 struct Walk<'a> {
     directories_only: bool,
     start: StartMatch,
+    /// The slashes the pattern wrote between the prefix and this `**`,
+    /// which is what separates the prefix from the first level of the
+    /// walk. Every level below that is the walk's own, so it writes one.
+    separator: usize,
+    /// Whether a link to a directory is a place this `**` carries the
+    /// word on from.
+    enter_links: bool,
     settings: &'a GlobSettings,
 }
 
@@ -340,7 +404,7 @@ impl Walk<'_> {
         let mut result = Vec::new();
         let mut pending = Vec::new();
         for candidate in candidates {
-            self.entries_below(&candidate, &mut pending, &mut result);
+            self.entries_below(&candidate, self.separator, &mut pending, &mut result);
             if let Some(candidate) = self.starting_match(candidate) {
                 result.push(candidate);
             }
@@ -349,7 +413,7 @@ impl Walk<'_> {
          * by name, so it is its own word as well as somewhere to go on
          * from. Only the candidates above were reached some other way. */
         while let Some(candidate) = pending.pop() {
-            self.entries_below(&candidate, &mut pending, &mut result);
+            self.entries_below(&candidate, 1, &mut pending, &mut result);
             result.push(candidate);
         }
         result
@@ -365,6 +429,7 @@ impl Walk<'_> {
     fn entries_below(
         &self,
         candidate: &Candidate,
+        separator: usize,
         pending: &mut Vec<Candidate>,
         result: &mut Vec<Candidate>,
     ) {
@@ -375,20 +440,27 @@ impl Walk<'_> {
             }
             let child = Candidate {
                 path: candidate.path.join(&entry.name),
-                display: append_component(&candidate.display, &bytes),
+                display: append_component(&candidate.display, separator, &bytes),
             };
             if entry.is_directory {
                 pending.push(child);
-            } else if !self.directories_only {
-                result.push(child);
-            } else if self.start != StartMatch::Prefix && is_directory(&child.path) {
-                /* A `**` the word ends at asks what a name resolves to, so
-                 * a link to a directory is one. A `**` the word carries on
-                 * past is the walk's own list of places to go on from, and
-                 * the walk does not go through links. */
+            } else if !self.directories_only || (self.reaches_links() && is_directory(&child.path))
+            {
                 result.push(child);
             }
         }
+    }
+
+    /// Whether a name that resolves to a directory without being one is a
+    /// word this `**` generates.
+    ///
+    /// A `**` the word ends at asks what a name resolves to, so a link to
+    /// a directory is one. A `**` the word carries on past produces the
+    /// places the rest of the word is matched in, and Bash matches inside
+    /// a link there for every `**` except one the pattern opens with.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn reaches_links(&self) -> bool {
+        self.start != StartMatch::Prefix || self.enter_links
     }
 
     /// The word this `**` generates for the directory it starts from, or
@@ -403,7 +475,9 @@ impl Walk<'_> {
             return None;
         }
         if self.start == StartMatch::Literal && candidate.display.last() != Some(&b'/') {
-            candidate.display.push(b'/');
+            candidate
+                .display
+                .extend_from_slice(&slashes(self.separator.max(1)));
         }
         Some(candidate)
     }
@@ -420,6 +494,7 @@ fn is_directory(path: &Path) -> bool {
 fn children(
     locale: &nsh_platform::Locale,
     candidates: Vec<Candidate>,
+    separator: usize,
     component: &Pattern,
     settings: &GlobSettings,
 ) -> Vec<Candidate> {
@@ -433,7 +508,7 @@ fn children(
             .into_iter()
             .map(|entry| entry.name)
             .collect::<Vec<_>>();
-        if literal_dot && settings.ignored.is_empty() {
+        if literal_dot && !settings.skips_dot_entries() {
             names.push(OsString::from("."));
             names.push(OsString::from(".."));
         }
@@ -445,7 +520,7 @@ fn children(
             if component.matches(locale, &bytes) {
                 result.push(Candidate {
                     path: candidate.path.join(&name),
-                    display: append_component(&candidate.display, &bytes),
+                    display: append_component(&candidate.display, separator, &bytes),
                 });
             }
         }
@@ -457,8 +532,24 @@ fn children(
 ///
 /// Each pattern is matched one pathname component at a time, so `*` and
 /// `?` never cross a `/` — `*.txt` hides `one.txt` but not `foo/two.txt`.
+///
+/// A non-empty list also hides `.` and `..` outright, and it hides them
+/// however the pattern spelled them: `*/.` matches nothing under any
+/// `GLOBIGNORE` at all, where `*/./f` still matches. That is the same
+/// rule `globskipdots` states about a directory's entries, reaching a
+/// component the walk never had to read a directory for.
 // [spec:nsh:req:compat.bash.expansion-globbing]
 fn is_ignored(locale: &nsh_platform::Locale, display: &BStr, settings: &GlobSettings) -> bool {
+    if settings.ignored.is_empty() {
+        return false;
+    }
+    let last = display
+        .rsplit(|byte| *byte == b'/')
+        .next()
+        .unwrap_or_default();
+    if last == b"." || last == b".." {
+        return true;
+    }
     settings
         .ignored
         .iter()
@@ -494,10 +585,72 @@ fn components(pattern: &Pattern) -> Vec<Pattern> {
     components
 }
 
-fn append_component(prefix: &[u8], component: &[u8]) -> BString {
+/// One component of a pattern with the run of slashes written in front
+/// of it, which is part of the word and not only a separator.
+struct Step {
+    /// How many slashes the pattern spells between the component before
+    /// this one and this one. Zero for the first component.
+    slashes: usize,
+    component: Pattern,
+}
+
+/// A pattern cut into the components a walk visits, keeping the width of
+/// every slash run.
+///
+/// [`components`] answers a different question and drops that width: it
+/// cuts a `GLOBIGNORE` entry into the parts one pathname is matched
+/// against, where an empty part is a part that matches nothing.
+struct Split {
+    /// The slashes the pattern opens with, which are its root when there
+    /// are any and nothing when there are none.
+    leading: usize,
+    steps: Vec<Step>,
+    /// The slashes the pattern ends with.
+    trailing: usize,
+}
+
+// [spec:posix:req:pattern.slash-explicit-match]
+fn split(pattern: &Pattern) -> Split {
+    let bytes = pattern.as_bytes();
+    let mut split = Split {
+        leading: 0,
+        steps: Vec::new(),
+        trailing: 0,
+    };
+    let mut run = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'/' {
+            run += 1;
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < bytes.len() && bytes[at] != b'/' {
+            at += 1;
+        }
+        if split.steps.is_empty() {
+            split.leading = run;
+            run = 0;
+        }
+        split.steps.push(Step {
+            slashes: run,
+            component: pattern.slice(start..at),
+        });
+        run = 0;
+    }
+    split.trailing = run;
+    split
+}
+
+fn slashes(count: usize) -> BString {
+    BString::from(vec![b'/'; count])
+}
+
+fn append_component(prefix: &[u8], separator: usize, component: &[u8]) -> BString {
     let mut result = BString::from(prefix);
     if !result.is_empty() && result.last() != Some(&b'/') {
-        result.push(b'/');
+        result.extend_from_slice(&slashes(separator.max(1)));
     }
     result.extend_from_slice(component);
     result

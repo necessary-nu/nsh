@@ -4,3 +4,7 @@ echo /nonexistent/*; echo "rc=$?"
 mkdir -p d1 d2; touch d1/x d2/x; echo d?/x; echo d[12]/x
 echo ~/nonexistentpath/*
 touch 'a*b'; echo a\*b; echo 'a*b'
+mkdir -p g/sub; touch g/a g/sub/b; echo g//*; echo g///*; echo .//g/*; echo g//sub//*; echo g//*//b
+mkdir -p g/sub; touch g/a g/sub/b; echo *//*; echo *//; echo g//*/; echo g//*//; echo g//?//b; echo g//[s]*//b
+mkdir -p g/sub; touch g/a; echo g//; echo ./g//*; echo "g//"*; p=g//; echo $p*; echo g/"/"*
+mkdir -p g; touch g/a g/.h; echo g/.*; echo g/.[.]*; echo g/*/.; echo g/*/..
