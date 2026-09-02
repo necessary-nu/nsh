@@ -349,6 +349,7 @@ pub(crate) fn assign_through(
                     attributes,
                     super::CallbackPolicy::Run,
                     arrays::ReadOnlyGuard::Enforce,
+                    super::AllExport::Marks,
                 )
             })?;
             Ok(true)
