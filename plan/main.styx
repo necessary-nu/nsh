@@ -7915,6 +7915,7 @@ children (
                                 id stop-the-corpus-eating-the-fuzzing-budget
                                 title "Stop the corpus replay eating a campaign's whole budget"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T02:09:36.926742169Z
@@ -7935,6 +7936,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @decision
                                         text "NEITHER OF THE TWO ANSWERS THIS NODE OFFERED, BECAUSE BOTH MISS. `cargo fuzz cmin` discards inputs and this corpus was seeded from Smoosh and Oils for their provenance. But the scaled wall clock -- `seconds + 120 + replay_estimate` -- does not work either, and it is worth writing down why: libFuzzer measures `-max_total_time` with `secondsSinceProcessStartUp()`, so a longer wall clock only stops the campaign being *killed*; the budget is still already spent when the fuzzing loop is first entered, and the loop exits immediately having mutated nothing. Widening the outer clock cannot buy mutation.\n\nWHAT WAS DONE INSTEAD IS THE SIBLING FIX'S SHAPE, ONE PHASE FURTHER IN. `stop-the-fuzz-budget-paying-for-the-build` moved the build out of the budget's clock and gave it one of its own. `fuzz/budget.sh` now does the same for the replay: the replay is kept in full, on `NSH_FUZZ_REPLAY_ALLOWANCE` (900s), and the budget starts at the `#N INITED` line libFuzzer prints at the moment the replay ends. That is read off the fuzzer rather than estimated from the corpus, so unlike a calibrated allowance it cannot go quietly wrong as the corpus grows.\n\nMEASURED, WARM BUILD, 2026-09-02.\n\n    parse 10         before  INITED #21259, DONE #21259 -- 0 mutations, 0 new units, 105s campaign\n                     after   replay 219s, then 11s mutating; 23325 units executed -- 2067 mutations, 8 new units\n    differential 20  before  exit 124 at the 140s wall clock, INITED never reached -- 0 mutations\n                     after   replay 182s, then 21s mutating; 3238 units executed -- 298 mutations, 2 new units\n    arithmetic 10    after   replay 3s, then 11s mutating -- 1721 mutations\n\nThe machine carried a load average near 90 from concurrent agents throughout, which is why the `parse` replay reads 219s here against the 104s the same corpus took on a quiet machine an hour earlier. The mutation counts are not affected by that: they are what the budget bought, and before they were zero.\n\n`-stop_file` WAS TRIED FIRST AND DOES NOT WORK. It is honoured only in fork mode: a campaign given `-max_total_time=0 -stop_file=X` ran to its containment wall clock with X in place. SIGTERM is what libFuzzer answers, by printing its final statistics and exiting 72 -- so `-print_final_stats=1` is now passed, and 72 is read as success rather than as a finding.\n\nWHAT THIS COSTS, SAID PLAINLY. A campaign's wall time is now its budget plus a replay that still grows with the corpus, and `NSH_FUZZ_REPLAY_ALLOWANCE` has to be raised by hand as that happens. It fails loudly and names itself. Bounding it properly -- a derived coverage-minimal campaign corpus beside the full archive, so nothing is discarded and the replay stops growing -- is filed as `bound-what-a-campaign-pays-to-replay-its-corpus`."
+                                    }
+
+                                    {
+                                        at 2026-09-02T05:33:51.082509878Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

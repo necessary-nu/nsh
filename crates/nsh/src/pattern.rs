@@ -153,18 +153,59 @@ impl Pattern {
         subject: &[u8],
         budget: &mut u64,
     ) -> bool {
+        self.matcher(locale, subject, budget, None)
+            .matches_from(0, 0)
+    }
+
+    /// Every subject offset at which this pattern, read from `from`, runs
+    /// out — the set `{ end : this pattern matches subject[from..end] }`.
+    ///
+    /// One traversal answers for every `end` at once, which is the whole
+    /// point of asking it this way round: the same question put once per
+    /// candidate `end` re-walks the same states with a fresh memo each
+    /// time and costs a factor of the subject's length more.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    fn ends_within(
+        &self,
+        locale: &nsh_platform::Locale,
+        subject: &[u8],
+        from: usize,
+        budget: &mut u64,
+    ) -> Vec<usize> {
+        let mut matcher = self.matcher(locale, subject, budget, Some(Vec::new()));
+        matcher.matches_from(0, from);
+        matcher.ends.unwrap_or_default()
+    }
+
+    fn matcher<'a>(
+        &'a self,
+        locale: &'a nsh_platform::Locale,
+        subject: &'a [u8],
+        budget: &'a mut u64,
+        ends: Option<Vec<usize>>,
+    ) -> Matcher<'a> {
         Matcher {
             locale,
             pattern: self,
             subject,
             memo: HashMap::new(),
             budget,
+            ends,
         }
-        .matches_from(0, 0)
     }
 
     fn active(&self, at: usize, byte: u8) -> bool {
         self.bytes.get(at) == Some(&byte) && !self.quoted.get(at).copied().unwrap_or(true)
+    }
+
+    /// The answer, and how much of the extended budget it took to reach.
+    /// A test can then fence the work a shape costs rather than the wall
+    /// clock it happens to take on the machine running it.
+    #[cfg(test)]
+    fn match_cost(&self, locale: &nsh_platform::Locale, subject: &[u8]) -> (bool, u64) {
+        let mut budget = EXTENDED_MATCH_BUDGET;
+        let matched = self.matches_within(locale, subject, &mut budget);
+        (matched, EXTENDED_MATCH_BUDGET - budget)
     }
 }
 
@@ -175,6 +216,14 @@ impl Pattern {
 /// can demand enormous work while producing no output. The budget is
 /// charged for attempted work rather than for results, and running out
 /// answers "no match" instead of running on.
+///
+/// What the budget is *not* is the thing that keeps one group cheap. A
+/// group at one subject offset costs a walk of its alternatives over the
+/// subject, so a pattern whose groups do not nest stays a polynomial in
+/// pattern length times subject length and never comes near this number;
+/// the budget is left holding only the depth that nesting multiplies.
+/// Asking it to hold more than that is how four four-hundred-byte inputs
+/// came to spend the whole four million and take a minute and a half.
 // [spec:nsh:req:compat.bash.expansion-globbing]
 const EXTENDED_MATCH_BUDGET: u64 = 4_000_000;
 
@@ -182,12 +231,12 @@ const EXTENDED_MATCH_BUDGET: u64 = 4_000_000;
 ///
 /// `memo` is keyed on `(pattern_at, subject_at)` alone, and that key is
 /// complete because nothing else can vary between two visits to the same
-/// pair: `pattern` and `subject` are fixed for the matcher's life, and
-/// `PatternOptions` belongs to the pattern and is immutable. In
+/// pair: `pattern`, `subject` and `ends` are fixed for the matcher's
+/// life, and `PatternOptions` belongs to the pattern and is immutable. In
 /// particular `!(…)` does not put the matcher into a negated mode — its
-/// alternatives are matched by separate matchers over sliced patterns
-/// and sliced subjects, and `matches_from` is only ever asked the plain
-/// question "does the rest of the pattern match the rest of the subject".
+/// alternatives are walked by separate matchers over sliced patterns, and
+/// `matches_from` is only ever asked the plain question "does the rest of
+/// the pattern match the rest of the subject".
 // [spec:nsh:req:compat.bash.expansion-globbing]
 struct Matcher<'a> {
     locale: &'a nsh_platform::Locale,
@@ -195,6 +244,12 @@ struct Matcher<'a> {
     subject: &'a [u8],
     memo: HashMap<(usize, usize), bool>,
     budget: &'a mut u64,
+    /// `Some` while the walk is collecting ends rather than answering a
+    /// yes-or-no question. Running out of pattern then records where the
+    /// subject had got to and reports "no match", so no branch is cut
+    /// short and every reachable end is seen. The memo turns into the
+    /// visited set that keeps the walk linear in its states.
+    ends: Option<Vec<usize>>,
 }
 
 impl Matcher<'_> {
@@ -227,7 +282,13 @@ impl Matcher<'_> {
     fn match_uncached(&mut self, mut pattern_at: usize, mut subject_at: usize) -> bool {
         loop {
             if pattern_at == self.pattern.bytes.len() {
-                return subject_at == self.subject.len();
+                let Some(ends) = self.ends.as_mut() else {
+                    return subject_at == self.subject.len();
+                };
+                if !ends.contains(&subject_at) {
+                    ends.push(subject_at);
+                }
+                return false;
             }
 
             if let Some(group) = self.extended_group(pattern_at) {
@@ -238,7 +299,10 @@ impl Matcher<'_> {
                 while self.pattern.active(pattern_at, b'*') {
                     pattern_at += 1;
                 }
-                if pattern_at == self.pattern.bytes.len() {
+                // A trailing `*` answers a yes-or-no question at once, but
+                // a collecting walk still has to visit every offset it
+                // reaches, so it goes round the candidate loop below.
+                if pattern_at == self.pattern.bytes.len() && self.ends.is_none() {
                     return true;
                 }
                 let mut candidate = subject_at;
@@ -362,26 +426,19 @@ impl Matcher<'_> {
 
     /// Every subject position one alternative can reach from `from`.
     ///
-    /// Each alternative is a pattern in its own right, matched against a
-    /// slice of the subject by its own matcher; the work budget is the
-    /// one thing they share, so a nested group cannot escape it.
+    /// Each alternative is a pattern in its own right, walked over the
+    /// same subject by its own matcher; the work budget is the one thing
+    /// they share, so a nested group cannot escape it.
     fn alternative_ends(&mut self, group: &ExtendedGroup, from: usize) -> Vec<usize> {
         let locale = self.locale;
         let subject = self.subject;
         let mut ends = Vec::new();
         for range in &group.alternatives {
             let alternative = self.pattern.slice(range.clone());
-            let mut end = from;
-            loop {
-                if !ends.contains(&end)
-                    && alternative.matches_within(locale, &subject[from..end], self.budget)
-                {
+            for end in alternative.ends_within(locale, subject, from, self.budget) {
+                if !ends.contains(&end) {
                     ends.push(end);
                 }
-                if end == subject.len() {
-                    break;
-                }
-                end = character_end(locale, subject, end);
             }
         }
         ends
@@ -791,5 +848,56 @@ mod tests {
         let mut different = subject;
         different.push(b'y');
         assert!(!pattern.matches(&locale, &different));
+    }
+
+    /// The shape the `matcher` fuzz target found on 2026-09-01: a leading
+    /// `*`, one `+(…)` whose alternatives are mostly empty, one
+    /// alternative holding a parenthesised run of `*`, and a subject made
+    /// of runs. Four such inputs of about four hundred bytes took between
+    /// eleven and ninety-two seconds, because `alternative_ends` asked
+    /// "does this alternative match `subject[from..end]`" once per
+    /// candidate `end` and threw the memo away between the questions.
+    ///
+    /// The fence is the work done rather than the clock, because the
+    /// clock says nothing about why: an answer costing more than a small
+    /// multiple of pattern length times subject length means a factor of
+    /// the subject's length has come back.
+    #[test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    fn extended_alternation_costs_a_multiple_of_its_input() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let mut bytes = b"*+(\x9f\x9d\xd6\xff\x9e\x9d\x9e(".to_vec();
+        bytes.extend(std::iter::repeat_n(b'*', 34));
+        bytes.extend_from_slice(b")**$*****");
+        bytes.extend(std::iter::repeat_n(b'|', 18));
+        bytes.extend(std::iter::repeat_n(b'*', 4));
+        bytes.extend(std::iter::repeat_n(0xff, 30));
+        bytes.extend_from_slice(b"aaa)+");
+        let pattern = Pattern::unquoted(BString::from(bytes)).with_options(PatternOptions {
+            extended: true,
+            ignore_case: false,
+        });
+
+        let mut subject = vec![b'a'; 14];
+        for (byte, run) in [
+            (b'*', 4),
+            (0x9a, 37),
+            (b'*', 33),
+            (0xff, 30),
+            (0xd6, 40),
+            (0xff, 60),
+            (b'*', 13),
+            (b'a', 12),
+        ] {
+            subject.extend(std::iter::repeat_n(byte, run));
+        }
+
+        let (matched, cost) = pattern.match_cost(&locale, &subject);
+        assert!(!matched);
+        let allowance = 2 * pattern.as_bytes().len() as u64 * subject.len() as u64;
+        assert!(
+            cost < allowance,
+            "cost {cost} exceeds allowance {allowance}"
+        );
     }
 }
