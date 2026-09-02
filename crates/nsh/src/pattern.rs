@@ -139,27 +139,45 @@ impl Pattern {
 
     // [spec:dash:sem:expand.pmatch-fn]
     pub(crate) fn matches(&self, locale: &nsh_platform::Locale, subject: &[u8]) -> bool {
-        // A pattern without extended groups is matched by a memoized
-        // walk whose work is bounded by pattern length times subject
-        // length, so it needs no budget and POSIX matching is unchanged
-        // by this argument existing.
-        let mut budget = if self.options.extended {
+        self.trial(locale, subject).matches_from(0)
+    }
+
+    /// This pattern put to one subject, ready to be asked about it more
+    /// than once.
+    ///
+    /// A trim asks about every offset of its value and a substitution
+    /// asks from every offset, so what those questions share is what the
+    /// whole operation costs: the locale's answers about the subject's
+    /// characters, and -- for the questions that are yes-or-no -- the
+    /// memo, whose key names a state rather than the question that
+    /// reached it.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub(crate) fn trial<'a>(
+        &'a self,
+        locale: &'a nsh_platform::Locale,
+        subject: &'a [u8],
+    ) -> Trial<'a> {
+        Trial {
+            pattern: self,
+            characters: Characters::of(locale, &self.bytes, subject),
+            memo: Memo::default(),
+            budget: 0,
+            spent: 0,
+        }
+    }
+
+    /// What one question about this pattern may cost.
+    ///
+    /// A pattern without extended groups is answered by a memoized walk
+    /// whose work is bounded by pattern length times subject length, so
+    /// it needs no budget and POSIX matching is unchanged by this
+    /// existing.
+    fn budget(&self) -> u64 {
+        if self.options.extended {
             EXTENDED_MATCH_BUDGET
         } else {
             u64::MAX
-        };
-        self.matches_within(locale, subject, &mut budget)
-    }
-
-    fn matches_within(
-        &self,
-        locale: &nsh_platform::Locale,
-        subject: &[u8],
-        budget: &mut u64,
-    ) -> bool {
-        let mut characters = Characters::of(locale, &self.bytes, subject);
-        self.matcher(&mut characters, 0, budget, None)
-            .matches_from(0, 0)
+        }
     }
 
     /// Every subject offset at which this pattern, read from `from`, runs
@@ -177,7 +195,8 @@ impl Pattern {
         from: usize,
         budget: &mut u64,
     ) -> Vec<usize> {
-        let mut matcher = self.matcher(characters, pattern_start, budget, Some(Vec::new()));
+        let mut memo = Memo::default();
+        let mut matcher = self.matcher(characters, pattern_start, budget, &mut memo, true);
         matcher.matches_from(0, from);
         matcher.ends.unwrap_or_default()
     }
@@ -187,7 +206,8 @@ impl Pattern {
         characters: &'a mut Characters<'b>,
         pattern_start: usize,
         budget: &'a mut u64,
-        ends: Option<Vec<usize>>,
+        memo: &'a mut Memo,
+        collect: bool,
     ) -> Matcher<'a, 'b> {
         let locale = characters.locale;
         let subject = characters.subject;
@@ -197,10 +217,9 @@ impl Pattern {
             pattern_start,
             subject,
             characters,
-            memo: HashMap::new(),
+            memo,
             budget,
-            ends,
-            group_ends: HashMap::new(),
+            ends: collect.then(Vec::new),
         }
     }
 
@@ -213,9 +232,70 @@ impl Pattern {
     /// clock it happens to take on the machine running it.
     #[cfg(test)]
     fn match_cost(&self, locale: &nsh_platform::Locale, subject: &[u8]) -> (bool, u64) {
-        let mut budget = EXTENDED_MATCH_BUDGET;
-        let matched = self.matches_within(locale, subject, &mut budget);
-        (matched, EXTENDED_MATCH_BUDGET - budget)
+        let mut trial = self.trial(locale, subject);
+        let matched = trial.matches_from(0);
+        (matched, trial.spent)
+    }
+}
+
+/// One pattern's answers about one subject, kept across the questions an
+/// operation over a whole value asks.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+pub(crate) struct Trial<'a> {
+    pattern: &'a Pattern,
+    characters: Characters<'a>,
+    /// Shared by every yes-or-no question, because a state's answer does
+    /// not depend on which question reached it.
+    memo: Memo,
+    /// What the question being asked has left to spend. Each gets the
+    /// whole of the pattern's budget, as it did when each was a match of
+    /// its own.
+    budget: u64,
+    /// What every question so far has cost, in states walked. The budget
+    /// left says nothing about that, having been refilled between the
+    /// questions, and it is what a test fences a whole operation on.
+    spent: u64,
+}
+
+impl Trial<'_> {
+    /// Whether the pattern matches the whole of `subject[from..]`.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub(crate) fn matches_from(&mut self, from: usize) -> bool {
+        let mut memo = std::mem::take(&mut self.memo);
+        let matched = self.ask(&mut memo, from, false).0;
+        // A question that ran out of budget abandoned branches it had not
+        // finished, and the `false` it wrote for those is not an answer
+        // the next question may read.
+        if self.budget > 0 {
+            self.memo = memo;
+        }
+        matched
+    }
+
+    /// Every offset at which the pattern, read from its first byte, runs
+    /// out over `subject[from..]` -- the set
+    /// `{ end : the pattern matches subject[from..end] }`, in order.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub(crate) fn ends_from(&mut self, from: usize) -> Vec<usize> {
+        // A collecting walk answers "no match" wherever the pattern runs
+        // out, so what its memo holds is not what a yes-or-no walk would
+        // hold at the same state, and it gets a memo of its own.
+        let mut memo = Memo::default();
+        let mut ends = self.ask(&mut memo, from, true).1;
+        ends.sort_unstable();
+        ends.dedup();
+        ends
+    }
+
+    fn ask(&mut self, memo: &mut Memo, from: usize, collect: bool) -> (bool, Vec<usize>) {
+        self.budget = self.pattern.budget();
+        let mut matcher =
+            self.pattern
+                .matcher(&mut self.characters, 0, &mut self.budget, memo, collect);
+        let matched = matcher.matches_from(0, from);
+        let ends = matcher.ends.take().unwrap_or_default();
+        self.spent += self.pattern.budget() - self.budget;
+        (matched, ends)
     }
 }
 
@@ -244,10 +324,11 @@ const EXTENDED_MATCH_BUDGET: u64 = 4_000_000;
 /// locale being selected and restored around it, and asking one
 /// character at a time is how a single match came to ask 482,532 times
 /// about a 293-byte subject: a repeated group re-asks the same offsets
-/// at every offset it can be entered at. One of these is built per match
-/// and shared by every matcher the match creates -- including the ones
-/// an extended group makes for its alternatives -- so an offset is asked
-/// about once and the locale is selected a handful of times.
+/// at every offset it can be entered at. One of these is built per trial
+/// -- one operation over one value, however many questions that takes --
+/// and shared by every matcher those questions create, including the
+/// ones an extended group makes for its alternatives, so an offset is
+/// asked about once and the locale is selected a handful of times.
 // [spec:nsh:req:compat.bash.expansion-globbing]
 struct Characters<'a> {
     locale: &'a nsh_platform::Locale,
@@ -299,7 +380,10 @@ struct Matcher<'a, 'b> {
     /// subject's characters, shared with every other matcher of the same
     /// match.
     characters: &'a mut Characters<'b>,
-    memo: HashMap<(usize, usize), bool>,
+    /// What this walk has already decided. Borrowed rather than owned so
+    /// that a caller asking about many offsets of one subject -- which
+    /// is what a trim does -- can hold one across the lot.
+    memo: &'a mut Memo,
     budget: &'a mut u64,
     /// `Some` while the walk is collecting ends rather than answering a
     /// yes-or-no question. Running out of pattern then records where the
@@ -307,12 +391,18 @@ struct Matcher<'a, 'b> {
     /// short and every reachable end is seen. The memo turns into the
     /// visited set that keeps the walk linear in its states.
     ends: Option<Vec<usize>>,
+}
+
+/// What one walk has already decided, and may be asked again.
+#[derive(Default)]
+struct Memo {
+    matches: HashMap<(usize, usize), bool>,
     /// Where each group, entered at each subject offset, can end. Keyed
     /// on `(group start, from)`, which is complete for the same reason
-    /// `memo`'s key is. Its size is bounded by the budget rather than by
-    /// the subject: producing an end costs at least one budget unit, so
-    /// the table cannot hold more entries than the walk was allowed to
-    /// pay for.
+    /// `matches`'s key is. Its size is bounded by the budget rather than
+    /// by the subject: producing an end costs at least one budget unit,
+    /// so the table cannot hold more entries than the walk was allowed
+    /// to pay for.
     group_ends: HashMap<(usize, usize), Vec<usize>>,
 }
 
@@ -349,7 +439,7 @@ impl Matcher<'_, '_> {
     // [spec:posix:syn:pattern.concatenation]
     // [spec:posix:sem:pattern.asterisk-longest-match]
     fn matches_from(&mut self, pattern_at: usize, subject_at: usize) -> bool {
-        if let Some(result) = self.memo.get(&(pattern_at, subject_at)) {
+        if let Some(result) = self.memo.matches.get(&(pattern_at, subject_at)) {
             return *result;
         }
         if *self.budget == 0 {
@@ -357,7 +447,7 @@ impl Matcher<'_, '_> {
         }
         *self.budget -= 1;
         let result = self.match_uncached(pattern_at, subject_at);
-        self.memo.insert((pattern_at, subject_at), result);
+        self.memo.matches.insert((pattern_at, subject_at), result);
         result
     }
 
@@ -378,6 +468,7 @@ impl Matcher<'_, '_> {
             }
 
             if self.pattern.active(pattern_at, b'*') {
+                let star_at = pattern_at;
                 while self.pattern.active(pattern_at, b'*') {
                     pattern_at += 1;
                 }
@@ -387,16 +478,7 @@ impl Matcher<'_, '_> {
                 if pattern_at == self.pattern.bytes.len() && self.ends.is_none() {
                     return true;
                 }
-                let mut candidate = subject_at;
-                loop {
-                    if self.matches_from(pattern_at, candidate) {
-                        return true;
-                    }
-                    if candidate == self.subject.len() {
-                        return false;
-                    }
-                    candidate = self.subject_end(candidate);
-                }
+                return self.match_star(star_at, pattern_at, subject_at);
             }
 
             if self.pattern.active(pattern_at, b'?') {
@@ -437,6 +519,48 @@ impl Matcher<'_, '_> {
             pattern_at = pattern_end;
             subject_at = subject_end;
         }
+    }
+
+    /// Where a `*` and the pattern after it can be satisfied from
+    /// `subject_at`.
+    ///
+    /// `*` is the one operator whose state answers for a whole run of
+    /// offsets at once: what it asks is whether the rest of the pattern
+    /// is satisfied at `subject_at` or at any offset after it, and the
+    /// same star one character further on asks that of a shorter run. So
+    /// the walk over candidates settles `(star, c)` for every `c` it
+    /// stepped over rather than only the offset it was asked about, and
+    /// reads those answers back when a later question steps into them.
+    ///
+    /// Without that, a caller asking about every offset of its value --
+    /// which is exactly what a suffix trim does -- pays for the walk
+    /// once per offset, and the whole operation is a square of the
+    /// value's length while its states are a multiple of it.
+    // [spec:posix:sem:pattern.asterisk-matches-any-string]
+    fn match_star(&mut self, star_at: usize, after: usize, subject_at: usize) -> bool {
+        let mut candidate = subject_at;
+        let mut stepped = Vec::new();
+        let matched = loop {
+            if let Some(known) = self.memo.matches.get(&(star_at, candidate)) {
+                break *known;
+            }
+            if self.matches_from(after, candidate) {
+                break true;
+            }
+            stepped.push(candidate);
+            if candidate == self.subject.len() {
+                break false;
+            }
+            candidate = self.subject_end(candidate);
+        };
+        // A walk that ran out of budget answered "no match" for branches
+        // it never took, and that answer is this question's alone.
+        if *self.budget > 0 {
+            for at in stepped {
+                self.memo.matches.insert((star_at, at), matched);
+            }
+        }
+        matched
     }
 
     /// Whether one pattern character stands for one subject character,
@@ -518,7 +642,7 @@ impl Matcher<'_, '_> {
     /// every offset it can be entered at. Remembering it is what stops
     /// that being a cube of the subject's length.
     fn alternative_ends(&mut self, group: &ExtendedGroup, from: usize) -> Vec<usize> {
-        if let Some(ends) = self.group_ends.get(&(group.start, from)) {
+        if let Some(ends) = self.memo.group_ends.get(&(group.start, from)) {
             return ends.clone();
         }
         let mut ends = Vec::new();
@@ -529,7 +653,9 @@ impl Matcher<'_, '_> {
         }
         ends.sort_unstable();
         ends.dedup();
-        self.group_ends.insert((group.start, from), ends.clone());
+        self.memo
+            .group_ends
+            .insert((group.start, from), ends.clone());
         ends
     }
 
@@ -1035,6 +1161,50 @@ mod tests {
         assert!(
             cost < allowance,
             "cost {cost} exceeds allowance {allowance}"
+        );
+    }
+
+    /// What one operation over a whole value is allowed to cost.
+    ///
+    /// `${v#*zz}` asked whether the pattern matched every prefix of its
+    /// value in turn, `${v%*zz}` the same of every suffix, and
+    /// `${v/*zz/X}` asked the second question from every offset -- so a
+    /// trim was a square of the value's length and a substitution a
+    /// cube. Measured interleaved at loads 9 to 18, one operation each
+    /// on a 2047-byte value: a trim 0.27s and a substitution 175.75s.
+    /// What the collecting walk answers for every end at once, and the
+    /// memo the questions now share, make a trim one walk of the value
+    /// and a substitution one walk from each of its offsets.
+    #[test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    fn an_operation_over_a_value_costs_one_walk() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let pattern = Pattern::unquoted(BString::from("*zz"));
+        let subject = vec![b'a'; 2048];
+        let offsets = subject.len() as u64 + 1;
+        let walk = COST_ALLOWANCE * pattern.as_bytes().len() as u64 * subject.len() as u64;
+
+        // `${v#*zz}` and `${v##*zz}` are the two ends of one traversal.
+        let mut prefixes = pattern.trial(&locale, &subject);
+        assert!(prefixes.ends_from(0).is_empty());
+        let cost = prefixes.spent;
+        assert!(cost < walk, "prefix cost {cost} exceeds allowance {walk}");
+
+        // `${v%*zz}` and `${v%%*zz}` ask one question per offset, and
+        // the memo they share is what keeps the lot to one walk.
+        let mut suffixes = pattern.trial(&locale, &subject);
+        assert!(!(0..=subject.len()).any(|at| suffixes.matches_from(at)));
+        let cost = suffixes.spent;
+        assert!(cost < walk, "suffix cost {cost} exceeds allowance {walk}");
+
+        // `${v/*zz/X}` needs the furthest end from each offset, which is
+        // a traversal each and no more than that.
+        let mut spans = pattern.trial(&locale, &subject);
+        assert!((0..=subject.len()).all(|at| spans.ends_from(at).is_empty()));
+        let (cost, allowance) = (spans.spent, walk * offsets);
+        assert!(
+            cost < allowance,
+            "span cost {cost} exceeds allowance {allowance}"
         );
     }
 

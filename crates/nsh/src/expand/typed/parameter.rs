@@ -668,29 +668,41 @@ fn trim(
     operation: ParameterOperation,
 ) -> BString {
     let boundaries = character_boundaries(locale, value);
+    // Every question below is about the same value, so they are put to
+    // one trial rather than to a match apiece: what a suffix asks at one
+    // offset the next offset's question walks over again, and the memo
+    // that stops it doing so belongs to the value rather than to the
+    // offset.
+    let mut trial = pattern.trial(locale, value);
     let cut = match operation {
         ParameterOperation::RemoveSmallestSuffix => boundaries
             .iter()
             .rev()
             .copied()
-            .find(|at| pattern.matches(locale, &value[*at..]))
+            .find(|at| trial.matches_from(*at))
             .map(|at| (0, at)),
         ParameterOperation::RemoveLargestSuffix => boundaries
             .iter()
             .copied()
-            .find(|at| pattern.matches(locale, &value[*at..]))
+            .find(|at| trial.matches_from(*at))
             .map(|at| (0, at)),
-        ParameterOperation::RemoveSmallestPrefix => boundaries
-            .iter()
-            .copied()
-            .find(|at| pattern.matches(locale, &value[..*at]))
-            .map(|at| (at, value.len())),
-        ParameterOperation::RemoveLargestPrefix => boundaries
-            .iter()
-            .rev()
-            .copied()
-            .find(|at| pattern.matches(locale, &value[..*at]))
-            .map(|at| (at, value.len())),
+        ParameterOperation::RemoveSmallestPrefix | ParameterOperation::RemoveLargestPrefix => {
+            // A prefix is the question the walk answers for every offset
+            // at once, so the smallest and the largest prefix are the two
+            // ends of a single traversal. Every step of a walk lands
+            // where a character ends, save for a collating element wider
+            // than one; the question was only ever asked at character
+            // boundaries and the answer stays there.
+            let ends: Vec<usize> = trial
+                .ends_from(0)
+                .into_iter()
+                .filter(|end| boundaries.binary_search(end).is_ok())
+                .collect();
+            let smallest = matches!(operation, ParameterOperation::RemoveSmallestPrefix);
+            if smallest { ends.first() } else { ends.last() }
+                .copied()
+                .map(|at| (at, value.len()))
+        }
         _ => unreachable!("only trimming operations reach trim"),
     };
     cut.map_or_else(

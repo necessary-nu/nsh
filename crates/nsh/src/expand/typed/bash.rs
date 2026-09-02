@@ -13,7 +13,7 @@ use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
 use crate::nodes::{FileRedirectionOperator, Node, Redirection, WordNode};
 use crate::options::{BashShopt, Dialect};
-use crate::pattern::{Pattern, PatternOptions};
+use crate::pattern::{Pattern, PatternOptions, Trial};
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, WordUnit};
 
 /// Pattern options for `case`, `[[ … ]]`, and `${name/pattern/…}`,
@@ -655,12 +655,17 @@ fn replace(
     anchor: Anchor,
 ) -> BString {
     let boundaries = super::character_boundaries(locale, text);
+    // One trial for the whole value: an end anchor asks about every
+    // offset in it, and an unanchored substitution asks from every
+    // offset, so the walks share what they learn about its characters
+    // and -- where the question is yes-or-no -- about its states.
+    let mut trial = pattern.trial(locale, text);
     let mut result = BString::new(Vec::new());
     if anchor == Anchor::End {
         let Some(start) = boundaries
             .iter()
             .copied()
-            .find(|start| pattern.matches(locale, &text[*start..]))
+            .find(|start| trial.matches_from(*start))
         else {
             return BString::from(text);
         };
@@ -674,7 +679,7 @@ fn replace(
     let mut replaced = false;
     while at < text.len() {
         let matched = (!replaced || all)
-            .then(|| longest_match(locale, &boundaries, text, pattern, at))
+            .then(|| longest_match(&mut trial, &boundaries, at))
             .flatten();
         match matched {
             Some(end) if end > at => {
@@ -699,19 +704,18 @@ fn replace(
     result
 }
 
-fn longest_match(
-    locale: &nsh_platform::Locale,
-    boundaries: &[usize],
-    text: &[u8],
-    pattern: &Pattern,
-    at: usize,
-) -> Option<usize> {
-    boundaries
-        .iter()
-        .copied()
+/// The furthest the pattern reaches from `at`, at a character boundary.
+///
+/// One traversal answers for every end at once. Asking the same question
+/// once per candidate end is what made a substitution a cube of the
+/// value's length: the ends were a factor of it, and each was a match
+/// that walked the value again.
+fn longest_match(trial: &mut Trial<'_>, boundaries: &[usize], at: usize) -> Option<usize> {
+    trial
+        .ends_from(at)
+        .into_iter()
         .rev()
-        .filter(|end| *end >= at)
-        .find(|end| pattern.matches(locale, &text[at..*end]))
+        .find(|end| boundaries.binary_search(end).is_ok())
 }
 
 /// `${name^pattern}`, `${name^^pattern}`, `${name,pattern}`, and
