@@ -1407,6 +1407,11 @@ assertions (
     {id unsplice-the-input-frame-doc-comment, kind @complete, author "brendan@necessary.nu", at 2026-09-01T23:57:28.877716878Z}
     {id settle-whether-the-workspace-unwinds, kind @complete, author "brendan@necessary.nu", at 2026-09-02T00:22:28.477062149Z}
     {id break-up-the-545-line-command-body, kind @complete, author "brendan@necessary.nu", at 2026-09-02T00:36:44.933057746Z}
+    {id split-the-printf-conversions, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:43.837985591Z}
+    {id split-the-printf-operand-scanner, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:45.541976121Z}
+    {id split-the-editor-bindings, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:51.026958215Z}
+    {id move-the-special-variable-readers, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:52.927409997Z}
+    {id split-the-arithmetic-lexer, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:59.38751016Z}
 )
 
 impl_evidence (

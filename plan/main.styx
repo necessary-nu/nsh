@@ -7747,30 +7747,75 @@ children (
                                         id split-the-printf-conversions
                                         title "Give the float renderings a file beside the digits"
                                         kind @refactor
+                                        sealed true
+                                        log (
+                                            {
+                                                at 2026-09-02T01:24:43.837985591Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
+                                            }
+                                        )
                                     }
 
                                     {
                                         id split-the-printf-operand-scanner
                                         title "Separate printf's operand scanner from its driver"
                                         kind @refactor
+                                        sealed true
+                                        log (
+                                            {
+                                                at 2026-09-02T01:24:45.541976121Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
+                                            }
+                                        )
                                     }
 
                                     {
                                         id split-the-editor-bindings
                                         title "Separate what the editor binds from the editor itself"
                                         kind @refactor
+                                        sealed true
+                                        log (
+                                            {
+                                                at 2026-09-02T01:24:51.026958215Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
+                                            }
+                                        )
                                     }
 
                                     {
                                         id move-the-special-variable-readers
                                         title "Put the named-variable readers with the variables they read"
                                         kind @refactor
+                                        sealed true
+                                        log (
+                                            {
+                                                at 2026-09-02T01:24:52.927409997Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
+                                            }
+                                        )
                                     }
 
                                     {
                                         id split-the-arithmetic-lexer
                                         title "Split arithmetic at the lexer, where it already divides"
                                         kind @refactor
+                                        sealed true
+                                        log (
+                                            {
+                                                at 2026-09-02T01:24:59.38751016Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
+                                            }
+                                        )
                                     }
                                 )
                                 log (
