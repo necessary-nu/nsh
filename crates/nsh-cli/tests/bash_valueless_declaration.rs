@@ -138,6 +138,134 @@ const A_REFERENCE_TO_NOTHING: &[&str] = &[
     "readonly t\ndeclare -n r=t\necho \"[${r@A}][${r@a}]\"\n",
 ];
 
+/// The names a `declare -p` listing carries, as the set a script's own
+/// declarations add to it.
+///
+/// The two shells do not start with the same names -- this one has no
+/// `FUNCNAME` or `BASH_SOURCE` and does have `PS1` -- so no row compares
+/// a whole listing. Each takes the listing's name set before and after
+/// its declarations and prints the difference, which cancels whatever
+/// the shell brought with it and is still a comparison of sets rather
+/// than of one line.
+///
+/// `grep -vxF` takes each line of `$b` as a fixed whole-line pattern, so
+/// the subtraction needs no file and no process substitution: these
+/// scripts run with the test runner's own working directory, which is
+/// not a place to be writing.
+fn listed_by_attribute() -> Vec<String> {
+    const NAMES: &str =
+        "names() { declare -p | sed -E 's/^declare -[a-zA-Z-]+ //; s/=.*//' | sort; }\n";
+    const DELTA: &str = "printf '%s\\n' \"$(names)\" | grep -vxF \"$b\" | tr '\\n' ' '\necho\n";
+
+    let mut cases: Vec<String> = [
+        // Every valueless declaration, one at a time and then together.
+        "declare -i zq\n",
+        "readonly zq\n",
+        "declare zq\n",
+        "declare -a zq\n",
+        "declare -A zq\n",
+        "declare -x zq\n",
+        "declare -l zq\n",
+        "declare -t zq\n",
+        "zt=1\ndeclare -n zq=zt\n",
+        "declare -i zq1\nreadonly zq2\ndeclare zq3\ndeclare -a zq4\n\
+         declare -A zq5\ndeclare -x zq6\n",
+        // An assignment does not take a name back out of the listing.
+        "declare -i zq\nzq=3\n",
+        "declare -a zq\nzq[2]=v\n",
+        // Nor does a second declaration of the same name.
+        "declare -i zq\ndeclare -r zq\n",
+    ]
+    .iter()
+    .map(|body| format!("{NAMES}b=$(names)\n{body}{DELTA}"))
+    .collect();
+
+    /* A name a function made local is in the listing while the body
+     * runs and gone from it afterwards, so the set is taken from
+     * inside. */
+    cases.push(format!(
+        "{NAMES}f(){{ local zqa; local zqb=1; declare zqc; \
+         printf '%s\\n' \"$(names)\" | grep -vxF \"$1\" | tr '\\n' ' '; echo; }}\n\
+         b=$(names)\nf \"$b\"\n"
+    ));
+    cases.push(format!(
+        "{NAMES}f(){{ local zqa; }}\nb=$(names)\nf\n{DELTA}"
+    ));
+    cases
+}
+
+/// The listing asked one name at a time, and the attribute filters it
+/// was split from `${!prefix@}` for.
+const LISTED_BY_NAME: &[&str] = &[
+    "declare -i zq\ndeclare -pi | grep -c ' zq$'\n",
+    "readonly zq\ndeclare -pr | grep -c ' zq$'\n",
+    "declare -a zq\ndeclare -pa | grep -c ' zq$'\n",
+    "declare -A zq\ndeclare -pA | grep -c ' zq$'\n",
+    "declare -x zq\ndeclare -px | grep -c ' zq$'\n",
+    "zt=1\ndeclare -n zq=zt\ndeclare -pn | grep -c ' zq'\n",
+    "declare -i zq\ndeclare -pr | grep -c ' zq$'\n",
+    "declare -a zq\ndeclare -pA | grep -c ' zq$'\n",
+    // The listing agrees with the same name asked for directly.
+    "declare -i zq\ndeclare -p zq\ndeclare -p | grep ' zq$'\n",
+    "readonly zq\ndeclare -p zq\ndeclare -p | grep ' zq$'\n",
+    "declare zq\ndeclare -p zq\ndeclare -p | grep ' zq$'\n",
+    "declare -a zq\ndeclare -p zq\ndeclare -p | grep ' zq$'\n",
+    "f(){ local zq; declare -p zq; declare -p | grep ' zq$'; }\nf\n",
+];
+
+/// The listings that must *not* grow the same names.
+///
+/// `${!prefix@}` answers with the names that hold a value, `set` and a
+/// bare `declare` list `name=value` pairs, and none of the three carries
+/// an invisible name in Bash. `export -p` and `readonly -p` do carry one
+/// when it holds their attribute, which is the other half of the same
+/// rule.
+const THE_OTHER_LISTINGS_ARE_UNMOVED: &[&str] = &[
+    "declare -i zq1\nreadonly zq2\ndeclare zq3\ndeclare -a zq4\necho \"[${!zq@}]\"\n",
+    "declare -i zq1\ndeclare -a zq4=()\necho \"[${!zq@}]\"\n",
+    "declare -i zq1\nreadonly zq2\ndeclare zq3\nset | grep -c '^zq'\n",
+    "declare -i zq1\nreadonly zq2\ndeclare zq3\ndeclare | grep -c '^zq'\n",
+    "declare -i zq1\ndeclare -x zq5\nexport -p | grep -c ' zq'\n",
+    "declare -i zq1\nreadonly zq2\nreadonly -p | grep -c ' zq'\n",
+    "declare -x zq5\nexport -p | grep ' zq5'\n",
+    "readonly zq2\nreadonly -p | grep ' zq2'\n",
+];
+
+/// The names this shell reserves for itself, which are not declarations.
+///
+/// `MAIL`, `MAILPATH`, `HISTSIZE`, `TERM` and the five locale names get
+/// an entry at start-up so that a later assignment has a callback to
+/// run. Bash has no variable there, and a listing that grew every entry
+/// would have reported this shell's bookkeeping as the script's
+/// declarations -- which is what the first attempt at this did, adding
+/// seven names Bash does not have.
+const A_RESERVED_SLOT_IS_NOT_A_DECLARATION: &[&str] = &[
+    "declare -p MAIL\necho status=$?\n",
+    "declare -p MAILPATH\necho status=$?\n",
+    "declare -p HISTSIZE\necho status=$?\n",
+    "declare -p LC_COLLATE\necho status=$?\n",
+    "declare -p LC_NUMERIC\necho status=$?\n",
+    "declare -p | grep -cE ' (MAIL|MAILPATH|HISTSIZE|LC_COLLATE|LC_NUMERIC)$'\n",
+    // An assignment gives it a declaration, and unsetting takes it back.
+    "MAIL=/x\ndeclare -p MAIL\ndeclare -p | grep -c ' MAIL='\n",
+    "MAIL=/x\nunset MAIL\ndeclare -p MAIL\necho status=$?\n",
+    "MAIL=/x\nunset MAIL\ndeclare -p | grep -c ' MAIL'\n",
+    "HISTSIZE=9\ndeclare -p HISTSIZE\n",
+    // Declaring one is a declaration like any other, wherever the
+    // declaration leaves a mark on the entry.
+    "declare -i MAILPATH\ndeclare -p MAILPATH\ndeclare -p | grep -c ' MAILPATH$'\n",
+    "readonly MAIL\ndeclare -p MAIL\ndeclare -p | grep -c ' MAIL$'\n",
+    "declare -x HISTSIZE\ndeclare -p HISTSIZE\ndeclare -p | grep -c ' HISTSIZE$'\n",
+    "declare -a LC_CTYPE\ndeclare -p LC_CTYPE\ndeclare -p | grep -c ' LC_CTYPE$'\n",
+    "declare -l MAIL\ndeclare -p MAIL\n",
+    "declare -t MAILPATH\ndeclare -p MAILPATH\n",
+    /* A bare `declare MAIL` is the one that cannot be told from the
+     * slot it found, because it changes nothing about the entry. It is
+     * `list-a-declaration-of-a-reserved-name`, and it is deliberately
+     * not a row here: the table is a check, and a check that is red for
+     * a defect somebody else is going to fix stops being one. */
+];
+
 /// Every combination of attributes a name can carry at once, through
 /// the three printers that spell its letters.
 ///
@@ -238,6 +366,34 @@ fn a_local_name_is_spelled_as_one() {
 #[test]
 fn a_reference_to_nothing_spells_nothing() {
     agrees(A_REFERENCE_TO_NOTHING);
+}
+
+/// `declare -p` lists a name that carries attributes and no value, as
+/// the reference lists it.
+// [spec:nsh:req:compat.bash.arrays-declarations/test]
+// [spec:nsh:req:compat.bash.functions-scoping/test]
+#[test]
+fn the_listing_carries_a_name_with_no_value() {
+    let cases = listed_by_attribute();
+    let borrowed: Vec<&str> = cases.iter().map(String::as_str).collect();
+    agrees(&borrowed);
+    agrees(LISTED_BY_NAME);
+}
+
+/// The listings that answer a different question are unmoved.
+// [spec:nsh:req:compat.bash.arrays-declarations/test]
+#[test]
+fn the_other_listings_do_not_grow_it() {
+    agrees(THE_OTHER_LISTINGS_ARE_UNMOVED);
+}
+
+/// A name this shell reserved for a callback is not a declaration, in
+/// the listing or asked for by name.
+// [spec:nsh:req:compat.bash.arrays-declarations/test]
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
+#[test]
+fn a_reserved_slot_is_not_a_declaration() {
+    agrees(A_RESERVED_SLOT_IS_NOT_A_DECLARATION);
 }
 
 /// `declare -p`, `${name@a}` and `${name@A}` order their letters as the

@@ -1438,7 +1438,7 @@ assertions (
     {id spell-a-valueless-name-back, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:19:49.138633066Z}
     {id apply-a-declaring-builtin-through-the-reference, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:45:11.445443261Z}
     {id keep-allexport-off-an-array, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:59:56.201085872Z}
-    {id spend-the-wrappers-budget-inside-the-boundary, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:55:22.428429632Z}
+    {id spend-the-wrappers-budget-inside-the-boundary, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:28:15.013856328Z}
     {id refuse-to-regenerate-a-file-another-session-changed, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:22:30.277642427Z}
     {id deliver-a-prompt-interrupt-without-eating-the-next-line, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:58:47.016231255Z}
     {id refuse-to-destroy-an-array-kind, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:15:07.483177095Z}

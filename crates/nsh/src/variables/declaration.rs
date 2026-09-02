@@ -78,9 +78,14 @@ pub(crate) fn attribute_letters(shell: &Shell, name: &BStr) -> BString {
 /// and is the whole of the difference from the transform's letters.
 // [spec:nsh:req:compat.bash.arrays-declarations]
 pub(crate) fn declaration_flags(shell: &Shell, name: &BStr) -> Option<BString> {
-    // A name declared without a value still has a declaration to print;
-    // only a name with no entry at all is missing.
+    /* A name declared without a value still has a declaration to print;
+     * what is missing is a name with no entry at all, and a slot this
+     * shell reserved for a callback, which Bash reports as `not found`
+     * because it has no variable there either. */
     super::variable_attributes(shell, name)?;
+    if super::value::reserved_slot(shell, name) {
+        return None;
+    }
     let mut flags = attribute_letters(shell, name);
     if flags.is_empty() {
         flags.push(b'-');

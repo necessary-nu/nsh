@@ -198,21 +198,34 @@ pub(crate) fn variable_kind(shell: &Shell, name: &BStr) -> Option<VariableKind> 
     }
 }
 
-/// The names a `declare -p` listing prints.
+/// The names a `declare -p` listing prints: every entry but a reserved
+/// slot.
 ///
-/// A name declared as an array and never assigned belongs here: it has
-/// a declaration to render even though it holds nothing, and Bash's own
-/// listing carries it. An entry that exists solely to carry attributes
-/// has nothing to say about a kind and is left out, which is what makes
-/// `declare -a z` a line and `readonly x` none.
+/// A declaration is what the listing carries, and an entry is what a
+/// declaration leaves behind. `declare -a z`, `declare -i n`,
+/// `readonly x`, `declare y` and a `local q` are all lines in Bash with
+/// nothing beside them, and Bash's own set shows the same rule on its
+/// own names -- `declare -i BASHPID`, `declare -- BASH_ARGV0` and
+/// `declare -a FUNCNAME` are in its `declare -p` with no value.
+// [spec:nsh:req:compat.bash.arrays-declarations]
 pub(crate) fn declared_names(shell: &Shell) -> Vec<BString> {
     shell
         .variables
         .entries
         .iter()
-        .filter(|(_, var)| !matches!(var.state, VariableState::Unset))
+        .filter(|(_, var)| !var.is_reserved_slot())
         .map(|(name, _)| name.clone())
         .collect()
+}
+
+/// Whether the entry for `name` is one this shell reserved rather than
+/// one a script made.
+pub(crate) fn reserved_slot(shell: &Shell, name: &BStr) -> bool {
+    shell
+        .variables
+        .entries
+        .get(name)
+        .is_some_and(Variable::is_reserved_slot)
 }
 
 /// The names that hold a value, which `${!prefix@}` answers with.
@@ -262,6 +275,35 @@ pub(crate) fn set_bash_attribute(
 }
 
 impl Variable {
+    /// Whether this entry is a slot the shell keeps for itself, exactly
+    /// as it made it.
+    ///
+    /// `initialize_variables` enters `MAIL`, `MAILPATH`, `HISTSIZE`,
+    /// `TERM` and the five locale names so that a later assignment has
+    /// a callback to run, and enters them `FIXED` and holding nothing.
+    /// Bash has no variable there at all -- `declare -p LANG` in a
+    /// shell started without one reports `not found`, and none of the
+    /// eight is in its `declare -p` -- so a listing carrying them would
+    /// report this shell's bookkeeping as the script's declarations.
+    /// The first attempt at this listing did exactly that, adding seven
+    /// names the reference does not have.
+    ///
+    /// The three tests are one question asked of the three places a
+    /// script can leave a mark: a value, a dash attribute, a `declare`
+    /// letter. `readonly MAIL` and `declare -i MAILPATH` are
+    /// declarations of names that happen to have had a slot, and they
+    /// are listed. What is left over is a bare `declare MAIL`, which
+    /// changes nothing about the entry and so cannot be told from the
+    /// slot it found; `list-a-declaration-of-a-reserved-name` holds
+    /// that, and it needs a mark of its own rather than a finer test
+    /// here.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    fn is_reserved_slot(&self) -> bool {
+        matches!(self.state, VariableState::Unset)
+            && self.attributes == super::VariableAttributes::FIXED
+            && self.bash_attributes == BashAttributes::new()
+    }
+
     pub(super) fn scalar(&self) -> Option<&BStr> {
         match &self.state {
             VariableState::Unset | VariableState::Declared(_) => None,
