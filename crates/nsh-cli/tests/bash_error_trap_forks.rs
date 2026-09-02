@@ -43,10 +43,10 @@ const PRELUDE: &str = "set -o errtrace\ntrap 'echo line=$LINENO' ERR\n";
 /// shell's where it still differs.
 ///
 /// A `Some` is a divergence recorded rather than described: it fails when
-/// the divergence is closed, so the entry cannot outlive its reason. The
-/// one left is `$LINENO` for a subshell -- Bash reports the line its `)`
-/// is on and this shell the line its `(` is on, which is a question about
-/// which line a compound command records and not about the trap.
+/// the divergence is closed, so the entry cannot outlive its reason. None
+/// is left: the last two, `$LINENO` for a subshell, went with the line a
+/// compound command records, whose own table is
+/// `bash_compound_command_line`.
 const CASES: &[(&str, &str, Option<&str>)] = &[
     /* Forked as the command itself: Bash is silent. */
     ("false &\nwait\n", "", None),
@@ -75,17 +75,12 @@ const CASES: &[(&str, &str, Option<&str>)] = &[
     ("x=$(false)\n", "line=3\n", None),
     ("if false; then :; fi\n", "", None),
     ("f() {\nfalse\n}\nf\n", "line=4\nline=6\n", None),
-    /* Recorded divergences: the count agrees, the line does not. */
-    (
-        "(\nfalse\n)\n",
-        "line=4\nline=5\n",
-        Some("line=4\nline=3\n"),
-    ),
-    (
-        "(\n(\nfalse\n)\n)\n",
-        "line=5\nline=7\n",
-        Some("line=5\nline=3\n"),
-    ),
+    /* A subshell's own failure, which is the shape the sweep found the
+     * count right and the line wrong on. The line it records is
+     * `bash_compound_command_line`'s subject; both are asserted here so
+     * the count cannot be closed by moving the line. */
+    ("(\nfalse\n)\n", "line=4\nline=5\n", None),
+    ("(\n(\nfalse\n)\n)\n", "line=5\nline=7\n", None),
 ];
 
 /// Feed one case to a shell on standard input and return what it printed.

@@ -382,6 +382,20 @@ pub(super) fn command(shell: &mut Shell, context: TokenContext) -> Result<Option
         }
     }
 
+    /* A subshell is the one compound form Bash records at its closing
+     * token rather than its opening one, and the line is read here
+     * because that is where the `)` has just been consumed. dash records
+     * the `(` and reports it in the diagnostic a failed redirection on a
+     * subshell raises, so the two answers are kept apart by the dialect
+     * that asks rather than one of them being made to serve both. */
+    // [spec:nsh:req:compat.bash.traps-introspection]
+    if bash::active(shell)
+        && let Some(Node::Subshell(subshell)) = parsed_command.as_mut()
+    {
+        subshell.line =
+            SourceLine::new(crate::input::current_input_frame(&mut shell.input).line_number);
+    }
+
     /* Every compound form ends at a closing token the branch above left
      * to the check just made, so the run is taken here rather than where
      * the node was built, where it would stop a token short. */

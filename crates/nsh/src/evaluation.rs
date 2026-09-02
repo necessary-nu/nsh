@@ -552,12 +552,19 @@ pub(crate) fn evaluate_record(
     }
 }
 
-/// Record the line the command about to run begins on.
+/// Record the line the command about to run is reported at.
 ///
 /// dash reports `$LINENO` inside a function body relative to the
 /// function's own first line; Bash reports the line in the file, which is
 /// what `BASH_LINENO`, `caller`, and the `DEBUG` and `ERR` actions all
 /// read. The subtraction is therefore the POSIX dialect's alone.
+///
+/// WHICH LINE A COMPOUND COMMAND PASSES IS THE PARSER'S ANSWER, not this
+/// function's, and it is not the same line for every form. A subshell and
+/// `(( ))` record the line their closing token is on, because that is
+/// where Bash builds those nodes; `for`, `case`, `select`, `for ((;;))`
+/// and `[[ ]]` record a line from inside themselves, because Bash hands
+/// those nodes one. `bash_compound_command_line` is the measured table.
 // [spec:nsh:req:compat.bash.traps-introspection]
 fn record_command_line(shell: &mut Shell, line: i32) {
     shell.evaluation.diagnostic_line = line;

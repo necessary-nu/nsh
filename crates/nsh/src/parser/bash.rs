@@ -51,7 +51,7 @@ pub(super) fn command_prefix(
         return Ok(None);
     }
     if token == TokenKind::DoubleParen {
-        return arithmetic_command(shell, line).map(Some);
+        return arithmetic_command(shell).map(Some);
     }
     if token != TokenKind::Word || shell.input.last_token_quoted {
         return Ok(None);
@@ -65,8 +65,13 @@ pub(super) fn command_prefix(
     }
 }
 
-pub(super) fn arithmetic_command(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
+/// `(( ))` records the line its closing parentheses are on, which is what
+/// Bash's own node holds and what `$LINENO` reads back from it. The line
+/// is taken after the expression rather than passed in for that reason.
+// [spec:nsh:req:compat.bash.traps-introspection]
+pub(super) fn arithmetic_command(shell: &mut Shell) -> Result<Node, Error> {
     let expression = arithmetic_text(shell)?;
+    let line = SourceLine::new(crate::input::current_input_frame(&mut shell.input).line_number);
     Ok(Node::Bash(BashNode::ArithmeticCommand(
         BashArithmeticCommand {
             tokens: SourceTokens::none(),
