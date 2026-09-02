@@ -1,8 +1,28 @@
-//! The variables a Bash shell maintains on a script's behalf.
+//! The variables the shell maintains on a script's behalf.
 //!
-//! Three kinds live here and they are not the same thing. *Facts* --
-//! `BASH`, `BASH_VERSION`, `OSTYPE`, `UID` -- are published once when the
-//! dialect turns on and then behave like any other variable. *Clocks and
+//! The oldest of them are POSIX's, and the shell installs them before it
+//! reads a line. [`super::initialize_variables`] enters `IFS`, `PATH`,
+//! `MAIL`, `MAILPATH`, `PS1`, `PS2`, `PS4` and `HISTSIZE` as `FIXED`
+//! entries carrying a [`Callback`], and the rest of the shell reads them
+//! back through the one-line accessor named for each -- `ifs_value`,
+//! `path_value`, `primary_prompt_value` and the others, over the single
+//! lookup in `builtin_value`. Naming a reader for the variable rather
+//! than for its caller is what makes the set of names the shell itself
+//! depends on a list one can read.
+//!
+//! `ifs_is_set` and `mail_path_is_set` are separate from the readers
+//! because for those two names unset and empty mean different things: an
+//! unset `IFS` splits on the default and an empty one does not split at
+//! all, and an empty `MAILPATH` still wins over `MAIL`. A caller given
+//! only the value could not tell the cases apart. `default_ifs` and
+//! `default_path` are what startup installs when nothing else supplies a
+//! value, and they sit beside the readers so that what is written at
+//! startup and what is read afterwards cannot drift.
+//!
+//! Three more kinds arrive with the Bash dialect, and they are not the
+//! same thing as each other. *Facts* -- `BASH`, `BASH_VERSION`,
+//! `OSTYPE`, `UID` -- are published once when the dialect turns on and
+//! then behave like any other variable. *Clocks and
 //! generators* -- `RANDOM`, `SRANDOM`, `SECONDS`, `EPOCHSECONDS`,
 //! `EPOCHREALTIME`, `LINENO`, `BASHPID`, `BASH_SUBSHELL` -- have no
 //! stored value worth trusting, so they are recomputed on the read that
@@ -30,7 +50,7 @@ use bstr::{BStr, BString};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 use super::value::{VariableKind, VariableValue};
-use super::{Callback, VariableAttributes, VariableState, arrays};
+use super::{Callback, DEFAULT_IFS, Variable, VariableAttributes, VariableState, arrays};
 use crate::context::Shell;
 use crate::options::{Dialect, ShellOption};
 use crate::status::ExitStatus;
@@ -257,7 +277,7 @@ fn shell_path(shell: &mut Shell) -> BString {
                 |path| BString::from(path.to_shell_bytes()),
             );
     }
-    let path = super::path_value(shell);
+    let path = path_value(shell);
     let mut cursor = crate::execution::PathCursor::literal(BStr::new(path.as_slice()));
     while let Some(candidate) = cursor.advance(BStr::new(name.as_slice())) {
         let Ok(native) = candidate.path.as_slice().try_to_path_buf() else {
@@ -599,6 +619,71 @@ pub(crate) fn fork_child(shell: &mut Shell) {
         return;
     }
     shell.variables.special.reseed();
+}
+
+pub fn default_ifs() -> &'static BStr {
+    BStr::new(DEFAULT_IFS)
+}
+
+pub fn default_path() -> BString {
+    BString::from(nsh_platform::default_search_path().to_shell_bytes())
+}
+
+fn builtin_value(shell: &Shell, name: &[u8]) -> BString {
+    shell
+        .variables
+        .entries
+        .get(BStr::new(name))
+        .and_then(Variable::scalar_owned)
+        .unwrap_or_default()
+}
+
+pub fn ifs_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"IFS")
+}
+
+pub fn ifs_is_set(shell: &Shell) -> bool {
+    shell
+        .variables
+        .entries
+        .get(BStr::new(b"IFS"))
+        .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
+}
+
+pub fn mail_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"MAIL")
+}
+
+pub fn mail_path_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"MAILPATH")
+}
+
+pub fn path_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PATH")
+}
+
+pub fn primary_prompt_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PS1")
+}
+
+pub fn continuation_prompt_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PS2")
+}
+
+pub fn trace_prompt_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PS4")
+}
+
+pub fn history_size_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"HISTSIZE")
+}
+
+pub fn mail_path_is_set(shell: &Shell) -> bool {
+    shell
+        .variables
+        .entries
+        .get(BStr::new(b"MAILPATH"))
+        .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
 }
 
 #[cfg(test)]

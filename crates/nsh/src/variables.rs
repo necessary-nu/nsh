@@ -29,6 +29,11 @@ pub(crate) mod nameref;
 pub(crate) mod call_stack;
 
 pub(crate) mod special;
+pub(crate) use special::{
+    continuation_prompt_value, default_ifs, default_path, history_size_value, ifs_is_set,
+    ifs_value, mail_path_is_set, mail_path_value, mail_value, path_value, primary_prompt_value,
+    trace_prompt_value,
+};
 
 /// Persistent attributes of a shell variable.
 // [spec:nsh:def:idiom.variable-expansion-state]
@@ -194,71 +199,6 @@ impl VariableTable {
             .entries
             .push(local);
     }
-}
-
-pub fn default_ifs() -> &'static BStr {
-    BStr::new(DEFAULT_IFS)
-}
-
-pub fn default_path() -> BString {
-    BString::from(nsh_platform::default_search_path().to_shell_bytes())
-}
-
-fn builtin_value(shell: &Shell, name: &[u8]) -> BString {
-    shell
-        .variables
-        .entries
-        .get(BStr::new(name))
-        .and_then(Variable::scalar_owned)
-        .unwrap_or_default()
-}
-
-pub fn ifs_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"IFS")
-}
-
-pub fn ifs_is_set(shell: &Shell) -> bool {
-    shell
-        .variables
-        .entries
-        .get(BStr::new(b"IFS"))
-        .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
-}
-
-pub fn mail_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"MAIL")
-}
-
-pub fn mail_path_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"MAILPATH")
-}
-
-pub fn path_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PATH")
-}
-
-pub fn primary_prompt_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PS1")
-}
-
-pub fn continuation_prompt_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PS2")
-}
-
-pub fn trace_prompt_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PS4")
-}
-
-pub fn history_size_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"HISTSIZE")
-}
-
-pub fn mail_path_is_set(shell: &Shell) -> bool {
-    shell
-        .variables
-        .entries
-        .get(BStr::new(b"MAILPATH"))
-        .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
 }
 
 /// The name portion of `name` or `name=value`.
