@@ -7,13 +7,13 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
 mod bash_gate;
 mod bash_reference;
 mod control;
 mod oils_runner;
 mod process;
+mod provenance;
 mod smoosh;
 mod smoosh_runner;
 
@@ -244,21 +244,8 @@ fn verify_checkout(checkout: &Path, lock: &SourceLock) -> Result<()> {
 }
 
 fn git_value(checkout: &Path, arguments: &[&str]) -> Result<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(checkout)
-        .args(arguments)
-        .output()?;
-    if !output.status.success() {
-        return Err(format!(
-            "git {} failed for {}: {}",
-            arguments.join(" "),
-            checkout.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )
-        .into());
-    }
-    Ok(String::from_utf8(output.stdout)?.trim().to_owned())
+    let output = provenance::git_output(checkout, arguments)?;
+    Ok(String::from_utf8(output)?.trim().to_owned())
 }
 
 fn generate_import(

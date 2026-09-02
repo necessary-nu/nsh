@@ -96,7 +96,7 @@ pub(crate) fn run_reference_specs(
         max_cases: None,
         summary: None,
         baseline: None,
-        update_baseline: false,
+        refresh: super::Refresh::No,
         posix: false,
         verbose: false,
         base_path: Some(OsString::from("/usr/bin:/bin")),

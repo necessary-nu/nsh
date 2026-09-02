@@ -8491,6 +8491,13 @@ children (
                                         kind @note
                                         text "Found 2026-09-02 while closing `spell-an-unassigned-array-back`, and not part of it. Measured against the pinned Bash 5.3.15 on `92f97f9`; pre-existing, and wrong in both directions at once.\n\n`set -a` exports an array here and Bash never exports one:\n\n    set -a; z=(1);            declare -p z   bash: declare -a z=([0]=\"1\")   nsh: declare -ax z=([0]=\"1\")\n    set -a; declare -a z=();  declare -p z   bash: declare -a z=()          nsh: declare -ax z=()\n    set -a; declare -a z;     declare -p z   bash: declare -a z             nsh: declare -ax z\n\nand it does *not* export a declaration Bash does:\n\n    set -a; declare -i n;     declare -p n   bash: declare -ix n            nsh: declare -i n\n\nso the two shells disagree about the letter on four of the five shapes, and agree on the plain `set -a; n=1` scalar.\n\nNO VALUE ESCAPES EITHER WAY, which is why nothing else has caught it. `[spec:nsh:req:compat.bash.arrays-declarations]` already keeps an array out of the environment -- `environment()` passes only a scalar -- so `set -a; z=(1); env | grep '^z'` is empty in both shells. It is the `x` on the declaration that differs, which `declare -p`, `${z[@]@A}` and `export -p` all print.\n\nWHERE. `variables::set_entry` sets `attributes.exported` from `ShellOption::AllExport` before it knows what kind of value is landing, and `arrays::store` goes through `set_entry` on purpose so a new name picks up export state and callbacks. Bash decides the other way round: `bind_variable` marks a *scalar* assignment for export under `-a` and an array assignment is not one. The `declare -i n` half is the mirror -- Bash's `declare` applies `-a`'s export to a name it is declaring, and this shell's `declare` does not go through `set_entry` at all when there is no value.\n\nDONE WHEN. Each of the five shapes above prints the reference's letters, `set -a` still exports a plain scalar assignment, and a differential table holds all of them."
                                     }
+
+                                    {
+                                        at 2026-09-02T12:46:17.138479862Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -8568,6 +8575,7 @@ children (
                                 id apply-a-declaring-builtin-through-the-reference
                                 title "Make `readonly` and `export` follow a nameref to its target"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T12:13:09.918291788Z
@@ -8588,6 +8596,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "ERRATUM, 2026-09-02: THE NODE'S CLAIM ABOUT `declare` IS WRONG, AND IT IS WRONG IN THE DIRECTION THAT MATTERS. The node reads that `variables::nameref::read_name` is what `declare` itself does not need, because Bash's `declare` deliberately does not read through a reference for `-n`. Only the `-n` half is true. Measured against the pinned Bash 5.3.15 on 848e0ab, every other letter of `declare` reads through a reference exactly as `readonly` does:\n\n    declare -n rr=t; t=1; declare -r rr; declare -p rr t\n      bash: declare -n rr=\"t\"  /  declare -r t=\"1\"   -- and `t=2` then fails\n      nsh:  declare -nr rr=\"t\" /  declare -- t=\"1\"   -- and `t=2` succeeded\n\n    declare -n rr=t; t=1; declare -i rr    bash: declare -i t=\"1\"\n    declare -n rr=t; t=1; declare -a rr    bash: declare -a t=([0]=\"1\")\n    declare -n rr=t; t=1; declare -x rr; declare +x rr   bash: t loses the export\n\nSo `declare -r` through a reference broke the same guarantee `readonly` did, and leaving it would have been half a fix of one hole. `declare -rn rr` -- the two letters together -- is the one that writes the reference: Bash gives `declare -nr rr=\"t\"` and leaves `t` alone.\n\nTHE THREE UNMEASURED SHAPES, MEASURED. A reference at nothing: `declare -n rr=nothere; readonly rr` creates `nothere` invisible and read-only, spelled `declare -r nothere`, status 0. A reference at an element: `declare -n r='A[k]'; readonly r` reports that A[k] is not a valid identifier and leaves both alone -- and the status stays 0, where the same complaint about a directly bad operand, `readonly 'A[k]'`, answers 1. A reference holding nothing, `declare -n rr`, reports the same way with an empty name. And `readonly rr` does NOT make `rr` itself read-only: a later `declare -n rr=u` re-points it, which is the question the node left open.\n\nWHERE THE TWO BUILT-INS PART COMPANY. `readonly` and `export` refuse all three of those. `declare` takes two of them: a reference at an element gives the attribute to the array, spelled `declare -Ai A`, and a reference holding nothing takes the attribute itself, spelled `declare -in rr`. It declares nothing for a cycle, or for a chain ending on another reference holding nothing. Both built-ins leave the status at 0 throughout.\n\nALSO FOUND, NOT PART OF THIS NODE: `export -n` is not implemented at all here. Bash's `export -n rr` takes the export off the reference's target; this shell refuses the letter. Filed separately."
+                                    }
+
+                                    {
+                                        at 2026-09-02T12:45:11.445443261Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -8616,6 +8631,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing `list-readonly-names-as-bash-lists-them`: with the listing form fixed, the only thing left between the two shells' `readonly -p` output is *which names are in it*. Measured against the pinned Bash 5.3.15 on `dea4a93`; pre-existing.\n\n    bash: declare -r  BASHOPTS=\"...\"\n          declare -ar BASH_VERSINFO=([0]=\"5\" [1]=\"3\" ...)\n          declare -ir EUID=\"1000\"\n          declare -ir PPID=\"...\"\n          declare -r  SHELLOPTS=\"...\"\n          declare -ir UID=\"1000\"\n\n    nsh:  declare -r  BASHOPTS=\"...\"\n          declare -r  SHELLOPTS=\"...\"\n\nSo four of Bash's six are missing the read-only attribute here, and three of them are missing `-i` as well: `EUID`, `UID` and `PPID` are integers there and plain scalars here, and `BASH_VERSINFO` is a read-only array here only in that it is an array. The values are all correct; it is the attributes that are not published with them.\n\nWHY IT IS MORE THAN A LISTING. A read-only `UID` is what makes `UID=0` fail, and a script that checks `[ \"$UID\" = 0 ]` after something tried to set it is relying on that refusal. Measured: `UID=0; echo $UID` is `0` here and an error there. The `-i` half is smaller but real: `EUID+=1` is arithmetic there and string concatenation here.\n\nWHERE. `variables::special::publish`, which enters the facts when the dialect turns on. It has `mark_dynamic` for the recomputed names and enters the rest as ordinary values; the attributes are simply not passed. `set_pipeline_status` and `publish_directory_stack` show the array form.\n\nMEASURE THE WHOLE SET BEFORE FIXING SIX NAMES. The six above are what a read-only listing shows; `declare -p` in Bash also carries `-i` on `BASHPID`, `HISTCMD`, `OPTIND`, `RANDOM` and `SRANDOM`, and `-a` on `BASH_ARGC`, `BASH_ARGV`, `BASH_LINENO`, `BASH_SOURCE`, `DIRSTACK`, `FUNCNAME`, `GROUPS` and `PIPESTATUS`. A `declare -p` diff of the two shells' startup sets is the right way to find them all at once, and is what this node should start with rather than a list transcribed by hand.\n\nDONE WHEN. Every name this shell publishes carries the attributes the reference publishes it with, `UID=0` and the other refusals follow, and a differential test compares the two shells' `declare -p` for the names both of them have."
+                                    }
+                                )
+                            }
+
+                            {
+                                id take-an-export-back-with-the-n-letter
+                                title "Implement `export -n`"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T12:46:10.544532115Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `apply-a-declaring-builtin-through-the-reference`, and not part of it: that node was about which name an attribute lands on, and this is about a letter the built-in does not accept at all. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\n`export -n NAME` takes the export attribute back off a name. It is Bash's mirror of `declare +x`, and this shell has neither the letter nor the effect:\n\n    x=1; export x; export -n x; declare -p x\n      bash: declare -- x=\"1\"\n      nsh:  export: -n: invalid option (the letters are `paA` in Bash mode, `p` in POSIX)\n\n    declare -n rr=t; t=1; export rr; export -n rr; declare -p t\n      bash: declare -- t=\"1\"        -- and it reads through the reference\n      nsh:  t keeps the export\n\nIt is the one script of the seventy that node measured that still differs after it.\n\nWHERE. `builtins/export.rs` builds its option letters as `b\"paA\"` under the Bash dialect and `b\"p\"` otherwise, and `crate::variables::value::clear_exported` is the effect `declare +x` already uses. The letter is Bash's alone: POSIX gives `export` no `-n`, and dash refuses it too, so the letter belongs inside the dialect test that is already there.\n\nWATCH TWO THINGS. `readonly -n` is not the same letter and Bash does not take a read-only attribute back at all, so only the `export` name may grow it. And the reference walk `c36aecc` added, `nameref::attributed_name`, is where `-n` has to resolve its operand, or `export -n rr` would clear the reference's own export rather than the target's.\n\nDONE WHEN. `export -n` clears the export on a plain name and on a reference's target, is refused in the POSIX dialect exactly as it is now, and a differential row covers each."
                                     }
                                 )
                             }

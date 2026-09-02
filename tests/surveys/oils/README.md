@@ -195,6 +195,37 @@ check. The verdict goes to stderr so it cannot corrupt `--format json` or
 Add `--update-baseline` to re-record the file. It prints the difference it is
 about to enshrine before writing, so a refresh is never silent.
 
+A refresh also has to be able to say *what* it measured. `target/release/nsh`
+is built from the working tree, so in a checkout several sessions share it is
+everybody's work at once, and a refresh taken over it records changes no commit
+explains. `ee98cec` removed two ids from this list and attributed them to a
+commit that did not remove them, for exactly that reason. So `--update-baseline`
+refuses a checkout carrying uncommitted work and names every path that made it
+so, before the run rather than after it:
+
+```text
+nsh-survey: refusing to re-record tests/surveys/oils/BASH_COMPARISON_FAILURES.toml
+from a checkout with 18 uncommitted path(s):
+  crates/nsh/src/pattern.rs
+  ...
+```
+
+Commit them and run again, or -- when the change being measured is necessarily
+still uncommitted, which is the ordinary case -- pass
+`--update-baseline-from-dirty-tree`. That records the list and writes
+`nsh_commit`, `shell_sha256` and every uncommitted path into the file, so a
+later reader can see which files' effects are in it. `plan/` is the one
+exception: nplan rewrites it on every `nplan start` and nothing under it reaches
+a shell or a survey run.
+
+Those three keys are the opposite of a pin. They are never compared against
+anything, and every comparison prints the sentence they make:
+
+```text
+recorded at 848e0ab over 19 uncommitted path(s), whose effects are in this
+list and in no commit: crates/nsh/src/pattern.rs, ...
+```
+
 `--format ids` prints just the failing ids, one per line, sorted. Do not
 recover them from the text report with a pattern: the one used before this
 existed was `[a-z0-9-]`, which has no underscore, so `case_.test.sh:1`,

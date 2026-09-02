@@ -392,8 +392,7 @@ pub(super) fn command(shell: &mut Shell, context: TokenContext) -> Result<Option
     if bash::active(shell)
         && let Some(Node::Subshell(subshell)) = parsed_command.as_mut()
     {
-        subshell.line =
-            SourceLine::new(crate::input::current_input_frame(&mut shell.input).line_number);
+        subshell.line = line_reached(shell);
     }
 
     /* Every compound form ends at a closing token the branch above left

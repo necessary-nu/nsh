@@ -1150,6 +1150,17 @@ fn expected_token_error(shell: &mut Shell, expected: Option<TokenKind>) -> Error
     syntax_error(shell, &message)
 }
 
+/// The line the parser has read as far as.
+///
+/// Every node that records a position records this one, taken at the
+/// moment that node is built, and which moment that is decides the
+/// answer: a construct built at its closing token holds a later line than
+/// one built at its opening word. See `record_command_line`.
+// [spec:nsh:req:compat.bash.traps-introspection]
+fn line_reached(shell: &mut Shell) -> SourceLine {
+    SourceLine::new(crate::input::current_input_frame(&mut shell.input).line_number)
+}
+
 // [spec:dash:sem:parser.synerror-fn]
 fn syntax_error(shell: &mut Shell, msg: &[u8]) -> Error {
     shell.evaluation.diagnostic_line =

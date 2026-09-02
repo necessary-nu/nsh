@@ -37,6 +37,15 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
     })?;
     let manifest: crate::OilsManifest =
         toml::from_str(&fs::read_to_string(options.root.join("MANIFEST.toml"))?)?;
+    /* Asked before the run rather than after it. The binary was built
+     * before the run started, so the tree as it stands now is the closest
+     * reading there is of what went into it -- and a refusal costs a
+     * second here instead of the group run it would otherwise waste. */
+    let provenance = match (&options.baseline, options.refresh) {
+        (Some(path), Refresh::FromCommitted) => Some(crate::provenance::vouch(path, false)?),
+        (Some(path), Refresh::FromDirtyTree) => Some(crate::provenance::vouch(path, true)?),
+        _ => None,
+    };
     let report = run_manifest(&options, &manifest)?;
     if let Some(path) = &options.summary {
         write_summary(path, &report)?;
@@ -52,13 +61,7 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
      * all, and reading its summary count instead is the mistake the
      * baseline exists to retire. */
     match &options.baseline {
-        Some(path) => baseline::apply(
-            &report,
-            &manifest,
-            &options.root,
-            path,
-            options.update_baseline,
-        ),
+        Some(path) => baseline::apply(&report, &manifest, &options.root, path, provenance),
         None => Ok(report.totals.is_success()),
     }
 }
@@ -76,12 +79,27 @@ struct Options {
     max_cases: Option<usize>,
     summary: Option<PathBuf>,
     baseline: Option<PathBuf>,
-    update_baseline: bool,
+    refresh: Refresh,
     posix: bool,
     verbose: bool,
     base_path: Option<OsString>,
     timezone: Option<OsString>,
     locale_archive: Option<OsString>,
+}
+
+/// What the run was asked to do with the failing-case list.
+///
+/// `FromDirtyTree` is spelled `--update-baseline-from-dirty-tree` because
+/// what it waives is the question of whose work is in the shell being
+/// measured. See `crate::provenance`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Refresh {
+    /// Compare against the recorded list.
+    No,
+    /// Re-record it, refusing a checkout that cannot vouch for the shell.
+    FromCommitted,
+    /// Re-record it anyway, naming the uncommitted paths inside the file.
+    FromDirtyTree,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -110,7 +128,7 @@ impl Options {
             max_cases: None,
             summary: None,
             baseline: None,
-            update_baseline: false,
+            refresh: Refresh::No,
             posix: false,
             verbose: false,
             base_path: None,
@@ -160,7 +178,10 @@ impl Options {
                 Some("--baseline") => {
                     options.baseline = Some(required_path(&mut args, "--baseline")?)
                 }
-                Some("--update-baseline") => options.update_baseline = true,
+                Some("--update-baseline") => options.refresh = Refresh::FromCommitted,
+                Some("--update-baseline-from-dirty-tree") => {
+                    options.refresh = Refresh::FromDirtyTree
+                }
                 Some("--posix") => options.posix = true,
                 Some("--verbose") => options.verbose = true,
                 Some(value) if value.starts_with('-') => {
@@ -204,7 +225,7 @@ impl Options {
     /// the filter happened to select. Neither is a comparison, so
     /// neither is allowed to look like one.
     fn check_baseline_is_answerable(&self) -> Result<()> {
-        if self.update_baseline && self.baseline.is_none() {
+        if self.refresh != Refresh::No && self.baseline.is_none() {
             return Err("--update-baseline needs --baseline PATH to write".into());
         }
         if self.baseline.is_none() {
@@ -231,7 +252,7 @@ impl Options {
         "usage: nsh-survey run-oils [--group ID] [--shell PATH] [--expect-shell LABEL]\n\
                 [--timeout-ms N] [--format text|json|ids] [--spec NAME] [--case TEXT]\n\
                 [--max-cases N] [--summary PATH] [--baseline PATH] [--update-baseline]\n\
-                [--posix] [--verbose] [ROOT]"
+                [--update-baseline-from-dirty-tree] [--posix] [--verbose] [ROOT]"
     }
 }
 

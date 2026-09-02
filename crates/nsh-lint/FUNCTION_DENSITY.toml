@@ -81,3 +81,20 @@ mark = 45
 # The cap the register gives warning of, from
 # `.config/nplan/config.styx`: `function-density {max-per-file 50}`.
 cap = 50
+
+[[file]]
+path = "crates/nsh/src/parser/bash.rs"
+answer = """
+Split the conditional sub-grammar out to `crates/nsh/src/parser/bash/conditional.rs`. \
+Eleven functions move -- `conditional`, `conditional_expression`, `conditional_chain`, \
+`conditional_or`, `conditional_and`, `conditional_primary`, `conditional_test`, \
+`closes_conditional`, `unary_operator`, `binary_operator`, `matches_a_pattern` -- with the \
+`ConditionalExpression` struct they pass between them, leaving 35 functions here and 11 there. \
+TWO THINGS CROSS THE SEAM AND HAVE TO STAY: `take_word` and the `ConditionalWord` it returns \
+are also used by `compound_array` for an array element, so the new module takes both from \
+`super` rather than taking them with it. `command_prefix` keeps calling `conditional`, which \
+stays `pub(super)`, and `conditional_primary` keeps reaching `super::keywords::nested` and \
+`super::tokens::mark`, so the move is imports and no signature changes. Counted with \
+`density.rs`'s counter on 2026-09-02, the day the file reached 46 by gaining `conditional_chain` \
+and `conditional_test` for the `[[ ]]` newline work.
+"""

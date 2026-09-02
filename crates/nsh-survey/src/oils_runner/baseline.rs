@@ -73,6 +73,7 @@ use std::path::Path;
 
 use super::{Result, RunReport};
 use crate::control::{Control, contended_cases};
+use crate::provenance::Provenance;
 
 const SCHEMA: u32 = 1;
 
@@ -115,6 +116,14 @@ fn header(group: &str, expectation_shell: &str, path: &Path) -> String {
 # `--case`, `--max-cases`) is refused outright because every unselected case
 # would read as fixed. The shell's hash is not pinned; it changes with every
 # build.
+#
+# `nsh_commit`, `shell_sha256` and `uncommitted` are the opposite of a pin:
+# they say what this list came from and are never compared against anything.
+# A refresh refuses a checkout carrying uncommitted work, because the shell
+# it measured was built from that work and no commit explains the result;
+# `--update-baseline-from-dirty-tree` records the list anyway and names every
+# such path in `uncommitted`. `ee98cec` had no way to do that and attributed
+# two entries it removed to a commit that did not remove them.
 
 "
     )
@@ -131,6 +140,18 @@ pub(super) struct Baseline {
     posix: bool,
     timeout_ms: u64,
     oils_commit: String,
+    /// The bytes this list was measured from, and the checkout they were
+    /// built in. Never pinned -- see [`Baseline::mismatch`] -- because
+    /// both change with every build and pinning either would refuse the
+    /// only runs anyone wants to make. They are here so the file can say
+    /// what it was, which is the one thing `ee98cec` could not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shell_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    nsh_commit: Option<String>,
+    /// Everything in that checkout that no commit accounts for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    uncommitted: Vec<String>,
     failing: BTreeSet<String>,
 }
 
@@ -141,7 +162,7 @@ impl Baseline {
     /// `record` adjusts the set for the cases the run could not decide,
     /// and a constructor that read `report.failing_ids()` itself would
     /// silently undo that.
-    fn from_run(report: &RunReport, failing: BTreeSet<String>) -> Self {
+    fn from_run(report: &RunReport, failing: BTreeSet<String>, taken_in: &Provenance) -> Self {
         Self {
             schema: SCHEMA,
             group: report.group.clone(),
@@ -149,7 +170,32 @@ impl Baseline {
             posix: report.posix,
             timeout_ms: report.timeout_ms,
             oils_commit: report.source_commit.clone(),
+            shell_sha256: Some(report.shell_sha256.clone()),
+            nsh_commit: Some(taken_in.commit.clone()),
+            uncommitted: taken_in.uncommitted.clone(),
             failing,
+        }
+    }
+
+    /// What this list can be attributed to, in one line.
+    ///
+    /// Printed by every comparison, because a difference read against a
+    /// list of unknown provenance is a difference nobody can act on. A
+    /// file recorded before this was tracked says so rather than
+    /// pretending to a clean tree.
+    fn taken_in(&self) -> String {
+        match (&self.nsh_commit, self.uncommitted.len()) {
+            (None, _) => "recorded before the runner tracked which checkout it measured; \
+                 the shell behind it cannot be attributed to a commit"
+                .to_owned(),
+            (Some(commit), 0) => {
+                format!("recorded at {commit}, with nothing uncommitted in the checkout")
+            }
+            (Some(commit), count) => format!(
+                "recorded at {commit} over {count} uncommitted path(s), whose effects are \
+                 in this list and in no commit: {}",
+                self.uncommitted.join(", ")
+            ),
         }
     }
 
@@ -314,8 +360,9 @@ impl Comparison {
     /// a machine-readable list under `--format ids`. Writing the verdict
     /// there would corrupt both, and a check nobody can pipe is a check
     /// people stop running.
-    fn write_text(&self, path: &Path, control: &Control) {
+    fn write_text(&self, path: &Path, control: &Control, taken_in: &str) {
         eprintln!("failing-case baseline: {}", path.display());
+        eprintln!("{taken_in}");
         eprintln!(
             "recorded {} failing cases, this run has {}",
             self.recorded, self.observed
@@ -396,10 +443,10 @@ pub(super) fn apply(
     manifest: &crate::OilsManifest,
     root: &Path,
     path: &Path,
-    update: bool,
+    taken_in: Option<Provenance>,
 ) -> Result<bool> {
-    if update {
-        return record(report, manifest, root, path);
+    if let Some(taken_in) = taken_in {
+        return record(report, manifest, root, path, &taken_in);
     }
     let baseline = Baseline::read(path)?;
     if let Some(reason) = baseline.mismatch(report) {
@@ -413,7 +460,7 @@ pub(super) fn apply(
     let mut comparison = Comparison::of(&baseline, report);
     let control = control_for(report, manifest, root, &comparison)?;
     comparison.set_aside(&control.contended());
-    comparison.write_text(path, &control);
+    comparison.write_text(path, &control, &baseline.taken_in());
     Ok(comparison.agrees())
 }
 
@@ -462,11 +509,18 @@ fn keep_recorded_answer(
 /// undecided case takes the answer already recorded rather than this
 /// run's, in both directions -- a case the run newly failed is not
 /// enshrined as expected either -- and every one of them is named.
+///
+/// AND IT RECORDS WHAT IT MEASURED. `taken_in` has already refused a
+/// checkout carrying uncommitted work unless the caller spelled out
+/// `--update-baseline-from-dirty-tree`; what reaches here is written into
+/// the file, so a list taken over half-finished work says so forever
+/// instead of being attributed to whatever commit happened to land next.
 fn record(
     report: &RunReport,
     manifest: &crate::OilsManifest,
     root: &Path,
     path: &Path,
+    taken_in: &Provenance,
 ) -> Result<bool> {
     let previous = path.is_file().then(|| Baseline::read(path)).transpose()?;
     let mut failing = report.failing_ids();
@@ -476,7 +530,7 @@ fn record(
             let mut comparison = Comparison::of(&previous, report);
             let control = control_for(report, manifest, root, &comparison)?;
             comparison.set_aside(&control.contended());
-            comparison.write_text(path, &control);
+            comparison.write_text(path, &control, &previous.taken_in());
             kept = keep_recorded_answer(&mut failing, &previous.failing, comparison.undecided());
         }
         Some(previous) => eprintln!(
@@ -488,13 +542,15 @@ fn record(
         ),
         None => eprintln!("{} does not exist yet; recording it", path.display()),
     }
-    let baseline = Baseline::from_run(report, failing);
+    let baseline = Baseline::from_run(report, failing, taken_in);
     let recorded = baseline.failing.len();
+    let attribution = baseline.taken_in();
     baseline.write(path)?;
     eprintln!(
         "baseline: wrote {recorded} failing cases, {kept} of them unchanged because \
                this run could not decide them"
     );
+    eprintln!("baseline: {attribution}");
     Ok(true)
 }
 
@@ -571,7 +627,15 @@ mod tests {
 
     /// A baseline recorded from a run, the way `record` records one.
     fn baseline_of(run: &RunReport) -> Baseline {
-        Baseline::from_run(run, run.failing_ids())
+        Baseline::from_run(run, run.failing_ids(), &taken_in(&[]))
+    }
+
+    /// A reading of a checkout, without asking git for one.
+    fn taken_in(uncommitted: &[&str]) -> Provenance {
+        Provenance {
+            commit: "b028f47".to_owned(),
+            uncommitted: uncommitted.iter().map(|path| (*path).to_owned()).collect(),
+        }
     }
 
     fn options_with_baseline() -> Options {
@@ -587,7 +651,7 @@ mod tests {
             max_cases: None,
             summary: None,
             baseline: Some(PathBuf::from("BASELINE.toml")),
-            update_baseline: false,
+            refresh: super::super::Refresh::No,
             posix: false,
             verbose: false,
             base_path: None,
@@ -731,6 +795,59 @@ mod tests {
         );
     }
 
+    /// A refresh taken over uncommitted work says so in the file it
+    /// writes.
+    ///
+    /// `ee98cec` removed `assign.test.sh:19` and `assign.test.sh:45`
+    /// from this list and attributed both to a commit that did not
+    /// remove them: the shell it measured had another session's
+    /// uncommitted files built into it, and nothing in the file it wrote
+    /// could say so. Now the file names them, and the comparison prints
+    /// the sentence on every run.
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
+    #[test]
+    fn a_refresh_records_the_work_no_commit_explains() {
+        let scratch = ScratchTree::new().unwrap();
+        let path = scratch.path().join("BASELINE.toml");
+        let run = report(&["case_.test.sh:1"], &[]);
+        let over = taken_in(&["crates/nsh/src/variables.rs"]);
+        Baseline::from_run(&run, run.failing_ids(), &over)
+            .write(&path)
+            .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("crates/nsh/src/variables.rs"), "{text}");
+
+        let read_back = Baseline::read(&path).unwrap();
+        let attribution = read_back.taken_in();
+        for named in ["b028f47", "crates/nsh/src/variables.rs"] {
+            assert!(attribution.contains(named), "{attribution}");
+        }
+        assert!(
+            Comparison::of(&read_back, &run).agrees(),
+            "the provenance became a pin and refused its own run",
+        );
+        assert!(
+            Baseline::from_run(&run, run.failing_ids(), &taken_in(&[]))
+                .taken_in()
+                .contains("nothing uncommitted"),
+            "a clean checkout did not say so",
+        );
+
+        /* The list checked in before this existed carries no provenance
+         * at all, and a comparison against it must say that rather than
+         * read as a clean tree. */
+        let older: Baseline = toml::from_str(
+            "schema = 1\ngroup = \"g\"\nexpectation_shell = \"bash\"\nposix = false\n\
+             timeout_ms = 5000\noils_commit = \"15de8fd\"\nfailing = []\n",
+        )
+        .unwrap();
+        assert!(
+            older.taken_in().contains("cannot be attributed"),
+            "{}",
+            older.taken_in()
+        );
+    }
+
     /// The control's answer takes a case out of the verdict, and only
     /// the cases it names.
     ///
@@ -842,7 +959,7 @@ mod tests {
         options.max_cases = Some(1);
         assert!(options.check_baseline_is_answerable().is_err());
         options = options_with_baseline();
-        options.update_baseline = true;
+        options.refresh = super::super::Refresh::FromCommitted;
         options.max_cases = Some(1);
         assert!(options.check_baseline_is_answerable().is_err());
         assert!(
@@ -890,7 +1007,7 @@ mod tests {
     fn recording_needs_somewhere_to_write() {
         let mut options = options_with_baseline();
         options.baseline = None;
-        options.update_baseline = true;
+        options.refresh = super::super::Refresh::FromCommitted;
         assert!(
             options
                 .check_baseline_is_answerable()

@@ -8,7 +8,7 @@ use bstr::{BStr, BString, ByteSlice as _};
 use super::{
     InputUnit, ListMode, SubscriptPosition, SyntaxClass, SyntaxContext, TokenContext, TokenKind,
     TokenMark, WordLexer, command, consume_newline_without_prompt, expected_token_error, finalize,
-    is_valid_name, list, parse_here_documents, read_input_unit, read_token,
+    is_valid_name, line_reached, list, parse_here_documents, read_input_unit, read_token,
     read_unit_skipping_line_continuations, set_input_string, syntax_error, syntax_stack,
     unread_input_unit,
 };
@@ -57,7 +57,7 @@ pub(super) fn command_prefix(
         return Ok(None);
     }
     if shell.input.word_text() == BStr::new(b"[[") {
-        conditional(shell, line).map(Some)
+        conditional(shell).map(Some)
     } else if shell.input.word_text() == BStr::new(b"function") {
         function(shell, line).map(Some)
     } else {
@@ -71,7 +71,7 @@ pub(super) fn command_prefix(
 // [spec:nsh:req:compat.bash.traps-introspection]
 pub(super) fn arithmetic_command(shell: &mut Shell) -> Result<Node, Error> {
     let expression = arithmetic_text(shell)?;
-    let line = SourceLine::new(crate::input::current_input_frame(&mut shell.input).line_number);
+    let line = line_reached(shell);
     Ok(Node::Bash(BashNode::ArithmeticCommand(
         BashArithmeticCommand {
             tokens: SourceTokens::none(),
@@ -129,22 +129,37 @@ pub(super) fn arithmetic_for(shell: &mut Shell, line: SourceLine) -> Result<Node
 /// rather than cleared, because a conditional can nest inside a command
 /// substitution that appears in such a pattern.
 // [spec:nsh:req:compat.bash.conditionals-arithmetic]
-pub(super) fn conditional(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
+pub(super) fn conditional(shell: &mut Shell) -> Result<Node, Error> {
     let enclosing = mem::replace(&mut shell.input.parsing_conditional, false);
-    let parsed = conditional_expression(shell, line);
+    let parsed = conditional_expression(shell);
     shell.input.parsing_conditional = enclosing;
     parsed
 }
 
-fn conditional_expression(shell: &mut Shell, line: SourceLine) -> Result<Node, Error> {
-    let first = read_token(shell, TokenContext::NONE)?;
+/// A parsed conditional expression and the line its node records.
+///
+/// `[[ ]]` records neither the line it opens on nor the line it closes
+/// on, but the line the parser had reached when the *top* node of the
+/// expression was built -- so the line belongs to the expression rather
+/// than to the construct, and is carried back out with it. A test holds
+/// its last operand's line, a group holds its `)`, an `&&` or `||` holds
+/// the line of whatever follows its right operand, and a `!` builds no
+/// node of its own and so holds its operand's.
+// [spec:nsh:req:compat.bash.traps-introspection]
+struct ConditionalExpression {
+    expression: BashConditionalExpr,
+    line: SourceLine,
+}
+
+fn conditional_expression(shell: &mut Shell) -> Result<Node, Error> {
+    let first = read_token(shell, TokenContext::SKIP_NEWLINES)?;
     // `[[ ]]` has nothing to be true or false about, and Bash rejects it
     // while parsing rather than answering with a status.
     if closes_conditional(shell, first.kind, first.quoted) {
         return Err(syntax_error(shell, b"expected a conditional expression"));
     }
     shell.input.token_pushed_back = true;
-    let expression = conditional_or(shell)?;
+    let parsed = conditional_or(shell)?;
     let close = read_token(shell, TokenContext::NONE)?;
     if !closes_conditional(shell, close.kind, close.quoted) {
         return Err(syntax_error(shell, b"expected ']]'"));
@@ -153,8 +168,8 @@ fn conditional_expression(shell: &mut Shell, line: SourceLine) -> Result<Node, E
     Ok(Node::Bash(BashNode::Conditional(Box::new(
         BashConditional {
             tokens: SourceTokens::none(),
-            line,
-            expression,
+            line: parsed.line,
+            expression: parsed.expression,
         },
     ))))
 }
@@ -575,45 +590,80 @@ fn for_clauses(shell: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
     ])
 }
 
-fn conditional_or(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
-    let mut left = conditional_and(shell)?;
+/// One precedence level of `[[ ]]`'s `&&` and `||`.
+///
+/// A newline before either connective continues the expression, so a long
+/// condition can be written over several lines. The line such a node
+/// records is the one the parser reaches after the whole right operand,
+/// because Bash builds the node only once it has looked past that operand
+/// for the next connective -- which is why `[[ 1 = 2\n]]` records line 1
+/// and `[[ 1 = 1 && 1 = 2\n]]` records line 2. A level that joined nothing
+/// builds no node, and hands its operand's own line straight back.
+// [spec:nsh:req:compat.bash.traps-introspection]
+fn conditional_chain(
+    shell: &mut Shell,
+    connective: TokenKind,
+    operand: fn(&mut Shell) -> Result<ConditionalExpression, Error>,
+    join: fn(Box<BashConditionalExpr>, Box<BashConditionalExpr>) -> BashConditionalExpr,
+) -> Result<ConditionalExpression, Error> {
+    let mut parsed = operand(shell)?;
+    let mut joined = false;
     loop {
-        // A newline inside `[[ ]]` continues the expression, so a long
-        // condition can be written over several lines.
         let token = read_token(shell, TokenContext::SKIP_NEWLINES)?.kind;
-        if token != TokenKind::OrIf {
+        if token != connective {
             shell.input.token_pushed_back = true;
-            return Ok(left);
+            if joined {
+                parsed.line = line_reached(shell);
+            }
+            return Ok(parsed);
         }
-        left = BashConditionalExpr::Or(Box::new(left), Box::new(conditional_and(shell)?));
+        let right = operand(shell)?;
+        parsed.expression = join(Box::new(parsed.expression), Box::new(right.expression));
+        joined = true;
     }
 }
 
-fn conditional_and(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
-    let mut left = conditional_primary(shell)?;
-    loop {
-        let token = read_token(shell, TokenContext::SKIP_NEWLINES)?.kind;
-        if token != TokenKind::AndIf {
-            shell.input.token_pushed_back = true;
-            return Ok(left);
-        }
-        left = BashConditionalExpr::And(Box::new(left), Box::new(conditional_primary(shell)?));
-    }
+fn conditional_or(shell: &mut Shell) -> Result<ConditionalExpression, Error> {
+    conditional_chain(
+        shell,
+        TokenKind::OrIf,
+        conditional_and,
+        BashConditionalExpr::Or,
+    )
 }
 
-fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
+fn conditional_and(shell: &mut Shell) -> Result<ConditionalExpression, Error> {
+    conditional_chain(
+        shell,
+        TokenKind::AndIf,
+        conditional_primary,
+        BashConditionalExpr::And,
+    )
+}
+
+fn conditional_primary(shell: &mut Shell) -> Result<ConditionalExpression, Error> {
     let first_mark = super::tokens::mark(shell);
-    let token = read_token(shell, TokenContext::NONE)?;
+    /* Bash skips newlines wherever a conditional may begin an operand or
+     * an operator, which is every position this read is reached from:
+     * after `[[`, after `&&` or `||`, after `(` and after `!`. The two
+     * positions it does not skip are the operand of a unary or a binary
+     * operator, and those are read below with the newline left in place
+     * so that they refuse it exactly as Bash does. */
+    // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+    let token = read_token(shell, TokenContext::SKIP_NEWLINES)?;
     if token.kind == TokenKind::LeftParen {
         /* `[[ ( ( ( ... ) ) ) ]]` is its own recursive descent, reached
          * from a command rather than through one, so it is charged the
          * same nesting budget the grammar around it spends. */
         // [spec:nsh:req:idiom.bounded-recursion]
-        let expression = super::keywords::nested(shell, conditional_or)?;
+        let expression = super::keywords::nested(shell, conditional_or)?.expression;
         if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
             return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
         }
-        return Ok(BashConditionalExpr::Group(Box::new(expression)));
+        return Ok(ConditionalExpression {
+            expression: BashConditionalExpr::Group(Box::new(expression)),
+            line: line_reached(shell),
+        });
     }
     if token.kind != TokenKind::Word || closes_conditional(shell, token.kind, token.quoted) {
         return Err(syntax_error(shell, b"expected conditional expression"));
@@ -623,7 +673,10 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
     if !first.quoted && first.arg.word.as_bstr() == BStr::new(b"!") {
         // [spec:nsh:req:idiom.bounded-recursion]
         let negated = super::keywords::nested(shell, conditional_primary)?;
-        return Ok(BashConditionalExpr::Not(Box::new(negated)));
+        return Ok(ConditionalExpression {
+            expression: BashConditionalExpr::Not(Box::new(negated.expression)),
+            line: negated.line,
+        });
     }
     if !first.quoted && unary_operator(first.arg.word.as_bstr()) {
         let operand_mark = super::tokens::mark(shell);
@@ -633,12 +686,27 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
         {
             return Err(syntax_error(shell, b"expected unary-test operand"));
         }
-        return Ok(BashConditionalExpr::Unary {
-            operator: NodeText::from(first.arg.word.as_bstr()),
-            operand: take_word(shell, operand_token.quoted, operand_mark).arg,
+        return Ok(ConditionalExpression {
+            expression: BashConditionalExpr::Unary {
+                operator: NodeText::from(first.arg.word.as_bstr()),
+                operand: take_word(shell, operand_token.quoted, operand_mark).arg,
+            },
+            line: line_reached(shell),
         });
     }
+    conditional_test(shell, first)
+}
 
+/// A word, and either the binary operator that follows it or nothing.
+///
+/// Split from `conditional_primary` because the operator is most of it:
+/// two of `[[ ]]`'s operators arrive as redirections rather than as
+/// words, and a bare word is a whole test of its own.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic]
+fn conditional_test(
+    shell: &mut Shell,
+    first: ConditionalWord,
+) -> Result<ConditionalExpression, Error> {
     let operator_token = read_token(shell, TokenContext::NONE)?;
     let operator = if operator_token.kind == super::TokenKind::Redirection {
         let redirection = shell.input.pending_redirection.take();
@@ -673,8 +741,21 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
         None
     };
     let Some(operator) = operator else {
+        /* A bare word is a whole test -- `[[ $x ]]` is `[[ -n $x ]]` --
+         * and Bash builds its node only after reading what follows, so a
+         * line continuation before the `]]` moves the line it records.
+         * That read is also the one place inside `[[ ]]` where Bash does
+         * not skip a newline, so `[[ $x\n]]` is a syntax error there and
+         * is refused here rather than accepted as an extension. */
+        // [spec:nsh:req:compat.bash.conditionals-arithmetic]
+        if operator_token.kind == TokenKind::Newline {
+            return Err(syntax_error(shell, b"expected ']]'"));
+        }
         shell.input.token_pushed_back = true;
-        return Ok(BashConditionalExpr::Word(first.arg));
+        return Ok(ConditionalExpression {
+            expression: BashConditionalExpr::Word(first.arg),
+            line: line_reached(shell),
+        });
     };
 
     let context = if operator.as_bstr() == BStr::new(b"=~") {
@@ -698,10 +779,14 @@ fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> 
     {
         return Err(syntax_error(shell, b"expected binary-test operand"));
     }
-    Ok(BashConditionalExpr::Binary {
-        left: first.arg,
-        operator,
-        right: take_word(shell, right_token.quoted, right_mark).arg,
+    let right = take_word(shell, right_token.quoted, right_mark).arg;
+    Ok(ConditionalExpression {
+        expression: BashConditionalExpr::Binary {
+            left: first.arg,
+            operator,
+            right,
+        },
+        line: line_reached(shell),
     })
 }
 

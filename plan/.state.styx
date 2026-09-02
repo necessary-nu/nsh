@@ -1436,7 +1436,8 @@ assertions (
     {id build-the-survey-baseline-from-what-is-committed, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:20:38.492451062Z}
     {id contain-the-workspace-tests-that-run-cases, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:25:06.793356084Z}
     {id spell-a-valueless-name-back, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:26:20.399911392Z}
-    {id apply-a-declaring-builtin-through-the-reference, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:36:59.177591718Z}
+    {id apply-a-declaring-builtin-through-the-reference, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:45:11.445443261Z}
+    {id keep-allexport-off-an-array, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:46:17.138479862Z}
 )
 
 impl_evidence (
