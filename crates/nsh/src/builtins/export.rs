@@ -14,6 +14,7 @@ use bstr::BStr;
 
 use crate::evaluation::Flow;
 use crate::options::Options;
+use crate::variables::nameref::{self, RefusedTarget};
 use crate::variables::value::VariableKind;
 use crate::variables::{
     VariableAttributes, VariableSelection, add_attributes, set_bytes, show_vars,
@@ -92,14 +93,31 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     let value = BStr::new(value.as_slice());
                     if append {
                         crate::variables::arrays::assign_text_target(shell, name, value, true)?;
-                        add_attributes(shell, name, attribute);
+                        match nameref::attributed_name(shell, name) {
+                            Ok(target) => {
+                                add_attributes(shell, BStr::new(target.as_slice()), attribute);
+                            }
+                            Err(refusal) => report_refusal(shell, name, &refusal),
+                        }
                     } else {
                         set_bytes(shell, name, Some(value), attribute)?;
                     }
                 }
                 (_, None, _) => {
-                    if !add_attributes(shell, word, attribute) {
-                        set_bytes(shell, word, None, attribute)?;
+                    /* A `declare -n` reference is read through here, so
+                     * `readonly rr` protects what `rr` names rather than
+                     * `rr` itself. */
+                    // [spec:nsh:req:compat.bash.functions-scoping]
+                    let target = match nameref::attributed_name(shell, word) {
+                        Ok(target) => target,
+                        Err(refusal) => {
+                            report_refusal(shell, word, &refusal);
+                            continue;
+                        }
+                    };
+                    let target = BStr::new(target.as_slice());
+                    if !add_attributes(shell, target, attribute) {
+                        set_bytes(shell, target, None, attribute)?;
                     }
                 }
             }
@@ -113,6 +131,29 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         show_vars(shell, args[0], selection, shell.evaluation.declared_kind)?;
     }
     Ok(Flow::Done((0).into()))
+}
+
+/// Report a reference the attribute could not be applied through.
+///
+/// Bash writes both of these and leaves the exit status at zero, so the
+/// operands beside this one still take their attribute and the command
+/// still answers 0.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn report_refusal(shell: &mut Shell, name: &BStr, refusal: &RefusedTarget) {
+    let mut message = Vec::new();
+    match refusal {
+        RefusedTarget::Circular => {
+            message.extend_from_slice(b"warning: ");
+            message.extend_from_slice(name.as_ref());
+            message.extend_from_slice(b": circular name reference");
+        }
+        RefusedTarget::NoName(text) => {
+            message.push(b'`');
+            message.extend_from_slice(text.as_slice());
+            message.extend_from_slice(b"': not a valid identifier");
+        }
+    }
+    shell.diagnostics().shell_warning(&message);
 }
 
 #[cfg(test)]

@@ -208,6 +208,88 @@ pub(crate) fn refused_element_write(shell: &Shell, name: &BStr) -> Option<BStrin
     }
 }
 
+/// Why a declaring built-in reached no variable through a reference.
+///
+/// Bash reports both of these and leaves the exit status alone, so
+/// neither is an [`Error`]: the operands beside this one still run and
+/// the command still answers 0.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(crate) enum RefusedTarget {
+    /// The chain closes on itself.
+    Circular,
+    /// The chain ends on a reference holding this text, which names no
+    /// variable: nothing at all, or one element of an array.
+    NoName(BString),
+}
+
+/// The text a reference holds, which names a variable only sometimes.
+fn reference_text(shell: &Shell, name: &BStr) -> BString {
+    let Some(entry) = shell.variables.entries.get(name) else {
+        return BString::default();
+    };
+    match &entry.state {
+        VariableState::Set(value) => value.scalar_owned().unwrap_or_default(),
+        VariableState::Unset | VariableState::Declared(_) => BString::default(),
+    }
+}
+
+/// The name `readonly` and `export` give their attribute to.
+///
+/// Both read through a reference: `declare -n rr=t; readonly rr` makes
+/// `t` read-only and leaves `rr` a reference that can still be
+/// re-pointed. A name at the end of the chain that does not exist yet is
+/// created there, invisible, exactly as a bare `readonly zz` creates one.
+///
+/// The refusals are narrower than [`declared_name`]'s, which is the one
+/// place the two built-ins and `declare` part company: a reference at an
+/// element or holding nothing is a name these two will not take.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(crate) fn attributed_name(shell: &Shell, name: &BStr) -> Result<BString, RefusedTarget> {
+    if !is_reference(shell, name) {
+        return Ok(name.to_owned());
+    }
+    let Some(target) = follow(shell, name) else {
+        return Err(RefusedTarget::Circular);
+    };
+    let Target::Name(target) = target else {
+        return Err(RefusedTarget::NoName(target.text()));
+    };
+    if is_reference(shell, BStr::new(target.as_slice())) {
+        // A chain that ends on a reference ends on one holding no name,
+        // and the text it holds is what Bash reports back.
+        return Err(RefusedTarget::NoName(reference_text(
+            shell,
+            BStr::new(target.as_slice()),
+        )));
+    }
+    Ok(target)
+}
+
+/// The name `declare` gives an attribute to, `-n` aside.
+///
+/// Every letter but `-n` reads through a reference as `readonly` does --
+/// `declare -n rr=t; declare -i rr` makes `t` the integer -- while
+/// `declare -n rr=y` re-points `rr` and so must not read through it.
+///
+/// Where the chain ends on nothing Bash is more forgiving here than in
+/// `readonly`: a reference at an element gives the attribute to the
+/// array the element belongs to, and a reference holding nothing takes
+/// the attribute itself. `None` applies nothing at all, which is what a
+/// cycle does and what a chain ending on *another* empty reference does.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(crate) fn declared_name(shell: &Shell, name: &BStr) -> Option<BString> {
+    if !is_reference(shell, name) {
+        return Some(name.to_owned());
+    }
+    match follow(shell, name)? {
+        Target::Name(target) if target == name => Some(target),
+        Target::Name(target) => {
+            (!is_reference(shell, BStr::new(target.as_slice()))).then_some(target)
+        }
+        Target::Element { base, .. } => Some(base),
+    }
+}
+
 /// The variable an array assignment to `name` should reach.
 ///
 /// `None` refuses the assignment: Bash reports a reference that selects

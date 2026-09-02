@@ -198,6 +198,21 @@ fn apply(
         return Ok(false);
     }
 
+    /* Every letter but `-n` reaches the variable a reference names, so
+     * `declare -r rr` protects `rr`'s target rather than `rr`; `-n`
+     * itself must not, because `declare -n rr=y` re-points `rr`. A
+     * reference that reaches no variable declares nothing at all. */
+    // [spec:nsh:req:compat.bash.functions-scoping]
+    let base = if requested.nameref.is_some() {
+        base.to_owned()
+    } else {
+        let Some(target) = nameref::declared_name(shell, base) else {
+            return Ok(true);
+        };
+        target
+    };
+    let base = BStr::new(base.as_slice());
+
     if scope == Scope::Local {
         let held = if value.is_some() {
             LocalValue::Assigned
