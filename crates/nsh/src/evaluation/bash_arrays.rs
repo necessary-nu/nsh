@@ -55,13 +55,8 @@ pub(crate) fn assign(
             match &assignment.subscript {
                 Some(subscript) => {
                     reject_empty_subscript(shell, BStr::new(name.as_slice()), subscript)?;
-                    let subscript =
-                        expand_scalar(shell, subscript, ExpansionMode::ASSIGNMENT_TILDE)?;
-                    let selector = arrays::resolve_selector(
-                        shell,
-                        BStr::new(name.as_slice()),
-                        BStr::new(subscript.as_slice()),
-                    )?;
+                    let selector =
+                        element_selector(shell, BStr::new(name.as_slice()), assignment, subscript)?;
                     arrays::assign_element(
                         shell,
                         BStr::new(name.as_slice()),
@@ -125,6 +120,90 @@ pub(crate) fn assign(
             Ok(true)
         }
     }
+}
+
+/// The element a statement's `a[sub]=v` names.
+///
+/// An indexed subscript is an arithmetic expression, and Bash reads one
+/// out of the *source* rather than out of the expanded word: `a['1']=z`
+/// is an arithmetic syntax error there, exactly as `${a['1']}` is,
+/// because the single quotes reach the evaluator. A parsed word cannot
+/// answer that question -- `WordUnit::Literal` records that a byte was
+/// quoted and not which quote it was written with -- so the bytes come
+/// back off the run the node was parsed from, and
+/// [`arrays::resolve_text_selector`] reads them the same way the
+/// expansion side does.
+///
+/// An associative subscript is a key and keeps the word path, where an
+/// assignment's tilde rule applies to it and its quotes come off:
+/// `m['a b']=w` names the key `a b` in both shells. A compound
+/// element's subscript is a word in Bash too -- `b=(['1']=x)` is
+/// element one there -- so that path is untouched as well.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn element_selector(
+    shell: &mut Shell,
+    name: &BStr,
+    assignment: &BashArrayAssignment,
+    subscript: &WordNode,
+) -> Result<ArraySelector, Error> {
+    if let Some(source) = subscript_source(assignment) {
+        let source = BStr::new(source.as_slice());
+        if arrays::reads_as_arithmetic(shell, name, source) {
+            return arrays::resolve_text_selector(shell, name, source);
+        }
+    }
+    let expanded = expand_scalar(shell, subscript, ExpansionMode::ASSIGNMENT_TILDE)?;
+    arrays::resolve_selector(shell, name, BStr::new(expanded.as_slice()))
+}
+
+/// The subscript's own bytes, cut out of the word the assignment was
+/// parsed from.
+///
+/// `arg_part` builds the subscript from the word's *units*, and says why
+/// in its own comment: the parts are this parser's reading of one word
+/// the reader cut, so they carry no run of their own. That reading has
+/// no room for the answer -- a unit records that a byte was quoted and
+/// not which quote quoted it, and `a['1']` and `a["1"]` differ in
+/// nothing else -- so the bytes are found again here, by the scan
+/// `parameter_subscript` makes over the same syntax on the read side.
+///
+/// `None` for a node nothing parsed, or a word whose text does not open
+/// with `name[`; the caller then falls back to the expanded word, which
+/// is what every subscript used before.
+// [spec:nsh:def:idiom.token-stream]
+fn subscript_source(assignment: &BashArrayAssignment) -> Option<BString> {
+    let text = assignment.tokens.text();
+    /* The run is the word plus whatever blank separated it from what
+     * came before, so `x=1; a[i]=2` hands this ` a[i]=2`. */
+    let bytes: &[u8] = text.as_ref();
+    let rest = bytes
+        .trim_ascii_start()
+        .strip_prefix(assignment.name.as_bstr().as_ref() as &[u8])?
+        .strip_prefix(b"[")?;
+    let mut depth = 1usize;
+    let mut quote: Option<u8> = None;
+    let mut escaped = false;
+    for (at, byte) in rest.iter().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, *byte) {
+            (Some(b'\''), b'\'') | (Some(b'"'), b'"') => quote = None,
+            (Some(b'"'), b'\\') | (None, b'\\') => escaped = true,
+            (Some(_), _) => {}
+            (None, b'\'' | b'"') => quote = Some(*byte),
+            (None, b'[') => depth += 1,
+            (None, b']') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(BString::from(&rest[..at]));
+                }
+            }
+            (None, _) => {}
+        }
+    }
+    None
 }
 
 /// Expand a `[subscript]=value` list, one element at a time.

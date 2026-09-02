@@ -145,9 +145,16 @@ impl<'a> Lexer<'a> {
         loop {
             match self.peek(0) {
                 Some(b' ' | b'\t' | b'\n') => self.pos += 1,
-                // Bash removes quoting before it evaluates, so `a['k']`
-                // and `i = '3'` name the same things as their bare forms.
-                Some(b'\'' | b'"') if self.bash => self.pos += 1,
+                /* Bash's arithmetic text arrives already expanded as if
+                 * it were inside double quotes, so a double quote in it
+                 * has been removed by then and never reaches an
+                 * evaluator. A *single* quote has not: it is an ordinary
+                 * byte to that expansion and an unknown token here, and
+                 * `(( i = '3' ))` and `${a['1']}` are both arithmetic
+                 * syntax errors in the reference. This once skipped both
+                 * and made `'3'` mean 3. */
+                // [spec:nsh:req:compat.bash.arrays-declarations]
+                Some(b'"') if self.bash => self.pos += 1,
                 _ => break,
             }
         }

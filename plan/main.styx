@@ -8812,6 +8812,13 @@ children (
                                         kind @note
                                         text "Found 2026-09-02 while closing `read-a-key-that-spells-an-assignment`, and not part of it: that node was about a *key*, and this is about an *index*. Measured against the pinned Bash 5.3.15 on `2a9d2e9`; pre-existing.\n\nAn indexed array's subscript is an arithmetic expression, and single quotes mean nothing in arithmetic, so Bash reports every one of these and this shell accepts them:\n\n    declare -a a=(1 2 3)\n    echo \"${a['1']}\"      bash: '1': arithmetic syntax error   nsh: 2\n    a['1']=z              bash: same, status 1                 nsh: assigns element 1\n    echo $(( a['1'] ))    bash: same                           nsh: 2\n    unset \"a['1']\"        bash: same                           nsh: removes element 1\n    n=1; echo \"${a['n']}\" bash: 'n': arithmetic syntax error   nsh: 2\n\nA *double*-quoted subscript is accepted by both -- `${a[\"1\"]}` is `2` everywhere -- because Bash removes double quotes from the subscript text before evaluating it and leaves single quotes in place, where they are an unknown token. `${zz['1']}` on a name that does not exist reports in Bash too, the kind defaulting to indexed.\n\nWHERE. `variables::arrays::text_word`, which is the shell's one answer to \"a subscript arrived as bytes and has to be read as a word\". Its rule -- quotes come off, text outside single quotes expands, a blank is data -- is right for an *associative* subscript, which is a key and not an expression, and is what `[spec:nsh:req:compat.bash.arrays-declarations]` measured for `m['a b']`. It is wrong for an indexed one, where Bash hands the bytes to the arithmetic evaluator with only double quotes taken off. `resolve_selector` is where the two part company: it already asks the target's kind to decide key-or-index, and that is where the two readings of the text belong.\n\nWATCH THE SHAPES THAT MUST NOT MOVE. `${a[\"1\"]}` and `${a[$n]}` stay accepted; `m['a b']` and `m['a=1']` are keys and keep their single quotes removed; `unset 'a[k]'` and `declare -n r='A[k]'` reach the same code and their associative forms are already pinned by tests.\n\nDONE WHEN. A single-quoted subscript on an indexed array reports and answers as the reference does, through `${a[..]}`, an assignment, `$(( ))` and `unset` alike, the associative forms are unmoved, and a differential table holds both halves."
                                     }
+
+                                    {
+                                        at 2026-09-02T14:59:28.692903454Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -8855,6 +8862,7 @@ children (
                                 id quote-the-set-listing-as-bash-quotes-it
                                 title "Print `set`'s listing in Bash's own form"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T12:13:26.590441653Z
@@ -8868,6 +8876,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:59:17.63390239Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

@@ -159,8 +159,99 @@ pub(crate) fn resolve_text_selector(
     name: &BStr,
     subscript: &BStr,
 ) -> Result<ArraySelector, Error> {
-    let resolved = text_word(shell, subscript)?;
+    let resolved = if reads_as_arithmetic(shell, name, subscript) {
+        arithmetic_word(shell, subscript)?
+    } else {
+        text_word(shell, subscript)?
+    };
     resolve_selector(shell, name, BStr::new(resolved.as_slice()))
+}
+
+/// Whether a subscript's bytes are an arithmetic expression rather than
+/// a key.
+///
+/// The target's kind decides, as it decides everything else about a
+/// subscript, and an unset name defaults to indexed -- which is why
+/// `${zz['1']}` reports in Bash for a name that does not exist. `@` and
+/// `*` are neither: they select the whole array, and they do it only
+/// when the *source* wrote them bare, so `${a[@]}` is every element and
+/// `${a["@"]}` is arithmetic on the letter.
+///
+/// The POSIX dialect answers `false` for everything. It has no arrays,
+/// and the one place it reaches a subscript at all is `unset a[i]`,
+/// which dash refuses as a bad variable name; changing how those bytes
+/// are read there would move a dialect this node is not about, and
+/// measurably did before this test was added -- `unset "a['1']"` went
+/// from doing nothing to ending the script.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn reads_as_arithmetic(shell: &Shell, name: &BStr, subscript: &BStr) -> bool {
+    shell.options.dialect() == crate::options::Dialect::Bash
+        && subscript != "@"
+        && subscript != "*"
+        && super::value::variable_kind(shell, name).unwrap_or(VariableKind::Indexed)
+            != VariableKind::Associative
+}
+
+/// Read a subscript's bytes the way Bash reads an *index*: as the
+/// contents of a double-quoted word.
+///
+/// Bash hands an indexed subscript to `expand_arith_string` with
+/// `Q_DOUBLE_QUOTES` already set, so a single quote in it is an ordinary
+/// byte that reaches the arithmetic evaluator and is rejected there --
+/// `${a['1']}` is an arithmetic syntax error, not element one. The
+/// evidence that it is *expansion* under double quotes rather than
+/// quote-stripping is Bash's own diagnostic: `${a['$n']}` with `n=1`
+/// reports the error token as `'1'`, so `$n` expanded inside the single
+/// quotes and the quotes themselves survived.
+///
+/// Everything else follows from that. A backslash keeps its meaning only
+/// before `$`, a backtick, a double quote or another backslash, so
+/// `${a[\1]}` reports `\1`; a double quote is removed; `${a[""]}` is the
+/// empty expression, which is zero, where `${a['']}` reports `''`.
+///
+/// [`text_word`] is the other reading and belongs to an associative
+/// subscript, which is a key and not an expression: `m['a b']` is the
+/// key `a b` in both shells.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn arithmetic_word(shell: &mut Shell, subscript: &BStr) -> Result<BString, Error> {
+    const ACTIVE: &[u8] = b"'\"\\$`";
+    if !subscript.iter().any(|byte| ACTIVE.contains(byte)) {
+        return Ok(subscript.to_owned());
+    }
+    let mut resolved = BString::default();
+    let mut expandable = BString::default();
+    let mut at = 0;
+    while at < subscript.len() {
+        let byte = subscript[at];
+        at += 1;
+        match byte {
+            // A single quote is a byte the evaluator will choke on, and
+            // it must not reach the expander, which would read it as a
+            // quote and eat what follows.
+            b'\'' => {
+                expand_run(shell, &mut expandable, &mut resolved)?;
+                resolved.push(b'\'');
+            }
+            b'"' => {}
+            b'\\' if at < subscript.len() => {
+                let escaped = subscript[at];
+                at += 1;
+                if matches!(escaped, b'$' | b'`' | b'"' | b'\\') {
+                    expandable.push(b'\\');
+                    expandable.push(escaped);
+                    continue;
+                }
+                /* The backslash means nothing here and both bytes are
+                 * the expression's, so neither goes past the expander. */
+                expand_run(shell, &mut expandable, &mut resolved)?;
+                resolved.push(b'\\');
+                resolved.push(escaped);
+            }
+            _ => expandable.push(byte),
+        }
+    }
+    expand_run(shell, &mut expandable, &mut resolved)?;
+    Ok(resolved)
 }
 
 /// Apply a word's quoting and expansion to text the parser never saw.
