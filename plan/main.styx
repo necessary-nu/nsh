@@ -7537,12 +7537,20 @@ children (
                                         id break-up-the-545-line-command-body
                                         title "Break up the 545-line body that runs a simple command"
                                         kind @refactor
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-01T20:58:45.80932381Z
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "`evaluate_command_in_scope` is 545 lines, and it is the largest single function in the shell. `split-the-evaluator-by-form` moved it into `crates/nsh/src/evaluation/command.rs`, whose whole subject is it, and deliberately did not touch it: that commit was a move and this is a decomposition, which is a different claim about a diff and wants a different commit.\n\nIt survived the density gate for as long as it has because the gate counts functions and this is one of them. `[spec:np:req:dod.complexity]` caps cyclomatic complexity at 50 rather than length, and a long straight-line body with few branches passes both -- so nothing in the tree has ever objected to it.\n\nWHAT IT DOES, in the order it does it, which is also the seam: expand the command's words; decide whether the name is a built-in, a function or a file; save the shell state the command may change; apply the redirections; run the thing; put the state back; and decide what the failure meant. Six or seven of those are nameable and several already have local `let` blocks around them.\n\nTHE CONSTRAINT THAT MAKES IT DELICATE. The save-and-restore pairs are what a `return` in the middle would leak, so any decomposition has to keep every early exit inside the frame that restores. `[dec:nsh:errors-are-values]` means those exits are `Err`/`Flow` values rather than jumps, which helps; `capture_local_control` and `builtin_error_is_fatal` are the two places where the decision about a failure is already factored out, and they are the model.\n\nIT WILL ADD FUNCTIONS, which is the point and is now affordable: `command.rs` is four functions, so six more leaves it at ten.\n\nDONE WHEN. No function in `command.rs` is longer than about eighty lines; `scripts/moved-only` reports the set as *changed*, because this one is not a move and must not be committed as though it were; and the full set is re-measured -- workspace, gate, `run-oils` as a list, POSIX, smoosh -- because every command the shell runs goes through here."
+                                            }
+
+                                            {
+                                                at 2026-09-02T00:36:44.933057746Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -7698,6 +7706,34 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Done (nplan complete)"
+                                    }
+                                )
+                            }
+
+                            {
+                                id widen-the-survey-failure-list-extraction
+                                title "Compare the survey's failing cases without dropping three of them"
+                                kind @test
+                                log (
+                                    {
+                                        at 2026-09-02T00:37:05.191158346Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "EVERY \"THE LIST IS IDENTICAL\" IN THIS WEEK'S COMMITS WAS BLIND TO THREE CASES, and the hole is in the extraction I wrote, not in the survey.\n\n`run-oils --group bash-comparison` prints a summary count that moves for reasons the register does not -- `process-sub.test.sh:1` and `:2` flake under load, one of them toward a false pass, and `1cd91c3` credited two fixes that were not real because it read the count. The answer adopted on 2026-09-01 was to compare the *list* of failing case ids instead:\n\n    grep -aoE '^FAIL +[a-z0-9-]+\\.test\\.sh:[0-9]+' | awk '{print $2}' | sort\n\n`[a-z0-9-]` has no underscore. Three spec files are named with one, so their failures never reach the list:\n\n    case_.test.sh:1\n    command_.test.sh:3\n    command_.test.sh:12\n\nThat is why the summary has said `fail=476` in every run this week while the list held 473, and I read the gap as the summary's known noise rather than as my own filter dropping rows. Measured 2026-09-02: widening the class to `[a-z0-9_-]` gives 476, and the difference is exactly those three.\n\nWHAT IT DID AND DID NOT COST. Nothing was missed: the three are stable across every run, and each list comparison this week was still exact over the 473 it saw. But the method's guarantee was smaller than the claim made for it -- a regression in any `*_.test.sh` spec would have passed a \"list identical\" check silently, and those three files cover `case` and `command`, which the `break-up-the-545-line-command-body` decomposition rewrote. The claim was checked on 473 of 476 cases and stated as though it were all of them.\n\nFound by the agent doing that decomposition, from the discrepancy between the summary line and the list length -- the same discrepancy I had looked at repeatedly and explained away.\n\nWHAT TO BUILD. The comparison should not be a regex in a commit message that each run retypes. `nsh-survey` already knows the ids; `run-oils` should be able to print them, `--format json` already exists, and a `--failing-ids` or an equivalent field would make the baseline a file the repository keeps rather than a `/tmp` artefact rebuilt by hand. Then the wrong regex cannot be written again, because there is no regex.\n\nDONE WHEN. A run can emit its failing-case ids directly, a checked-in baseline holds all 476, the comparison is one command, and the three underscore-named cases are in it."
+                                    }
+                                )
+                            }
+
+                            {
+                                id stop-the-fuzz-budget-paying-for-the-build
+                                title "Stop a fuzz run's budget being spent on building it"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T00:37:20.927558951Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "`fuzz/run.sh TARGET SECONDS` gives the sandbox a wall clock of `seconds + 120`, and the `cargo +nightly fuzz` build happens *inside* it. So the build is paid for out of the fuzzing budget, and on a cold cache it can eat most of it.\n\nMeasured 2026-09-02 by the agent decomposing `evaluate_command_in_scope`: `fuzz/run.sh differential 180` needed two rebuilds, 2 minutes 27 seconds of the 300-second wall clock, and the sandbox killed the run at exit 124 with the fuzzer only part-way through its 180 seconds. On a warm build the same command finishes with room to spare.\n\nWHY IT MATTERS MORE THAN THE LOST SECONDS. The truncated run exits 124, which is indistinguishable from the fuzzer having been stopped by its own timeout -- so a cold-cache run looks like a completed short campaign and reports no artifact, when what actually happened is that it barely ran. Every \"no new artifact\" in this week's commits was on a warm cache and is sound, but the failure mode is silent and the next person will not know to check.\n\nIt is the same shape as `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` seen from the clock: a run that could not measure much reports as one that measured and found nothing.\n\nWHAT TO DO. Build before starting the clock -- `fuzz/run.sh --build` already exists for exactly that and `fuzz/sweep.sh` already calls it -- so the wall clock covers only the campaign. Failing that, the runner should say how much of its budget went on the build, so a short campaign is visible as one.\n\nDONE WHEN. A cold-cache `fuzz/run.sh TARGET 180` fuzzes for 180 seconds, or says plainly that it did not."
                                     }
                                 )
                             }
