@@ -105,7 +105,12 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
         }
     } else {
-        show_vars(shell, args[0], selection)?;
+        /* With no operand there is no compound value for `-a` or `-A` to
+         * describe, and Bash spends the letter on the listing instead:
+         * `readonly -a` names the read-only indexed arrays and nothing
+         * else. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        show_vars(shell, args[0], selection, shell.evaluation.declared_kind)?;
     }
     Ok(Flow::Done((0).into()))
 }

@@ -8141,6 +8141,7 @@ children (
                                 id bound-what-a-campaign-pays-to-replay-its-corpus
                                 title "Bound what a campaign pays to replay its corpus"
                                 kind @perf
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T05:32:05.962021961Z
@@ -8154,6 +8155,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T11:51:05.584416872Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

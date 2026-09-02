@@ -975,12 +975,13 @@ fn assignment_fields(
     let whole_array = matches!(value, Value::At(_) | Value::Star(_))
         && crate::variables::value::variable_kind(shell, base)
             .is_some_and(|kind| kind != crate::variables::value::VariableKind::Scalar);
-    let flags = crate::variables::special::declaration_flags(shell, base).unwrap_or_default();
+    let flags = crate::variables::declaration::declaration_flags(shell, base).unwrap_or_default();
     if whole_array {
         let mut assignment = base.to_owned();
         if let Some(stored) = stored {
-            assignment
-                .extend_from_slice(&crate::variables::special::declaration_value(shell, stored));
+            assignment.extend_from_slice(&crate::variables::declaration::declaration_value(
+                shell, stored,
+            ));
         }
         let mut letters = BString::from("-");
         letters.extend_from_slice(&flags);
@@ -1019,7 +1020,7 @@ fn attributes_of(shell: &Shell, name: &BStr) -> BString {
     let Some(target) = declaration_target(shell, name) else {
         return BString::default();
     };
-    crate::variables::special::attribute_letters(shell, BStr::new(target.as_slice()))
+    crate::variables::declaration::attribute_letters(shell, BStr::new(target.as_slice()))
 }
 
 fn any_character() -> Pattern {

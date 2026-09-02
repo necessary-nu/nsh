@@ -318,6 +318,7 @@ fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result
             shell,
             BStr::new(b""),
             crate::variables::VariableSelection::Set,
+            None,
         )
         .map(|()| Flow::Done(ExitStatus::SUCCESS));
     }
@@ -336,7 +337,7 @@ fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result
     let mut status = ExitStatus::SUCCESS;
     for name in names {
         let name = BStr::new(name.as_slice());
-        let Some(rendered) = render(shell, name) else {
+        let Some(rendered) = crate::variables::declaration::declaration_line(shell, name) else {
             let mut message = b"declare: ".to_vec();
             message.extend_from_slice(name.as_ref());
             message.extend_from_slice(b": not found\n");
@@ -377,15 +378,4 @@ fn selected(shell: &Shell, requested: &Requested, name: &BStr) -> bool {
         Some(kind) => crate::variables::value::variable_kind(shell, name) == Some(kind),
         None => true,
     }
-}
-
-fn render(shell: &Shell, name: &BStr) -> Option<BString> {
-    let mut line = BString::from("declare -");
-    line.extend_from_slice(&crate::variables::special::declaration_flags(shell, name)?);
-    line.push(b' ');
-    line.extend_from_slice(name.as_ref());
-    if let Some(value) = crate::variables::value::variable_value(shell, name) {
-        line.extend_from_slice(&crate::variables::special::declaration_value(shell, value));
-    }
-    Some(line)
 }

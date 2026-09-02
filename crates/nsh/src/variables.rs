@@ -28,6 +28,8 @@ pub(crate) mod nameref;
 
 pub(crate) mod call_stack;
 
+pub(crate) mod declaration;
+
 pub(crate) mod special;
 pub(crate) use special::{
     continuation_prompt_value, default_ifs, default_path, history_size_value, ifs_is_set,
@@ -756,15 +758,30 @@ pub fn environment(shell: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> 
         .collect()
 }
 
+/// List the variables a selection names, in the dialect's own form.
+///
+/// `export -p` and `readonly -p` print declarations in Bash -- the same
+/// `declare -p` line, out of the same renderer, so an exported array is
+/// `declare -ax xa=([0]="1")` there and not its first element -- and
+/// `export NAME='value'` in the POSIX dialect, which is dash's form and
+/// is the one `[spec:posix:req:builtin.readonly.p-output-reinput]` asks
+/// to be readable back. A bare `set` prints `name=value` in both.
+///
+/// `kind` narrows the listing to one array kind, which is the only other
+/// thing Bash does with `readonly -a` and `readonly -A`: the letters are
+/// not attributes there, so with no operand they can only select.
 // [spec:dash:sem:var.showvars-fn]
+// [spec:nsh:req:compat.bash.arrays-declarations]
 pub(crate) fn show_vars(
     shell: &mut Shell,
     prefix: &BStr,
     selection: VariableSelection,
+    kind: Option<VariableKind>,
 ) -> Result<(), Error> {
     let bash = shell.options.dialect() == crate::options::Dialect::Bash;
+    let declarations = bash && selection != VariableSelection::Set;
     let locale = shell.locale.clone();
-    let records: Vec<Vec<u8>> = shell
+    let selected: Vec<BString> = shell
         .variables
         .entries
         .iter()
@@ -773,14 +790,27 @@ pub(crate) fn show_vars(
             VariableSelection::Exported => var.attributes.exported,
             VariableSelection::ReadOnly => var.attributes.read_only,
         })
-        .map(|(name, var)| {
-            let mut record = Vec::new();
+        .map(|(name, _)| name.clone())
+        .collect();
+    let mut records: Vec<Vec<u8>> = Vec::new();
+    for name in selected {
+        let name = BStr::new(name.as_slice());
+        if kind.is_some() && value::variable_kind(shell, name) != kind {
+            continue;
+        }
+        let mut record = Vec::new();
+        if declarations {
+            let Some(line) = declaration::declaration_line(shell, name) else {
+                continue;
+            };
+            record.extend_from_slice(&line);
+        } else {
             record.extend_from_slice(prefix);
             if !prefix.is_empty() {
                 record.push(b' ');
             }
-            record.extend_from_slice(name);
-            if let Some(value) = var.scalar() {
+            record.extend_from_slice(name.as_ref());
+            if let Some(value) = shell.variables.entries.get(name).and_then(Variable::scalar) {
                 record.push(b'=');
                 // Bash's listing reaches for `$'...'` where single quotes
                 // could not carry the bytes; POSIX's never does.
@@ -792,10 +822,10 @@ pub(crate) fn show_vars(
                 };
                 record.extend_from_slice(&quoted);
             }
-            record.push(b'\n');
-            record
-        })
-        .collect();
+        }
+        record.push(b'\n');
+        records.push(record);
+    }
     for record in records {
         shell.write_output(crate::output::OutputDestination::Stdout, &record)?;
     }
