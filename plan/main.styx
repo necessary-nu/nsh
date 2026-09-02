@@ -7684,12 +7684,20 @@ children (
                                 id settle-whether-the-workspace-unwinds
                                 title "Settle whether anything in the workspace relies on unwinding"
                                 kind @chore
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-01T23:49:51.246522056Z
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "`Cargo.toml`'s workspace comment ends \"Nothing in this workspace relies on unwinding\", and that stopped being true on 2026-09-02 at `1b12fa6`.\n\nThe comment is worth reading in full, because it is a good one and its subject is exactly this: `panic = \"unwind\"` used to be pinned on both profiles, and the pin was the constraint `[dec:nsh:errors-are-values]` existed to remove -- the port implemented C's `longjmp` as an unwind carrying a typed payload, so every shell error, every `exit` and every `^C` was a panic, and `panic = \"abort\"` would have turned each of them into a dead shell. The mechanism is gone, a failure is a value, and the pin went with it. The last sentence is the claim that made removing it safe.\n\nWHAT MADE IT UNTRUE. `crates/nsh-lint`'s `main` runs each source-shape check under `std::panic::catch_unwind` so that a failing run reports *all* the failures rather than stopping at the first. Those checks assert, because they were `#[test]` functions until that commit and the assertion message is the report. Under `panic = \"abort\"` the first failing check would take the process down and the other twenty-five would not run -- which is a worse check, not a broken one, and the crate is `publish = false` tooling that never ships.\n\nSo this is small, and it is exactly the kind of stale sentence this repository has been finding all week: a claim written next to the thing it justified, still there after what it depended on changed. Four were found in the week of 2026-08-25 and `check-that-a-cited-decision-is-live` exists because of them.\n\nTHREE ANSWERS, and the choice is the work:\n\n  * amend the comment to say that nothing *shipped* relies on unwinding and name `nsh-lint` as the exception;\n  * have `nsh-lint` collect reports as values rather than catching panics -- each check returns `Vec<String>` instead of asserting, which is also what `[dec:nsh:errors-are-values]` would say if the crate were in scope for it;\n  * leave the reporting loop and pin `panic = \"unwind\"` for that crate alone.\n\nThe second is the one that agrees with the repository's own decision, and it is a rewrite of twenty-six check bodies rather than a comment edit, which is why this is a node.\n\nDONE WHEN. The sentence in `Cargo.toml` is true again, by whichever route, and the route is written down with the reason."
+                                    }
+
+                                    {
+                                        at 2026-09-02T00:22:28.477062149Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
                                     }
                                 )
                             }
