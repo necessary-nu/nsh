@@ -1,2 +1,42 @@
 [net]
 git-fetch-with-cli = true
+
+# Every test binary in this workspace runs behind the repository's containment
+# boundary, because cargo puts it there.
+#
+# `enforce-survey-test-containment` was closed in August with a definition of
+# done naming "workspace-test" among the commands that must run inside a
+# fail-closed PID namespace, with "no unsandboxed fallback". That was true of
+# the two callers that had been given the property -- `nsh-survey`'s runner,
+# whose `process::Request` cannot be built without a verified `Containment`,
+# and `scripts/sandboxed` -- and false of `cargo test --workspace`, which ran
+# shell cases with the session's own uid, PID namespace and controlling
+# terminal and asked nothing of anybody. The README spelled the command with
+# the wrapper in front; most sessions typed it without.
+#
+# `kill-a-survey-case-the-harness-abandoned` is why that gap is not
+# theoretical: on 2026-08-31 four `nsh` processes spun at 98% CPU for
+# forty-seven hours in the host's PID namespace, and the correction it left
+# is that containment is a property of the callers rather than of the machine.
+# Cargo is a caller. This gives it the property, so the tests are contained
+# whether or not the wrapper was typed, and there is no spelling of
+# `cargo test` that runs a shell case bare.
+#
+# It is fail-closed for the same reason the other two are: `scripts/sandboxed`
+# refuses when the `sandbox` tool is missing or when its containment probe and
+# execution canary do not pass, so a boundary that cannot be established is a
+# failed test rather than an unsandboxed one.
+#
+# Cargo applies a runner to the host target as well as to cross-compiled ones,
+# and resolves a relative program against this file's directory, so the entry
+# needs no triple and no absolute path. It reaches `cargo test`, `cargo run`
+# and `cargo bench`, and it reaches doctests too -- cargo hands it to rustdoc
+# as the test runtool, which is why the wrapper has to bind back the directory
+# rustdoc compiled its merged doctest binary into. It does not reach a build
+# script, or a test binary somebody runs out of `target/` by hand; the second
+# is the same hole `./target/release/nsh case.sh` is, and the abandoned scan is
+# what stands there. `cargo fuzz` builds with cargo and then runs the artifact
+# itself, so `fuzz/run.sh` keeps its "exactly one containment layer" and gains
+# nothing here.
+[target.'cfg(unix)']
+runner = ["scripts/sandboxed", "--cargo-runner", "--"]

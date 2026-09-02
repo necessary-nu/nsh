@@ -1433,7 +1433,7 @@ assertions (
     {id list-readonly-names-as-bash-lists-them, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:12:44.579606711Z}
     {id stop-selecting-the-locale-per-character, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:18:13.776036539Z}
     {id accept-newlines-inside-a-conditional, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:19:12.153259249Z}
-    {id build-the-survey-baseline-from-what-is-committed, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:20:38.492451062Z}
+    {id build-the-survey-baseline-from-what-is-committed, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:54:43.617828026Z}
     {id contain-the-workspace-tests-that-run-cases, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:25:06.793356084Z}
     {id spell-a-valueless-name-back, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:26:20.399911392Z}
     {id apply-a-declaring-builtin-through-the-reference, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:45:11.445443261Z}

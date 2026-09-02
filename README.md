@@ -124,6 +124,22 @@ The wrapper requires the `sandbox` tool and fails closed if containment cannot
 be established. Read [tests/README.md](tests/README.md) before adding or
 changing differential cases.
 
+Cargo carries that boundary itself: `.cargo/config.toml` names
+`scripts/sandboxed --cargo-runner` as the target runner, so every binary
+`cargo test`, `cargo run` and `cargo bench` execute goes into a PID namespace
+whether or not the wrapper was typed in front. There is no spelling of
+`cargo test` that runs a shell case with the session's own process table, and a
+sandbox that cannot be established is a failed command rather than an
+unsandboxed one. Keep the wrapper on the outside anyway — it is what asks
+whether the machine is carrying an abandoned case, a question about the whole
+command rather than about each of its sixty-two test binaries, and it is what
+contains the commands cargo has nothing to do with. Two boundaries nest without
+complaint; the run above is unchanged by the runner except that it costs about
+40 ms per test binary.
+`tests/harness/containment-selftest.sh` is the runner's self-test and, like
+`tests/harness/abandoned-selftest.sh`, must not be run through the wrapper: it
+asks the host whether a descendant survived, which is what the boundary hides.
+
 `LOCPATH` is an export rather than a path the tests look up themselves. A
 locale is opened by name, and glibc resolves every name under its own locale
 directory, so a generated one is reachable only through that variable in the

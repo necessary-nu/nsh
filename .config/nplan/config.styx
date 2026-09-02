@@ -29,6 +29,18 @@ platforms (
     // `export LOCPATH=$(./tests/build-locales.sh)` and then
     // `scripts/sandboxed -- cargo test --workspace`; the locale tests fail
     // rather than skip when that fixture is missing.
+    //
+    // CORRECTION 2026-09-02: the first half of that paragraph stands as
+    // written and the second half no longer holds. `.cargo/config.toml` now
+    // names `scripts/sandboxed --cargo-runner` as cargo's target runner, so a
+    // gate command running `cargo test` bare could not reintroduce the hazard:
+    // cargo puts every test binary in a PID namespace itself, and a boundary
+    // it cannot establish fails the command. The entry stays absent for the
+    // reason that is still true -- the suite measured 36 s at load 20 against
+    // a 60 s check budget, which is a check that would start failing on a busy
+    // machine rather than when the code is wrong. The recommended command is
+    // also unchanged: the wrapper on the outside is what asks whether the
+    // machine is carrying an abandoned case.
     {
         platform "rust/workspace"
         files (crates/**/*.rs crates/**/Cargo.toml Cargo.toml Cargo.lock)

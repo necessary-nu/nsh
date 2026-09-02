@@ -6,6 +6,7 @@ set -euo pipefail
 
 usage() {
     echo "usage: scripts/sandboxed [--writable PATH]... [--timeout SECONDS] -- COMMAND [ARG...]" >&2
+    echo "       scripts/sandboxed --cargo-runner -- PROGRAM [ARG...]" >&2
     exit 2
 }
 
@@ -13,6 +14,16 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 SANDBOX=${NSH_TEST_SANDBOX:-sandbox}
 TIMEOUT=${NSH_TEST_TIMEOUT:-900}
 NPROC=${NSH_TEST_NPROC:-256}
+# Where the command starts. A command typed at this wrapper is a command about
+# the repository, so it starts at the root; a binary cargo hands us is one
+# cargo already chose a directory for, and moving it would change what the
+# program under test sees.
+CHDIR=$ROOT
+# `--cargo-runner` is this wrapper standing where `.cargo/config.toml` points
+# cargo, so that `cargo test` and `cargo run` carry the boundary themselves
+# rather than depending on somebody typing the wrapper first. See the comment
+# in `.cargo/config.toml` for why that indirection exists at all.
+RUNNER=false
 
 case $TIMEOUT in
     ''|*[!0-9]*) usage ;;
@@ -54,6 +65,11 @@ while (($#)); do
                 ''|*[!0-9]*) usage ;;
             esac
             shift 2
+            ;;
+        --cargo-runner)
+            RUNNER=true
+            CHDIR=$(pwd -P)
+            shift
             ;;
         --)
             shift
@@ -129,7 +145,18 @@ abandoned_processes() { # abandoned_processes MINIMUM-AGE-SECONDS
     done
 }
 
-ABANDONED=${NSH_TEST_ABANDONED:-refuse}
+# The scan is a question about the machine a test command is about to start
+# on, and `--cargo-runner` is not the start of a command: cargo calls this
+# wrapper once per test binary, so a workspace run would ask it sixty-two
+# times, pay 91-162 ms of /proc walk for each, and could refuse in the middle
+# of a suite for a process that crossed the age threshold while the suite ran.
+# The command-level wrapper still asks it once, which is where the question
+# belongs.
+if $RUNNER; then
+    ABANDONED=ignore
+else
+    ABANDONED=${NSH_TEST_ABANDONED:-refuse}
+fi
 case $ABANDONED in
     refuse | kill | ignore) ;;
     *)
@@ -172,15 +199,32 @@ SANDBOX_ARGS=(
     --dev /dev
     --proc /proc
     --tmpfs /tmp
-    --chdir "$ROOT"
+    --chdir "$CHDIR"
     --limit "nproc=$NPROC"
 )
-for path in "${WRITABLES[@]}"; do
+# A program under /tmp is the one thing this boundary hides from itself: the
+# root is bound read-only, so every path stays reachable except the fresh
+# tmpfs that replaces /tmp. `rustdoc` compiles a merged doctest binary into
+# /tmp/rustdoctestXXXXXX and hands cargo's runner that path, so without this
+# `cargo test --workspace` ends on `env: '/tmp/.../rust_out': No such file or
+# directory` -- the boundary working exactly as specified, on the wrong file.
+# Only the directory holding the program comes back, and read-only, so a case
+# still cannot see or touch what else is in the session's /tmp.
+READABLES=()
+if $RUNNER && [[ ${1-} == /tmp/* && -f ${1-} ]]; then
+    READABLES+=("$(cd "$(dirname "$1")" && pwd -P)")
+fi
+for path in "${WRITABLES[@]}" "${READABLES[@]}"; do
     [[ $path != *:* ]] || {
-        echo "scripts/sandboxed: writable path contains ':': $path" >&2
+        echo "scripts/sandboxed: bound path contains ':': $path" >&2
         exit 1
     }
+done
+for path in "${WRITABLES[@]}"; do
     SANDBOX_ARGS+=(--bind "$path:$path")
+done
+for path in "${READABLES[@]}"; do
+    SANDBOX_ARGS+=(--bind "$path:$path:ro")
 done
 
 root_probe="$ROOT/.sandboxed-root-write-probe-$$"
