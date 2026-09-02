@@ -1425,7 +1425,7 @@ assertions (
     {id stop-an-interactive-shell-exiting-on-sigchld, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:32:52.847819724Z}
     {id match-bash-dot-names-and-literal-paths, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:48:57.256382473Z}
     {id let-the-sweep-see-a-slow-unit, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:55:39.71182461Z}
-    {id spell-an-unassigned-array-back, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:56:28.496773437Z}
+    {id spell-an-unassigned-array-back, kind @complete, author "brendan@necessary.nu", at 2026-09-02T11:21:42.95771595Z}
     {id kill-a-survey-case-the-harness-abandoned, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:22:08.44381477Z}
     {id give-the-failing-case-baseline-the-gates-control, kind @doing, author "brendan@necessary.nu", at 2026-09-02T10:22:16.069586104Z}
 )

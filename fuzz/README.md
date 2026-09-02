@@ -118,14 +118,52 @@ the Oils survey, the POSIX harness or Smoosh.
   `close-the-pattern-replacement-divergence`.
 * `matcher` -- four inputs of about four hundred bytes take between eleven
   and ninety-two seconds to match. libFuzzer files these as `slow-unit`
-  rather than `crash`, so a replay exits zero and a sweep does not see
-  them; they have to be read. Filed as
-  `bound-the-cost-of-matching-a-pattern`.
+  rather than `crash`, so a replay of one exits zero. Fixed by `2c40a0e`
+  and `e6551ef`; the sweep below is what stopped that exit status meaning
+  "closed".
 
 A divergence used to be reported as two fingerprints, which identifies it
 across runs and says nothing about what it was, so every triage began by
 writing a program to recover the script from the artifact. The report now
 carries the script and both outputs.
+
+## Sweeping the artifacts
+
+`fuzz/sweep.sh` replays every stored artifact against the current build and
+says which still reproduce; `--prune` deletes the rest, so the artifact
+directory stays a list of open findings rather than a history of closed
+ones. One fix usually kills a family -- the round-trip corpus went from 284
+artifacts to 3 across four fixes -- which is what makes sweeping cheaper
+than triaging the same defect thirty times.
+
+**Two classes, and only one of them fails its replay.** A `crash-`, `leak-`
+or `oom-` artifact is an input the target could not survive, so its replay
+exits non-zero and the status settles it. A `slow-unit-` or a `timeout-` is
+an input the target *survived* and took too long over, so its replay exits
+zero -- and a sweep that reads only the status calls every performance
+finding closed. It does that most eagerly right after a campaign has found
+one, because that is when the sweep gets run. On the tree that still had
+the alternation defect, the old sweep reported all five `matcher` slow units
+"no longer reproduce" while each of them still took between seven and eleven
+seconds, and `--prune` would have deleted all five.
+
+**What a cost artifact is measured against.** Not a wall clock: the same
+artifact read 1.16s on a quiet machine and 25.27s an hour later under load,
+and a threshold in seconds turns that into a different verdict. It is
+measured against what an *ordinary* input of the same target costs, taken
+from the target's own corpus in the same replay, seconds apart, on the same
+machine -- so whatever the machine is doing to one number it is doing to the
+other. `NSH_SWEEP_COST_ALLOWANCE` is the multiple, 256 by default; the four
+closed `matcher` artifacts read 7x to 93x across nine sweeps at loads from 8
+to 95, and the same four read 2,282x to 3,439x on the tree that still has
+the defect. Between load 8 and load 95 the sweep's own wall clock doubled
+and no verdict moved. `d771ff817c9f` reads 480x to 587x on both trees and stays live
+on purpose: `e6551ef` brought it to 1.16s rather than to tenths, and
+`stop-selecting-the-locale-per-character` is the open node that says why.
+
+**A corpus that cannot answer leaves the artifact undecided**, which is
+neither live nor closed: `--prune` keeps it and the sweep's status says the
+sweep was not clean. `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`.
 
 ## Why this exists
 

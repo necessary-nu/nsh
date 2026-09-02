@@ -106,7 +106,10 @@ that grows without bound slows every run.
 **Crashes.** Minimise, fix the cause, then sweep. `fuzz/sweep.sh TARGET`
 replays every stored artifact against the current build and reports which
 still reproduce; `--prune` removes the rest, so the artifact directory
-stays a list of open findings rather than a history of closed ones. One
+stays a list of open findings rather than a history of closed ones. A
+`slow-unit-` or `timeout-` artifact reproduces by *costing* rather than by
+failing, so the sweep measures those against what an ordinary input of the
+same target costs instead of reading their exit status; see the README. One
 fix usually kills a family: the round-trip corpus went from 284 artifacts
 to 3 across four fixes, so triaging artifact by artifact is triaging the
 same defect thirty times.

@@ -8147,6 +8147,7 @@ children (
                                 id spell-an-unassigned-array-back
                                 title "Tell a declared array from an assigned empty one"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T05:36:09.264676187Z
@@ -8160,6 +8161,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T11:21:42.95771595Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -8323,6 +8331,20 @@ children (
                             {
                                 id sweep-the-corpus-for-cost-outliers
                                 title "Look for the expensive inputs already sitting in the corpus"
+                                kind @test
+                                log (
+                                    {
+                                        at 2026-09-02T11:21:20.29612281Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "FOUND 2026-09-02 WHILE CLOSING `let-the-sweep-see-a-slow-unit`, AND NOT PART OF IT. Nothing looks at what the corpus itself costs, and the corpus is where the expensive inputs are.\n\nlibFuzzer files a `slow-unit-` only when an input crosses `-report_slow_units`, ten seconds by default. Everything under that stays in the corpus and is never reported by anything. Measured on `fuzz/corpus/matcher`, a deterministic 249-input sample replayed through the built target at load 4:\n\n    median            2 ms\n    90th percentile   3 ms\n    99th percentile 160 ms\n    slowest         313 ms\n\nso the corpus holds inputs costing a hundred and fifty times an ordinary one, on the *fixed* tree. On the tree still carrying the alternation defect the same sample's slowest read 7,082ms -- which is the number that forced `fuzz/sweep.sh` to calibrate against the cheaper half of its sample rather than the mean, because averaging that one in would have hidden a 9,069ms artifact behind it.\n\nWHY IT IS WORTH LOOKING. The fifth `matcher` artifact, `d771ff817c9f`, took eleven seconds and had been reachable for as long as the defect existed; it was found only because someone ran one more campaign after believing the work was done. An input at three hundred milliseconds is the same shape one order of magnitude down, and there are already several of them sitting in a directory nobody reads. The sweep now has the machinery to say what an input costs as a multiple of an ordinary one, and pointing it at the corpus instead of the artifact directory is most of the work.\n\nWHAT IS NOT OBVIOUS AND IS THE ACTUAL QUESTION. A corpus outlier is not automatically a defect: a legitimately large input legitimately costs more, and the sweep's multiple is not size-normalised. So the useful report is probably cost per input byte, or cost against the same target's inputs of a similar size, rather than a flat multiple -- and choosing between those wants the distribution looked at rather than guessed.\n\nDONE WHEN. Something reports the cost distribution of a target's corpus in units that do not move with the machine's load, the `matcher` outliers above have been read and either explained or filed, and whatever it is runs cheaply enough that a campaign can end with it."
+                                    }
+                                )
+                            }
+
+                            {
+                                id build-the-survey-baseline-from-what-is-committed
+                                title "Stop the survey baseline recording another agent's uncommitted work"
                                 kind @test
                             }
                         )
