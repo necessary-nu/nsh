@@ -802,21 +802,18 @@ pub(super) fn transform(
         b"a" => true,
         /* `@A` prints a declaration, and a name that has none prints
          * nothing: `${undeclared[@]@A}` and `${1@A}` are both empty in
-         * Bash, where `${x[@]@A}` on a plain scalar is `x='...'`. An
-         * array is the one name that still has a declaration to print
-         * with nothing to read: `${z@A}` on `declare -a z` is
-         * `declare -a z`, and so is `${z[5]@A}` on an array whose fifth
-         * element is not there. */
+         * Bash, where `${x[@]@A}` on a plain scalar is `x='...'`. What a
+         * name has to print is not what it holds -- `declare -i n` and
+         * `readonly x` hold nothing and print, `${z[5]@A}` on an array
+         * whose fifth element is missing prints the array -- so the
+         * question is asked of the *name*, and only `$@` and `$*`, which
+         * have no entry to ask, are decided by what was read. */
         // [spec:nsh:req:compat.bash.arrays-declarations]
         b"A" => declaration_target(shell, name).is_some_and(|base| {
-            !value.is_unset()
-                || matches!(
-                    crate::variables::value::variable_kind(shell, BStr::new(base.as_slice())),
-                    Some(
-                        crate::variables::value::VariableKind::Indexed
-                            | crate::variables::value::VariableKind::Associative
-                    )
-                )
+            if base == "@" || base == "*" {
+                return !value.is_unset();
+            }
+            crate::variables::declaration::is_spellable(shell, BStr::new(base.as_slice()))
         }),
         _ => has_transformable_bytes(&value),
     };
@@ -835,6 +832,19 @@ pub(super) fn transform(
          * rather than one for the array. */
         b"a" => {
             let letters = attributes_of(shell, name);
+            /* A name that holds no value has no elements for the map to
+             * run over, and Bash still answers once for the declaration:
+             * `${z[@]@a}` is `a` on a `declare -a z` and empty on the
+             * `declare -a z=()` beside it, because the first has nothing
+             * to walk and the second has an empty walk. */
+            if valueless_name(shell, name) {
+                return Ok(Expansion::one(Field::from_bytes(
+                    &letters,
+                    context.protects(),
+                    context.splits(),
+                    context.quoted,
+                )));
+            }
             map_value(shell, value, context, |_, _| letters.clone())
         }
         /* `@A` prints the assignment that would recreate the name, so
@@ -919,6 +929,17 @@ fn declaration_target(shell: &Shell, name: &BStr) -> Option<BString> {
     if base == "@" || base == "*" {
         return Some(base);
     }
+    /* A reference with nothing in it points nowhere, and both transforms
+     * answer nothing for it in Bash: `${r@A}` and `${r@a}` on a bare
+     * `declare -n r` are empty, where `declare -p r` still prints
+     * `declare -n r`. Spelling the reference itself would be answering a
+     * question about the wrong name. */
+    if crate::variables::value::variable_value(shell, BStr::new(base.as_slice())).is_none()
+        && crate::variables::value::bash_attributes(shell, BStr::new(base.as_slice()))
+            .is_some_and(|bash| bash.contains(crate::variables::value::BashAttribute::Nameref))
+    {
+        return None;
+    }
     let target = crate::variables::nameref::read_name(shell, BStr::new(base.as_slice()))
         .unwrap_or_else(|| base.clone());
     let target = match super::split_subscript(BStr::new(target.as_slice())) {
@@ -975,7 +996,7 @@ fn assignment_fields(
     let whole_array = matches!(value, Value::At(_) | Value::Star(_))
         && crate::variables::value::variable_kind(shell, base)
             .is_some_and(|kind| kind != crate::variables::value::VariableKind::Scalar);
-    let flags = crate::variables::declaration::declaration_flags(shell, base).unwrap_or_default();
+    let flags = crate::variables::declaration::transform_flags(shell, base);
     if whole_array {
         let mut assignment = base.to_owned();
         if let Some(stored) = stored {
@@ -984,30 +1005,52 @@ fn assignment_fields(
             ));
         }
         let mut letters = BString::from("-");
-        letters.extend_from_slice(&flags);
+        letters.extend_from_slice(&flags.unwrap_or_default());
         return vec![BString::from("declare"), letters, assignment];
     }
-    /* An array with no element to read as a scalar has no `=` at all:
-     * `declare -a z` prints itself, where `z=''` would claim an element
-     * zero the array does not have. A subscript naming an element that
-     * is not there reads the same way -- `${z[5]@A}` is `declare -a z`
-     * in Bash -- so an unset value prints the declaration alone. */
+    /* A name with no element to read as a scalar has no `=` at all:
+     * `declare -a z` and `declare -i n` and `readonly x` all print
+     * themselves, where `z=''` would claim a value none of them has. A
+     * subscript naming an element that is not there reads the same way
+     * -- `${z[5]@A}` is `declare -a z` in Bash. */
     let mut assignment = base.to_owned();
     let unreadable = value.is_unset()
+        || stored.is_none()
         || matches!(value, Value::Variable(stored) if stored.scalar_ref().is_none());
     if !unreadable {
         let text = super::value_bytes(shell, value.clone(), context);
         assignment.push(b'=');
         assignment.extend_from_slice(&quote(shell, BStr::new(text.as_slice())));
     }
-    if flags == "-" {
+    /* `declare ` goes in front of every name that carries an attribute
+     * and in front of no name that carries none, and the letters between
+     * them are written only when there are letters: a `local q` is
+     * `declare q`, where a global `q=1` is `q='1'`. */
+    let Some(flags) = flags else {
         return vec![assignment];
+    };
+    let mut line = BString::from("declare ");
+    if !flags.is_empty() {
+        line.push(b'-');
+        line.extend_from_slice(&flags);
+        line.push(b' ');
     }
-    let mut line = BString::from("declare -");
-    line.extend_from_slice(&flags);
-    line.push(b' ');
     line.extend_from_slice(&assignment);
     vec![line]
+}
+
+/// Whether the parameter names a variable that holds no value at all.
+///
+/// `@a` maps over the elements of what it was given, and a declared name
+/// with nothing in it has none to map: the map would answer nothing
+/// where Bash answers the declaration's letters once.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn valueless_name(shell: &Shell, name: &BStr) -> bool {
+    let Some(base) = declaration_target(shell, name) else {
+        return false;
+    };
+    let base = BStr::new(base.as_slice());
+    base != "@" && base != "*" && crate::variables::value::variable_value(shell, base).is_none()
 }
 
 /// The attribute letters of the variable a parameter names.

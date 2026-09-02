@@ -1441,7 +1441,7 @@ assertions (
     {id spend-the-wrappers-budget-inside-the-boundary, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:55:22.428429632Z}
     {id refuse-to-regenerate-a-file-another-session-changed, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:55:46.697045361Z}
     {id deliver-a-prompt-interrupt-without-eating-the-next-line, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:58:47.016231255Z}
-    {id refuse-to-destroy-an-array-kind, kind @doing, author "brendan@necessary.nu", at 2026-09-02T13:00:36.134019438Z}
+    {id refuse-to-destroy-an-array-kind, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:15:07.483177095Z}
 )
 
 impl_evidence (

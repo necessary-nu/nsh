@@ -9,11 +9,15 @@
 //! that now read it are why it lives here rather than beside the special
 //! variables it arrived with.
 //!
-//! Two letter tables sit next to each other on purpose.
-//! [`attribute_letters`] is Bash's `var_attribute_string`, which
-//! `${name@a}` renders, and [`declaration_flags`] is its
-//! `attribute_string`, which a `declare -p` line carries; they order the
-//! same attributes differently, and Bash keeps them apart too.
+//! THERE IS ONE LETTER TABLE, not two. This module was written believing
+//! that `declare -p` ordered its letters differently from `${name@a}`,
+//! and it does not: measured over all 79 attribute combinations on the
+//! pinned 5.3.15, `declare -p` prints exactly the letters `${name@a}`
+//! prints, `declare -rl` and `declare -tl` and `declare -xu` included.
+//! Bash's `print_var_attributes` calls `var_attribute_string`, the same
+//! function `@a` reaches, so [`attribute_letters`] is the table and
+//! [`declaration_flags`] is that table with the `-` a bare
+//! `declare -- x` needs.
 
 use bstr::{BStr, BString};
 
@@ -67,48 +71,82 @@ pub(crate) fn attribute_letters(shell: &Shell, name: &BStr) -> BString {
 /// The attribute letters a `declare -p` line carries for `name`, or
 /// `None` for a name with no entry at all.
 ///
-/// Bash writes these in a different order from the `${name@a}` letters
-/// above -- `declare -Ar`, but `${m@a}` is `Ar` only by coincidence and
-/// `-rx` is `rx` there and `rx` here while `-lu` is `lu` there and `ul`
-/// here. `attribute_string` and `var_attribute_string` are two tables in
-/// Bash and they are two here, next to each other so that the difference
-/// is visible rather than surprising. A name that carries nothing takes
-/// `-`, which is what makes `declare -- x="1"`.
+/// The letters are [`attribute_letters`]'s, because Bash's are: this
+/// once held a second table in `attribute_string` order and printed
+/// `declare -lr` where the reference prints `declare -rl`. A name that
+/// carries nothing takes `-`, which is what makes `declare -- x="1"`
+/// and is the whole of the difference from the transform's letters.
 // [spec:nsh:req:compat.bash.arrays-declarations]
 pub(crate) fn declaration_flags(shell: &Shell, name: &BStr) -> Option<BString> {
-    use super::value::BashAttribute;
-
     // A name declared without a value still has a declaration to print;
     // only a name with no entry at all is missing.
-    let attributes = super::variable_attributes(shell, name)?;
-    let bash = super::value::bash_attributes(shell, name).unwrap_or_default();
-    let mut flags = BString::default();
-    match super::value::variable_kind(shell, name) {
-        Some(VariableKind::Indexed) => flags.push(b'a'),
-        Some(VariableKind::Associative) => flags.push(b'A'),
-        Some(VariableKind::Scalar) | None => {}
-    }
-    for (attribute, letter) in [
-        (BashAttribute::Integer, b'i'),
-        (BashAttribute::Lowercase, b'l'),
-        (BashAttribute::Nameref, b'n'),
-        (BashAttribute::Trace, b't'),
-        (BashAttribute::Uppercase, b'u'),
-    ] {
-        if bash.contains(attribute) {
-            flags.push(letter);
-        }
-    }
-    if attributes.read_only {
-        flags.push(b'r');
-    }
-    if attributes.exported {
-        flags.push(b'x');
-    }
+    super::variable_attributes(shell, name)?;
+    let mut flags = attribute_letters(shell, name);
     if flags.is_empty() {
         flags.push(b'-');
     }
     Some(flags)
+}
+
+/// The letters `${name@A}` writes its `declare` prefix with, or `None`
+/// for a name that is spelled bare.
+///
+/// Bash prefixes the assignment with `declare ` exactly when the name
+/// carries an attribute, and `local` is one: a global `x=1` spells
+/// `x='1'` and a `local x=1` spells `declare x='1'`, with no letters
+/// between them either way. So an empty `Some` is a real answer here and
+/// is not the same as `None`, which is why this is not
+/// [`declaration_flags`] with the `-` taken off.
+// [spec:nsh:req:compat.bash.functions-scoping]
+pub(crate) fn transform_flags(shell: &Shell, name: &BStr) -> Option<BString> {
+    let letters = attribute_letters(shell, name);
+    if letters.is_empty() && !is_local(shell, name) {
+        return None;
+    }
+    Some(letters)
+}
+
+/// Whether `name` belongs to the function body now running, which is
+/// Bash's `att_local`.
+///
+/// The *current* body decides, not any body: a name a caller made local
+/// is an ordinary variable to the function it calls, measured as
+/// `${x@A}` spelling `declare x='1'` in the declaring body and `x='1'`
+/// in a callee. `local` is not an attribute of the entry here -- it is a
+/// record in the frame that will restore the caller's -- so this reads
+/// the frames rather than the variable. Everything from the frame the
+/// call pushed upwards belongs to the same call, a declaration
+/// built-in's transient frame included.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn is_local(shell: &Shell, name: &BStr) -> bool {
+    use super::LocalVariable;
+
+    let Some(frame) = shell.variables.function_frames.last().copied() else {
+        return false;
+    };
+    shell
+        .variables
+        .locals
+        .get(frame..)
+        .into_iter()
+        .flatten()
+        .flat_map(|scope| scope.entries.iter())
+        .any(|local| match local {
+            LocalVariable::Options(_) => false,
+            LocalVariable::Created(held) | LocalVariable::Saved { name: held, .. } => held == name,
+        })
+}
+
+/// Whether `${name@A}` has anything to say about `name`.
+///
+/// A name with no entry has nothing, and so has an entry that holds no
+/// value and carries no attribute -- a bare `declare y` at the global
+/// level is empty in the reference, where `declare -i n` and a `local q`
+/// both print. The value is what makes an ordinary `x=1` printable, and
+/// the attributes are what make a name with no value printable.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn is_spellable(shell: &Shell, name: &BStr) -> bool {
+    super::value::variable_value(shell, name).is_some() || transform_flags(shell, name).is_some()
 }
 
 /// The `=value` a `declare -p` line writes for a stored value, and

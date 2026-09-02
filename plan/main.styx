@@ -8615,6 +8615,7 @@ children (
                                 id refuse-to-destroy-an-array-kind
                                 title "Refuse `declare +a` and `declare +A` as Bash refuses them"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T11:23:48.005197813Z
@@ -8642,6 +8643,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "INTERRUPTED MID-FLIGHT 2026-09-02 ~15:0x by an API session limit, not by anything in the work. Six agents were killed in the same second. This agent held three nodes; it committed `c36aecc` (`apply-a-declaring-builtin-through-the-reference`, the real data difference), `e181904` (`keep-allexport-off-an-array`) and `a81455c` -- the last of which repaired a file it had left out of the middle commit, so **HEAD compiles**, checked afterwards in a clean detached worktree at `a81455c`.\n\nIt was on this node when it stopped. Uncommitted in the checkout, not lost:\n\n    crates/nsh/src/builtins/declare.rs                    +35/-...\n    crates/nsh-cli/tests/bash_destroying_an_array_kind.rs (new, untracked)\n\nThe untracked test file is the fragile one: it is invisible to `git stash` and to anything that reasons about tracked paths, and `scripts/moved-only` had exactly this hole in itself on first use. Do not clean the working tree.\n\nDo not `git checkout` or `git stash` either path. The tree is the only copy."
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:15:07.483177095Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -8844,20 +8852,6 @@ children (
                             }
 
                             {
-                                id commit-only-what-this-session-staged
-                                title "Stop one session's commit carrying another session's staged files"
-                                kind @fix
-                                log (
-                                    {
-                                        at 2026-09-02T12:55:16.570039712Z
-                                        author "brendan@necessary.nu"
-                                        kind @note
-                                        text "`nplan commit` COMMITS THE INDEX, AND THE INDEX IS SHARED BY EVERY SESSION IN THIS CHECKOUT. It happened on 2026-09-02 at 14:50 while closing `build-the-survey-baseline-from-what-is-committed`, and this node exists because nothing could have stopped it.\n\nWHAT HAPPENED. `git diff --cached --name-only` at 14:46 held nothing but `plan/`. Six survey files were staged by explicit path -- no `git add -A`, no `git add .`, exactly what the house rules ask for. The commit message took four minutes to write. `nplan commit` went in at 14:50 and produced `9fb9e56`: thirteen files, of which five were `accept-newlines-inside-a-conditional`'s (`crates/nsh-cli/tests/bash_conditional_newlines.rs`, `crates/nsh/src/parser.rs`, `crates/nsh/src/parser/bash.rs`, `crates/nsh/src/parser/grammar.rs`, a `FUNCTION_DENSITY.toml` entry), staged by that session inside the window. Its `nplan-rule` trailers name that node's rules, so the spec-coverage record moved under the wrong id as well.\n\nIT WAS NOT UNDONE, AND THAT WAS A JUDGEMENT. `git reset --soft HEAD~1` on a shared checkout, while another session may be inside its own `nplan commit`, risks losing work outright; committed and misattributed is recoverable by reading a log entry, which the other node now has. The cost paid was an inaccurate permanent record, which is the same cost `ee98cec` paid for the same class of defect one level down -- shared mutable state that a tool reads without being able to say whose it is.\n\nWHY DISCIPLINE CANNOT FIX IT. There is no staging discipline that closes the window: the index is written by the other session, not by this one, and the window is however long `nplan commit` takes to run its gates. Every session in this checkout commits this way because it is the only way the tool offers.\n\nWHAT TO DO, in rising order of cost. Cheapest: `nplan commit` records the paths it was asked to address and refuses if the index has grown since it was asked -- it already knows what the caller staged, because the caller staged it. Next: `nplan commit` commits with an explicit pathspec (`git commit -- <paths>`), so the index's other entries are simply not its business; `git commit` with a pathspec does not disturb the index for the paths it does not name. Most: a per-session index (`GIT_INDEX_FILE`) for the duration of the commit, which is what git already provides for exactly this.\n\nThe middle option is probably the right one and is a few lines: the tool knows the staged set at the moment it is called, and committing that set rather than \"whatever is staged when the gates finish\" is a strictly narrower promise.\n\nDONE WHEN. A commit made by one session cannot contain a file another session staged, demonstrated by staging a foreign file inside the window and watching the commit either refuse or exclude it."
-                                    }
-                                )
-                            }
-
-                            {
                                 id stop-the-machine-running-out-of-disk
                                 title "Keep enough disk for a build to finish"
                                 kind @chore
@@ -8909,6 +8903,34 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing `refuse-to-destroy-an-array-kind`, which fixed `+a` and `+A` and deliberately left this letter alone: it is a different refusal with a different message and a different reason. Measured against the pinned Bash 5.3.15 on `a81455c`; pre-existing.\n\n    declare -r q=1; declare +r q; declare -p q\n      bash: declare: q: readonly variable   status 1, q unchanged\n      nsh:  accepted silently,              status 0, q unchanged\n\n    q=1; declare +r q; declare -p q\n      both: declare -- q=\"1\", status 0\n\nSo the letter is ordinary on a name that is not read-only, and refused on one that is. The kind refusal `refuse-to-destroy-an-array-kind` added has the same shape -- an attribute a declaration may not take back -- and the same narrowness: it fires only when the name already carries the thing the letter would remove.\n\nThe refusal is POSIX's as much as Bash's: a read-only variable's attribute cannot be removed by any means in either shell, which is what makes `readonly` worth anything. It is only the *report* and the status that are missing here.\n\nWHERE. `builtins::declare::parse` reads `-r`/`+r` into `requested.read_only` as a plain `bool` -- `requested.read_only = enable` -- so `+r` is indistinguishable from the letter never appearing. It has to become an `Option<bool>` as `exported` already is, and the refusal then belongs beside the `destroyed_kind` check in `apply`, which already reports before any other letter of the same command has landed.\n\nWATCH `is_bare`. `declare +r` with no operand is a listing and not a declaration; `Requested::is_bare` currently reads `!self.read_only`, which is true for `+r` today and must stay true after the type changes, or a bare `declare +r` would print the wrong listing.\n\nDONE WHEN. `declare +r`, `typeset +r` and `local +r` on a read-only name report and answer 1 with the variable unchanged, they are silent on a name that is not read-only, the bare `declare +r` listing is unmoved, and a differential row covers each."
+                                    }
+                                )
+                            }
+
+                            {
+                                id take-the-array-letter-for-a-plain-operand
+                                title "Make `readonly -a name=value` declare an array"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T14:17:06.374756457Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `refuse-to-destroy-an-array-kind`, and not part of it. It matters beyond its own row because it CORRECTS `76d09d9`, whose finding is quoted in three later nodes. Measured against the pinned Bash 5.3.15 on `befef91`; pre-existing.\n\n`76d09d9` recorded that Bash consults `-a` and `-A` only for a *compound* operand, so `readonly -A m` is just `declare -r m`. The first half of that is too strong. Bash consults the letter for any operand that carries a **value**, compound or not:\n\n    readonly -a q=1;   declare -p q   bash: declare -ar q=([0]=\"1\")   nsh: declare -r q=\"1\"\n    export   -a e=1;   declare -p e   bash: declare -ax e=([0]=\"1\")   nsh: declare -x e=\"1\"\n    readonly -A k=v;   declare -p k   bash: declare -Ar k=([0]=\"v\" )  nsh: declare -r k=\"v\"\n    readonly -a q=1 r=2               bash: both become indexed arrays\n\nand `declare -a d=1` is `declare -a d=([0]=\"1\")` in BOTH shells already, which is the same rule reaching the built-in that always had it. What `76d09d9` got right is the operand with no value at all: `readonly -A m; declare -p m` is `declare -r m` in both, and `set -a; readonly -a z` is `declare -rx z` in both. So the boundary is a value, not a parenthesis.\n\nTHIS IS A DATA DIFFERENCE, not a spelling one. `q` is an indexed array there and a scalar here, so `q[1]=x` afterwards reads back differently, and `${q[@]}` and `${#q[@]}` answer differently.\n\nWHERE. `evaluation::bash_arrays::apply_declarations` consults the held `kind` only under `matches!(declaration.assignment.value, BashArrayValue::Compound(_))`, which is `76d09d9`'s rule written down. Widening it to any held declaration with a value is the change; the operand with no value must keep taking neither letter.\n\nWATCH WHAT MOVES WITH IT. `readonly -A m=([a b]=1)` and the rest of `bash_associative_assignment.rs`'s `DECLARING_BUILTINS` table are the compound half and are already pinned -- they must not move. And `keep-allexport-off-a-compound-readonly-operand` is about the *export* letter on the same command; the two touch the same lines and the second is easier once the built-in can see that a value is on its way.\n\nDONE WHEN. `readonly -a`, `readonly -A`, `export -a` and `export -A` with a plain `name=value` operand declare the array the reference declares, the same letters with no value stay as they are, `bash_associative_assignment.rs` is unmoved, and a differential table holds both halves. The erratum belongs on `76d09d9`'s node too, since three later nodes quote its rule."
+                                    }
+                                )
+                            }
+
+                            {
+                                id tell-a-full-disk-from-a-compiler-bug
+                                title "Name the full disk that looks like a linker crash"
+                                kind @build
+                                log (
+                                    {
+                                        at 2026-09-02T14:18:06.41972196Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `apply-a-declaring-builtin-through-the-reference`, and not part of it. It is filed because the failure mode misidentifies itself, and because it cost a measurement run and nearly a wrong diagnosis.\n\nWHAT IT LOOKS LIKE. A `cargo test --workspace` in a fresh worktree reported, for eight different test binaries at once:\n\n    collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped\n    PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/\n     #3 __memcpy_avx_unaligned_erms\n     #4 llvm::StringTableBuilder::write(unsigned char*) const\n     #7 lld::elf::MergeNoTailSection::writeTo(unsigned char*)\n\nAn LLVM stack trace and an invitation to file an upstream bug. It is neither. SIGBUS inside `memcpy` in `writeTo` is the linker writing into an mmap'd output file it can no longer extend: the filesystem is full. `df -h /` read `149G 149G 670M 100%` at that moment.\n\nWHY IT BITES HERE PARTICULARLY. This repository's practice is to measure in a detached worktree with its own `CARGO_TARGET_DIR` when the shared checkout is transiently unbuildable from another agent's in-flight files -- and with several agents doing that at once, each debug target tree is 1.3GB and up. `target/debug` in the main checkout was 8.2GB, of which `target/debug/incremental` was 3.3GB. Five worktrees existed at the same time on this machine.\n\nWHAT SHOULD EXIST. Something that says \"the disk is full\" before or instead of the LLVM trace. Candidates, cheapest first: a free-space check in `scripts/sandboxed` beside the containment probe and the abandoned-process check, refusing with a number rather than letting the linker die; the same check in whatever wrapper agents use to create a measuring worktree; and a line in the repository's measuring notes saying that `ld ... signal 7` and `rustc ... SIGBUS` mean `df` and not an upstream bug.\n\nRELATED AND ALREADY KNOWN. `scripts/sandboxed` already refuses on two machine-state conditions -- an abandoned uncontained process, and a containment probe that a `--tmpfs /tmp` mount silently defeats when the worktree itself lives under `/tmp`, which is its own trap for the worktree practice. This is the third of the same kind.\n\nDONE WHEN. A run that cannot fit its output says so by name, the threshold is stated rather than guessed, and the two SIGBUS signatures above are written down somewhere an agent reads before believing a compiler crashed."
                                     }
                                 )
                             }
