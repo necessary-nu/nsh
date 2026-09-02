@@ -5,7 +5,7 @@
 //! and `[` are operators exactly when their byte is unquoted, while literal
 //! and locale-multibyte characters remain ordinary byte-preserving slices.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bstr::BString;
 
@@ -46,6 +46,10 @@ pub(crate) struct Pattern {
 // [spec:nsh:req:compat.bash.expansion-globbing]
 struct ExtendedGroup {
     kind: u8,
+    /// Where `X(` begins. The group is a function of this offset and the
+    /// pattern, so it is also the half of `Matcher::group_ends`'s key
+    /// that names *which* group an end set belongs to.
+    start: usize,
     alternatives: Vec<core::ops::Range<usize>>,
     next: usize,
 }
@@ -191,6 +195,7 @@ impl Pattern {
             memo: HashMap::new(),
             budget,
             ends,
+            group_ends: HashMap::new(),
         }
     }
 
@@ -250,6 +255,13 @@ struct Matcher<'a> {
     /// short and every reachable end is seen. The memo turns into the
     /// visited set that keeps the walk linear in its states.
     ends: Option<Vec<usize>>,
+    /// Where each group, entered at each subject offset, can end. Keyed
+    /// on `(group start, from)`, which is complete for the same reason
+    /// `memo`'s key is. Its size is bounded by the budget rather than by
+    /// the subject: producing an end costs at least one budget unit, so
+    /// the table cannot hold more entries than the walk was allowed to
+    /// pay for.
+    group_ends: HashMap<(usize, usize), Vec<usize>>,
 }
 
 impl Matcher<'_> {
@@ -397,6 +409,7 @@ impl Matcher<'_> {
                         alternatives.push(start..cursor);
                         return Some(ExtendedGroup {
                             kind,
+                            start: at,
                             alternatives,
                             next: cursor + 1,
                         });
@@ -429,18 +442,25 @@ impl Matcher<'_> {
     /// Each alternative is a pattern in its own right, walked over the
     /// same subject by its own matcher; the work budget is the one thing
     /// they share, so a nested group cannot escape it.
+    ///
+    /// The answer depends on nothing but the group and `from`, and a
+    /// repeated group asks it about every offset it can reach — from
+    /// every offset it can be entered at. Remembering it is what stops
+    /// that being a cube of the subject's length.
     fn alternative_ends(&mut self, group: &ExtendedGroup, from: usize) -> Vec<usize> {
+        if let Some(ends) = self.group_ends.get(&(group.start, from)) {
+            return ends.clone();
+        }
         let locale = self.locale;
         let subject = self.subject;
         let mut ends = Vec::new();
         for range in &group.alternatives {
             let alternative = self.pattern.slice(range.clone());
-            for end in alternative.ends_within(locale, subject, from, self.budget) {
-                if !ends.contains(&end) {
-                    ends.push(end);
-                }
-            }
+            ends.extend(alternative.ends_within(locale, subject, from, self.budget));
         }
+        ends.sort_unstable();
+        ends.dedup();
+        self.group_ends.insert((group.start, from), ends.clone());
         ends
     }
 
@@ -464,22 +484,29 @@ impl Matcher<'_> {
         subject_at: usize,
         optional: bool,
     ) -> bool {
+        // A repetition reaches the closure of the group's ends, so an
+        // offset is worth expanding once. `seen` says which have been,
+        // and it is a set rather than a scanned list because the closure
+        // can hold an offset for every position in the subject.
+        let mut seen = HashSet::new();
         let mut ends = Vec::new();
-        let mut pending = self.alternative_ends(group, subject_at);
+        let mut pending: Vec<usize> = self
+            .alternative_ends(group, subject_at)
+            .into_iter()
+            .filter(|end| seen.insert(*end))
+            .collect();
         while let Some(at) = pending.pop() {
-            if ends.contains(&at) {
-                continue;
-            }
             ends.push(at);
             if at > subject_at {
+                let reached = self.alternative_ends(group, at);
                 pending.extend(
-                    self.alternative_ends(group, at)
+                    reached
                         .into_iter()
-                        .filter(|end| *end > at),
+                        .filter(|end| *end > at && seen.insert(*end)),
                 );
             }
         }
-        if optional && !ends.contains(&subject_at) {
+        if optional && seen.insert(subject_at) {
             ends.push(subject_at);
         }
         ends.into_iter()
@@ -489,7 +516,10 @@ impl Matcher<'_> {
     /// `!(list)` consumes any run of subject characters that no
     /// alternative matches, then the pattern continues after the group.
     fn match_group_excluded(&mut self, group: &ExtendedGroup, subject_at: usize) -> bool {
-        let excluded = self.alternative_ends(group, subject_at);
+        let excluded: HashSet<usize> = self
+            .alternative_ends(group, subject_at)
+            .into_iter()
+            .collect();
         let mut candidates = Vec::new();
         let mut end = subject_at;
         loop {
@@ -850,6 +880,18 @@ mod tests {
         assert!(!pattern.matches(&locale, &different));
     }
 
+    /// What one extended-glob match is allowed to cost, as a multiple of
+    /// pattern length times subject length.
+    ///
+    /// The fence is the work done rather than the clock, because the
+    /// clock says nothing about why, and because the inputs below moved
+    /// by a factor of three within an hour as this machine's load did.
+    /// The number is loose on purpose: the shapes below were over it by a
+    /// factor of seven and of twenty-five when they were found, because
+    /// what each had was a whole factor of the subject's length. A fence
+    /// that only just held would be measuring the constant instead.
+    const COST_ALLOWANCE: u64 = 16;
+
     /// The shape the `matcher` fuzz target found on 2026-09-01: a leading
     /// `*`, one `+(…)` whose alternatives are mostly empty, one
     /// alternative holding a parenthesised run of `*`, and a subject made
@@ -857,11 +899,6 @@ mod tests {
     /// eleven and ninety-two seconds, because `alternative_ends` asked
     /// "does this alternative match `subject[from..end]`" once per
     /// candidate `end` and threw the memo away between the questions.
-    ///
-    /// The fence is the work done rather than the clock, because the
-    /// clock says nothing about why: an answer costing more than a small
-    /// multiple of pattern length times subject length means a factor of
-    /// the subject's length has come back.
     #[test]
     // [spec:nsh:req:compat.bash.expansion-globbing/test]
     fn extended_alternation_costs_a_multiple_of_its_input() {
@@ -894,7 +931,57 @@ mod tests {
 
         let (matched, cost) = pattern.match_cost(&locale, &subject);
         assert!(!matched);
-        let allowance = 2 * pattern.as_bytes().len() as u64 * subject.len() as u64;
+        let allowance = COST_ALLOWANCE * pattern.as_bytes().len() as u64 * subject.len() as u64;
+        assert!(
+            cost < allowance,
+            "cost {cost} exceeds allowance {allowance}"
+        );
+    }
+
+    /// The shape the same target found on 2026-09-02, in the campaign run
+    /// to check the first one was closed. A repeated group whose only
+    /// alternative is `*` reaches every offset from wherever it starts,
+    /// and `match_group_repeated` then asks each of those where the group
+    /// can go next — so a group entered at n offsets asked the same n
+    /// questions n times over, and the answer to each was recomputed from
+    /// nothing. A twenty-six byte pattern against a 388-byte subject
+    /// spent the whole budget and took twenty-five seconds to replay.
+    #[test]
+    // [spec:nsh:req:compat.bash.expansion-globbing/test]
+    fn a_repeated_group_asks_each_offset_once() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let pattern = Pattern::unquoted(BString::from(&b"*aa*(*)aaaa\x8daaaaaaa*(a*)*\x95"[..]))
+            .with_options(PatternOptions {
+                extended: true,
+                ignore_case: false,
+            });
+
+        let mut subject = Vec::new();
+        for (byte, run) in [
+            (b'a', 2),
+            (0xff, 1),
+            (b'?', 3),
+            (0xff, 2),
+            (b'?', 1),
+            (0xff, 45),
+            (b'a', 110),
+            (0xff, 1),
+            (b'?', 1),
+            (0xff, 45),
+            (b'a', 118),
+            (0xff, 3),
+            (b'?', 13),
+            (b'a', 8),
+            (0xff, 3),
+            (b'?', 25),
+            (b'a', 7),
+        ] {
+            subject.extend(std::iter::repeat_n(byte, run));
+        }
+
+        let (matched, cost) = pattern.match_cost(&locale, &subject);
+        assert!(!matched);
+        let allowance = COST_ALLOWANCE * pattern.as_bytes().len() as u64 * subject.len() as u64;
         assert!(
             cost < allowance,
             "cost {cost} exceeds allowance {allowance}"
