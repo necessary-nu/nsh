@@ -14,6 +14,7 @@ mod control;
 mod oils_runner;
 mod process;
 mod provenance;
+mod shell;
 mod smoosh;
 mod smoosh_runner;
 

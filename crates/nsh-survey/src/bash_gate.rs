@@ -21,11 +21,13 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::control::{Control, contended_cases, require_bash_basename};
+use crate::control::{Control, contended_cases};
 use crate::oils_runner::{GateCase, GateOutcome, run_gate_group};
+use crate::shell::ShellUnderTest;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -107,12 +109,25 @@ pub(crate) fn command(mut args: env::ArgsOs, default_root: PathBuf) -> Result<bo
             _ => return Err(format!("unexpected argument; {}", usage()).into()),
         }
     }
-    let shell = shell.ok_or_else(|| format!("gate-bash requires --shell PATH; {}", usage()))?;
-    gate(&root.unwrap_or(default_root), &shell)
+    gate(
+        &root.unwrap_or(default_root),
+        &shell.unwrap_or_else(default_shell),
+    )
+}
+
+/// The shell the gate scores when nobody names one.
+///
+/// It used to be that there was no default, because the gate refused any
+/// basename but `bash` and this one is not it. Now that the gate installs
+/// its own copy under the name it needs, the binary this repository
+/// builds is simply the answer, and the recipe is one command instead of
+/// three.
+fn default_shell() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/nsh")
 }
 
 fn usage() -> &'static str {
-    "usage: nsh-survey gate-bash --shell PATH [ROOT]"
+    "usage: nsh-survey gate-bash [--shell PATH] [ROOT]"
 }
 
 fn read_register(root: &Path) -> Result<Register> {
@@ -165,17 +180,29 @@ struct Findings {
 }
 
 // [spec:nsh:req:compat.bash.survey-closure]
-fn gate(root: &Path, shell: &Path) -> Result<bool> {
-    /* Resolve first, then insist on the name. The runner canonicalizes
-     * the shell before running it, so a symlink called `bash` pointing at
-     * some other file is executed under that file's name -- and nsh reads
-     * its own name to decide whether Bash mode is on. Checking the name
-     * given rather than the name run let a link called `bash` score nsh
-     * in POSIX mode against a Bash suite, which is where the 793 in the
-     * log came from. */
+fn gate(root: &Path, named: &Path) -> Result<bool> {
+    /* A SHELL OLDER THAN THE SOURCES IT CLAIMS IS REFUSED RATHER THAN
+     * SCORED. `-p nsh` leaves `target/release/nsh` untouched, and the
+     * gate would then certify the previous build without a word. */
+    if let Some(complaint) = crate::shell::built_before_its_sources(named)? {
+        return Err(complaint.into());
+    }
+    /* THE GATE INSTALLS ITS OWN SHELL, under the one name that measures
+     * the Bash profile at all. `argv[0]` selects the dialect, so this
+     * used to be a refusal -- any basename but `bash` was rejected -- and
+     * the refusal made every README tell the reader to copy the binary to
+     * one fixed path first. In a checkout several sessions share, that
+     * path is a shared mutable file: another session's build replaced it
+     * between two runs a minute apart on 2026-09-02 and the two runs
+     * disagreed about which cases were failing. Installing the copy here
+     * removes both problems at once -- there is no shared path left, and
+     * the shell cannot run under a name that turns the profile off,
+     * because the gate chose the name. That covers the 793 in this file's
+     * log too: a symlink called `bash` pointing at nsh is installed as
+     * nsh's bytes called `bash`, which is the thing being asked for. */
     // [spec:nsh:req:compat.bash.survey-closure]
-    let shell = fs::canonicalize(shell)?;
-    require_bash_basename(&shell)?;
+    let installed = ShellUnderTest::install(named, OsStr::new("bash"))?;
+    let shell = installed.path();
     let shell = shell.as_path();
     let root = fs::canonicalize(root)?;
     let register = read_register(&root)?;
@@ -584,36 +611,40 @@ mod tests {
         );
     }
 
-    /// The name that matters is the name the shell runs under.
+    /// The name that matters is the name the shell runs under, and the
+    /// gate is the one that chooses it now.
     ///
     /// The runner canonicalizes the shell before executing it, and nsh
     /// reads its own name to decide whether Bash mode is on. So a link
-    /// called `bash` pointing at `nsh` satisfies a check on the name
-    /// given and then runs with the dialect off, scoring a POSIX shell
-    /// against a Bash suite. That is where the 793 in this node's log
-    /// came from: 80 of 873 eligible cases passing, reported as a
+    /// called `bash` pointing at `nsh` satisfied a check on the name
+    /// given and then ran with the dialect off, scoring a POSIX shell
+    /// against a Bash suite: that is where the 793 in this node's log
+    /// came from, 80 of 873 eligible cases passing and reported as a
     /// measurement of Bash compatibility.
+    ///
+    /// The refusal that fixed it made every README tell the reader to
+    /// copy the binary to one fixed path first, which is the collision
+    /// `give-each-gate-run-its-own-shell` is about. So the gate installs
+    /// its own copy and names it, and a shell spelled any way at all --
+    /// a link, a binary called `nsh`, a path another session rewrites --
+    /// runs under the one name that measures the profile.
     // [spec:nsh:req:compat.bash.survey-closure/test]
     #[test]
-    fn a_link_named_bash_over_another_shell_fails() {
-        let scratch =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/nsh-survey-gate-name");
-        drop(fs::remove_dir_all(&scratch));
-        fs::create_dir_all(&scratch).unwrap();
-        let target = scratch.join("nsh");
+    fn the_gate_names_the_shell_it_runs() {
+        let scratch = crate::process::ScratchTree::new().unwrap();
+        let target = scratch.path().join("nsh");
         fs::write(&target, b"#!/bin/sh\nexit 0\n").unwrap();
-        let link = scratch.join("bash");
+        let link = scratch.path().join("bash");
         std::os::unix::fs::symlink(&target, &link).unwrap();
-
-        // The name as given is `bash`, which is what used to be checked.
-        assert!(require_bash_basename(&link).is_ok());
-        // The name it resolves to is not, and that is the one that runs.
-        let resolved = fs::canonicalize(&link).unwrap();
-        assert!(
-            require_bash_basename(&resolved).is_err(),
-            "a link called bash resolving to {} was accepted",
-            resolved.display(),
-        );
-        drop(fs::remove_dir_all(&scratch));
+        for named in [target.as_path(), link.as_path()] {
+            let installed = ShellUnderTest::install(named, OsStr::new("bash")).unwrap();
+            assert_eq!(
+                installed.path().file_name(),
+                Some(OsStr::new("bash")),
+                "the gate would have run {} under another name",
+                named.display(),
+            );
+            assert_eq!(fs::read(installed.path()).unwrap(), b"#!/bin/sh\nexit 0\n");
+        }
     }
 }

@@ -91,7 +91,7 @@ fn header(group: &str, expectation_shell: &str, path: &Path) -> String {
 #
 # Generated. Do not edit the list by hand: re-record it with
 #
-#     nsh-survey run-oils --shell target/gate/bash --expect-shell {expectation_shell} \\
+#     nsh-survey run-oils --expect-shell {expectation_shell} \\
 #       --group {group} --baseline {path} --update-baseline
 #
 # and read the difference the refresh prints before you keep it. Drop
@@ -653,6 +653,7 @@ mod tests {
             root: PathBuf::from("."),
             group: "bash-comparison".to_owned(),
             shell: PathBuf::from("target/gate/bash"),
+            reported_shell: "target/gate/bash".to_owned(),
             expectation_shell: "bash".to_owned(),
             timeout: Duration::from_millis(5_000),
             format: OutputFormat::Text,

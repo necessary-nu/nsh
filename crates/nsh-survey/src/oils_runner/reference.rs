@@ -87,6 +87,7 @@ pub(crate) fn run_reference_specs(
     let options = Options {
         root,
         group: group.to_owned(),
+        reported_shell: display_shell(&shell),
         shell,
         expectation_shell: "bash".to_owned(),
         timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),

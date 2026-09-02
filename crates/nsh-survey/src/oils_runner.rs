@@ -27,10 +27,30 @@ pub(crate) use reference::{
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
 pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> {
-    let Some(options) = Options::parse(args, default_root)? else {
+    let Some(mut options) = Options::parse(args, default_root)? else {
         println!("{}", Options::usage());
         return Ok(true);
     };
+    /* SAID RATHER THAN REFUSED, which is the difference between this
+     * command and the gate. `run-oils` scores whatever it is pointed at,
+     * including the pinned Bash and shells from outside this tree, so a
+     * stale build is a fact about the run to put in front of the reader
+     * rather than a verdict. The gate scores this repository's shell and
+     * nothing else, so there it is a refusal. */
+    if let Some(complaint) = crate::shell::built_before_its_sources(&options.shell)? {
+        eprintln!("warning: {complaint}");
+    }
+    /* THE RUN INSTALLS ITS OWN SHELL. `target/gate/bash` was the
+     * documented path and it is a shared mutable file: another session's
+     * build replaced it between two runs a minute apart, and the two runs
+     * disagreed about which cases were failing. There is no shared path
+     * to collide on now, and the name is derived from the expectation
+     * namespace rather than left to a `cp` the reader has to remember. */
+    let installed = crate::shell::ShellUnderTest::install(
+        &options.shell,
+        &crate::shell::name_for(&options.expectation_shell, &options.shell),
+    )?;
+    options.shell = installed.path();
     crate::read_lock(&options.root).and_then(|lock| {
         crate::verify_import(&options.root, &lock)?;
         crate::verify_oils_manifest(&options.root, &lock)
@@ -86,6 +106,15 @@ struct Options {
     root: PathBuf,
     group: String,
     shell: PathBuf,
+    /// How the shell is named in the report.
+    ///
+    /// `shell` is the private copy this run installed, whose path is
+    /// unique to the run; a summary that recorded it would carry a
+    /// different string every time it was regenerated and name a
+    /// directory that no longer exists. What a reader wants is the binary
+    /// the caller pointed at, and `shell_sha256` beside it says which
+    /// bytes those were.
+    reported_shell: String,
     expectation_shell: String,
     timeout: Duration,
     format: OutputFormat,
@@ -136,6 +165,7 @@ impl Options {
             root: default_root,
             group: "full".to_owned(),
             shell: Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/nsh"),
+            reported_shell: String::new(),
             expectation_shell: "osh".to_owned(),
             timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),
             format: OutputFormat::Text,
@@ -226,10 +256,11 @@ impl Options {
         })?;
         options.shell = fs::canonicalize(&options.shell).map_err(|error| {
             format!(
-                "cannot resolve shell {}: {error}; build it with cargo build --release --bin nsh",
+                "cannot resolve shell {}: {error}; build it with cargo build --release -p nsh-cli",
                 options.shell.display()
             )
         })?;
+        options.reported_shell = display_shell(&options.shell);
         options.check_baseline_is_answerable()?;
         Ok(Some(options))
     }
@@ -414,7 +445,7 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
         source_commit: manifest.source_commit.clone(),
         group: group.id.clone(),
         group_label: group.label.clone(),
-        shell: display_shell(&options.shell),
+        shell: options.reported_shell.clone(),
         shell_sha256: crate::sha256_file(&options.shell)?,
         expectation_shell: options.expectation_shell.clone(),
         containment: containment.label().to_owned(),

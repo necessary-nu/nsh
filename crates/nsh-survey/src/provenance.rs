@@ -241,7 +241,7 @@ pub(crate) fn vouch(subject: &Path, allow_uncommitted: bool) -> Result<Provenanc
 }
 
 /// The top of the checkout this crate is built from.
-fn checkout_root() -> Result<PathBuf> {
+pub(crate) fn checkout_root() -> Result<PathBuf> {
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR"));
     Ok(PathBuf::from(
         String::from_utf8(git_output(checkout, &["rev-parse", "--show-toplevel"])?)?

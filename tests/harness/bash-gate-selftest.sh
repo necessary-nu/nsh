@@ -15,15 +15,16 @@
 # naming it with --writable would bind it as a mount point and the copy
 # could not be replaced.
 #
-# It needs target/release/nsh-survey and a shell installed as
-# target/bash-mode/bash -- the gate refuses any other basename, which is
-# itself one of the cases below.
+# It needs target/release/nsh-survey and target/release/nsh. The gate
+# installs its own copy of the shell under the name `bash`, so there is no
+# fixed path to prepare and none to collide with another session on; the
+# last case below is that property.
 set -u
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 COPY=$ROOT/target/gate-selftest
 SURVEY=$ROOT/target/release/nsh-survey
-SHELL_UNDER_TEST=$ROOT/target/bash-mode/bash
+SHELL_UNDER_TEST=$ROOT/target/release/nsh
 REGISTER=$COPY/BASH_DISPOSITIONS.toml
 failures=0
 
@@ -117,14 +118,22 @@ open(path, 'w').write(text)
 PY
 refuses "register pinned to another corpus" "the corpus is"
 
-# argv[0] selects the dialect, so any other basename measures the profile
-# with the profile turned off.
+# argv[0] selects the dialect, so a shell run under any other name measures
+# the profile with the profile turned off -- 80 of 873 eligible cases
+# passing, which is the 793 in the gate's log. The gate used to refuse a
+# binary called `nsh` for that reason and the refusal is what put a fixed
+# `cp` in every README; it now installs its own copy called `bash`. So the
+# same command that had to be refused must now pass, and pass with the
+# dialect on: an unmutated register and a shell named `nsh` scoring the
+# whole eligible manifest.
 output=$("$SURVEY" gate-bash --shell "$ROOT/target/release/nsh" "$COPY" 2>&1)
-if (($? == 0)) || ! printf '%s' "$output" | grep -qF "must be named exactly"; then
-    printf 'FAIL %-36s a shell not named bash was accepted\n' "wrong basename"
+status=$?
+if ((status != 0)) || ! printf '%s' "$output" | grep -qF "gate: PASS"; then
+    printf 'FAIL %-36s a shell named nsh did not run as bash\n' "shell named by the gate"
+    printf '%s\n' "$output" | tail -4
     failures=1
 else
-    printf 'ok   %-36s\n' "wrong basename"
+    printf 'ok   %-36s\n' "shell named by the gate"
 fi
 
 if ((failures == 0)); then

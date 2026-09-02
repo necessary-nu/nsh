@@ -7,9 +7,11 @@ Timing data is omitted so reruns produce stable diffs.
 
 ## Current baseline
 
-Recorded with the release shell installed as `target/bash-mode/bash`; the
-basename selects the dialect, so a shell under any other name measures the
-profile with the profile turned off.
+Recorded with the release shell run under the name `bash`; the basename
+selects the dialect, so a shell under any other name measures the profile with
+the profile turned off. `--expect-shell bash` now makes the runner install its
+own copy under that name, so the `shell` field in the older summaries below
+names `target/bash-mode/bash`, the fixed path the recipe used to ask for.
 
 | Group | Selected | Pass | Fail | Unsupported | Known bug | Timeout | Error |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -27,26 +29,28 @@ Build the release shell and `nsh-survey`, then run each group through the
 top-level sandbox:
 
 ```sh
-mkdir -p target/bash-mode && cp target/release/nsh target/bash-mode/bash
-
 scripts/sandboxed --writable tests/surveys/oils/results -- \
   target/release/nsh-survey run-oils \
   --group bash-comparison --expect-shell bash \
-  --shell target/bash-mode/bash \
   --summary tests/surveys/oils/results/bash-comparison.toml
 
 scripts/sandboxed --writable tests/surveys/oils/results -- \
   target/release/nsh-survey run-oils \
   --group bash-extension --expect-shell bash \
-  --shell target/bash-mode/bash \
   --summary tests/surveys/oils/results/bash-extension.toml
 
 scripts/sandboxed --writable tests/surveys/oils/results -- \
   target/release/nsh-survey run-oils \
   --group bash-named-diagnostic --expect-shell bash \
-  --shell target/bash-mode/bash \
   --summary tests/surveys/oils/results/bash-named-diagnostic.toml
 ```
+
+There is no `cp` any more, and there must not be one: a fixed path under
+`target/` is a shared mutable file in a checkout several sessions use, and
+another session's build replaced one between two runs a minute apart on
+2026-09-02. `--shell` defaults to `target/release/nsh`, and the runner
+installs its own copy of it, named `bash` because `--expect-shell bash` is
+what needs that name.
 
 The outer sandbox protects the caller; the survey runner separately contains
 each test case.

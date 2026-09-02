@@ -139,15 +139,35 @@ category and a reason, plus the whole files that
 `[dec:nsh:bash-compatibility-is-scripts]` places outside the contract.
 
 ```sh
-scripts/sandboxed -- cargo build --release --bin nsh --bin nsh-survey
-mkdir -p target/bash-mode && cp target/release/nsh target/bash-mode/bash
-scripts/sandboxed -- target/release/nsh-survey gate-bash \
-  --shell target/bash-mode/bash
+scripts/sandboxed -- cargo build --release -p nsh-cli -p nsh-survey
+scripts/sandboxed -- target/release/nsh-survey gate-bash
 ```
 
-The basename must be exactly `bash`: `argv[0]` selects the dialect, so a name
-like `bash-pre` silently measures the profile with the profile turned off, and
-the gate refuses to run under one.
+`argv[0]` selects the dialect, so a shell under any name but `bash` measures
+the profile with the profile turned off -- that is where the 793 in
+`give-each-gate-run-its-own-shell`'s log came from, 80 of 873 cases passing
+and reported as a Bash-compatibility figure. The gate used to refuse any other
+basename, and the refusal is why this recipe used to open with
+`cp target/release/nsh target/bash-mode/bash`.
+
+**That fixed path was the bug.** In a checkout several sessions share it is a
+shared mutable file like any other: on 2026-09-02 `target/gate/bash` was
+written at 12:21 and replaced by another session's build at 12:22, and two
+`run-oils --baseline` runs a minute apart disagreed about which cases were
+failing. The run header's `shell sha256` was the only witness.
+
+So the gate installs its own copy, under the name it needs, in a directory
+nothing else writes and that goes when the run ends. `--shell` defaults to
+`target/release/nsh` and may name any binary; there is no `cp` and no shared
+path left to collide on. `run-oils` does the same, choosing `bash` when
+`--expect-shell bash` is given and keeping the binary's own name otherwise.
+
+A shell under `target/` that is older than the newest source under `crates/`
+was not built from the tree it is about to be scored against: the gate refuses
+it and names the file it lost to, and `run-oils` prints the same sentence as a
+warning, because `run-oils` also scores shells this repository did not build.
+`cargo build --release -p nsh` is the way to get one -- it leaves
+`target/release/nsh` alone, because the binary belongs to `nsh-cli`.
 
 Categories:
 
@@ -182,7 +202,7 @@ it in one command:
 
 ```sh
 scripts/sandboxed -- target/release/nsh-survey run-oils \
-  --shell target/gate/bash --expect-shell bash --group bash-comparison \
+  --expect-shell bash --group bash-comparison \
   --baseline tests/surveys/oils/BASH_COMPARISON_FAILURES.toml
 ```
 
