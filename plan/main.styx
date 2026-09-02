@@ -8991,6 +8991,7 @@ children (
                                 id stop-the-machine-running-out-of-disk
                                 title "Keep enough disk for a build to finish"
                                 kind @chore
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T12:55:39.525645316Z
@@ -9011,6 +9012,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T18:00:18.807269689Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -9278,6 +9286,34 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing five nodes from a private measurement worktree. Measured on `7265a96`.\n\n`crates/nsh-survey/src/shell.rs`'s `a_shell_older_than_its_sources_is_named` fails when the checkout's `target` is a symbolic link:\n\n    cargo test -p nsh-survey --bin nsh-survey\n      /home/brendan/work/dash          82 passed\n      /home/brendan/work/dash-spellback (target -> /data/...)  81 passed, 1 failed\n        a shell from 1971 was accepted as built from today's tree\n\nThe test writes a scratch shell under `target/` -- \"so it is judged\", its own comment says -- gives it a 1971 mtime and expects `built_before_its_sources` to complain. With `target` a link, the scratch path resolves outside the checkout root, the shell is treated as one from somewhere else, and the staleness check declines to judge it. Nothing else in the workspace notices; the release binaries, the sandbox and the Oils survey all work through the link.\n\nWHY IT IS NOT AN EXOTIC SETUP. This machine's root filesystem reached 100% on 2026-09-02 and the response, for two sessions, was to put a private worktree's build tree on `/data` and link `target` to it -- 3.8G off `/` at the cost of one symlink. Every house rule here points agents at private worktrees, so the next one to run out of disk will do the same and will see a red test that is nothing to do with their change. That is the cost: not a broken check, a misleading one.\n\nWHAT TO DO. `provenance::checkout_root` and the \"is this shell ours\" test disagree about whether to resolve symlinks, and the fix is to make them agree -- canonicalize both sides, or neither. The test itself could also say what it assumes: it depends on `target/` being a real directory inside the root, which is worth an assertion with a message rather than a failure that reads as a staleness bug.\n\nDONE WHEN. The check judges a shell under a linked `target` as it judges one under a real directory, or says plainly that it cannot; and the test passes in a worktree whose `target` is a link."
+                                    }
+                                )
+                            }
+
+                            {
+                                id reach-the-build-that-does-not-type-the-wrapper
+                                title "Reach the build that never types the wrapper"
+                                kind @build
+                                log (
+                                    {
+                                        at 2026-09-02T18:01:12.848990479Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "FOUND 2026-09-02 WHILE CLOSING `tell-a-full-disk-from-a-compiler-bug`, AND NOT PART OF IT. That node gave `scripts/sandboxed` a free-space precondition that refuses under 2 GiB and names the misleading signatures. It works, and it reaches strictly less than the node assumed.\n\nTHE GAP. `scripts/sandboxed` is asked only when somebody types it. The README documents `scripts/sandboxed -- cargo build` and says to keep the wrapper on the outside because it is what asks the machine-state questions, but nothing enforces that for a build, and the spelling agents are actually told to use elsewhere is bare: the repository's own measuring guidance is `cargo build --release -p nsh-cli`, with no wrapper. That command never reaches the check.\n\n`.cargo/config.toml` does not close it. The runner entry gives every test binary the containment boundary whether or not the wrapper was typed, but cargo calls a runner to *run* a binary, which is after every link has already happened. By then the question is answered. `tell-a-full-disk-from-a-compiler-bug` skips the check in `--cargo-runner` mode for exactly that reason, and that part is right.\n\nSO THE FAILURE THE NODE WAS FILED FOR IS STILL REACHABLE. Both recorded incidents were builds: a `cargo build --release -p nsh-survey` that died with ENOSPC, and a `cargo test --workspace` that died as eight `ld terminated with signal 7 [Bus error]` failures. Typed without the wrapper, both would still do that today.\n\nCANDIDATES, and the trade in each. A `build.rs` in a workspace crate reaches every `cargo build`, `cargo test` and `cargo check` with no opt-in at all, which is the only option that needs nobody to remember anything -- but cargo re-runs a build script only when the package changes, so it would fire on the fresh full builds that actually fail and not on incremental ones. That may be exactly right, since a from-clean build is what costs 2.79 GiB, but it should be measured rather than assumed. A cargo alias cannot inject a check. Documenting the wrapper spelling in the measuring notes is the cheapest and is what is already being relied on, unsuccessfully.\n\nDONE WHEN a `cargo build --release -p nsh-cli` typed with no wrapper on a machine under the threshold says so by name rather than dying as a linker crash, and the cost of whatever reaches it -- a build script's own compile time, or a re-run rule -- is measured and stated."
+                                    }
+                                )
+                            }
+
+                            {
+                                id reconcile-worktrees-recorded-on-a-tmpfs
+                                title "Reconcile the two worktrees recorded on a tmpfs"
+                                kind @chore
+                                log (
+                                    {
+                                        at 2026-09-02T18:01:24.863334099Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "FOUND 2026-09-02 WHILE CLOSING `stop-the-machine-running-out-of-disk`, AND DELIBERATELY LEFT ALONE THERE.\n\n`git worktree list` records two worktrees inside a Claude session scratchpad:\n\n    /tmp/claude-1000/-home-brendan-work-dash/a8f54ffd-.../scratchpad/trimtree  903d5c0 (detached)\n    /tmp/claude-1000/-home-brendan-work-dash/a8f54ffd-.../scratchpad/wt        903d5c0 (detached)\n\nNeither was created by the session that filed this. Both are 16 MB with no `target/`, so they cost almost nothing in disk -- which is why `stop-the-machine-running-out-of-disk` did not touch them, and why this is filed rather than folded in. Three things about them are worth someone's attention anyway.\n\nTHEY ARE ON A TMPFS. `/tmp` on this machine is a tmpfs, so those 32 MB are RAM, and so is anything built in them. That tmpfs was at 22 GiB of 32 GiB while this was written, almost all of it other projects' scratch. A worktree there also cannot be measured in: `refuse-a-survey-run-whose-shell-the-boundary-hides` records that a `CARGO_TARGET_DIR` under `/tmp` makes the survey harness's own binary vanish inside the containment boundary.\n\nONE OF THEM IS DIRTY. `wt` carries an uncommitted modification to `crates/nsh-platform/src/locale.rs`. That is the one thing near a worktree that no build regenerates, so it must not be removed without finding out whose it is. `trimtree` is clean.\n\nBOTH ARE BEHIND. They sit at `903d5c0`, which was HEAD before this afternoon's work and is now several commits back.\n\n`scripts/disk-headroom` reports them and refuses to reclaim either -- the dirty one for its dirt, and it names the tmpfs -- so nothing is at risk. What is missing is the decision: a scratchpad is session-scoped and these outlive the session that made them, so the records accumulate.\n\nDONE WHEN each is either claimed by a live session, or its uncommitted change is rescued and the worktree removed with `git worktree remove` and `git worktree prune`; and there is an answer to whether a worktree belongs in a session scratchpad on a tmpfs at all, given that it is RAM and that the survey harness cannot measure from there."
                                     }
                                 )
                             }
