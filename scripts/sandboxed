@@ -99,6 +99,120 @@ done
 OUTER_TIMEOUT=$(/usr/bin/awk -v t="$TIMEOUT" -v b="$BACKSTOP" \
     'BEGIN { printf "%.3f\n", (t == 0 ? 0 : t + b) }')
 
+# A FULL FILESYSTEM DOES NOT SAY SO; IT SAYS THE COMPILER CRASHED.
+#
+# On 2026-09-02 a `cargo test --workspace` in a fresh worktree reported, for
+# eight test binaries at once:
+#
+#     collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped
+#     PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/
+#      #4 llvm::StringTableBuilder::write(unsigned char*) const
+#      #7 lld::elf::MergeNoTailSection::writeTo(unsigned char*)
+#
+# an LLVM stack trace and an invitation to file an upstream bug. It is
+# neither: SIGBUS inside `memcpy` under `writeTo` is the linker writing into
+# an mmap'd output file it can no longer extend, and `df -h /` read 100% at
+# that moment. The same cause produced, within the same hour, a `rustc` ICE
+# carrying no message at all and a `cargo` ENOSPC -- three signatures for one
+# condition, and only the third contains the word "space". An hour went into
+# the first of them before anybody ran `df`.
+#
+# THE THRESHOLD IS NOT "ENOUGH TO BUILD", AND DOES NOT CLAIM TO BE. This
+# wrapper cannot know whether the command behind the `--` is a clean build of
+# the workspace or a one-crate rebuild, so it cannot answer whether the output
+# will fit. What it can answer is whether the machine is in the state where a
+# failure stops naming its own cause. Measured here on 2026-09-02 at load
+# 15-20, building into a scratch `CARGO_TARGET_DIR` on another filesystem:
+#
+#   2.79 GiB  a from-clean `cargo test --workspace --no-run`, peak and final
+#             alike -- the tree grows monotonically, so there is no transient
+#             link spike to budget for over and above the tree itself
+#   1.50 GiB  linker output in flight at once: `nproc` (32 here) parallel link
+#             jobs times the largest link output in this workspace, 48.1 MiB
+#   1.6 GiB   free when `cargo` reported ENOSPC and named it
+#   670 MiB   free when the linker took the bus error quoted above
+#
+# 2 GiB is above the in-flight link figure and above both recorded failure
+# points, and below what a clean full build needs. So a machine that passes
+# this check may still not fit its build -- and `cargo` will say so, in those
+# words -- while a machine that fails it is one whose next failure would have
+# lied about why.
+#
+# It is asked before the abandoned-process scan because it is far cheaper: two
+# `statfs` calls against that scan's 91-162 ms walk of /proc.
+if $RUNNER; then
+    DISK=ignore
+else
+    DISK=${NSH_TEST_DISK:-refuse}
+fi
+case $DISK in
+    refuse | warn | ignore) ;;
+    *)
+        echo "scripts/sandboxed: NSH_TEST_DISK must be refuse, warn or ignore" >&2
+        exit 2
+        ;;
+esac
+DISK_MIN=${NSH_TEST_DISK_MIN:-2048}
+case $DISK_MIN in
+    '' | *[!0-9]*)
+        echo "scripts/sandboxed: NSH_TEST_DISK_MIN must be a number of mebibytes" >&2
+        exit 2
+        ;;
+esac
+
+# `%a` is the count of blocks a non-superuser may still use and `%S` the size
+# of one; the product is what `df` reports as "Avail", checked against
+# `df -B1` on all three filesystems of this machine.
+free_bytes() { # free_bytes PATH
+    local blocks size
+    blocks=$(/usr/bin/stat -f -c '%a' "$1") || return 1
+    size=$(/usr/bin/stat -f -c '%S' "$1") || return 1
+    printf '%s\n' "$((blocks * size))"
+}
+
+# The question is about the filesystems this run may write to, which is
+# exactly the set of paths bound writable -- `$ROOT/target` always, plus
+# whatever `--writable` named. A worktree measuring into its own
+# `CARGO_TARGET_DIR` is the case this was filed for, and it is covered because
+# that directory has to be bound to be written. Two paths on one filesystem
+# are one question, so the scan is per device rather than per path.
+if [[ $DISK != ignore ]]; then
+    DISK_MINIMUM=$((DISK_MIN * 1024 * 1024))
+    SEEN_DEVICES=' '
+    SHORT_PATHS=()
+    SHORT_REPORTS=()
+    for path in "${WRITABLES[@]}"; do
+        device=$(/usr/bin/stat -c '%d' "$path") || continue
+        [[ $SEEN_DEVICES != *" $device "* ]] || continue
+        SEEN_DEVICES+="$device "
+        available=$(free_bytes "$path") || continue
+        ((available < DISK_MINIMUM)) || continue
+        SHORT_PATHS+=("$path")
+        SHORT_REPORTS+=("$(/usr/bin/awk -v p="$path" -v a="$available" -v m="$DISK_MINIMUM" \
+            -v s="$(/usr/bin/df --output=source -- "$path" | /usr/bin/tail -n 1)" \
+            'BEGIN { printf "%s is on %s with %.2f GiB free, under %.2f GiB", p, s, a / 1073741824, m / 1073741824 }')")
+    done
+    if ((${#SHORT_PATHS[@]})); then
+        for report in "${SHORT_REPORTS[@]}"; do
+            echo "scripts/sandboxed: $report" >&2
+        done
+        echo "scripts/sandboxed: below that mark a build's failure stops naming its own" >&2
+        echo "cause. A linker out of room dies as 'ld terminated with signal 7 [Bus" >&2
+        echo "error]' under an LLVM stack trace asking for an upstream bug report, and" >&2
+        echo "rustc dies as an ICE with no message; only cargo itself ever says 'No" >&2
+        echo "space left on device'. Run df before believing either of the first two." >&2
+        if [[ $DISK == warn ]]; then
+            echo "scripts/sandboxed: running anyway because NSH_TEST_DISK=warn" >&2
+        else
+            echo "scripts/sandboxed: refusing to start a build that would fail this way." >&2
+            echo "Free some space, or re-run with NSH_TEST_DISK=warn to run anyway or" >&2
+            echo "=ignore to skip the check. NSH_TEST_DISK_MIN is the threshold in" >&2
+            echo "mebibytes." >&2
+            exit 1
+        fi
+    fi
+fi
+
 # An abandoned case is one this wrapper can still see. Everything the
 # repository runs against shell-controlled input goes into a PID namespace
 # and dies with it, so a shell built into a `target/` directory, sitting at

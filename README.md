@@ -178,6 +178,38 @@ second), so a probe somebody is watching is left alone.
 `NSH_TEST_ABANDONED=kill` clears them and continues; `=ignore` skips the
 check. `tests/harness/abandoned-selftest.sh` is its self-test.
 
+The wrapper also asks whether the machine has room, because **a full
+filesystem does not report itself as one**. It reports, for every link running
+at that moment:
+
+```text
+collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped
+PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/
+ #4 llvm::StringTableBuilder::write(unsigned char*) const
+ #7 lld::elf::MergeNoTailSection::writeTo(unsigned char*)
+```
+
+SIGBUS under `writeTo` is the linker writing into an mmap'd output file it can
+no longer extend, and the stack trace and the invitation to file an upstream
+bug are both beside the point. The same cause also appears as a `rustc` ICE
+carrying no message at all, and — only sometimes — as `cargo`'s own
+`No space left on device`. On 2026-09-02 all three came out of one afternoon,
+and an hour went into the first of them before anybody ran `df`. **Run `df`
+before believing that the compiler or the linker crashed.**
+
+The default threshold is 2 GiB free on each filesystem the run may write to —
+`target/` always, plus anything `--writable` named, asked once per filesystem
+rather than once per path. It is not a claim that 2 GiB is enough to build:
+measured here, a from-clean `cargo test --workspace` costs 2.79 GiB, and up to
+1.50 GiB of linker output is in flight at once (32 parallel jobs against a
+largest link output of 48.1 MiB). It is the mark below which a failure stops
+naming its own cause — the recorded ENOSPC happened at 1.6 GiB free and the
+bus error above at 670 MiB. Above the mark a build may still not fit, and
+`cargo` will say so in those words. `NSH_TEST_DISK=warn` prints the verdict
+and runs anyway, `=ignore` skips the check, and `NSH_TEST_DISK_MIN` sets the
+threshold in mebibytes. `tests/harness/disk-selftest.sh` is its self-test, and
+unlike the other two it may be run through the wrapper.
+
 The budget itself is spent inside the boundary: `timeout` stands in front of
 the command *within* the namespace, with a wider one outside as a backstop for
 a sandbox that never got as far as running anything. Stopping a command by
@@ -192,8 +224,10 @@ is what `fuzz/run.sh` passes to run until interrupted — and no longer drags
 the abandoned-process threshold down with it.
 `tests/harness/budget-selftest.sh` is the self-test for that.
 
-Neither self-test may be run through the wrapper: both ask the host what
-survived a finished command, which is what the boundary hides.
+The abandoned-process and budget self-tests may not be run through the
+wrapper: both ask the host what survived a finished command, which is what the
+boundary hides. The free-space one asks nothing the boundary hides, and runs
+either way.
 
 ## Repository layout
 
