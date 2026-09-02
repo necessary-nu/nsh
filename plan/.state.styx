@@ -1442,8 +1442,9 @@ assertions (
     {id refuse-to-regenerate-a-file-another-session-changed, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:22:30.277642427Z}
     {id deliver-a-prompt-interrupt-without-eating-the-next-line, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:58:47.016231255Z}
     {id refuse-to-destroy-an-array-kind, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:15:07.483177095Z}
-    {id list-the-names-that-only-carry-attributes, kind @doing, author "brendan@necessary.nu", at 2026-09-02T14:19:54.704454042Z}
+    {id list-the-names-that-only-carry-attributes, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:33:58.434607178Z}
     {id give-each-gate-run-its-own-shell, kind @doing, author "brendan@necessary.nu", at 2026-09-02T14:22:53.923916779Z}
+    {id quote-the-set-listing-as-bash-quotes-it, kind @doing, author "brendan@necessary.nu", at 2026-09-02T14:34:04.839852303Z}
 )
 
 impl_evidence (

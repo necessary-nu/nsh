@@ -157,7 +157,8 @@ impl Pattern {
         subject: &[u8],
         budget: &mut u64,
     ) -> bool {
-        self.matcher(locale, subject, budget, None)
+        let mut characters = Characters::of(locale, &self.bytes, subject);
+        self.matcher(&mut characters, 0, budget, None)
             .matches_from(0, 0)
     }
 
@@ -171,27 +172,31 @@ impl Pattern {
     // [spec:nsh:req:compat.bash.expansion-globbing]
     fn ends_within(
         &self,
-        locale: &nsh_platform::Locale,
-        subject: &[u8],
+        characters: &mut Characters<'_>,
+        pattern_start: usize,
         from: usize,
         budget: &mut u64,
     ) -> Vec<usize> {
-        let mut matcher = self.matcher(locale, subject, budget, Some(Vec::new()));
+        let mut matcher = self.matcher(characters, pattern_start, budget, Some(Vec::new()));
         matcher.matches_from(0, from);
         matcher.ends.unwrap_or_default()
     }
 
-    fn matcher<'a>(
+    fn matcher<'a, 'b>(
         &'a self,
-        locale: &'a nsh_platform::Locale,
-        subject: &'a [u8],
+        characters: &'a mut Characters<'b>,
+        pattern_start: usize,
         budget: &'a mut u64,
         ends: Option<Vec<usize>>,
-    ) -> Matcher<'a> {
+    ) -> Matcher<'a, 'b> {
+        let locale = characters.locale;
+        let subject = characters.subject;
         Matcher {
             locale,
             pattern: self,
+            pattern_start,
             subject,
+            characters,
             memo: HashMap::new(),
             budget,
             ends,
@@ -232,6 +237,40 @@ impl Pattern {
 // [spec:nsh:req:compat.bash.expansion-globbing]
 const EXTENDED_MATCH_BUDGET: u64 = 4_000_000;
 
+/// The two strings one match reads, and what the locale has said about
+/// their characters so far.
+///
+/// `mbrlen` has no locale-taking form, so an answer costs the thread
+/// locale being selected and restored around it, and asking one
+/// character at a time is how a single match came to ask 482,532 times
+/// about a 293-byte subject: a repeated group re-asks the same offsets
+/// at every offset it can be entered at. One of these is built per match
+/// and shared by every matcher the match creates -- including the ones
+/// an extended group makes for its alternatives -- so an offset is asked
+/// about once and the locale is selected a handful of times.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+struct Characters<'a> {
+    locale: &'a nsh_platform::Locale,
+    /// The whole pattern. Every alternative is a slice of it, which is
+    /// why one table serves them all.
+    pattern: &'a [u8],
+    subject: &'a [u8],
+    pattern_widths: Vec<u8>,
+    subject_widths: Vec<u8>,
+}
+
+impl<'a> Characters<'a> {
+    fn of(locale: &'a nsh_platform::Locale, pattern: &'a [u8], subject: &'a [u8]) -> Self {
+        Self {
+            locale,
+            pattern,
+            subject,
+            pattern_widths: Vec::new(),
+            subject_widths: Vec::new(),
+        }
+    }
+}
+
 /// One pattern matched against one subject.
 ///
 /// `memo` is keyed on `(pattern_at, subject_at)` alone, and that key is
@@ -242,11 +281,24 @@ const EXTENDED_MATCH_BUDGET: u64 = 4_000_000;
 /// alternatives are walked by separate matchers over sliced patterns, and
 /// `matches_from` is only ever asked the plain question "does the rest of
 /// the pattern match the rest of the subject".
+///
+/// `characters` is the one field that does change, and it does not
+/// weaken that argument: it only ever grows, and what it accumulates are
+/// the locale's answers about bytes that do not move, so a second visit
+/// to a pair reads exactly the widths the first one did.
 // [spec:nsh:req:compat.bash.expansion-globbing]
-struct Matcher<'a> {
-    locale: &'a nsh_platform::Locale,
+struct Matcher<'a, 'b> {
+    locale: &'b nsh_platform::Locale,
     pattern: &'a Pattern,
-    subject: &'a [u8],
+    /// Where this matcher's pattern begins in the whole one. An
+    /// alternative is a slice of the pattern its group was read from, so
+    /// its offsets index the shared width table once shifted by this.
+    pattern_start: usize,
+    subject: &'b [u8],
+    /// What the locale has already said about the pattern's and the
+    /// subject's characters, shared with every other matcher of the same
+    /// match.
+    characters: &'a mut Characters<'b>,
     memo: HashMap<(usize, usize), bool>,
     budget: &'a mut u64,
     /// `Some` while the walk is collecting ends rather than answering a
@@ -264,7 +316,25 @@ struct Matcher<'a> {
     group_ends: HashMap<(usize, usize), Vec<usize>>,
 }
 
-impl Matcher<'_> {
+impl Matcher<'_, '_> {
+    /// Where the character beginning at `at` in the subject runs out.
+    fn subject_end(&mut self, at: usize) -> usize {
+        let limit = self.subject.len();
+        let widths = &mut self.characters.subject_widths;
+        character_end(self.locale, self.subject, widths, at, limit)
+    }
+
+    /// Where the character beginning at `at` in this matcher's own
+    /// pattern runs out. Both offsets are that pattern's, and the table
+    /// underneath is the whole pattern's.
+    fn pattern_end(&mut self, at: usize) -> usize {
+        let start = self.pattern_start;
+        let limit = start + self.pattern.bytes.len();
+        let bytes = self.characters.pattern;
+        let widths = &mut self.characters.pattern_widths;
+        character_end(self.locale, bytes, widths, start + at, limit) - start
+    }
+
     // [spec:posix:def:pattern.notation-purpose]
     // [spec:posix:req:pattern.invalid-byte-sequence-unspecified]
     // [spec:posix:req:pattern.match-by-bit-pattern]
@@ -325,7 +395,7 @@ impl Matcher<'_> {
                     if candidate == self.subject.len() {
                         return false;
                     }
-                    candidate = character_end(self.locale, self.subject, candidate);
+                    candidate = self.subject_end(candidate);
                 }
             }
 
@@ -334,7 +404,7 @@ impl Matcher<'_> {
                     return false;
                 }
                 pattern_at += 1;
-                subject_at = character_end(self.locale, self.subject, subject_at);
+                subject_at = self.subject_end(subject_at);
                 continue;
             }
 
@@ -356,8 +426,8 @@ impl Matcher<'_> {
             if subject_at == self.subject.len() {
                 return false;
             }
-            let pattern_end = character_end(self.locale, &self.pattern.bytes, pattern_at);
-            let subject_end = character_end(self.locale, self.subject, subject_at);
+            let pattern_end = self.pattern_end(pattern_at);
+            let subject_end = self.subject_end(subject_at);
             if !self.same_character(
                 &self.pattern.bytes[pattern_at..pattern_end],
                 &self.subject[subject_at..subject_end],
@@ -451,12 +521,11 @@ impl Matcher<'_> {
         if let Some(ends) = self.group_ends.get(&(group.start, from)) {
             return ends.clone();
         }
-        let locale = self.locale;
-        let subject = self.subject;
         let mut ends = Vec::new();
         for range in &group.alternatives {
             let alternative = self.pattern.slice(range.clone());
-            ends.extend(alternative.ends_within(locale, subject, from, self.budget));
+            let start = self.pattern_start + range.start;
+            ends.extend(alternative.ends_within(self.characters, start, from, self.budget));
         }
         ends.sort_unstable();
         ends.dedup();
@@ -529,7 +598,7 @@ impl Matcher<'_> {
             if end == self.subject.len() {
                 break;
             }
-            end = character_end(self.locale, self.subject, end);
+            end = self.subject_end(end);
         }
         candidates
             .into_iter()
@@ -554,12 +623,12 @@ impl Matcher<'_> {
     /// docs/divergences.md; costs `var-op-patsub.test.sh:23`.
     // [spec:dash:sem:expand.ccmatch-fn]
     // [spec:posix:req:pattern.unmatched-open-bracket-unspecified]
-    fn bracket(&self, mut at: usize, subject_at: usize) -> Option<(usize, Vec<usize>)> {
+    fn bracket(&mut self, mut at: usize, subject_at: usize) -> Option<(usize, Vec<usize>)> {
         let inverted = (self.pattern.active(at, b'!') || self.pattern.active(at, b'^'))
             .then(|| at += 1)
             .is_some();
-        let subject_width = (subject_at < self.subject.len())
-            .then(|| character_end(self.locale, self.subject, subject_at) - subject_at);
+        let subject_width =
+            (subject_at < self.subject.len()).then(|| self.subject_end(subject_at) - subject_at);
         let mut matched_widths = Vec::new();
         let mut first_member = true;
 
@@ -595,7 +664,7 @@ impl Matcher<'_> {
             }
 
             let member_start = at;
-            let member_end = character_end(self.locale, &self.pattern.bytes, at);
+            let member_end = self.pattern_end(at);
             at = member_end;
             first_member = false;
 
@@ -604,7 +673,7 @@ impl Matcher<'_> {
                 && !self.pattern.active(at + 1, b']')
             {
                 let range_end_start = at + 1;
-                let range_end = character_end(self.locale, &self.pattern.bytes, range_end_start);
+                let range_end = self.pattern_end(range_end_start);
                 if let Some(width) = subject_width
                     && member_end - member_start == 1
                     && range_end - range_end_start == 1
@@ -725,15 +794,46 @@ fn fold_case(bytes: &[u8]) -> Vec<u8> {
     }
 }
 
-fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usize {
-    if at >= bytes.len() {
+/// How many byte positions the locale is asked about at once.
+///
+/// The block doubles from here, so a walk of a whole string asks a
+/// logarithmic number of times while a match that fails at its first
+/// character does not pay for the rest of the string. That second half
+/// is what the constant is for: `${v#pattern}` asks about every prefix
+/// of `v` in turn, and each of those asks is a match of its own.
+const CHARACTER_BLOCK: usize = 8;
+
+/// Where the character beginning at `at` runs out, within `bytes[..limit]`.
+///
+/// `widths` is what the locale has already said about `bytes`, and grows
+/// as offsets past its end are asked for.
+fn character_end(
+    locale: &nsh_platform::Locale,
+    bytes: &[u8],
+    widths: &mut Vec<u8>,
+    at: usize,
+    limit: usize,
+) -> usize {
+    if at >= limit {
         return at;
     }
-    let width = locale
-        .multibyte_len(&bytes[at..])
-        .filter(|width| *width > 0)
-        .unwrap_or(1);
-    at.saturating_add(width).min(bytes.len())
+    if at >= widths.len() {
+        let known = widths.len();
+        let want = (known * 2)
+            .max(CHARACTER_BLOCK)
+            .max(at + 1)
+            .min(bytes.len());
+        widths.extend(locale.character_widths(&bytes[known..], want - known));
+    }
+    let width = usize::from(widths[at]);
+    // A character reaching past `limit` is not one this string holds, so
+    // its first byte is stepped over alone -- which is the answer the
+    // locale itself gives when it is shown the truncated string.
+    if at + width <= limit {
+        at + width
+    } else {
+        at + 1
+    }
 }
 
 /// Compatibility entry for callers whose pattern contains no quoted bytes.

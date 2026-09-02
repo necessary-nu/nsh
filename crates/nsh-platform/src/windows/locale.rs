@@ -132,6 +132,17 @@ impl Locale {
         (bytes.len() >= length && std::str::from_utf8(&bytes[..length]).is_ok()).then_some(length)
     }
 
+    pub fn character_widths(&self, bytes: &[u8], offsets: usize) -> Vec<u8> {
+        (0..offsets.min(bytes.len()))
+            .map(|at| {
+                self.multibyte_len(&bytes[at..])
+                    .and_then(|width| u8::try_from(width).ok())
+                    .filter(|width| *width > 0)
+                    .unwrap_or(1)
+            })
+            .collect()
+    }
+
     pub fn decode_exact(&self, bytes: &[u8], expected_len: usize) -> Option<i32> {
         let value = std::str::from_utf8(bytes.get(..expected_len)?).ok()?;
         let mut chars = value.chars();

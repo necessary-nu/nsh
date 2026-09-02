@@ -8580,6 +8580,7 @@ children (
                                 id list-the-names-that-only-carry-attributes
                                 title "List a name that carries attributes and no value in `declare -p`"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T11:23:07.013494122Z
@@ -8593,6 +8594,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:33:58.434607178Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -8822,6 +8830,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing `list-readonly-names-as-bash-lists-them`, which fixed the `export -p` and `readonly -p` half of `variables::show_vars` and deliberately left the `set` half alone. Measured against the pinned Bash 5.3.15 on `dea4a93`; pre-existing.\n\nA bare `set` (and a bare `declare`, which is the same listing) differs from Bash in two ways at once:\n\n    x=1;                    set | grep '^x'   bash: x=1                      nsh: x='1'\n    declare -i n=3;         set | grep '^n'   bash: n=3                      nsh: n='3'\n    declare -a z=(1 2);     set | grep '^z'   bash: z=([0]=\"1\" [1]=\"2\")      nsh: z='1'\n    declare -A m=([k]=v);   set | grep '^m'   bash: m=([k]=\"v\" )             nsh: m\n    declare -a z=();        set | grep '^z'   bash: z=()                     nsh: z\n\n1. THE QUOTING IS UNCONDITIONAL HERE AND CONDITIONAL THERE. Bash quotes only when leaving the value bare would not read back -- its `sh_single_quote` is reached through the same \"does this need quoting\" test `declare -p` uses -- and this shell always quotes. The POSIX dialect's form is dash's and always quotes there too, correctly, so this is a Bash-mode-only question.\n\n2. AN ARRAY PRINTS ITS FIRST ELEMENT, OR NOTHING. `show_vars`'s non-declaration branch reads `Variable::scalar`, which for an array is element zero, so a two-element array lists as its first element and an associative array with no `\"0\"` key lists as a bare name. That is the same defect `dea4a93` fixed for `export -p` by giving it the declaration renderer; `set` needs the *compound* spelling without the `declare -flags` prefix, which is `declaration_value` and nothing else.\n\nBoth halves live in the one `else` branch of `variables::show_vars`, and `variables::declaration::declaration_value` already produces the `=(...)` text this needs.\n\nWATCH THE DIALECT BOUNDARY. `set` in the POSIX dialect is dash's listing and is pinned against the C dash reference by `tests/corpus/aud_state_var.txt`; whatever changes here must be inside the `bash` test that branch already makes, and the corpus must be re-run before and after.\n\nDONE WHEN. `set` and a bare `declare` in Bash mode print what the reference prints for a plain scalar, an integer, an indexed array, an associative array and an empty array; the POSIX dialect's listing is byte-identical to before; and a differential table holds the rows."
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:34:04.839852303Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }

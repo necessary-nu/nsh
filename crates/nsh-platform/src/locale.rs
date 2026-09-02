@@ -373,6 +373,41 @@ impl Locale {
         })
     }
 
+    /// How wide the character beginning at each of the first `offsets`
+    /// byte positions of `bytes` is, in bytes.
+    ///
+    /// One entry per byte position rather than per character, because a
+    /// caller stepping through a string does not know where the next
+    /// character starts until it has asked.  A position where no
+    /// character begins -- an invalid sequence, one the string ends too
+    /// soon to complete, or the null character -- is one byte wide, which
+    /// is what such a caller has to step over to make progress.
+    ///
+    /// A run of positions is answered together because `mbrlen` has no
+    /// locale-taking form: every answer needs the thread locale selected
+    /// and restored, and one selection covers the whole run.
+    // [spec:nsh:req:embedding-safety.process-locale-is-unchanged]
+    // [spec:nsh:req:shell-locale.operation-binding]
+    pub fn character_widths(&self, bytes: &[u8], offsets: usize) -> Vec<u8> {
+        let offsets = offsets.min(bytes.len());
+        self.with_selected(|| {
+            (0..offsets)
+                .map(|at| {
+                    // SAFETY: each conversion is bounded by the bytes that
+                    // remain after `at` and uses initialized local state.
+                    let width = unsafe {
+                        let mut state = std::mem::zeroed();
+                        mbrlen(bytes[at..].as_ptr().cast(), bytes.len() - at, &mut state)
+                    };
+                    u8::try_from(width)
+                        .ok()
+                        .filter(|width| *width > 0)
+                        .unwrap_or(1)
+                })
+                .collect()
+        })
+    }
+
     pub fn decode_exact(&self, bytes: &[u8], expected_len: usize) -> Option<i32> {
         if expected_len > bytes.len() {
             return None;
@@ -650,6 +685,51 @@ mod tests {
         let locale = Locale::c().unwrap();
         let _ = locale.character_encoding(0xcc);
         let _ = locale.charmap_is_utf8();
+        assert_eq!(current(), before);
+    }
+
+    /// One entry per byte position, one byte wherever no character
+    /// begins, and only for the run of positions asked about.
+    ///
+    /// The three ways a position can hold no character are each here,
+    /// because a caller reading this table steps by what it says and
+    /// would loop forever on a zero: the second byte of a two-byte
+    /// character, a byte no character may start with, and a start byte
+    /// the string ends too soon to complete. All three answer one, which
+    /// is what stepping over them costs.
+    ///
+    /// The short run is the same test rather than a second one: a caller
+    /// learning widths in blocks asks about a prefix of the positions
+    /// while passing the bytes that follow them, so that a character at
+    /// the last position it asks about is measured whole, and the answer
+    /// has to be the one it would have got asking about all of them.
+    // [spec:nsh:req:shell-locale.operation-binding/test]
+    #[test]
+    fn character_widths_answer_every_byte_position() {
+        /* U+00CC, then a lone continuation byte, then a truncated
+         * two-byte start. */
+        let bytes = [b'a', 0xc3, 0x8c, 0x8c, b'z', 0xc3];
+        let utf8 = utf8();
+        assert_eq!(utf8.character_widths(&bytes, bytes.len()), [
+            1, 2, 1, 1, 1, 1
+        ]);
+        assert_eq!(utf8.character_widths(&bytes, 0), []);
+        assert_eq!(utf8.character_widths(&bytes, 2), [1, 2]);
+        assert_eq!(utf8.character_widths(&bytes, 99), [1, 2, 1, 1, 1, 1]);
+        assert_eq!(utf8.character_widths(&[], 4), []);
+
+        /* A single-byte charmap has no character wider than its bytes,
+         * and the C locale's own NUL is a character one byte wide. */
+        let c = Locale::c().unwrap();
+        assert_eq!(c.character_widths(&bytes, bytes.len()), [1; 6]);
+        assert_eq!(c.character_widths(&[0, b'a', 0], 3), [1, 1, 1]);
+    }
+
+    // [spec:nsh:req:embedding-safety.process-locale-is-unchanged/test]
+    #[test]
+    fn character_widths_preserve_thread_locale() {
+        let before = current();
+        let _ = utf8().character_widths(&[0xc3, 0x8c, b'a'], 3);
         assert_eq!(current(), before);
     }
 
