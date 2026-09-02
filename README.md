@@ -153,10 +153,13 @@ scripts/sandboxed -- target/release/nsh-survey run-oils \
 A case started by hand has none of this: no PID namespace, no read-only root
 and, above all, no budget. On 2026-08-31 four such shells spun at 98% CPU for
 forty-seven hours after the worktree, the binary and the case files they came
-from had all been deleted. `scripts/sandboxed` now refuses to run while any
+from had all been deleted. `scripts/sandboxed` now refuses to run while one
 of them is on the machine, because nothing else can see them — inside the
-boundary the process table is the sandbox's own. `NSH_TEST_ABANDONED=kill`
-clears them and continues; `=ignore` skips the check.
+boundary the process table is the sandbox's own. Orphaned is not abandoned:
+a process qualifies only once it has outlived the wrapper's own budget
+(`NSH_TEST_ABANDONED_AFTER`, defaulting to `--timeout`), so a probe somebody
+is watching is left alone. `NSH_TEST_ABANDONED=kill` clears them and
+continues; `=ignore` skips the check.
 `tests/harness/abandoned-selftest.sh` is its self-test and is the one script
 here that must not be run through the wrapper.
 

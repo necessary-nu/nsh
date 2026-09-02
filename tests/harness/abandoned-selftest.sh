@@ -15,8 +15,10 @@
 #   tests/harness/abandoned-selftest.sh
 #
 # It briefly puts one abandoned process on the machine, so a concurrent
-# scripts/sandboxed may refuse for the second or so that it lives. That is
-# the check working.
+# scripts/sandboxed run that has lowered NSH_TEST_ABANDONED_AFTER may refuse
+# for the second or so that it lives. At the default age it cannot: a decoy
+# seconds old is younger than the wrapper's own budget, which is a case
+# below.
 set -u
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
@@ -80,7 +82,7 @@ if [[ -z ${stranger:-} ]]; then
     echo "abandoned-selftest: could not orphan the stranger" >&2
     exit 1
 fi
-output=$("$WRAPPER" -- /bin/echo stranger 2>&1)
+output=$(NSH_TEST_ABANDONED_AFTER=0 "$WRAPPER" -- /bin/echo stranger 2>&1)
 status=$?
 report "another project's orphan is left alone" \
     "$([[ $status -eq 0 && $output == stranger ]] && echo y)" \
@@ -99,13 +101,28 @@ if [[ -z ${orphan:-} ]]; then
     exit 1
 fi
 
-output=$("$WRAPPER" -- /bin/echo unreachable 2>&1)
+# Orphaned is not yet abandoned. The default age is the wrapper's own
+# budget, and this decoy is seconds old: refusing it is what refused a
+# concurrent session's live probe the first time the check ran.
+output=$("$WRAPPER" -- /bin/echo young 2>&1)
+status=$?
+report "a young orphan is not yet abandoned" \
+    "$([[ $status -eq 0 && $output == young ]] && echo y)" \
+    "status=$status output=[$output]"
+
+output=$(NSH_TEST_ABANDONED_AFTER=0 "$WRAPPER" -- /bin/echo unreachable 2>&1)
 status=$?
 report "an abandoned process is refused" \
     "$([[ $status -eq 1 && $output == *"$orphan"* && $output != *unreachable* ]] && echo y)" \
     "status=$status"
 
-output=$(NSH_TEST_ABANDONED=ignore "$WRAPPER" -- /bin/echo ignored 2>&1)
+output=$(NSH_TEST_ABANDONED_AFTER=nonsense "$WRAPPER" -- /bin/echo unreachable 2>&1)
+status=$?
+report "a non-numeric age is refused" \
+    "$([[ $status -eq 2 && $output != *unreachable* ]] && echo y)" \
+    "status=$status"
+
+output=$(NSH_TEST_ABANDONED=ignore NSH_TEST_ABANDONED_AFTER=0 "$WRAPPER" -- /bin/echo ignored 2>&1)
 status=$?
 report "NSH_TEST_ABANDONED=ignore runs anyway" \
     "$([[ $status -eq 0 && $output == ignored ]] && echo y)" \
@@ -114,7 +131,7 @@ report "ignore leaves the process alive" \
     "$(kill -0 "$orphan" 2>/dev/null && echo y)" \
     "pid=$orphan"
 
-output=$(NSH_TEST_ABANDONED=kill "$WRAPPER" -- /bin/echo killed 2>&1)
+output=$(NSH_TEST_ABANDONED=kill NSH_TEST_ABANDONED_AFTER=0 "$WRAPPER" -- /bin/echo killed 2>&1)
 status=$?
 report "NSH_TEST_ABANDONED=kill clears and runs" \
     "$([[ $status -eq 0 && $output == *killed* ]] && echo y)" \
@@ -125,7 +142,7 @@ report "kill leaves nothing behind" \
     "pid=$orphan"
 orphan=
 
-output=$(NSH_TEST_ABANDONED=nonsense "$WRAPPER" -- /bin/echo unreachable 2>&1)
+output=$(NSH_TEST_ABANDONED=nonsense NSH_TEST_ABANDONED_AFTER=0 "$WRAPPER" -- /bin/echo unreachable 2>&1)
 status=$?
 report "an unknown mode is refused, not assumed" \
     "$([[ $status -eq 2 && $output != *unreachable* ]] && echo y)" \

@@ -41,6 +41,30 @@
 //! the failing set and would leave the comparison silent. They are
 //! reported separately and count against the verdict, which is the same
 //! judgement `bash_gate` makes for the same reason.
+//!
+//! AND THE LIST MOVES FOR REASONS THAT ARE NOT THE SHELL'S. Two
+//! `process-sub` cases are decided by a race between a `>(list)` child
+//! and the shell's own exit, and the machine's load decides it in both
+//! directions: measured on 2026-09-02 over 100 harness runs each,
+//! `process-sub.test.sh:2` is in this list as an expected failure and
+//! passed 41 times at load 87, while `:1` is not in it and failed about 9
+//! times in 100. So a loaded run reported a difference either way and a
+//! quiet one did not, and the file said nothing about it.
+//!
+//! `crate::control` is the answer, and it is the one `gate-bash` already
+//! had: when the comparison turns on a case, the pinned Bash is asked
+//! whether it still reproduces its own recorded result on the disputed
+//! spec files. A case it cannot is undecided this run -- named, with the
+//! count behind it, and left out of the verdict. It is asked of the
+//! reference alone, so a case this shell loses that the reference wins
+//! every time is still a difference at any load.
+//!
+//! THE GENERATOR NEEDED IT MORE THAN THE COMPARISON DID. A refresh takes
+//! the run's failing set as the new list, so a lucky run silently
+//! *deletes* a known-flaky entry -- which is what happened to
+//! `process-sub.test.sh:2` on 2026-09-01, found only because someone
+//! remembered it should be there. An undecided case now keeps the answer
+//! already recorded, in both directions.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -48,6 +72,7 @@ use std::fs;
 use std::path::Path;
 
 use super::{Result, RunReport};
+use crate::control::{Control, contended_cases};
 
 const SCHEMA: u32 = 1;
 
@@ -78,6 +103,12 @@ fn header(group: &str, expectation_shell: &str, path: &Path) -> String {
 # `command_.test.sh:3` and `command_.test.sh:12` sat silently outside every
 # comparison made with it.
 #
+# A case the pinned Bash could not reproduce its own recorded result on is
+# undecided: the comparison names it and does not count it, and a refresh
+# keeps whatever this file already said about it rather than taking the
+# lucky run's answer. `process-sub.test.sh:2` was deleted from here that way
+# on 2026-09-01 and had to be measured again by hand.
+#
 # The pins are what make the list mean something. A run whose group,
 # expectation namespace, POSIX mode, per-case timeout or Oils commit differs
 # from these is refused rather than compared, and a filtered run (`--spec`,
@@ -104,7 +135,13 @@ pub(super) struct Baseline {
 }
 
 impl Baseline {
-    fn from_run(report: &RunReport) -> Self {
+    /// The pins from this run, with the failing set given rather than
+    /// taken.
+    ///
+    /// `record` adjusts the set for the cases the run could not decide,
+    /// and a constructor that read `report.failing_ids()` itself would
+    /// silently undo that.
+    fn from_run(report: &RunReport, failing: BTreeSet<String>) -> Self {
         Self {
             schema: SCHEMA,
             group: report.group.clone(),
@@ -112,7 +149,7 @@ impl Baseline {
             posix: report.posix,
             timeout_ms: report.timeout_ms,
             oils_commit: report.source_commit.clone(),
-            failing: report.failing_ids(),
+            failing,
         }
     }
 
@@ -187,6 +224,11 @@ pub(super) struct Comparison {
     no_longer_failing: Vec<String>,
     unknown: Vec<String>,
     unstable: Vec<String>,
+    /// The cases the reference could not reproduce itself on this run.
+    ///
+    /// They start in one of the three lists above and are moved here by
+    /// `set_aside`, so a case is never both a difference and undecided.
+    undecided: Vec<String>,
     recorded: usize,
     observed: usize,
 }
@@ -209,6 +251,7 @@ impl Comparison {
                 .collect(),
             unknown: baseline.failing.difference(&known).cloned().collect(),
             unstable: report.unstable_ids().into_iter().collect(),
+            undecided: Vec::new(),
             recorded: baseline.failing.len(),
             observed: observed.len(),
         }
@@ -221,6 +264,49 @@ impl Comparison {
             && self.unstable.is_empty()
     }
 
+    /// The cases worth asking the reference about.
+    ///
+    /// Every one of these is a live outcome: this run's shell did
+    /// something the recorded list does not expect. The ids the list
+    /// names and the group no longer contains are left out on purpose --
+    /// no rerun of anything can change what a checked-in file says, and
+    /// the control's budget would be spent on a question no run answers.
+    fn disputed(&self) -> BTreeSet<String> {
+        self.newly_failing
+            .iter()
+            .chain(&self.no_longer_failing)
+            .chain(&self.unstable)
+            .cloned()
+            .collect()
+    }
+
+    /// Move the cases the reference could not reproduce out of the
+    /// verdict and into `undecided`.
+    ///
+    /// A case is never both: it is a difference the run measured, or it
+    /// is a case this machine could not measure at all.
+    fn set_aside(&mut self, contended: &BTreeSet<String>) {
+        for list in [
+            &mut self.newly_failing,
+            &mut self.no_longer_failing,
+            &mut self.unstable,
+        ] {
+            list.retain(|id| {
+                let keep = !contended.contains(id);
+                if !keep {
+                    self.undecided.push(id.clone());
+                }
+                keep
+            });
+        }
+        self.undecided.sort();
+        self.undecided.dedup();
+    }
+
+    fn undecided(&self) -> &[String] {
+        &self.undecided
+    }
+
     /// Report to stderr, deliberately.
     ///
     /// The verdict is about the run rather than part of its output, and
@@ -228,7 +314,7 @@ impl Comparison {
     /// a machine-readable list under `--format ids`. Writing the verdict
     /// there would corrupt both, and a check nobody can pipe is a check
     /// people stop running.
-    fn write_text(&self, path: &Path) {
+    fn write_text(&self, path: &Path, control: &Control) {
         eprintln!("failing-case baseline: {}", path.display());
         eprintln!(
             "recorded {} failing cases, this run has {}",
@@ -246,6 +332,16 @@ impl Comparison {
         for id in &self.unstable {
             eprintln!("  ! {id} timed out or ended in a harness error, which is never expected");
         }
+        if !self.undecided.is_empty() {
+            eprintln!("{}", Control::headline(self.undecided.len()));
+            for id in &self.undecided {
+                eprintln!(
+                    "  ~ {id} -- the pinned Bash lost it in {} of {} control runs",
+                    control.lost(id),
+                    control.runs()
+                );
+            }
+        }
         if self.agrees() {
             eprintln!("baseline: matched on all {} failing cases", self.recorded);
         } else {
@@ -261,10 +357,49 @@ impl Comparison {
     }
 }
 
+/// Ask the reference about the cases this run's verdict turns on.
+///
+/// The same control `gate-bash` uses, on the same budget, against the
+/// same recording of what the pinned Bash does: a case the reference
+/// cannot reproduce itself on cannot say anything about this shell
+/// either. It is paid for only when the comparison found something, so
+/// an agreeing run costs exactly what it always did.
+///
+/// A run that expects some other shell's output is left uncontrolled and
+/// says so. `BASH_REFERENCE_CASES.json` records what the pinned Bash
+/// does, so it can answer for `--expect-shell bash` and for nothing else.
+fn control_for(
+    report: &RunReport,
+    manifest: &crate::OilsManifest,
+    root: &Path,
+    comparison: &Comparison,
+) -> Result<Control> {
+    let disputed = comparison.disputed();
+    if disputed.is_empty() {
+        return Ok(Control::default());
+    }
+    if report.expectation_shell != "bash" {
+        eprintln!(
+            "baseline: no control run -- the reference calibration answers for \
+             --expect-shell bash and this run expects {}",
+            report.expectation_shell
+        );
+        return Ok(Control::default());
+    }
+    let (eligible, _) = crate::bash_reference::calibration(root)?;
+    contended_cases(root, manifest, &report.group, &eligible, &disputed)
+}
+
 /// Compare this run against the recorded list, or record this run as it.
-pub(super) fn apply(report: &RunReport, path: &Path, update: bool) -> Result<bool> {
+pub(super) fn apply(
+    report: &RunReport,
+    manifest: &crate::OilsManifest,
+    root: &Path,
+    path: &Path,
+    update: bool,
+) -> Result<bool> {
     if update {
-        return record(report, path);
+        return record(report, manifest, root, path);
     }
     let baseline = Baseline::read(path)?;
     if let Some(reason) = baseline.mismatch(report) {
@@ -275,9 +410,38 @@ pub(super) fn apply(report: &RunReport, path: &Path, update: bool) -> Result<boo
         )
         .into());
     }
-    let comparison = Comparison::of(&baseline, report);
-    comparison.write_text(path);
+    let mut comparison = Comparison::of(&baseline, report);
+    let control = control_for(report, manifest, root, &comparison)?;
+    comparison.set_aside(&control.contended());
+    comparison.write_text(path, &control);
     Ok(comparison.agrees())
+}
+
+/// Take the recorded answer for every case this run could not decide.
+///
+/// Both directions matter and only one of them has bitten so far. A case
+/// the list expects to fail and this run passed stays in the list, which
+/// is the `process-sub.test.sh:2` repair; a case the list expects to pass
+/// and this run failed stays out of it, so a race cannot enshrine itself
+/// as an expected failure either.
+fn keep_recorded_answer(
+    failing: &mut BTreeSet<String>,
+    recorded: &BTreeSet<String>,
+    undecided: &[String],
+) -> usize {
+    for id in undecided {
+        let was_failing = recorded.contains(id);
+        if was_failing {
+            failing.insert(id.clone());
+        } else {
+            failing.remove(id);
+        }
+        eprintln!(
+            "  = {id} keeps its recorded answer ({}); this run could not decide it",
+            if was_failing { "failing" } else { "passing" }
+        );
+    }
+    undecided.len()
 }
 
 /// Write the run's failing ids as the new list, saying what changed.
@@ -288,11 +452,32 @@ pub(super) fn apply(report: &RunReport, path: &Path, update: bool) -> Result<boo
 /// difference would be about the run, not the shell -- but it is still
 /// replaced, because re-recording after an Oils bump is exactly when this
 /// is wanted.
-fn record(report: &RunReport, path: &Path) -> Result<bool> {
+///
+/// A REFRESH KEEPS WHAT THIS RUN COULD NOT DECIDE. On 2026-09-01 a lucky
+/// run of `--update-baseline` dropped `process-sub.test.sh:2`, a case
+/// both shells lose to a race about four runs in five on a quiet machine,
+/// and the entry had to be measured again and put back by hand. A
+/// generated file that quietly loses an entry on a good day is the defect
+/// the whole baseline exists to stop, wearing the generator's hat. So an
+/// undecided case takes the answer already recorded rather than this
+/// run's, in both directions -- a case the run newly failed is not
+/// enshrined as expected either -- and every one of them is named.
+fn record(
+    report: &RunReport,
+    manifest: &crate::OilsManifest,
+    root: &Path,
+    path: &Path,
+) -> Result<bool> {
     let previous = path.is_file().then(|| Baseline::read(path)).transpose()?;
+    let mut failing = report.failing_ids();
+    let mut kept = 0_usize;
     match previous {
         Some(previous) if previous.mismatch(report).is_none() => {
-            Comparison::of(&previous, report).write_text(path)
+            let mut comparison = Comparison::of(&previous, report);
+            let control = control_for(report, manifest, root, &comparison)?;
+            comparison.set_aside(&control.contended());
+            comparison.write_text(path, &control);
+            kept = keep_recorded_answer(&mut failing, &previous.failing, comparison.undecided());
         }
         Some(previous) => eprintln!(
             "{} described another run ({}); recording this one instead",
@@ -303,10 +488,13 @@ fn record(report: &RunReport, path: &Path) -> Result<bool> {
         ),
         None => eprintln!("{} does not exist yet; recording it", path.display()),
     }
-    let baseline = Baseline::from_run(report);
+    let baseline = Baseline::from_run(report, failing);
     let recorded = baseline.failing.len();
     baseline.write(path)?;
-    eprintln!("baseline: wrote {recorded} failing cases");
+    eprintln!(
+        "baseline: wrote {recorded} failing cases, {kept} of them unchanged because \
+               this run could not decide them"
+    );
     Ok(true)
 }
 
@@ -381,6 +569,11 @@ mod tests {
         }
     }
 
+    /// A baseline recorded from a run, the way `record` records one.
+    fn baseline_of(run: &RunReport) -> Baseline {
+        Baseline::from_run(run, run.failing_ids())
+    }
+
     fn options_with_baseline() -> Options {
         Options {
             root: PathBuf::from("."),
@@ -421,7 +614,7 @@ mod tests {
 
     #[test]
     fn a_matching_run_agrees_with_its_baseline() {
-        let recorded = Baseline::from_run(&report(&["case_.test.sh:1"], &[]));
+        let recorded = baseline_of(&report(&["case_.test.sh:1"], &[]));
         let comparison = Comparison::of(&recorded, &report(&["case_.test.sh:1"], &[]));
         assert!(comparison.agrees());
         assert_eq!(comparison.recorded, 1);
@@ -430,7 +623,7 @@ mod tests {
 
     #[test]
     fn a_new_failure_is_named_and_refused() {
-        let recorded = Baseline::from_run(&report(&["alias.test.sh:0"], &[]));
+        let recorded = baseline_of(&report(&["alias.test.sh:0"], &[]));
         let comparison = Comparison::of(
             &recorded,
             &report(&["alias.test.sh:0", "command_.test.sh:3"], &[]),
@@ -444,7 +637,7 @@ mod tests {
     /// fixed or merely won a race it usually loses.
     #[test]
     fn a_case_that_stops_failing_is_named() {
-        let recorded = Baseline::from_run(&report(&["alias.test.sh:0", "case_.test.sh:1"], &[]));
+        let recorded = baseline_of(&report(&["alias.test.sh:0", "case_.test.sh:1"], &[]));
         let comparison = Comparison::of(
             &recorded,
             &passing_report(&["alias.test.sh:0"], &[], &["case_.test.sh:1"]),
@@ -460,7 +653,7 @@ mod tests {
     /// coverage.
     #[test]
     fn an_absent_case_is_not_a_fix() {
-        let recorded = Baseline::from_run(&report(
+        let recorded = baseline_of(&report(
             &["alias.test.sh:0", "case_.test.sh:1", "gone.test.sh:4"],
             &[],
         ));
@@ -477,7 +670,7 @@ mod tests {
     /// decided nothing. The verdict must not.
     #[test]
     fn a_timeout_is_never_an_expected_outcome() {
-        let recorded = Baseline::from_run(&report(&["alias.test.sh:0"], &[]));
+        let recorded = baseline_of(&report(&["alias.test.sh:0"], &[]));
         let comparison = Comparison::of(
             &recorded,
             &report(&["alias.test.sh:0"], &["process-sub.test.sh:1"]),
@@ -490,7 +683,7 @@ mod tests {
 
     #[test]
     fn a_baseline_refuses_a_foreign_run() {
-        let recorded = Baseline::from_run(&report(&["alias.test.sh:0"], &[]));
+        let recorded = baseline_of(&report(&["alias.test.sh:0"], &[]));
         let mut other = report(&["alias.test.sh:0"], &[]);
         other.group = "bash-extension".to_owned();
         let reason = recorded.mismatch(&other).expect("group differs");
@@ -508,26 +701,124 @@ mod tests {
         );
     }
 
+    /// The file the generator writes is the file the comparison reads.
+    ///
+    /// Driven through `Baseline` rather than through `apply`, because
+    /// `apply` asks the pinned Bash about anything it cannot decide and
+    /// this is a question about a file. What the control does with a
+    /// disagreement is `the_undecided_leave_the_verdict`'s and
+    /// `an_undecided_case_keeps_its_recorded_answer`'s.
     #[test]
     fn a_recorded_baseline_reads_back_as_itself() {
         let scratch = ScratchTree::new().unwrap();
         let path = scratch.path().join("BASELINE.toml");
         let run = report(&["case_.test.sh:1", "command_.test.sh:3"], &[]);
-        assert!(apply(&run, &path, true).unwrap());
+        baseline_of(&run).write(&path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(
             text.starts_with("# The cases the bash-comparison"),
             "header missing: {text}"
         );
         assert!(text.contains("case_.test.sh:1"), "{text}");
-        assert!(apply(&run, &path, false).unwrap());
+        let read_back = Baseline::read(&path).unwrap();
+        assert!(Comparison::of(&read_back, &run).agrees());
         assert!(
-            !apply(
-                &passing_report(&["case_.test.sh:1"], &[], &["command_.test.sh:3"]),
-                &path,
-                false
+            !Comparison::of(
+                &read_back,
+                &passing_report(&["case_.test.sh:1"], &[], &["command_.test.sh:3"])
             )
-            .unwrap()
+            .agrees()
+        );
+    }
+
+    /// The control's answer takes a case out of the verdict, and only
+    /// the cases it names.
+    ///
+    /// A case the reference reproduced is still a difference however
+    /// loaded the machine was: that is the property that keeps this a
+    /// control and not a retry.
+    #[test]
+    fn the_undecided_leave_the_verdict() {
+        let recorded = baseline_of(&report(&["alias.test.sh:0", "case_.test.sh:1"], &[]));
+        let run = passing_report(
+            &["alias.test.sh:0", "command_.test.sh:3"],
+            &["process-sub.test.sh:1"],
+            &["case_.test.sh:1"],
+        );
+        let mut comparison = Comparison::of(&recorded, &run);
+        assert_eq!(
+            comparison.disputed(),
+            [
+                "case_.test.sh:1".to_owned(),
+                "command_.test.sh:3".to_owned(),
+                "process-sub.test.sh:1".to_owned(),
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>(),
+            "the disputed set is the live outcomes and nothing else",
+        );
+        assert!(!comparison.agrees());
+
+        comparison.set_aside(
+            &[
+                "case_.test.sh:1".to_owned(),
+                "process-sub.test.sh:1".to_owned(),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(
+            comparison.undecided(),
+            [
+                "case_.test.sh:1".to_owned(),
+                "process-sub.test.sh:1".to_owned()
+            ]
+        );
+        assert_eq!(comparison.newly_failing, ["command_.test.sh:3"]);
+        assert!(comparison.no_longer_failing.is_empty());
+        assert!(comparison.unstable.is_empty());
+        assert!(
+            !comparison.agrees(),
+            "a case the reference reproduced is still a difference",
+        );
+
+        comparison.set_aside(&["command_.test.sh:3".to_owned()].into_iter().collect());
+        assert!(comparison.agrees(), "nothing decided is left to disagree");
+    }
+
+    /// The refresh this node exists for.
+    ///
+    /// `--update-baseline` dropped `process-sub.test.sh:2` on a lucky run
+    /// on 2026-09-01 and it had to be measured again and put back by
+    /// hand. An undecided case now takes the recorded answer in both
+    /// directions.
+    #[test]
+    fn an_undecided_case_keeps_its_recorded_answer() {
+        let recorded: BTreeSet<String> = ["process-sub.test.sh:2".to_owned()].into_iter().collect();
+        let mut failing: BTreeSet<String> = BTreeSet::new();
+        assert_eq!(
+            keep_recorded_answer(
+                &mut failing,
+                &recorded,
+                &["process-sub.test.sh:2".to_owned()]
+            ),
+            1
+        );
+        assert!(
+            failing.contains("process-sub.test.sh:2"),
+            "a lucky run dropped the entry again",
+        );
+
+        let mut failing: BTreeSet<String> =
+            ["process-sub.test.sh:1".to_owned()].into_iter().collect();
+        keep_recorded_answer(
+            &mut failing,
+            &recorded,
+            &["process-sub.test.sh:1".to_owned()],
+        );
+        assert!(
+            failing.is_empty(),
+            "an unlucky run enshrined a race as an expected failure",
         );
     }
 

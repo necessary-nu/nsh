@@ -80,24 +80,44 @@ done
 # binaries are none of our business. Worktrees are why the path is not
 # anchored at $ROOT -- nplan keeps this repository's worktrees outside it.
 #
+# ORPHANED IS NOT YET ABANDONED, which is the 2026-09-02 correction and
+# the first thing this check got wrong. Its first run refused because
+# another session had a `target/spell/nsh` probe of its own, 37 seconds
+# old, at ppid 1 and 98% CPU -- the incident's exact shape and somebody's
+# live measurement. A process is only abandoned once it has outlived
+# anything that could still be waiting for it, so the age has to be part
+# of the fingerprint. The default is this wrapper's own budget: nothing
+# it starts may live longer than $TIMEOUT, so a process outside every
+# boundary that has outlived it is abandoned by the wrapper's own
+# definition. It catches the forty-seven-hour case in fifteen minutes
+# instead of never, and it never catches a probe somebody is watching.
+#
 # The check runs here rather than inside the boundary because inside it
 # there is nothing to see: the sandbox mounts a fresh /proc in a fresh PID
 # namespace, so a contained run cannot observe the host's leftovers. It
 # runs before the containment canary so that a machine in this state costs
 # a refusal rather than a test run.
-abandoned_processes() {
-    local own line rest pid parent exe stat
+abandoned_processes() { # abandoned_processes MINIMUM-AGE-SECONDS
+    local minimum=$1 own line rest pid parent exe stat uptime ticks age
+    local -a fields
     own=$(/usr/bin/readlink /proc/self/ns/pid) || return 0
+    read -r uptime _ < /proc/uptime || return 0
+    uptime=${uptime%%.*}
+    ticks=$(/usr/bin/getconf CLK_TCK) || return 0
     for stat in /proc/[0-9]*/stat; do
         pid=${stat#/proc/}
         pid=${pid%/stat}
         read -r line 2>/dev/null < "$stat" || continue
         # Field 2 is the command in parentheses and may contain spaces and
-        # ')', so the fields after it start at the *last* ") ".
+        # ')', so the fields after it start at the *last* ") ". What is
+        # left begins at field 3, so fields[1] is the parent and
+        # fields[19] is field 22, the start time in clock ticks.
         rest=${line##*') '}
-        parent=${rest#* }
-        parent=${parent%% *}
+        fields=($rest)
+        parent=${fields[1]}
         [[ $parent == 1 ]] || continue
+        age=$((uptime - fields[19] / ticks))
+        ((age >= minimum)) || continue
         exe=$(/usr/bin/readlink "/proc/$pid/exe" 2>/dev/null) || continue
         [[ $exe == */target/* ]] || continue
         case ${exe% (deleted)} in
@@ -117,10 +137,18 @@ case $ABANDONED in
         exit 2
         ;;
 esac
+ABANDONED_AFTER=${NSH_TEST_ABANDONED_AFTER:-$TIMEOUT}
+case $ABANDONED_AFTER in
+    '' | *[!0-9]*)
+        echo "scripts/sandboxed: NSH_TEST_ABANDONED_AFTER must be a number of seconds" >&2
+        exit 2
+        ;;
+esac
 if [[ $ABANDONED != ignore ]]; then
-    mapfile -t ABANDONED_PIDS < <(abandoned_processes)
+    mapfile -t ABANDONED_PIDS < <(abandoned_processes "$ABANDONED_AFTER")
     if ((${#ABANDONED_PIDS[@]})); then
-        echo "scripts/sandboxed: uncontained processes from an earlier run are still alive:" >&2
+        echo "scripts/sandboxed: uncontained processes have outlived this wrapper's own" >&2
+        echo "${ABANDONED_AFTER}-second budget with nothing left to wait for them:" >&2
         /usr/bin/ps -o pid=,etime=,pcpu=,args= -p "${ABANDONED_PIDS[@]}" >&2 || :
         if [[ $ABANDONED == kill ]]; then
             kill -KILL "${ABANDONED_PIDS[@]}" 2>/dev/null || :

@@ -8098,6 +8098,7 @@ children (
                                 id let-the-sweep-see-a-slow-unit
                                 title "Let the artifact sweep see a finding that is slow rather than wrong"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T05:30:38.593256899Z
@@ -8111,6 +8112,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T11:22:15.443163815Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -8139,6 +8147,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "THE RESIDUE OF `stop-the-corpus-eating-the-fuzzing-budget`, LEFT ON PURPOSE AND WRITTEN DOWN RATHER THAN LOST. That node stopped the corpus replay eating the *budget*: the budget now starts at libFuzzer's `#N INITED` line, so a campaign given N seconds mutates for N seconds whatever the corpus costs. It did not stop the replay eating *wall time*, and that cost still scales with the corpus.\n\n    fuzz/corpus/parse         21,267 inputs   121 MB   replay 104 s quiet, 219 s loaded\n    fuzz/corpus/differential   2,940 inputs    12 MB   replay 182 s loaded\n    fuzz/corpus/roundtrip      4,519 inputs    54 MB   not measured\n\nSo `fuzz/run.sh parse 10` is a four-minute command, and it gets slower every time a campaign adds an input. `NSH_FUZZ_REPLAY_ALLOWANCE` (900s) is the knob that has to be raised by hand when it stops fitting; the runner says so loudly and names it, which is why this is a cost rather than a bug.\n\nTHE ANSWER IS NOT `cargo fuzz cmin`, FOR THE REASON THE ORIGINAL NODE GAVE. It minimises the corpus in place and discards inputs, and this corpus was seeded from the Smoosh and Oils suites precisely because real scripts reach constructs a generator takes a very long time to stumble into. A minimised corpus keeps the coverage and loses the provenance.\n\nTHE ANSWER IS PROBABLY TWO CORPORA, WHICH DISCARDS NOTHING. Keep `fuzz/corpus/<target>` as the archive and the regression set. Derive a coverage-equivalent campaign set beside it with `-merge=1 <derived> <archive>`, which executes every archived input against the current build -- so the expensive pass yields both the regression evidence and the reduced set -- and refresh it when the archive has grown. A campaign then seeds from the derived set, whose size is bounded by the number of distinct feature sets rather than by how many inputs have accumulated: libFuzzer's own numbers say `parse` reduces from 21,258 files to `corp: 2633` and 6 MB, and `differential` from 2,938 to `corp: 1554`.\n\nWHAT MAKES IT REAL WORK RATHER THAN A ONE-LINER. Staleness has to be tracked (a stamp against the archive) or the derived set silently stops representing the archive. New finds land in the derived set and have to reach the archive. And the merge is crash-resistant by design -- it skips a crashing input and retries rather than aborting -- so it writes artifacts but exits zero, which means anything calling it a regression check has to read the artifact directory rather than the status. `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` is the rule that bites there.\n\nDONE WHEN. A short campaign on `parse` is seconds of start-up rather than minutes, no archived input has been deleted, and every archived input is still executed against the build by something that reports what it found."
+                                    }
+
+                                    {
+                                        at 2026-09-02T11:23:21.970033439Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }
@@ -8182,6 +8197,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found on 2026-09-02 while closing `close-associative-assignment-diagnostics`, and not part of it -- it is on the *read* side, which that node never touched. Measured against the pinned Bash 5.3.15; pre-existing.\n\nA key whose bytes spell `[...]=`, which Bash 5.1's key/value form makes easy to produce, cannot be read back through a subscript:\n\n    declare -A m; m['[a]=1']=x; echo \"[${m['[a]=1']}]\"\n      bash: [x]      nsh: []\n    ${#m[@]} is 1 in both, so the write stored it and only the read misses.\n\nNeighbouring shapes are fine, which is what narrows it:\n\n    m['a]b']=x;  ${m['a]b']}    both: x\n    m['[x]']=v;  ${m['[x]']}    both: v\n\nSo it is not brackets as such and not a closing bracket as such: it is a *balanced* bracketed run followed by `=`. The suspect is the split of `m[...]` into name and subscript on the read path -- `expand::typed::split_subscript` and `variables::arrays::resolve_text_selector` -- against Bash's `skipsubscript`, which counts nesting and honours quoting.\n\nHOW IT WAS MET. `declare -A m=(foo bar [a]=1 x)` stores the literal key `[a]=1`, which is Bash's own behaviour and is now this shell's; a differential row that read the element back had to be cut down to `${#m[@]}` and one other key because of this. The write side and `declare -p` both agree with Bash on the key.\n\nDONE WHEN. `${m['[a]=1']}` reads what the assignment wrote, and the differential row in `bash_associative_assignment.rs` that had to be trimmed reads the element again."
+                                    }
+
+                                    {
+                                        at 2026-09-02T11:23:56.571452861Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }
@@ -8346,6 +8368,98 @@ children (
                                 id build-the-survey-baseline-from-what-is-committed
                                 title "Stop the survey baseline recording another agent's uncommitted work"
                                 kind @test
+                                log (
+                                    {
+                                        at 2026-09-02T11:22:22.298323411Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "THE BASH-COMPARISON BASELINE IS REFRESHED FROM `target/release/nsh`, WHICH IN A SHARED CHECKOUT IS EVERY AGENT'S WORK AT ONCE. Found 2026-09-02 while closing `spell-an-unassigned-array-back`, with the two runs that prove it.\n\n`ee98cec` removed `assign.test.sh:19` and `assign.test.sh:45` from `tests/surveys/oils/BASH_COMPARISON_FAILURES.toml` and said in its message that they \"already passed, from the associative-assignment work\". They did not pass at its parent. Measured, each with a shell built in a worktree holding exactly one set of files:\n\n    b028f47 alone                     471 fail + 2 = 473, baseline matched on all 473\n    b028f47 + spell-an-unassigned...  471 fail, `- assign.test.sh:19`, `- assign.test.sh:45`\n\nSo both ids left the failing set because of an *uncommitted* change in the shared checkout, and the refresh enshrined it under another node's name. Nothing was lost -- the fix landed as `92f97f9` an hour later -- but the record now attributes a survey move to a commit that did not make it, and the reverse case is the dangerous one: a baseline refreshed while someone's half-finished work is in the tree can *add* a failing id that nothing committed explains, and the next agent will hunt it in the wrong file.\n\nIT IS NOT A DISCIPLINE PROBLEM AND CANNOT BE FIXED BY ASKING. Every agent in this checkout builds `target/release/nsh` from the shared working tree by design -- that is what `cargo build --release -p nsh-cli` does -- and `--update-baseline` has no way to know whose changes are in the binary it just measured. The README's command is the one everybody runs.\n\nWHAT THE RUN ALREADY KNOWS. `RunReport` records `shell` and `shell_sha256`, so a refresh can already say *which bytes* it measured; what it cannot say is which commit those bytes came from. `git status --porcelain` is one call away and the answer is a boolean: a refresh from a dirty tree is a refresh of unknown provenance.\n\nWHAT TO DO, in rising order of cost. Refuse `--update-baseline` when the working tree carries modifications outside the baseline file itself, with an override that has to be spelled out (`--update-baseline-from-dirty-tree`, recorded in the file's header). Or record the tree state in the header beside `oils_commit`, so a later reader can see that a refresh was taken over uncommitted work. The first is what `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` argues for: a measurement whose subject cannot be named is not a measurement.\n\nRELATED AND NOT THE SAME. `ee98cec` itself filed `give-each-gate-run-its-own-shell` about two runs colliding on one shell path; this is about one run measuring a shell nobody can identify afterwards. The two share a cause -- the shared checkout -- and neither fixes the other.\n\nDONE WHEN. `--update-baseline` in a dirty tree either refuses or records what it could not vouch for, and the refusal names the files that made the tree dirty."
+                                    }
+                                )
+                            }
+
+                            {
+                                id spell-a-valueless-name-back
+                                title "Answer `@A` and `@a` for a name that carries attributes and no value"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:22:45.893338038Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `spell-an-unassigned-array-back`, and not part of it: that node fixed the *array* half of the question and these are the scalar half, wrong the same way before and after. Measured against the pinned Bash 5.3.15 on `92f97f9`; pre-existing.\n\nA name that carries an attribute and holds no value has a declaration to spell and this shell spells nothing:\n\n    declare -i n; echo \"[${n@A}]\"     bash: [declare -i n]   nsh: []\n    readonly x;   echo \"[${x@A}]\"     bash: [declare -r x]   nsh: []\n    f(){ local x; echo \"[${x@A}]\"; }  bash: [declare x]      nsh: []\n\nand read whole it spells an element that is not there:\n\n    declare -i n; echo \"[${n[@]@A}]\"  bash: [declare -i n]   nsh: [declare -i n='']\n    declare y;    echo \"[${y[@]@A}]\"  bash: []               nsh: [y='']\n\nThe rule the rows describe is Bash's `att_` set rather than the value: `${y@A}` on a *global* `declare y` is empty because the name carries no attribute at all, while the same name declared `local` prints `declare x` -- `att_local` is an attribute and Bash's own `declare -p`-alike renderer has a letter table with nothing in it for that one. `${undeclared@A}` and `${1@A}` stay empty in both shells, which is the boundary.\n\n`@a` has the same shape one level down. It answers for the name and not for the value, so a subscript that reads nothing still answers:\n\n    declare -a z; echo \"[${z[@]@a}]\"  bash: [a]   nsh: []\n    declare -i n; echo \"[${n[@]@a}]\"  bash: [i]   nsh: []\n\nbut `declare -a z=(); ${z[@]@a}` is empty in both, because `@a` maps over the elements and an assigned empty array has none. Bash reaches the one-word answer only when the array path finds no value to walk, which is the same invisible-variable route `spell-an-unassigned-array-back` took.\n\nWHERE. `expand::typed::bash::transform`'s availability gate and `assignment_fields`. `92f97f9` moved the gate as far as an array kind -- `${z[5]@A}` on `z=(1 2)` is now `declare -a z` in both -- and left the attributed scalar where it was, deliberately, because it is a different question from that node's.\n\nDONE WHEN. `${name@A}` prints a declaration wherever Bash prints one and nothing wherever Bash prints nothing, `${name[@]@A}` stops inventing `=''` for a name with no value, `${name[@]@a}` answers the letters for a valueless name, and a differential table runs every row through both shells."
+                                    }
+                                )
+                            }
+
+                            {
+                                id list-the-names-that-only-carry-attributes
+                                title "List a name that carries attributes and no value in `declare -p`"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:23:07.013494122Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `spell-an-unassigned-array-back`. That node made the bare `declare -p` listing carry a declared *array* (`declare -a z`), which it did not before; the same listing still drops every other valueless name. Measured against the pinned Bash 5.3.15 on `92f97f9`; pre-existing.\n\n    declare -i n; declare -p | grep -c ' n$'   bash: 1   nsh: 0\n    readonly x;   declare -p | grep -c ' x$'   bash: 1   nsh: 0\n    declare y;    declare -p | grep -c ' y$'   bash: 1   nsh: 0\n\nNamed directly it prints -- `declare -p n` is `declare -i n` in both -- so it is the *listing*'s predicate and not the renderer. Bash's own set shows the same rule on its own names: `declare -i BASHPID`, `declare -- BASH_ARGV0` and `declare -a FUNCNAME` are all in its `declare -p` with no value beside them.\n\nWHERE. `variables::value::declared_names`, which `92f97f9` split from `valued_names` for exactly this reason: `${!prefix@}` lists names that hold a value (Bash lists `hello=()` there and not `declare -a z`), and `declare -p` lists names that hold a declaration. The first half of that split is done; widening `declared_names` from \"a value or an array kind\" to \"a value or anything to declare\" is the second.\n\nWATCH WHAT WIDENS WITH IT. The predicate is shared with `declare -p`'s attribute filters (`declare -pi`, `declare -pr`), which is right, and it must not reach `set`, `export -p` or `${!prefix@}`, none of which lists an invisible name in Bash. And this shell creates entries of its own for names a script never declared; a wider listing will show them, so the fix has to be measured against a full `declare -p` diff rather than against one name.\n\nDONE WHEN. `declare -p` lists every name Bash lists and no name Bash omits, for at least `declare -i n`, `readonly x`, `declare y`, `local x` and a nameref, and a differential test compares the *set* of names rather than one line."
+                                    }
+                                )
+                            }
+
+                            {
+                                id keep-allexport-off-an-array
+                                title "Match Bash on which names `set -a` exports"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:23:28.663829314Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `spell-an-unassigned-array-back`, and not part of it. Measured against the pinned Bash 5.3.15 on `92f97f9`; pre-existing, and wrong in both directions at once.\n\n`set -a` exports an array here and Bash never exports one:\n\n    set -a; z=(1);            declare -p z   bash: declare -a z=([0]=\"1\")   nsh: declare -ax z=([0]=\"1\")\n    set -a; declare -a z=();  declare -p z   bash: declare -a z=()          nsh: declare -ax z=()\n    set -a; declare -a z;     declare -p z   bash: declare -a z             nsh: declare -ax z\n\nand it does *not* export a declaration Bash does:\n\n    set -a; declare -i n;     declare -p n   bash: declare -ix n            nsh: declare -i n\n\nso the two shells disagree about the letter on four of the five shapes, and agree on the plain `set -a; n=1` scalar.\n\nNO VALUE ESCAPES EITHER WAY, which is why nothing else has caught it. `[spec:nsh:req:compat.bash.arrays-declarations]` already keeps an array out of the environment -- `environment()` passes only a scalar -- so `set -a; z=(1); env | grep '^z'` is empty in both shells. It is the `x` on the declaration that differs, which `declare -p`, `${z[@]@A}` and `export -p` all print.\n\nWHERE. `variables::set_entry` sets `attributes.exported` from `ShellOption::AllExport` before it knows what kind of value is landing, and `arrays::store` goes through `set_entry` on purpose so a new name picks up export state and callbacks. Bash decides the other way round: `bind_variable` marks a *scalar* assignment for export under `-a` and an array assignment is not one. The `declare -i n` half is the mirror -- Bash's `declare` applies `-a`'s export to a name it is declaring, and this shell's `declare` does not go through `set_entry` at all when there is no value.\n\nDONE WHEN. Each of the five shapes above prints the reference's letters, `set -a` still exports a plain scalar assignment, and a differential table holds all of them."
+                                    }
+                                )
+                            }
+
+                            {
+                                id refuse-to-destroy-an-array-kind
+                                title "Refuse `declare +a` and `declare +A` as Bash refuses them"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:23:48.005197813Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `spell-an-unassigned-array-back`, and not part of it. Measured against the pinned Bash 5.3.15 on `92f97f9`; pre-existing.\n\n    declare -a z; declare +a z; declare -p z; echo rc=$?\n\n      bash: declare: z: cannot destroy array variables in this way   (status 1)\n            declare -a z                                             rc=0\n      nsh:  declare -a z                                             rc=0\n\nso this shell accepts `+a` silently, answers 0, and leaves the kind alone -- the *value* ends up right and the status does not. `declare +A m` is the same. `+x` is the one Bash does take back (`declare -x s; declare +x s` clears the export in both), which is why the parser already reads a `+` prefix at all.\n\nBash's rule is narrow and worth writing down: an attribute letter that changes a variable's *representation* cannot be removed, so `+a`, `+A` and `+n` on an existing array or reference report and fail, while `+x`, `+r` (which is itself refused, for a different reason), `+i`, `+l`, `+u` and `+t` are ordinary. It is a diagnostic-and-status divergence with no data behind it, which is why nothing in the surveys sees it.\n\nWHERE. `builtins::declare::parse_options` reads `+a`/`+A` into `requested.kind` with the same `enable` flag every other letter uses, and `apply` then consults `requested.kind` only when it is `Some`. The refusal has to happen where the name is known, because `declare +a nosucharray` is not an error in Bash -- there is no array to destroy.\n\nDONE WHEN. `declare +a` and `declare +A` on a name that holds that kind report and answer 1 while leaving the variable as it was, they are silent on a name that does not, and a differential row covers each."
+                                    }
+                                )
+                            }
+
+                            {
+                                id stop-the-noclobber-append-case-flaking
+                                title "Stop the noclobber-append case passing about a third of loaded runs"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:25:56.207226895Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "`sh-options.test.sh:23` IS THE ONLY CASE THE BASELINE'S CONTROL MAY NOT EXCUSE, AND THAT IS THE POINT OF FILING IT. Found 2026-09-02 while closing `give-the-failing-case-baseline-the-gates-control`.\n\nThe case is \"noclobber on `&>> >>`\": `set -C`, then two appends to `$TMP/no-clobber` with `>>` and two with `&>>`, comparing status and file contents. It is `BASH_COMPARISON_FAILURES.toml`'s, expected to fail, and `stop-the-closure-gate-flaking` already named it in 2026-08-30 as one of two cases that \"flake the other way\" -- toward a *pass*, which is the direction nothing goes red for. That node fixed the gate; nothing has ever looked at the case.\n\nMEASURED, and the load is not the variable it looks like. Ten consecutive `run-oils --group bash-comparison --baseline` comparisons at load 64 to 97: four reported a difference and all four were this case and nothing else, while the control excused every case the pinned Bash also loses -- `process-sub.test.sh:1` at 2 of 15, `:2` at 4, 7, 8 and 10 of 15, `background.test.sh:7` at 5 of 15, `:12` at 3 and 7 of 15. Ten comparisons at load 6 to 14 matched ten times. So after the control, this is the whole of the baseline's remaining load dependence.\n\nThe control asks the pinned Bash, fifteen times, and it reproduced its own recorded result every time on every one of those four runs. So the instability is this shell's alone, and a control that excused it would be the retry the design exists not to be.\n\nIT IS NOT LOAD, IT IS THE RUN IT IS IN. Same shell, same machine, same load 94, three shapes:\n\n    the case on its own (`--case sh-options.test.sh:23`)      failed 6 of 6\n    its whole spec file (`--spec sh-options.test.sh`)         failed 4 of 6\n    the whole bash-comparison group                           failed 6 of 10\n\nSo it never flakes when it runs alone and flakes about a third of the time when other cases run before it -- at a load where the isolated form is perfectly stable. Every case gets its own scratch directory and its own `$TMP` (`execute_case` creates `<scratch>/<spec>-<index>`), so this is not state shared through the filesystem; something about running after other cases changes what this one does.\n\nTHAT SHAPE IS WORTH MORE THAN THIS CASE. `wait-for-a-process-substitution-to-finish` recorded that the gate's control missed the reference's own loss three times out of three at 0 of 15, a 1-in-1000 coincidence at the measured rate, and guessed that the control's samples are not independent of the moment the gate's run lost the case. A case whose flake rate depends on whether it runs alone or in a group is exactly that mechanism, seen in the other shell: the control's one-file run is a systematically different environment from the group run whose verdict it is checking.\n\nDONE WHEN. The mechanism is written down -- what running after other cases changes -- and either the case fails in a group run as reliably as it does alone, or the difference is a divergence with a reason. A rate is not the deliverable; the reason is."
+                                    }
+                                )
+                            }
+
+                            {
+                                id refuse-to-regenerate-a-file-another-session-changed
+                                title "Refuse to regenerate a checked-in file another session has changed"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T11:26:23.072586533Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "`--update-baseline` OVERWROTE ANOTHER SESSION'S UNCOMMITTED WORK, AND NOTHING COULD HAVE STOPPED IT. Done by me on 2026-09-02 while closing `give-the-failing-case-baseline-the-gates-control`; the file was reconstructed and restored within minutes, and the near-miss is the finding.\n\nWHAT HAPPENED. `tests/surveys/oils/BASH_COMPARISON_FAILURES.toml` had been re-recorded in the shared checkout by another session, which had dropped `assign.test.sh:19`, `assign.test.sh:45` and `glob.test.sh:37` from the failing list -- consistent with the uncommitted array and pathname work sitting in `crates/nsh/src/variables/*` and `crates/nsh/src/expand/typed/pathname.rs`, which is presumably fixing exactly those three. A comparison run against a shell built from HEAD reported all three as newly failing, which looked like a stale baseline; a refresh then wrote HEAD's answer over theirs. It was restored byte-for-byte from `HEAD` minus those three ids, which the comparison's own output proved was the whole of their change: 470 recorded, three `+` lines, no `-` lines.\n\nWHY IT IS THE TOOL'S PROBLEM AND NOT ONLY MINE. The generator's whole purpose is that the checked-in file is authoritative and machine-written. On a checkout with one worktree per session that is safe. On this one -- where five sessions share a tree and the house rules already forbid `git add -A`, `cargo fmt --all` and `git checkout <path>` for exactly this reason -- a generator that writes a tracked file is another way to discard work silently, and it is the one way that no rule currently covers.\n\nIt also produced a false diagnosis on the way through, which is the second cost: for twenty minutes the evidence said \"the checked-in baseline is stale by three deterministic failures\", and the three were bisected against a build of the commit that recorded it before the real explanation appeared.\n\nWHAT TO DO. `--update-baseline` should refuse when the file it is about to write differs from its committed content, unless the caller says to overwrite -- the same shape as the `mismatch` pins already in the file, one level up. It needs `git status --porcelain <path>` or an equivalent, which is more git than `nsh-survey` has today, so the alternative is a `--force` requirement plus printing the exact diff before writing. The same question applies to every generated tracked file in the repository, not only this one: `BASH_DISPOSITIONS.toml`, `BASH_REFERENCE_CASES.json` and `crates/nsh-lint/FUNCTION_DENSITY.toml` are all written or read as registers.\n\nDONE WHEN. A refresh of a tracked generated file that another session has modified is refused, names the difference, and says what to do -- and the refusal is tested rather than asserted."
+                                    }
+                                )
                             }
                         )
                     }

@@ -52,7 +52,13 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
      * all, and reading its summary count instead is the mistake the
      * baseline exists to retire. */
     match &options.baseline {
-        Some(path) => baseline::apply(&report, path, options.update_baseline),
+        Some(path) => baseline::apply(
+            &report,
+            &manifest,
+            &options.root,
+            path,
+            options.update_baseline,
+        ),
         None => Ok(report.totals.is_success()),
     }
 }

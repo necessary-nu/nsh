@@ -1424,10 +1424,12 @@ assertions (
     {id close-associative-assignment-diagnostics, kind @complete, author "brendan@necessary.nu", at 2026-09-02T05:49:17.419364089Z}
     {id stop-an-interactive-shell-exiting-on-sigchld, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:32:52.847819724Z}
     {id match-bash-dot-names-and-literal-paths, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:48:57.256382473Z}
-    {id let-the-sweep-see-a-slow-unit, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:55:39.71182461Z}
+    {id let-the-sweep-see-a-slow-unit, kind @complete, author "brendan@necessary.nu", at 2026-09-02T11:22:15.443163815Z}
     {id spell-an-unassigned-array-back, kind @complete, author "brendan@necessary.nu", at 2026-09-02T11:21:42.95771595Z}
     {id kill-a-survey-case-the-harness-abandoned, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:22:08.44381477Z}
     {id give-the-failing-case-baseline-the-gates-control, kind @doing, author "brendan@necessary.nu", at 2026-09-02T10:22:16.069586104Z}
+    {id bound-what-a-campaign-pays-to-replay-its-corpus, kind @doing, author "brendan@necessary.nu", at 2026-09-02T11:23:21.970033439Z}
+    {id read-a-key-that-spells-an-assignment, kind @doing, author "brendan@necessary.nu", at 2026-09-02T11:23:56.571452861Z}
 )
 
 impl_evidence (

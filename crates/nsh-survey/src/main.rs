@@ -11,6 +11,7 @@ use std::process::Command;
 
 mod bash_gate;
 mod bash_reference;
+mod control;
 mod oils_runner;
 mod process;
 mod smoosh;

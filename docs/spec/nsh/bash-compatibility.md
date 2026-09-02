@@ -337,3 +337,62 @@ shells lose it, and the only way this one could stop would be to wait for a
 1; tac)` returns in 4 ms under both -- and which would hang the shell on
 `exec 3> >(sleep 5); exec 3>&-`. A run that names the case as undecided is the
 control working, not the gate failing.
+
+### The same control, for the failing-case baseline
+
+`nsh-survey run-oils --group bash-comparison --baseline PATH` is the other
+comparison this profile is checked with: `tests/surveys/oils/BASH_COMPARISON_FAILURES.toml`
+lists every case in that group this shell is expected to fail, and the run
+exits non-zero and names every id on either side of a difference. It had the
+gate's load-dependence and none of the gate's answer, in both directions.
+Measured 2026-09-02 over 100 harness runs each: `process-sub.test.sh:2` is in
+that list as an expected failure and this shell passed it 41 times at load 87,
+while `process-sub.test.sh:1` is not in it and this shell failed it about 9
+times in 100. So a loaded run reported a difference one way or the other and a
+quiet one did not.
+
+Both checks now call one control, with the same budget and the same rule: when
+a comparison turns on a case, the pinned Bash is asked whether it still
+reproduces its own recorded result on the disputed spec files, and a case it
+cannot is undecided this run -- named with the count behind it, and left out of
+the verdict. It is asked of the reference alone in both, so a case this shell
+loses that the reference wins every time is still a difference at any load.
+
+**The generator needed it more than the comparison did.** `--update-baseline`
+takes the run's failing set as the new list, so a lucky run silently *deletes*
+a known-flaky entry rather than merely reporting one. `process-sub.test.sh:2`
+went that way on 2026-09-01 and had to be measured again and put back by hand,
+and it was noticed only because somebody remembered it should be there. A
+refresh now keeps the answer already recorded for every case the run could not
+decide, in both directions: a case the run newly failed is not enshrined as an
+expected failure either.
+
+**What the control cannot do, measured.** Over ten consecutive comparisons at
+load 6 to 14 the verdict was *matched* ten times, with the control excusing
+`process-sub.test.sh:2` on the one run that flipped it. Over ten more at load
+64 to 97 it was *matched* six times and reported a difference four times -- and
+every one of those four was the same case, `sh-options.test.sh:23` ("noclobber
+on `&>> >>`"), with nothing else on the list. The control did its half on those
+same runs: it excused `process-sub.test.sh:1` at 2 of 15, `:2` at 4, 7, 8 and
+10 of 15, `background.test.sh:7` at 5 of 15 and `:12` at 3 and 7 of 15.
+
+`sh-options.test.sh:23` is not one the control may excuse. It is in the list as
+an expected failure, it passed four of those ten loaded runs, and the pinned
+Bash reproduced its own recorded result in all fifteen control runs every time
+it was asked. A case only *this* shell is unstable on is a defect of this
+shell, and a control that excused it would be the retry this design exists not
+to be. Nor is load the variable it looks like: at load 94 the case fails 6 of 6
+runs on its own, 4 of 6 when its whole spec file runs, and 6 of 10 in the whole
+group -- so it is stable alone and unstable behind other cases, at one load. It
+is filed as `stop-the-noclobber-append-case-flaking` rather than absorbed into
+the machine's column.
+
+That shape looked like a lead on the gate's three misses at 0 of 15 -- a
+one-file control run being a different environment from the group run whose
+verdict it checks -- and it was tested rather than assumed. Interleaved at load
+89 to 112, the pinned Bash lost `process-sub.test.sh:1` in 2 of 9 whole-group
+runs and 26 of 135 one-file runs, 22% against 19%, which nine group samples
+cannot separate from equal. So the guess in the constant's own doc comment is
+not supported by this evidence, the three misses stay unexplained, and the
+count behind every undecided case stays printed so that the next person can see
+the thing rather than infer it.
