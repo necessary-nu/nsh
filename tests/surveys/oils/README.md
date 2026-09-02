@@ -226,6 +226,38 @@ recorded at 848e0ab over 19 uncommitted path(s), whose effects are in this
 list and in no commit: crates/nsh/src/pattern.rs, ...
 ```
 
+### It will not write over a change it did not make
+
+A generator that writes a tracked file can destroy a colleague's work in one
+command, and on 2026-09-02 one did: this file had been re-recorded in the
+shared checkout by another session, a comparison against a shell built from
+HEAD reported their three dropped ids as newly failing -- which reads exactly
+like a stale baseline -- and `--update-baseline` wrote HEAD's answer over
+theirs. It was restored byte for byte, and only because somebody noticed.
+
+So a refresh refuses a generated file this checkout has already changed since
+HEAD, prints the difference, and says so:
+
+```text
+nsh-survey: refusing to overwrite tests/surveys/oils/BASH_COMPARISON_FAILURES.toml:
+it is generated, and this checkout has already changed it since HEAD.
+  -  "assign.test.sh:19",
+  +  "glob.test.sh:37",
+Read that difference before you discard it. ...
+```
+
+The check runs before the survey and again immediately before the write,
+because the group run is minutes long and is exactly the window another
+session re-records in. `--overwrite-a-changed-file` is the way to say you
+have read it. `calibrate-bash-reference` takes the same flag and guards
+`BASH_REFERENCE_CASES.json` and `BASH_REFERENCE.toml` the same way.
+
+Untracked files are not guarded -- a path git has never heard of has no
+committed content to protect, and recording a register for the first time is
+that case. `import-oils` is not guarded either: it rewrites the whole corpus
+by design, and what it writes is verified byte for byte against `SOURCE.toml`
+and `FILES.sha256`, which is a stronger statement than "differs from HEAD".
+
 `--format ids` prints just the failing ids, one per line, sorted. Do not
 recover them from the text report with a pattern: the one used before this
 existed was `[a-z0-9-]`, which has no underscore, so `case_.test.sh:1`,

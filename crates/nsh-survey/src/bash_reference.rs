@@ -120,10 +120,12 @@ pub(crate) fn calibrate_command(mut args: env::ArgsOs, default_root: PathBuf) ->
     let mut shell = None;
     let mut sources = None;
     let mut root = None;
+    let mut overwrite = false;
     while let Some(argument) = args.next() {
         match argument.to_str() {
             Some("--shell") => shell = Some(required_path(args.next(), "--shell PATH")?),
             Some("--sources") => sources = Some(required_path(args.next(), "--sources SOURCES")?),
+            Some("--overwrite-a-changed-file") => overwrite = true,
             Some(value) if value.starts_with('-') => {
                 return Err(format!("unknown calibrate option {value:?}").into());
             }
@@ -133,7 +135,7 @@ pub(crate) fn calibrate_command(mut args: env::ArgsOs, default_root: PathBuf) ->
     }
     let shell = shell.ok_or("calibrate-bash-reference requires --shell PATH")?;
     let sources = sources.ok_or("calibrate-bash-reference requires --sources SOURCES")?;
-    calibrate(&root.unwrap_or(default_root), &sources, &shell)
+    calibrate(&root.unwrap_or(default_root), &sources, &shell, overwrite)
 }
 
 pub(crate) fn verify_command(mut args: env::ArgsOs, default_root: PathBuf) -> Result<()> {
@@ -599,7 +601,26 @@ pub(crate) struct VerifiedReference {
     pub(crate) excluded: usize,
 }
 
-fn calibrate(root: &Path, sources: &Path, shell: &Path) -> Result<()> {
+/// The two tracked files a calibration replaces.
+///
+/// Both are registers this repository reads as authority --
+/// `BASH_REFERENCE_CASES.json` decides which cases the closure gate may
+/// judge at all -- so a calibration that quietly wrote over somebody
+/// else's re-record would move the gate's own definition of expected.
+fn guard_generated_files(root: &Path, overwrite: bool) -> Result<()> {
+    for name in [CASES_FILE, PROFILE_FILE] {
+        crate::provenance::guard_generated(&root.join(name), overwrite)?;
+    }
+    Ok(())
+}
+
+fn calibrate(root: &Path, sources: &Path, shell: &Path, overwrite: bool) -> Result<()> {
+    /* Asked before the calibration rather than after it: the run is two
+     * whole survey groups, and a refusal that arrives at the write has
+     * already spent all of them. Asked again at each write, because the
+     * window between is exactly long enough for another session to
+     * re-record one of these. */
+    guard_generated_files(root, overwrite)?;
     verify_source_files(sources)?;
     verify_toolchain()?;
     let root = fs::canonicalize(root)?;
@@ -645,6 +666,7 @@ fn calibrate(root: &Path, sources: &Path, shell: &Path) -> Result<()> {
         build_case_manifest(&manifest, &catalog, &reports, &receipt.binary_sha256)?;
     let case_text = format!("{}\n", serde_json::to_string_pretty(&case_manifest)?);
     let case_sha256 = sha256_bytes(case_text.as_bytes());
+    guard_generated_files(&root, overwrite)?;
     fs::write(root.join(CASES_FILE), &case_text)?;
 
     let profile = ReferenceProfile {
@@ -677,6 +699,7 @@ fn calibrate(root: &Path, sources: &Path, shell: &Path) -> Result<()> {
             groups,
         },
     };
+    guard_generated_files(&root, overwrite)?;
     fs::write(root.join(PROFILE_FILE), toml::to_string_pretty(&profile)?)?;
     verify(&root, Some(sources), Some(&shell))?;
     println!(

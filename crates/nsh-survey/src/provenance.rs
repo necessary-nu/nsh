@@ -38,6 +38,7 @@
 //! least named.
 
 use std::error::Error;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -100,8 +101,9 @@ impl Provenance {
     /// The file about to be written is exempt because it is the output:
     /// a refresh that refused because its own target had been
     /// re-recorded would be refusing the thing it was asked to fix.
-    /// Whether *that* difference is somebody else's work is a separate
-    /// question, asked separately.
+    /// Whether *that* difference is somebody else's work is
+    /// [`guard_generated`]'s question, and it is asked separately
+    /// because the two have different answers.
     pub(crate) fn read(checkout: &Path, subject: &Path) -> Result<Self> {
         let root = String::from_utf8(git_output(checkout, &["rev-parse", "--show-toplevel"])?)?
             .trim()
@@ -112,7 +114,10 @@ impl Provenance {
             .to_owned();
         let exempt = relative_to(&root, subject);
         let status = git_output(&root, &["status", "--porcelain=v1", "-z"])?;
-        let mut uncommitted = changed_paths(&status)?;
+        let mut uncommitted: Vec<String> = changes(&status)?
+            .into_iter()
+            .map(|(_, path)| path)
+            .collect();
         uncommitted.retain(|path| {
             !path.starts_with(NOT_AN_INPUT) && exempt.as_deref() != Some(path.as_str())
         });
@@ -157,21 +162,47 @@ impl Provenance {
 }
 
 /// The path `subject` names inside `root`, in git's own spelling.
+///
+/// BOTH SIDES ARE RESOLVED, and the reason is a bug this had. The survey
+/// root is reached as `CARGO_MANIFEST_DIR/../../tests/surveys/oils`, and
+/// `std::path::absolute` keeps a `..` rather than folding it, so
+/// `strip_prefix` failed and every check built on this answered "not in
+/// the checkout" -- silently, because a path outside the checkout is a
+/// legitimate answer. `calibrate-bash-reference` was guarded by a guard
+/// that could not fire.
 fn relative_to(root: &Path, subject: &Path) -> Option<String> {
-    let absolute = std::path::absolute(subject).ok()?;
-    let relative = absolute.strip_prefix(root).ok()?;
+    let root = fs::canonicalize(root).ok()?;
+    let relative = resolved(subject)?;
+    let relative = relative.strip_prefix(&root).ok()?;
     Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
-/// Every path `git status --porcelain=v1 -z` named, renames included.
+/// `path` with every `.` and `..` folded away, whether or not it exists.
+///
+/// A register being recorded for the first time has no file to
+/// canonicalize, but its directory always does.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    if let Ok(existing) = fs::canonicalize(path) {
+        return Some(existing);
+    }
+    let parent = fs::canonicalize(path.parent()?).ok()?;
+    Some(parent.join(path.file_name()?))
+}
+
+/// Every change `git status --porcelain=v1 -z` named, as its two status
+/// letters and the path they are about, renames included.
 ///
 /// The `-z` form is the only one that cannot lie about a filename: the
 /// default quotes anything unusual, and a survey that parsed the quoted
 /// form would silently drop the paths hardest to notice. A rename emits
-/// its two halves as two records; both are uncommitted, so both are kept
-/// and the order between them does not matter.
-fn changed_paths(status: &[u8]) -> Result<Vec<String>> {
-    let mut paths = Vec::new();
+/// its two halves as two records; both are uncommitted, so both are kept,
+/// carrying the same letters, and the order between them does not matter.
+///
+/// The letters are kept because `??` -- a path git has never heard of --
+/// is a different answer from every other code, and only one of the two
+/// readers below cares which.
+fn changes(status: &[u8]) -> Result<Vec<(String, String)>> {
+    let mut changes: Vec<(String, String)> = Vec::new();
     let mut renamed = false;
     for record in status.split(|byte| *byte == 0) {
         if record.is_empty() {
@@ -179,7 +210,11 @@ fn changed_paths(status: &[u8]) -> Result<Vec<String>> {
         }
         if renamed {
             renamed = false;
-            paths.push(String::from_utf8(record.to_vec())?);
+            let code = changes
+                .last()
+                .map(|(code, _)| code.clone())
+                .unwrap_or_default();
+            changes.push((code, String::from_utf8(record.to_vec())?));
             continue;
         }
         if record.len() < 4 || record[2] != b' ' {
@@ -190,9 +225,12 @@ fn changed_paths(status: &[u8]) -> Result<Vec<String>> {
             .into());
         }
         renamed = record[0] == b'R' || record[0] == b'C';
-        paths.push(String::from_utf8(record[3..].to_vec())?);
+        changes.push((
+            String::from_utf8(record[..2].to_vec())?,
+            String::from_utf8(record[3..].to_vec())?,
+        ));
     }
-    Ok(paths)
+    Ok(changes)
 }
 
 /// Read this crate's checkout, refusing one that cannot vouch for the
@@ -202,11 +240,97 @@ pub(crate) fn vouch(subject: &Path, allow_uncommitted: bool) -> Result<Provenanc
         .vouched(subject, allow_uncommitted)
 }
 
+/// The top of the checkout this crate is built from.
+fn checkout_root() -> Result<PathBuf> {
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR"));
+    Ok(PathBuf::from(
+        String::from_utf8(git_output(checkout, &["rev-parse", "--show-toplevel"])?)?
+            .trim()
+            .to_owned(),
+    ))
+}
+
+/// How much of the difference is worth printing before it stops being
+/// read.
+///
+/// The whole point is that somebody looks at it, and a 470-line register
+/// replaced wholesale would produce a thousand-line wall. Forty lines is
+/// enough to see three ids move, which is the shape the near-miss had.
+const DIFF_LINES: usize = 40;
+
+/// Refuse to overwrite a tracked generated file this checkout has changed.
+///
+/// A GENERATOR THAT WRITES A TRACKED FILE CAN DESTROY A COLLEAGUE'S WORK
+/// IN ONE COMMAND, and on 2026-09-02 one did.
+/// `tests/surveys/oils/BASH_COMPARISON_FAILURES.toml` had been re-recorded
+/// in this shared checkout by another session, which had dropped three ids
+/// from the failing list. A comparison run against a shell built from HEAD
+/// reported all three as newly failing, which reads exactly like a stale
+/// baseline; `--update-baseline` then wrote HEAD's answer over theirs. It
+/// was restored byte for byte within minutes, and only because somebody
+/// noticed.
+///
+/// The house rules already forbid `git add -A`, `cargo fmt --all` and
+/// `git checkout <path>` for this reason. A generator is the same hazard
+/// through a door no rule covered: its whole premise is that the file is
+/// machine-written and therefore disposable, which is true on a checkout
+/// with one worktree per session and false on this one.
+///
+/// It also cost twenty minutes of false diagnosis on the way through. The
+/// evidence said "the checked-in baseline is stale by three deterministic
+/// failures", and the three were bisected against a build of the commit
+/// that recorded them before the real explanation appeared. Printing the
+/// difference is what buys that back: the diff below *is* the other
+/// session's change, and it is unreadable as anything else.
+///
+/// UNTRACKED IS NOT GUARDED, deliberately. A path git has never heard of
+/// has no committed content to compare against, and the first recording of
+/// a new register is exactly that case. The importer is not guarded either:
+/// `import-oils` rewrites the whole corpus by design, and what it writes is
+/// verified byte for byte against `SOURCE.toml` and `FILES.sha256`, which
+/// is a stronger statement than "differs from HEAD".
+pub(crate) fn guard_generated(path: &Path, overwrite: bool) -> Result<()> {
+    if overwrite {
+        return Ok(());
+    }
+    guard_unchanged(&checkout_root()?, path)
+}
+
+/// The refusal itself, against a named checkout so it can be asked of one
+/// built for the question.
+fn guard_unchanged(root: &Path, path: &Path) -> Result<()> {
+    let Some(relative) = relative_to(root, path) else {
+        return Ok(());
+    };
+    let status = git_output(root, &["status", "--porcelain=v1", "-z", "--", &relative])?;
+    if !changes(&status)?
+        .iter()
+        .any(|(code, named)| code != "??" && *named == relative)
+    {
+        return Ok(());
+    }
+    let diff = String::from_utf8_lossy(&git_output(root, &["diff", "HEAD", "--", &relative])?)
+        .lines()
+        .take(DIFF_LINES)
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(format!(
+        "refusing to overwrite {relative}: it is generated, and this checkout has \
+         already changed it since HEAD.\n{diff}\n\
+         Read that difference before you discard it. In a checkout several sessions \
+         share it is as likely to be somebody else's re-record as your own, and \
+         overwriting it is the one way left to lose their work without a trace. \
+         Commit it, or restore it from HEAD, or -- if you have read it and mean to \
+         replace it -- pass --overwrite-a-changed-file."
+    )
+    .into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::process::ScratchTree;
-    use std::fs;
 
     /// git, in a checkout made for one test.
     ///
@@ -242,14 +366,15 @@ mod tests {
         let status = b" M crates/nsh/src/variables.rs\0A  crates/nsh/src/new.rs\0\
             ?? crates/nsh/src/probe.rs\0R  after.rs\0before.rs\0";
         assert_eq!(
-            changed_paths(status).unwrap(),
+            changes(status).unwrap(),
             [
-                "crates/nsh/src/variables.rs",
-                "crates/nsh/src/new.rs",
-                "crates/nsh/src/probe.rs",
-                "after.rs",
-                "before.rs",
+                (" M", "crates/nsh/src/variables.rs"),
+                ("A ", "crates/nsh/src/new.rs"),
+                ("??", "crates/nsh/src/probe.rs"),
+                ("R ", "after.rs"),
+                ("R ", "before.rs"),
             ]
+            .map(|(code, path)| (code.to_owned(), path.to_owned()))
         );
     }
 
@@ -258,8 +383,8 @@ mod tests {
     // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
     #[test]
     fn an_unreadable_status_record_is_refused() {
-        assert!(changed_paths(b"nonsense\0").is_err());
-        assert!(changed_paths(b"").unwrap().is_empty());
+        assert!(changes(b"nonsense\0").is_err());
+        assert!(changes(b"").unwrap().is_empty());
     }
 
     /// This checkout is a git checkout, so the reading must work in it.
@@ -349,6 +474,64 @@ mod tests {
             recorded.uncommitted,
             ["kept.rs", "probe.rs"],
             "the override dropped what it was supposed to record",
+        );
+    }
+
+    /// The near-miss this guard exists for, replayed.
+    ///
+    /// Another session had re-recorded the failing-case list and a
+    /// refresh wrote HEAD's answer over it; the three ids it discarded
+    /// had to be reconstructed from the comparison's own output. The
+    /// refusal has to name what it is protecting, or the reader has no
+    /// way to tell their own edit from somebody else's.
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
+    #[test]
+    fn a_changed_generated_file_is_not_overwritten() {
+        let scratch = ScratchTree::new().unwrap();
+        let repo = scratch.path();
+        git(repo, &["init", "-q"]);
+        let register = repo.join("FAILURES.toml");
+        fs::write(&register, b"failing = [\n  \"assign.test.sh:19\",\n]\n").unwrap();
+        git(repo, &["add", "FAILURES.toml"]);
+        git(repo, &["commit", "-q", "-m", "one"]);
+        guard_unchanged(repo, &register).expect("an unmodified register was refused");
+
+        /* A file git has never heard of has no committed content to
+         * protect, and the first recording of a register is that case. */
+        let fresh = repo.join("NEW.toml");
+        fs::write(&fresh, b"failing = []\n").unwrap();
+        guard_unchanged(repo, &fresh).expect("an untracked file was refused");
+        guard_unchanged(repo, Path::new("/etc/hostname"))
+            .expect("a path outside the checkout was refused");
+
+        fs::write(&register, b"failing = [\n  \"glob.test.sh:37\",\n]\n").unwrap();
+        /* The survey root is reached as `.../crates/nsh-survey/../../tests/...`,
+         * and a `..` that survived into `strip_prefix` made this whole
+         * guard answer "not in the checkout" without saying so. */
+        fs::create_dir(repo.join("spec")).unwrap();
+        assert!(
+            guard_unchanged(repo, &repo.join("spec/../FAILURES.toml")).is_err(),
+            "a path spelled with `..` was read as outside the checkout",
+        );
+        let refusal = guard_unchanged(repo, &register)
+            .expect_err("a register another session had changed was overwritten")
+            .to_string();
+        for named in [
+            "FAILURES.toml",
+            "-  \"assign.test.sh:19\"",
+            "+  \"glob.test.sh:37\"",
+            "--overwrite-a-changed-file",
+        ] {
+            assert!(refusal.contains(named), "{refusal}");
+        }
+        guard_generated(&register, true).expect("the spelled-out override was still refused");
+
+        /* Staging it is not committing it: the change is still one no
+         * commit accounts for, and the next refresh would still lose it. */
+        git(repo, &["add", "FAILURES.toml"]);
+        assert!(
+            guard_unchanged(repo, &register).is_err(),
+            "staging the change was taken for committing it",
         );
     }
 }

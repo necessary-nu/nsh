@@ -1435,13 +1435,14 @@ assertions (
     {id accept-newlines-inside-a-conditional, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:58:32.974921997Z}
     {id build-the-survey-baseline-from-what-is-committed, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:54:43.617828026Z}
     {id contain-the-workspace-tests-that-run-cases, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:55:17.219508871Z}
-    {id spell-a-valueless-name-back, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:26:20.399911392Z}
+    {id spell-a-valueless-name-back, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:19:49.138633066Z}
     {id apply-a-declaring-builtin-through-the-reference, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:45:11.445443261Z}
     {id keep-allexport-off-an-array, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:59:56.201085872Z}
     {id spend-the-wrappers-budget-inside-the-boundary, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:55:22.428429632Z}
     {id refuse-to-regenerate-a-file-another-session-changed, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:55:46.697045361Z}
     {id deliver-a-prompt-interrupt-without-eating-the-next-line, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:58:47.016231255Z}
     {id refuse-to-destroy-an-array-kind, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:15:07.483177095Z}
+    {id list-the-names-that-only-carry-attributes, kind @doing, author "brendan@necessary.nu", at 2026-09-02T14:19:54.704454042Z}
 )
 
 impl_evidence (

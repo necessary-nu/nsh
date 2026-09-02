@@ -444,9 +444,10 @@ pub(super) fn apply(
     root: &Path,
     path: &Path,
     taken_in: Option<Provenance>,
+    overwrite: bool,
 ) -> Result<bool> {
     if let Some(taken_in) = taken_in {
-        return record(report, manifest, root, path, &taken_in);
+        return record(report, manifest, root, path, &taken_in, overwrite);
     }
     let baseline = Baseline::read(path)?;
     if let Some(reason) = baseline.mismatch(report) {
@@ -510,6 +511,13 @@ fn keep_recorded_answer(
 /// run's, in both directions -- a case the run newly failed is not
 /// enshrined as expected either -- and every one of them is named.
 ///
+/// AND IT REFUSES TO WRITE OVER A CHANGE IT DID NOT MAKE. The last thing
+/// before the write is `guard_generated`, asked again rather than only
+/// before the run: the group run is minutes long and is exactly the
+/// window in which another session re-records this file. On 2026-09-02 a
+/// refresh did write over one, and the three ids it discarded were
+/// reconstructed by hand from the comparison's own output.
+///
 /// AND IT RECORDS WHAT IT MEASURED. `taken_in` has already refused a
 /// checkout carrying uncommitted work unless the caller spelled out
 /// `--update-baseline-from-dirty-tree`; what reaches here is written into
@@ -521,6 +529,7 @@ fn record(
     root: &Path,
     path: &Path,
     taken_in: &Provenance,
+    overwrite: bool,
 ) -> Result<bool> {
     let previous = path.is_file().then(|| Baseline::read(path)).transpose()?;
     let mut failing = report.failing_ids();
@@ -545,6 +554,7 @@ fn record(
     let baseline = Baseline::from_run(report, failing, taken_in);
     let recorded = baseline.failing.len();
     let attribution = baseline.taken_in();
+    crate::provenance::guard_generated(path, overwrite)?;
     baseline.write(path)?;
     eprintln!(
         "baseline: wrote {recorded} failing cases, {kept} of them unchanged because \
@@ -652,6 +662,7 @@ mod tests {
             summary: None,
             baseline: Some(PathBuf::from("BASELINE.toml")),
             refresh: super::super::Refresh::No,
+            overwrite: false,
             posix: false,
             verbose: false,
             base_path: None,

@@ -8529,6 +8529,7 @@ children (
                                 id spell-a-valueless-name-back
                                 title "Answer `@A` and `@a` for a name that carries attributes and no value"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T11:22:45.893338038Z
@@ -8550,6 +8551,13 @@ children (
                                         kind @note
                                         text "INTERRUPTED MID-FLIGHT 2026-09-02 ~15:0x by an API session limit, not by anything in the work. Six agents were killed in the same second. Its last words were \"now the Oils survey with the right flags\", so the change and its coverage exist and only the survey verification was outstanding.\n\nUncommitted in the checkout, not lost -- and note the first three are **staged in the index**, which matters here more than usual:\n\n    crates/nsh-cli/tests/bash_valueless_declaration.rs   (new, staged)\n    crates/nsh/src/expand/typed/bash.rs                  (staged)\n    crates/nsh/src/variables/declaration.rs              (staged)\n\nTHE INDEX IS SHARED BY EVERY SESSION IN THIS CHECKOUT, and `nplan commit` commits the index. Earlier today that swept one node's five staged files into another node's commit (`9fb9e56`), which `01c269c` records and `commit-only-the-paths-a-node-staged` exists to fix. So these three staged paths are exposed: the next `nplan_commit` from any session in this tree will carry them. Whoever resumes should either finish and commit this node first, or reset those three out of the index and keep them as working-tree changes.\n\nHEAD compiles; checked in a clean detached worktree at `a81455c`.\n\nDo not `git checkout` or `git stash` any of those paths. The tree is the only copy."
                                     }
+
+                                    {
+                                        at 2026-09-02T14:19:49.138633066Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
+                                    }
                                 )
                             }
 
@@ -8563,6 +8571,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing `spell-an-unassigned-array-back`. That node made the bare `declare -p` listing carry a declared *array* (`declare -a z`), which it did not before; the same listing still drops every other valueless name. Measured against the pinned Bash 5.3.15 on `92f97f9`; pre-existing.\n\n    declare -i n; declare -p | grep -c ' n$'   bash: 1   nsh: 0\n    readonly x;   declare -p | grep -c ' x$'   bash: 1   nsh: 0\n    declare y;    declare -p | grep -c ' y$'   bash: 1   nsh: 0\n\nNamed directly it prints -- `declare -p n` is `declare -i n` in both -- so it is the *listing*'s predicate and not the renderer. Bash's own set shows the same rule on its own names: `declare -i BASHPID`, `declare -- BASH_ARGV0` and `declare -a FUNCNAME` are all in its `declare -p` with no value beside them.\n\nWHERE. `variables::value::declared_names`, which `92f97f9` split from `valued_names` for exactly this reason: `${!prefix@}` lists names that hold a value (Bash lists `hello=()` there and not `declare -a z`), and `declare -p` lists names that hold a declaration. The first half of that split is done; widening `declared_names` from \"a value or an array kind\" to \"a value or anything to declare\" is the second.\n\nWATCH WHAT WIDENS WITH IT. The predicate is shared with `declare -p`'s attribute filters (`declare -pi`, `declare -pr`), which is right, and it must not reach `set`, `export -p` or `${!prefix@}`, none of which lists an invisible name in Bash. And this shell creates entries of its own for names a script never declared; a wider listing will show them, so the fix has to be measured against a full `declare -p` diff rather than against one name.\n\nDONE WHEN. `declare -p` lists every name Bash lists and no name Bash omits, for at least `declare -i n`, `readonly x`, `declare y`, `local x` and a nameref, and a differential test compares the *set* of names rather than one line."
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:19:54.704454042Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }

@@ -46,6 +46,14 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
         (Some(path), Refresh::FromDirtyTree) => Some(crate::provenance::vouch(path, true)?),
         _ => None,
     };
+    /* And the second question about the same file: not whose work is in
+     * the shell, but whose work is in the file this run is about to
+     * replace. Asked here so a refusal costs a second rather than the
+     * group run, and again at the write, because the group run is exactly
+     * the window another session re-records in. */
+    if let (Some(path), true) = (&options.baseline, provenance.is_some()) {
+        crate::provenance::guard_generated(path, options.overwrite)?;
+    }
     let report = run_manifest(&options, &manifest)?;
     if let Some(path) = &options.summary {
         write_summary(path, &report)?;
@@ -61,7 +69,14 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
      * all, and reading its summary count instead is the mistake the
      * baseline exists to retire. */
     match &options.baseline {
-        Some(path) => baseline::apply(&report, &manifest, &options.root, path, provenance),
+        Some(path) => baseline::apply(
+            &report,
+            &manifest,
+            &options.root,
+            path,
+            provenance,
+            options.overwrite,
+        ),
         None => Ok(report.totals.is_success()),
     }
 }
@@ -80,6 +95,7 @@ struct Options {
     summary: Option<PathBuf>,
     baseline: Option<PathBuf>,
     refresh: Refresh,
+    overwrite: bool,
     posix: bool,
     verbose: bool,
     base_path: Option<OsString>,
@@ -129,6 +145,7 @@ impl Options {
             summary: None,
             baseline: None,
             refresh: Refresh::No,
+            overwrite: false,
             posix: false,
             verbose: false,
             base_path: None,
@@ -182,6 +199,7 @@ impl Options {
                 Some("--update-baseline-from-dirty-tree") => {
                     options.refresh = Refresh::FromDirtyTree
                 }
+                Some("--overwrite-a-changed-file") => options.overwrite = true,
                 Some("--posix") => options.posix = true,
                 Some("--verbose") => options.verbose = true,
                 Some(value) if value.starts_with('-') => {
@@ -252,7 +270,8 @@ impl Options {
         "usage: nsh-survey run-oils [--group ID] [--shell PATH] [--expect-shell LABEL]\n\
                 [--timeout-ms N] [--format text|json|ids] [--spec NAME] [--case TEXT]\n\
                 [--max-cases N] [--summary PATH] [--baseline PATH] [--update-baseline]\n\
-                [--update-baseline-from-dirty-tree] [--posix] [--verbose] [ROOT]"
+                [--update-baseline-from-dirty-tree] [--overwrite-a-changed-file]\n\
+                [--posix] [--verbose] [ROOT]"
     }
 }
 
