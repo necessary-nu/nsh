@@ -548,17 +548,68 @@ impl LineEditor {
         }
     }
 
+    /// Read one unit from the terminal, reading again when a signal
+    /// interrupted the wait without leaving the shell anything to take.
+    ///
+    /// The plain input path asks the same question at the same place and
+    /// answers it dash's way: `input::read_input_descriptor` reads again
+    /// when a signal interrupts its `read`, because a delivery is not an end
+    /// of input. This read had no such answer -- every `EINTR` became
+    /// `HostFailure::Interrupted`, which the driver completes as
+    /// `ReadResult::Interrupted`, which `drive_line` reports as "no line",
+    /// which is the same value a real end of input produces. An interactive
+    /// shell therefore ended its session whenever a caught signal arrived
+    /// while it sat at the prompt: `SIGCHLD` when a background job finished,
+    /// and equally any signal the user had trapped.
+    ///
+    /// `crate::error::interrupt_pending` is what separates the two cases,
+    /// and only an untrapped `SIGINT` sets it. That one is different because
+    /// it has a *value* waiting: the handler stored it, and the poll
+    /// boundary above `read_input_descriptor` turns it into an error.
+    /// Abandoning the line is how the editor lets it through, so it still
+    /// returns `Interrupted`.
+    ///
+    /// A caught signal that merely has a trap action to run is not one of
+    /// those. dash and the pinned Bash 5.3.15 both leave the action for the
+    /// next `dotrap`, after the line being typed has been entered --
+    /// measured 2026-09-02 on a pty with `trap 'echo TRAPPED' USR1` and an
+    /// external `kill -USR1`, where both shells print `TRAPPED` in front of
+    /// the *next* command's output rather than at the prompt. Reading again
+    /// reproduces that, and it keeps the half-typed line, which re-driving
+    /// the editor from `read_input_descriptor` would have discarded.
+    // [spec:nsh:req:interactive.signal-does-not-end-the-session]
     fn read_effect(
         &mut self,
         locale: &nsh_platform::Locale,
         purpose: ReadEffect,
     ) -> Result<ReadOutcome, HostFailure> {
-        if let ReadEffect::KeySequence { deadline } = purpose {
-            match nsh_platform::wait_for_terminal_input(&self.input, deadline.remaining()) {
-                Ok(true) => {}
-                Ok(false) => return Ok(ReadOutcome::TimedOut),
+        loop {
+            if let ReadEffect::KeySequence { deadline } = purpose {
+                match nsh_platform::wait_for_terminal_input(&self.input, deadline.remaining()) {
+                    Ok(true) => {}
+                    Ok(false) => return Ok(ReadOutcome::TimedOut),
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                        if crate::error::interrupt_pending() {
+                            return Err(HostFailure::Interrupted);
+                        }
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(HostFailure::Failed(
+                            locale.error_message(&error).into_boxed_str(),
+                        ));
+                    }
+                }
+            }
+            let mut byte = [0];
+            match self.input.read(&mut byte) {
+                Ok(0) => return Ok(ReadOutcome::EndOfInput),
+                Ok(_) => return Ok(ReadOutcome::Bytes(byte.into())),
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                    return Err(HostFailure::Interrupted);
+                    if crate::error::interrupt_pending() {
+                        return Err(HostFailure::Interrupted);
+                    }
+                    continue;
                 }
                 Err(error) => {
                     return Err(HostFailure::Failed(
@@ -566,17 +617,6 @@ impl LineEditor {
                     ));
                 }
             }
-        }
-        let mut byte = [0];
-        match self.input.read(&mut byte) {
-            Ok(0) => Ok(ReadOutcome::EndOfInput),
-            Ok(_) => Ok(ReadOutcome::Bytes(byte.into())),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                Err(HostFailure::Interrupted)
-            }
-            Err(error) => Err(HostFailure::Failed(
-                locale.error_message(&error).into_boxed_str(),
-            )),
         }
     }
 
@@ -597,7 +637,10 @@ impl LineEditor {
                 Ok(0) => return Err(HostFailure::Cancelled),
                 Ok(_) => {}
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                    return Err(HostFailure::Interrupted);
+                    if crate::error::interrupt_pending() {
+                        return Err(HostFailure::Interrupted);
+                    }
+                    continue;
                 }
                 Err(error) => {
                     return Err(HostFailure::Failed(

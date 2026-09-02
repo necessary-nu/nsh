@@ -224,6 +224,9 @@ fn clear_standard_input_nonblocking(shell: &mut crate::context::Shell) -> bool {
 }
 
 // [spec:dash:sem:input.preadfd-fn]
+// The retry below is the shell's answer to a signal that arrived while it was
+// waiting for a line, and the line editor's read owes the same answer.
+// [spec:nsh:req:interactive.signal-does-not-end-the-session]
 // [spec:posix:req:sh.stdin-used-only-if]
 // [spec:posix:req:sh.stdin-no-read-ahead]
 // [spec:posix:req:sh.stdin-blocking-reads]

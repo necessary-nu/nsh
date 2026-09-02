@@ -1426,7 +1426,8 @@ assertions (
     {id match-bash-dot-names-and-literal-paths, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:54:40.842077295Z}
     {id let-the-sweep-see-a-slow-unit, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:55:39.71182461Z}
     {id spell-an-unassigned-array-back, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:56:28.496773437Z}
-    {id kill-a-survey-case-the-harness-abandoned, kind @doing, author "brendan@necessary.nu", at 2026-09-02T09:58:06.341298094Z}
+    {id kill-a-survey-case-the-harness-abandoned, kind @complete, author "brendan@necessary.nu", at 2026-09-02T10:22:08.44381477Z}
+    {id give-the-failing-case-baseline-the-gates-control, kind @doing, author "brendan@necessary.nu", at 2026-09-02T10:22:16.069586104Z}
 )
 
 impl_evidence (
