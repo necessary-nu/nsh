@@ -129,7 +129,10 @@ impl TerminalControl for OwnedTerminal {
 
 #[cfg(test)]
 mod tests {
+    use nshedit::domain::KeySequence;
+
     use super::super::*;
+    use super::*;
 
     struct TestTerminal;
 

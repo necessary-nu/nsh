@@ -52,24 +52,18 @@
 // [spec:posix:req:edit.yank-motion]
 
 use bstr::BStr;
-use nsh_platform::{
-    EditorTerminalAttributes as TerminalAttributes, NativeStrExt as _, ShellBytesExt as _,
-    TerminalControlCharacter as ControlCharacter,
-};
+use nsh_platform::ShellBytesExt as _;
 use nshedit::domain::{
-    Action, ArgumentCommand, Binding, CommandName, CommandSequence, Direction, EditTarget,
-    EditingMode, EditorConfig, EffectCommand, HistorySearchCommand, HistorySearchRepetition,
-    ImmediateCommand, InputMode, KeySequence, KeymapMode, Motion, Outcome, Prompt, Refresh,
-    ScreenSize, SignalPolicy, TerminalLiteral, TerminalMode, Text, TextUnit, WordTraversal,
-    YankPlacement,
+    Action, Binding, Direction, EditingMode, EditorConfig, EffectCommand, HistorySearchCommand,
+    HistorySearchRepetition, InputMode, KeymapMode, Motion, Outcome, Prompt, Refresh, ScreenSize,
+    SignalPolicy, TerminalLiteral, TerminalMode, Text, TextUnit,
 };
 use nshedit::editor::effect::{
-    AliasResponse, HistoryResponse, HistorySearchInput, HistorySearchResponse, HistorySelection,
-    HostFailure, PromptSide, ReadEffect, ReadOutcome,
+    HistoryResponse, HistorySearchInput, HistorySearchResponse, HistorySelection, HostFailure,
+    PromptSide, ReadEffect, ReadOutcome,
 };
 use nshedit::editor::{
-    CompletionCandidate, DriverError, Editor, ReadDriver, ReadResult, ReadStep, StartError,
-    TerminalControl, TerminalProfile, Tokenizer,
+    DriverError, Editor, ReadDriver, ReadResult, ReadStep, StartError, TerminalProfile, Tokenizer,
 };
 use nshedit::history::HistoryCursor;
 use std::error::Error as StdError;
@@ -96,6 +90,17 @@ const REPEAT_HISTORY_SEARCH: Binding = Binding::Effect(EffectCommand::SearchHist
 const REVERSE_HISTORY_SEARCH: Binding = Binding::Effect(EffectCommand::SearchHistory(
     HistorySearchCommand::Repeat(HistorySearchRepetition::OppositeDirection),
 ));
+
+mod bindings;
+use bindings::{
+    install_shell_bindings, next_vi_original_line, refresh_shell_bindings, shell_alias,
+    shell_user_command,
+};
+
+mod completion;
+use completion::{
+    all_completion_insertions, completion_candidates, completion_candidates_for_stem,
+};
 
 mod history;
 pub use history::{History, HistoryEvent};
@@ -846,424 +851,6 @@ fn terminfo_supports_line_editing(entry: &nshterm::TermInfo) -> bool {
     })
 }
 
-// [spec:posix:sem:edit.append-last-bigword]
-fn install_shell_bindings<T: TerminalControl>(
-    editor: &mut Editor<T>,
-    terminal_attributes: Option<&TerminalAttributes>,
-) -> Result<(), nshedit::domain::Error> {
-    let terminal_bindings = [
-        (
-            "\u{1b}[A",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
-        ),
-        (
-            "\u{1b}[B",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
-        ),
-        (
-            "\u{1b}[C",
-            Binding::Action(Action::Move(Motion::Character(Direction::Next))),
-        ),
-        (
-            "\u{1b}[D",
-            Binding::Action(Action::Move(Motion::Character(Direction::Previous))),
-        ),
-        (
-            "\u{1b}[H",
-            Binding::Action(Action::Move(Motion::StartOfLine)),
-        ),
-        ("\u{1b}[F", Binding::Action(Action::Move(Motion::EndOfLine))),
-        (
-            "\u{1b}[3~",
-            Binding::Action(Action::Delete(EditTarget::Character(Direction::Next))),
-        ),
-    ];
-    for mode in [
-        KeymapMode::Emacs,
-        KeymapMode::ViInsert,
-        KeymapMode::ViCommand,
-    ] {
-        for (sequence, binding) in &terminal_bindings {
-            editor.bind(mode, KeySequence::try_from(*sequence)?, binding.clone());
-        }
-    }
-    editor.bind(
-        KeymapMode::ViInsert,
-        KeySequence::try_from("\t")?,
-        Binding::Effect(EffectCommand::Complete),
-    );
-
-    let vi_command_bindings = [
-        (
-            "\u{1}",
-            Binding::Action(Action::Move(Motion::StartOfBuffer)),
-        ),
-        (
-            "\u{8}",
-            Binding::Immediate(ImmediateCommand::DeletePreviousUnit),
-        ),
-        (
-            "\u{b}",
-            Binding::Action(Action::Kill(EditTarget::Motion(Motion::EndOfBuffer))),
-        ),
-        ("\u{c}", Binding::Action(Action::Refresh(Refresh::Full))),
-        (
-            "\u{e}",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
-        ),
-        (
-            "\u{10}",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
-        ),
-        (
-            "\u{12}",
-            Binding::Action(Action::Refresh(Refresh::Redisplay)),
-        ),
-        (
-            "\u{15}",
-            Binding::Action(Action::Kill(EditTarget::Motion(Motion::StartOfBuffer))),
-        ),
-        (
-            "\u{17}",
-            Binding::Immediate(ImmediateCommand::TraverseWords {
-                direction: Direction::Previous,
-                operation: WordTraversal::Kill,
-            }),
-        ),
-        (
-            " ",
-            Binding::Action(Action::Move(Motion::Character(Direction::Next))),
-        ),
-        (
-            "+",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
-        ),
-        (
-            "-",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
-        ),
-        (
-            "0",
-            Binding::Immediate(ImmediateCommand::StartOfLineOrArgument),
-        ),
-        // Entering insert mode after the cursor before requesting ordinary
-        // insert-mode completion makes the command-mode cursor's character
-        // part of the current bigword and leaves the editor in insert mode.
-        ("\\", Binding::Macro(Text::from("a\t"))),
-        ("_", Binding::Effect(EffectCommand::InsertHistoryWord)),
-        (
-            "^",
-            Binding::User(
-                CommandName::new(FIRST_NONBLANK).expect("static shell command name is valid"),
-            ),
-        ),
-        ("@", Binding::Effect(EffectCommand::ExpandAlias)),
-        (":", Binding::Effect(EffectCommand::ReadEditorCommand)),
-        (
-            "=",
-            Binding::User(
-                CommandName::new(DISPLAY_EXPANSIONS).expect("static shell command name is valid"),
-            ),
-        ),
-        (
-            "*",
-            Binding::User(
-                CommandName::new(EXPAND_ALL).expect("static shell command name is valid"),
-            ),
-        ),
-        (
-            "J",
-            Binding::Effect(EffectCommand::SearchHistory(HistorySearchCommand::Prefix(
-                Direction::Next,
-            ))),
-        ),
-        (
-            "K",
-            Binding::Effect(EffectCommand::SearchHistory(HistorySearchCommand::Prefix(
-                Direction::Previous,
-            ))),
-        ),
-        (
-            "P",
-            Binding::Immediate(ImmediateCommand::PasteRegister(YankPlacement::AtCursor)),
-        ),
-        ("u", Binding::Action(Action::Undo)),
-        (
-            "U",
-            Binding::User(
-                CommandName::new(UNDO_ALL_CHANGES).expect("static shell command name is valid"),
-            ),
-        ),
-        (
-            "Y",
-            Binding::Action(Action::Copy(EditTarget::Motion(Motion::EndOfLine))),
-        ),
-        (
-            "X",
-            // The native action vocabulary deliberately applies a counted
-            // `Kill(Character)` only once.  Express vi's counted `X` as the
-            // ordinary delete-operator/backward-motion interaction; macro
-            // bindings preserve and replay the caller's count.
-            Binding::Macro(Text::from("dh")),
-        ),
-        (
-            "j",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
-        ),
-        (
-            "k",
-            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
-        ),
-        // [spec:posix:req:edit.history-search-repeat]
-        ("n", REPEAT_HISTORY_SEARCH),
-        ("N", REVERSE_HISTORY_SEARCH),
-        (
-            "p",
-            Binding::Immediate(ImmediateCommand::PasteRegister(YankPlacement::AfterCursor)),
-        ),
-        (
-            "x",
-            Binding::Action(Action::Kill(EditTarget::Character(Direction::Next))),
-        ),
-        (
-            "~",
-            Binding::Immediate(ImmediateCommand::ToggleCaseAndAdvance),
-        ),
-        (
-            "c^",
-            Binding::User(
-                CommandName::new(CHANGE_TO_FIRST_NONBLANK)
-                    .expect("static shell command name is valid"),
-            ),
-        ),
-        // POSIX shell vi mode gives `cw` the traditional change-to-word-end
-        // behavior, preserving the separator before the next word.
-        ("cw", Binding::Macro(Text::from("ce"))),
-        (
-            "d^",
-            Binding::User(
-                CommandName::new(DELETE_TO_FIRST_NONBLANK)
-                    .expect("static shell command name is valid"),
-            ),
-        ),
-        (
-            "y^",
-            Binding::User(
-                CommandName::new(YANK_TO_FIRST_NONBLANK)
-                    .expect("static shell command name is valid"),
-            ),
-        ),
-    ];
-    for (sequence, binding) in vi_command_bindings {
-        editor.bind(
-            KeymapMode::ViCommand,
-            KeySequence::try_from(sequence)?,
-            binding,
-        );
-    }
-    for digit in '1'..='9' {
-        editor.bind(
-            KeymapMode::ViCommand,
-            KeySequence::new(Text::from(digit.to_string()))?,
-            Binding::Sequence(CommandSequence::Argument(ArgumentCommand::StartDigit)),
-        );
-    }
-
-    if let Some(attributes) = terminal_attributes {
-        install_terminal_character(
-            editor,
-            attributes,
-            ControlCharacter::Erase,
-            &[
-                KeymapMode::Emacs,
-                KeymapMode::ViInsert,
-                KeymapMode::ViCommand,
-            ],
-            Binding::Immediate(ImmediateCommand::DeletePreviousUnit),
-        )?;
-        install_terminal_character(
-            editor,
-            attributes,
-            ControlCharacter::Kill,
-            &[KeymapMode::Emacs, KeymapMode::ViInsert],
-            Binding::Action(Action::Kill(EditTarget::Buffer)),
-        )?;
-        // [spec:posix:req:edit.insert-end-of-file]
-        install_terminal_character(
-            editor,
-            attributes,
-            ControlCharacter::EndOfFile,
-            &[
-                KeymapMode::Emacs,
-                KeymapMode::ViInsert,
-                KeymapMode::ViCommand,
-            ],
-            Binding::Immediate(ImmediateCommand::EndOfInputIfEmpty),
-        )?;
-        install_terminal_character(
-            editor,
-            attributes,
-            ControlCharacter::WordErase,
-            &[KeymapMode::Emacs, KeymapMode::ViInsert],
-            Binding::Immediate(ImmediateCommand::TraverseWords {
-                direction: Direction::Previous,
-                operation: WordTraversal::Kill,
-            }),
-        )?;
-        // [spec:posix:sem:edit.insert-literal-next]
-        install_terminal_character(
-            editor,
-            attributes,
-            ControlCharacter::LiteralNext,
-            &[KeymapMode::Emacs, KeymapMode::ViInsert],
-            Binding::Sequence(CommandSequence::QuotedInsert),
-        )?;
-        install_terminal_character(
-            editor,
-            attributes,
-            ControlCharacter::Reprint,
-            &[KeymapMode::Emacs, KeymapMode::ViInsert],
-            Binding::Action(Action::Refresh(Refresh::Full)),
-        )?;
-    }
-    Ok(())
-}
-
-fn install_terminal_character<T: TerminalControl>(
-    editor: &mut Editor<T>,
-    attributes: &TerminalAttributes,
-    character: ControlCharacter,
-    modes: &[KeymapMode],
-    binding: Binding,
-) -> Result<(), nshedit::domain::Error> {
-    let byte = attributes.control_character(character);
-    let sequence = KeySequence::new(text_from_bytes(&[byte]))?;
-    for mode in modes {
-        editor.bind(*mode, sequence.clone(), binding.clone());
-    }
-    Ok(())
-}
-
-fn refresh_shell_bindings<T: TerminalControl>(
-    editor: &mut Editor<T>,
-    attributes: Option<&TerminalAttributes>,
-) -> Result<(), nshedit::domain::Error> {
-    let mode = editor.config().editing_mode();
-    editor.reset_bindings(mode);
-    install_shell_bindings(editor, attributes)
-}
-
-// [spec:posix:req:edit.command-alias-insert]
-fn shell_alias(
-    shell: &mut crate::context::Shell,
-    name: &Text,
-    enter_insert: bool,
-) -> Result<AliasResponse, HostFailure> {
-    let name = text_to_bytes(name).map_err(host_failure)?;
-    if name.contains(&0) {
-        return Err(HostFailure::Failed(
-            "an editor alias name contains NUL".into(),
-        ));
-    }
-    let Some(expansion) = shell.aliases.lookup(BStr::new(&name), false) else {
-        return Ok(AliasResponse::Missing);
-    };
-    let mut macro_text = Text::default();
-    // POSIX `@letter` inserts ordinary alias text.  Starting the native
-    // macro in Vi insertion mode gives embedded escape sequences and later
-    // command keys their normal editor meaning without baking shell policy
-    // into nshedit's generic alias effect.
-    if enter_insert {
-        macro_text.push(TextUnit::Scalar('i'));
-    }
-    macro_text.extend(text_from_bytes(&expansion).as_units().iter().copied());
-    Ok(AliasResponse::Expansion(macro_text))
-}
-
-fn shell_user_command(
-    editor: &mut NativeEditor,
-    name: &str,
-    vi_original_line: Option<&Text>,
-) -> Result<Outcome, HostFailure> {
-    let first_nonblank = first_nonblank_index(editor.line());
-    let destination = editor.line().index(first_nonblank).map_err(host_failure)?;
-    match name {
-        FIRST_NONBLANK => editor
-            .execute(Action::Move(Motion::Absolute(destination)))
-            .map_err(host_failure),
-        DELETE_TO_FIRST_NONBLANK | CHANGE_TO_FIRST_NONBLANK | YANK_TO_FIRST_NONBLANK => {
-            let cursor = editor.cursor().get();
-            let start = cursor.min(first_nonblank);
-            let mut end = cursor.max(first_nonblank);
-            if start == end && start < editor.line().len() {
-                end += 1;
-            }
-            let span = editor.line().span(start..end).map_err(host_failure)?;
-            let action = if name == YANK_TO_FIRST_NONBLANK {
-                Action::Copy(EditTarget::Span(span))
-            } else {
-                Action::Kill(EditTarget::Span(span))
-            };
-            let outcome = editor.execute(action).map_err(host_failure)?;
-            if name == CHANGE_TO_FIRST_NONBLANK {
-                editor
-                    .execute(Action::SetModes {
-                        input: InputMode::Insert,
-                        keymap: KeymapMode::ViInsert,
-                    })
-                    .map_err(host_failure)
-            } else {
-                Ok(outcome)
-            }
-        }
-        // [spec:posix:req:edit.undo]
-        UNDO_ALL_CHANGES => {
-            let whole_line = editor
-                .line()
-                .span(0..editor.line().len())
-                .map_err(host_failure)?;
-            editor
-                .replace(whole_line, vi_original_line.cloned().unwrap_or_default())
-                .map_err(host_failure)?;
-            if editor.line().is_empty() {
-                editor
-                    .execute(Action::Refresh(Refresh::Full))
-                    .map_err(host_failure)
-            } else {
-                editor
-                    .execute(Action::Move(Motion::Character(Direction::Previous)))
-                    .map_err(host_failure)
-            }
-        }
-        _ => Err(HostFailure::Unavailable),
-    }
-}
-
-fn first_nonblank_index(line: &Text) -> usize {
-    line.as_units()
-        .iter()
-        .position(|unit| {
-            !matches!(
-                unit,
-                TextUnit::Scalar(' ' | '\t') | TextUnit::RawByte(b' ' | b'\t')
-            )
-        })
-        .unwrap_or(0)
-}
-
-fn next_vi_original_line(
-    original: Option<Text>,
-    current: &Text,
-    entered_command_mode: bool,
-    copied_line: bool,
-) -> Option<Text> {
-    if copied_line || (entered_command_mode && original.is_none()) {
-        Some(current.clone())
-    } else {
-        original
-    }
-}
-
 fn shell_prompt(shell: &mut crate::context::Shell) -> Prompt {
     /* The null check this had is gone with the pointer, and it was
      * already dead: `getprompt`'s three arms are two variable texts and
@@ -1339,61 +926,6 @@ fn host_failure(error: impl fmt::Display) -> HostFailure {
     HostFailure::Failed(message.into_boxed_str())
 }
 
-// [spec:posix:req:edit.command-complete-unique]
-fn completion_candidates(
-    query: &nshedit::editor::CompletionQuery,
-) -> nshedit::editor::CompletionCandidates {
-    completion_candidates_for_stem(query.stem())
-}
-
-fn completion_candidates_for_stem(stem: &Text) -> nshedit::editor::CompletionCandidates {
-    let Ok(stem) = text_to_bytes(stem) else {
-        return Vec::new().into();
-    };
-    let split = nsh_platform::shell_path_last_separator(&stem)
-        .map_or((b"".as_slice(), stem.as_slice()), |position| {
-            (&stem[..=position], &stem[position + 1..])
-        });
-    let (prefix, basename) = split;
-    let directory = if prefix.is_empty() {
-        b".".as_slice()
-    } else {
-        prefix
-    };
-    let Ok(directory) = directory.try_to_path_buf() else {
-        return Vec::new().into();
-    };
-    let Ok(entries) = nsh_platform::read_directory(&directory) else {
-        return Vec::new().into();
-    };
-    let mut candidates = entries
-        .into_iter()
-        .filter_map(|entry| {
-            let name = entry.name.to_shell_bytes();
-            if !name.starts_with(basename) {
-                return None;
-            }
-            let mut insertion = prefix.to_vec();
-            insertion.extend_from_slice(&name);
-            let suffix = if entry.is_directory { "/" } else { " " };
-            Some(CompletionCandidate::new(text_from_bytes(&insertion)).with_suffix(suffix))
-        })
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| left.insertion().cmp(right.insertion()));
-    candidates.into()
-}
-
-fn all_completion_insertions(candidates: &nshedit::editor::CompletionCandidates) -> Text {
-    let mut expansion = Text::default();
-    for candidate in candidates.iter() {
-        if !expansion.is_empty() {
-            expansion.push(TextUnit::Scalar(' '));
-        }
-        expansion.extend(candidate.insertion().as_units().iter().copied());
-    }
-    expansion
-}
-
 fn shell_editor(shell: &mut crate::context::Shell) -> Vec<u8> {
     for name in [b"EDITOR".as_slice(), b"VISUAL".as_slice()] {
         if let Some(value) = crate::variables::lookup_bytes(shell, BStr::new(name)) {
@@ -1408,7 +940,6 @@ fn shell_editor(shell: &mut crate::context::Shell) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn baseline_requires_redisplay_capabilities() {
@@ -1432,77 +963,6 @@ mod tests {
     fn prompt_literals_do_not_contribute_columns() {
         let prompt = prompt_from_text(&text_from_bytes(b"x\x01\x1b[31m\x01> "), 1);
         assert_eq!(prompt.parts().len(), 3);
-    }
-
-    #[test]
-    fn line_state_preserves_owned_text() {
-        assert_eq!(first_nonblank_index(&Text::from(" \tword")), 2);
-        assert_eq!(first_nonblank_index(&text_from_bytes(b" \t\xffword")), 2);
-        assert_eq!(first_nonblank_index(&Text::default()), 0);
-
-        let typed = text_from_bytes(b"typed\xff");
-        let original = next_vi_original_line(None, &typed, true, false);
-        assert_eq!(original, Some(typed.clone()));
-
-        let changed = Text::from("changed");
-        let original = next_vi_original_line(original, &changed, true, false);
-        assert_eq!(original, Some(typed));
-
-        let history = Text::from("history");
-        let original = next_vi_original_line(original, &history, false, true);
-        assert_eq!(original, Some(history.clone()));
-        assert_eq!(
-            next_vi_original_line(original, &changed, false, false),
-            Some(history)
-        );
-    }
-
-    #[test]
-    fn completion_marks_files_and_directories() {
-        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let directory = std::env::temp_dir().join(format!(
-            "nsh-completion-test-{}-{serial}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&directory).unwrap();
-        std::fs::write(directory.join("alpha-file"), []).unwrap();
-        std::fs::create_dir(directory.join("alpha-directory")).unwrap();
-        std::fs::write(directory.join("beta"), []).unwrap();
-
-        let mut stem = directory.to_shell_bytes();
-        stem.extend_from_slice(b"/alpha");
-        let candidates = completion_candidates_for_stem(&text_from_bytes(&stem));
-        assert_eq!(candidates.len(), 2);
-        let mut suffixes = candidates
-            .iter()
-            .map(|candidate| {
-                (
-                    text_to_bytes(candidate.insertion()).unwrap(),
-                    candidate.suffix().cloned(),
-                )
-            })
-            .collect::<Vec<_>>();
-        suffixes.sort_by(|left, right| left.0.cmp(&right.0));
-        assert!(suffixes[0].0.ends_with(b"alpha-directory"));
-        assert_eq!(suffixes[0].1, Some(Text::from("/")));
-        assert!(suffixes[1].0.ends_with(b"alpha-file"));
-        assert_eq!(suffixes[1].1, Some(Text::from(" ")));
-
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn all_insertions_have_single_spaces() {
-        let candidates = vec![
-            CompletionCandidate::new("alpha1").with_suffix(" "),
-            CompletionCandidate::new("alpha2").with_suffix("/"),
-        ]
-        .into();
-        assert_eq!(
-            all_completion_insertions(&candidates),
-            Text::from("alpha1 alpha2")
-        );
     }
 
     #[test]
