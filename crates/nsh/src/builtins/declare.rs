@@ -224,6 +224,8 @@ fn apply(
     // A declaration records the name even with nothing to store in it,
     // so the attributes below have an entry to live on.
     nameref::ensure_entry(shell, base);
+    let was_exported = crate::variables::variable_attributes(shell, base)
+        .is_some_and(|attributes| attributes.exported);
 
     if let Some(kind) = requested.kind {
         if !arrays::convertible(shell, base, kind) {
@@ -269,7 +271,8 @@ fn apply(
     }
 
     let attributes = VariableAttributes {
-        exported: requested.exported == Some(true),
+        exported: requested.exported == Some(true)
+            || exported_by_allexport(shell, requested, base, scope),
         read_only: requested.read_only,
         fixed: false,
     };
@@ -279,8 +282,34 @@ fn apply(
     // `+x` is the one attribute Bash lets a declaration take back.
     if requested.exported == Some(false) {
         crate::variables::value::clear_exported(shell, base);
+    } else if !attributes.exported && !was_exported && is_array(shell, base) {
+        /* A declaration that names an array is not exported by `set -a`,
+         * and the value it just stored may have been: the plain `z=q` on
+         * an array *is* exported there, and it is the same write. So the
+         * option is taken back here rather than withheld from the write,
+         * which cannot tell a declaration from an assignment. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        crate::variables::value::clear_exported(shell, base);
     }
     Ok(true)
+}
+
+/// Whether `set -a` exports the name this declaration is creating.
+///
+/// Bash's `-a` reaches a declaration that does not name an array:
+/// `set -a; declare -i n` is `declare -ix n`, where `set -a; declare -a z`
+/// is not exported at all. A declaration local to a function is not
+/// reached either -- `local -i q` under `-a` stays `declare -i q` --
+/// while `local x=1` *is* exported, because its value goes through the
+/// ordinary assignment path and that is where the option is picked up.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn exported_by_allexport(shell: &Shell, requested: &Requested, base: &BStr, scope: Scope) -> bool {
+    requested.exported != Some(false)
+        && scope == Scope::Global
+        && !is_array(shell, base)
+        && shell
+            .options
+            .enabled(crate::options::ShellOption::AllExport)
 }
 
 /// Report the array kind a name may not be given.

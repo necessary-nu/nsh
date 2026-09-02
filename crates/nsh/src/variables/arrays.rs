@@ -13,7 +13,7 @@
 use bstr::{BStr, BString};
 
 use super::value::{VariableKind, VariableValue};
-use super::{CallbackPolicy, VariableAttributes, VariableState, set_entry, valid_name};
+use super::{AllExport, CallbackPolicy, VariableAttributes, VariableState, set_entry, valid_name};
 use crate::context::Shell;
 use crate::error::Error;
 
@@ -834,8 +834,14 @@ fn reject_read_only(shell: &mut Shell, name: &BStr, guard: ReadOnlyGuard) -> Res
 }
 
 /// Write a whole structural value back, going through `set_entry` first
-/// so a brand-new name picks up export state, locale callbacks, and the
-/// `allexport` option exactly as a scalar assignment would.
+/// so a brand-new name picks up export state and locale callbacks
+/// exactly as a scalar assignment would.
+///
+/// `allexport` is the one thing it does not pick up. Bash's `-a` marks
+/// an assignment that stores a scalar, and this is every write that
+/// stores something else: `set -a; z=(1)`, `set -a; z[0]=5` and
+/// `set -a; declare -a z` all leave the name unexported there.
+// [spec:nsh:req:compat.bash.arrays-declarations]
 pub(super) fn store(
     shell: &mut Shell,
     name: &BStr,
@@ -852,6 +858,7 @@ pub(super) fn store(
             attributes,
             CallbackPolicy::Run,
             guard,
+            AllExport::Declines,
         )
     })?;
     let entry = shell

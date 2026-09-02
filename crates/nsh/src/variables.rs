@@ -118,6 +118,22 @@ pub(crate) enum CallbackPolicy {
     Suppress,
 }
 
+/// Whether `set -a` marks the name a write creates.
+///
+/// Bash's `-a` marks an assignment that stores a *scalar*, and a
+/// compound one is not: `set -a; x=1` exports `x` where
+/// `set -a; z=(1)` exports nothing and `set -a; z[0]=5` exports
+/// nothing. Every array-shaped write in this shell goes through
+/// [`arrays::store`], so that is the one write that declines.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AllExport {
+    /// A scalar assignment, which the option marks.
+    Marks,
+    /// A structural value, which it does not reach.
+    Declines,
+}
+
 #[derive(Clone, Debug)]
 struct Variable {
     attributes: VariableAttributes,
@@ -501,13 +517,14 @@ fn set_entry(
     mut attributes: VariableAttributes,
     callback_policy: CallbackPolicy,
     guard: arrays::ReadOnlyGuard,
+    all_export: AllExport,
 ) -> Result<(), Error> {
     if !valid_name(&shell.locale, name) {
         let mut message = name.to_vec();
         message.extend_from_slice(b": bad variable name");
         return Err(shell.diagnostics().shell_error(&message));
     }
-    if shell.options.enabled(ShellOption::AllExport) {
+    if all_export == AllExport::Marks && shell.options.enabled(ShellOption::AllExport) {
         attributes.exported = true;
     }
 
@@ -635,6 +652,7 @@ pub(crate) fn set_bytes(
                 attributes,
                 CallbackPolicy::Run,
                 arrays::ReadOnlyGuard::Enforce,
+                AllExport::Marks,
             )
         });
     };
@@ -655,6 +673,7 @@ pub(crate) fn set_bytes(
             attributes,
             CallbackPolicy::Run,
             arrays::ReadOnlyGuard::Enforce,
+            AllExport::Marks,
         )
     })
 }
@@ -690,6 +709,7 @@ pub(crate) fn set_integer_bytes(
             attributes,
             callback_policy,
             arrays::ReadOnlyGuard::Enforce,
+            AllExport::Marks,
         )
     })?;
     Ok(value)
