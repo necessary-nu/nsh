@@ -1430,7 +1430,7 @@ assertions (
     {id give-the-failing-case-baseline-the-gates-control, kind @complete, author "brendan@necessary.nu", at 2026-09-02T11:39:48.635663285Z}
     {id bound-what-a-campaign-pays-to-replay-its-corpus, kind @complete, author "brendan@necessary.nu", at 2026-09-02T11:51:05.584416872Z}
     {id read-a-key-that-spells-an-assignment, kind @complete, author "brendan@necessary.nu", at 2026-09-02T11:50:03.559380974Z}
-    {id list-readonly-names-as-bash-lists-them, kind @doing, author "brendan@necessary.nu", at 2026-09-02T11:50:37.286263943Z}
+    {id list-readonly-names-as-bash-lists-them, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:12:44.579606711Z}
 )
 
 impl_evidence (

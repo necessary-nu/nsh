@@ -8228,6 +8228,7 @@ children (
                                 id list-readonly-names-as-bash-lists-them
                                 title "List readonly and exported names in the dialect's own form"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T05:36:47.912753966Z
@@ -8241,6 +8242,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T12:12:44.579606711Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -8517,6 +8525,48 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing `read-a-key-that-spells-an-assignment`, and not part of it: that node was about a *key*, and this is about an *index*. Measured against the pinned Bash 5.3.15 on `2a9d2e9`; pre-existing.\n\nAn indexed array's subscript is an arithmetic expression, and single quotes mean nothing in arithmetic, so Bash reports every one of these and this shell accepts them:\n\n    declare -a a=(1 2 3)\n    echo \"${a['1']}\"      bash: '1': arithmetic syntax error   nsh: 2\n    a['1']=z              bash: same, status 1                 nsh: assigns element 1\n    echo $(( a['1'] ))    bash: same                           nsh: 2\n    unset \"a['1']\"        bash: same                           nsh: removes element 1\n    n=1; echo \"${a['n']}\" bash: 'n': arithmetic syntax error   nsh: 2\n\nA *double*-quoted subscript is accepted by both -- `${a[\"1\"]}` is `2` everywhere -- because Bash removes double quotes from the subscript text before evaluating it and leaves single quotes in place, where they are an unknown token. `${zz['1']}` on a name that does not exist reports in Bash too, the kind defaulting to indexed.\n\nWHERE. `variables::arrays::text_word`, which is the shell's one answer to \"a subscript arrived as bytes and has to be read as a word\". Its rule -- quotes come off, text outside single quotes expands, a blank is data -- is right for an *associative* subscript, which is a key and not an expression, and is what `[spec:nsh:req:compat.bash.arrays-declarations]` measured for `m['a b']`. It is wrong for an indexed one, where Bash hands the bytes to the arithmetic evaluator with only double quotes taken off. `resolve_selector` is where the two part company: it already asks the target's kind to decide key-or-index, and that is where the two readings of the text belong.\n\nWATCH THE SHAPES THAT MUST NOT MOVE. `${a[\"1\"]}` and `${a[$n]}` stay accepted; `m['a b']` and `m['a=1']` are keys and keep their single quotes removed; `unset 'a[k]'` and `declare -n r='A[k]'` reach the same code and their associative forms are already pinned by tests.\n\nDONE WHEN. A single-quoted subscript on an indexed array reports and answers as the reference does, through `${a[..]}`, an assignment, `$(( ))` and `unset` alike, the associative forms are unmoved, and a differential table holds both halves."
+                                    }
+                                )
+                            }
+
+                            {
+                                id apply-a-declaring-builtin-through-the-reference
+                                title "Make `readonly` and `export` follow a nameref to its target"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T12:13:09.918291788Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `list-readonly-names-as-bash-lists-them`, where a candidate test row would not agree and the reason turned out to be a data difference rather than a listing one. Measured against the pinned Bash 5.3.15 on `dea4a93`; pre-existing.\n\nA `declare -n` reference reads and writes through itself, and Bash's `readonly` and `export` read through it too: the attribute lands on the *target*.\n\n    declare -n rr=t; t=1; readonly rr; declare -p rr t\n      bash: declare -n rr=\"t\"  /  declare -r t=\"1\"\n      nsh:  declare -nr rr=\"t\" /  declare -- t=\"1\"\n\n    declare -n rr=t; t=1; readonly rr; t=2\n      bash: t: readonly variable, status 1\n      nsh:  accepted, t is 2\n\n    declare -n rr=t; t=1; export rr; export -p | grep -E ' (rr|t)='\n      bash: declare -x t=\"1\"\n      nsh:  declare -nx rr=\"t\"\n\nSo this is not a spelling difference: a script that makes a name read-only through a reference is still able to write it here, which is the failure mode the attribute exists to prevent. The `export` half has the same shape and matters less -- neither shell puts the reference in the environment -- but it is the same bug.\n\nWHERE. `builtins/export.rs` applies `add_attributes` (or `set_bytes`) to the operand as written. `variables::nameref::read_name` is the existing walk and is what `declare` itself does not need, because Bash's `declare` deliberately does *not* read through a reference for `-n` (`declare -n ref=y` re-points it). The two built-ins differ from `declare` here and from each other in nothing.\n\nNOT MEASURED YET, and worth measuring before fixing: what `readonly` does when the reference points at nothing, at an element (`declare -n r='A[k]'`), or at a name that does not exist; and whether `readonly rr` also makes `rr` itself read-only in Bash, or only `t` -- the `declare -p rr` above says only `t`, but a second `declare -n rr=u` afterwards would say whether the reference can still be re-pointed.\n\nDONE WHEN. `readonly` and `export` through a reference land on the name the reference holds, the refusal that follows is the reference's target's, and a differential table holds the shapes above plus the three unmeasured ones."
+                                    }
+                                )
+                            }
+
+                            {
+                                id quote-the-set-listing-as-bash-quotes-it
+                                title "Print `set`'s listing in Bash's own form"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T12:13:26.590441653Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `list-readonly-names-as-bash-lists-them`, which fixed the `export -p` and `readonly -p` half of `variables::show_vars` and deliberately left the `set` half alone. Measured against the pinned Bash 5.3.15 on `dea4a93`; pre-existing.\n\nA bare `set` (and a bare `declare`, which is the same listing) differs from Bash in two ways at once:\n\n    x=1;                    set | grep '^x'   bash: x=1                      nsh: x='1'\n    declare -i n=3;         set | grep '^n'   bash: n=3                      nsh: n='3'\n    declare -a z=(1 2);     set | grep '^z'   bash: z=([0]=\"1\" [1]=\"2\")      nsh: z='1'\n    declare -A m=([k]=v);   set | grep '^m'   bash: m=([k]=\"v\" )             nsh: m\n    declare -a z=();        set | grep '^z'   bash: z=()                     nsh: z\n\n1. THE QUOTING IS UNCONDITIONAL HERE AND CONDITIONAL THERE. Bash quotes only when leaving the value bare would not read back -- its `sh_single_quote` is reached through the same \"does this need quoting\" test `declare -p` uses -- and this shell always quotes. The POSIX dialect's form is dash's and always quotes there too, correctly, so this is a Bash-mode-only question.\n\n2. AN ARRAY PRINTS ITS FIRST ELEMENT, OR NOTHING. `show_vars`'s non-declaration branch reads `Variable::scalar`, which for an array is element zero, so a two-element array lists as its first element and an associative array with no `\"0\"` key lists as a bare name. That is the same defect `dea4a93` fixed for `export -p` by giving it the declaration renderer; `set` needs the *compound* spelling without the `declare -flags` prefix, which is `declaration_value` and nothing else.\n\nBoth halves live in the one `else` branch of `variables::show_vars`, and `variables::declaration::declaration_value` already produces the `=(...)` text this needs.\n\nWATCH THE DIALECT BOUNDARY. `set` in the POSIX dialect is dash's listing and is pinned against the C dash reference by `tests/corpus/aud_state_var.txt`; whatever changes here must be inside the `bash` test that branch already makes, and the corpus must be re-run before and after.\n\nDONE WHEN. `set` and a bare `declare` in Bash mode print what the reference prints for a plain scalar, an integer, an indexed array, an associative array and an empty array; the POSIX dialect's listing is byte-identical to before; and a differential table holds the rows."
+                                    }
+                                )
+                            }
+
+                            {
+                                id mark-the-shell-facts-bash-marks
+                                title "Give the shell's own facts the attributes Bash gives them"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T12:13:53.404937433Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `list-readonly-names-as-bash-lists-them`: with the listing form fixed, the only thing left between the two shells' `readonly -p` output is *which names are in it*. Measured against the pinned Bash 5.3.15 on `dea4a93`; pre-existing.\n\n    bash: declare -r  BASHOPTS=\"...\"\n          declare -ar BASH_VERSINFO=([0]=\"5\" [1]=\"3\" ...)\n          declare -ir EUID=\"1000\"\n          declare -ir PPID=\"...\"\n          declare -r  SHELLOPTS=\"...\"\n          declare -ir UID=\"1000\"\n\n    nsh:  declare -r  BASHOPTS=\"...\"\n          declare -r  SHELLOPTS=\"...\"\n\nSo four of Bash's six are missing the read-only attribute here, and three of them are missing `-i` as well: `EUID`, `UID` and `PPID` are integers there and plain scalars here, and `BASH_VERSINFO` is a read-only array here only in that it is an array. The values are all correct; it is the attributes that are not published with them.\n\nWHY IT IS MORE THAN A LISTING. A read-only `UID` is what makes `UID=0` fail, and a script that checks `[ \"$UID\" = 0 ]` after something tried to set it is relying on that refusal. Measured: `UID=0; echo $UID` is `0` here and an error there. The `-i` half is smaller but real: `EUID+=1` is arithmetic there and string concatenation here.\n\nWHERE. `variables::special::publish`, which enters the facts when the dialect turns on. It has `mark_dynamic` for the recomputed names and enters the rest as ordinary values; the attributes are simply not passed. `set_pipeline_status` and `publish_directory_stack` show the array form.\n\nMEASURE THE WHOLE SET BEFORE FIXING SIX NAMES. The six above are what a read-only listing shows; `declare -p` in Bash also carries `-i` on `BASHPID`, `HISTCMD`, `OPTIND`, `RANDOM` and `SRANDOM`, and `-a` on `BASH_ARGC`, `BASH_ARGV`, `BASH_LINENO`, `BASH_SOURCE`, `DIRSTACK`, `FUNCNAME`, `GROUPS` and `PIPESTATUS`. A `declare -p` diff of the two shells' startup sets is the right way to find them all at once, and is what this node should start with rather than a list transcribed by hand.\n\nDONE WHEN. Every name this shell publishes carries the attributes the reference publishes it with, `UID=0` and the other refusals follow, and a differential test compares the two shells' `declare -p` for the names both of them have."
                                     }
                                 )
                             }
