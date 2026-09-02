@@ -1446,7 +1446,7 @@ assertions (
     {id give-each-gate-run-its-own-shell, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:45:12.756467306Z}
     {id quote-the-set-listing-as-bash-quotes-it, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:59:17.63390239Z}
     {id quote-a-subscript-the-way-bash-quotes-one, kind @complete, author "brendan@necessary.nu", at 2026-09-02T15:34:06.01782486Z}
-    {id mark-the-shell-facts-bash-marks, kind @doing, author "brendan@necessary.nu", at 2026-09-02T15:34:17.545778385Z}
+    {id mark-the-shell-facts-bash-marks, kind @complete, author "brendan@necessary.nu", at 2026-09-02T15:52:55.903431341Z}
 )
 
 impl_evidence (

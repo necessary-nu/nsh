@@ -8899,6 +8899,7 @@ children (
                                 id mark-the-shell-facts-bash-marks
                                 title "Give the shell's own facts the attributes Bash gives them"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T12:13:53.404937433Z
@@ -8912,6 +8913,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T15:52:55.903431341Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -9129,6 +9137,118 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "THE ONE NAME `mark-the-shell-facts-bash-marks` LEFT, AND IT IS LEFT BECAUSE IT IS A DIFFERENT MECHANISM. Found 2026-09-02 while closing that node; measured against the pinned Bash 5.3.15 on `7265a96`.\n\n`SECONDS` carries no letter in Bash until something reads it, and `-i` afterwards. Measured with `env -i` on both shells:\n\n    (fresh)              declare -p | grep SECONDS   bash: declare -- SECONDS\n    : $SECONDS; same                                 bash: declare -i SECONDS\n    (fresh)              declare -p SECONDS          bash: declare -i SECONDS\n    (fresh)              echo \"${SECONDS@a}\"         bash: i\n    nsh, all four                                    declare -- SECONDS / (empty)\n\nSo the reference's *listing* and its *named* lookup disagree about the same name in the same shell, and they disagree because the named lookup is a read and the listing is not. `BASHPID`, `RANDOM`, `SRANDOM` and `OPTIND` carry `-i` from the start in both shells and are not part of this; `EPOCHSECONDS`, `EPOCHREALTIME`, `LINENO` and `BASH_SUBSHELL` carry nothing in either, read or not.\n\nTWO HALVES, AND THE SECOND IS THE EXPENSIVE ONE.\n\n1. The read has to set the attribute. `variables::special::refresh` is the read path and already recomputes `SECONDS`; one `set_bash_attribute(Integer, true)` beside the recomputation would make `: $SECONDS; declare -p | grep SECONDS` right.\n\n2. `declare -p NAME` and `${name@a}` have to *be* reads, and they are not. Neither calls `special::refresh`, which is visible without `SECONDS` at all:\n\n    x=$BASHPID; declare -p BASHPID\n      bash: declare -i BASHPID=\"886412\"   (the live pid)\n      nsh:  declare -i BASHPID=\"0\"        (the seed `mark_dynamic` wrote)\n\n    declare -p RANDOM\n      bash: declare -i RANDOM=\"27226\"     nsh: declare -i RANDOM=\"0\"\n\nA NAME WHOSE VALUE IS RECOMPUTED SPELLS ITS SEED BACK, in other words, and that is worth fixing on its own account: `declare -p` exists to say what the shell holds, and for five names it says `0`. The values are unpredictable, so no differential row can compare them directly -- but `x=$BASHPID; declare -p BASHPID | grep -c \"$x\"` is 1 in the reference and 0 here, and that is a row.\n\nWHERE. `builtins/declare.rs`'s `print` and `variables::show_vars`'s declaration branch both hold `&mut Shell` and both call `declaration::declaration_line`; a `special::refresh(shell, name)` in front of each is the whole of half 2. Watch what that does to the *listing*: refreshing every name in a bare `declare -p` would give `SECONDS` its `-i` in a fresh listing, where the reference prints `--`. So the refresh belongs to the named lookup and not to the listing, which is exactly the asymmetry Bash itself has.\n\nDONE WHEN. `declare -p SECONDS`, `${SECONDS@a}` and a listing taken after a read all carry `-i`, a listing taken before one does not, `declare -p BASHPID` names the running process rather than zero, and a differential table holds the four rows above."
+                                    }
+                                )
+                            }
+
+                            {
+                                id keep-a-local-declared-after-unset
+                                title "Keep the entry `unset` leaves behind on a name local to the running body"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:53:30.854017131Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `spell-a-valueless-name-back`, and not part of it: that node was about what a declaration spells, and this is about whether the declaration is still there to spell. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\n`unset` on a name the running function made local removes the entry here and leaves an invisible local in Bash:\n\n    f(){ local pv=1; unset pv; declare -p pv; echo \"[${pv@A}]\"; }; f\n      bash: declare -- pv  /  [declare pv]\n      nsh:  declare: pv: not found  /  []\n\nTHE VALUES ARE ALREADY RIGHT, which is why this is small and why it is worth writing down rather than guessing at later. `$pv` is empty inside the body and the caller's value is restored on return in both shells, because the frame still holds the `Saved` record whatever happened to the entry. It is the entry's *lifetime* that differs, and only a declaration printer can see it.\n\nWHERE, AND THE INCONSISTENCY THAT MAKES IT ODD. A POSIX `local` on a fresh name goes through `make_local_bytes`, which sets `attributes.fixed = true`, and `set_entry`'s removal path keeps a `fixed` entry -- so that one survives `unset`. Bash mode's `local` is `declare`, which goes through `nameref::make_local`, which inserts `Variable::unset(VariableAttributes::NONE, callback)`. The same construct therefore survives `unset` in one dialect and not in the other, and it is the dialect with `declare -p` that loses.\n\nWATCH WHAT `fixed` MEANS BEFORE REACHING FOR IT. `80388bd` gave `fixed` a second job: an `Unset` entry that is `FIXED` and carries nothing else is a slot this shell reserved for a callback, and `declare -p` deliberately does not list one. Making a Bash-mode local `FIXED` would hide it from the listing, which is the opposite of what this node wants. The mark this needs is \"a declaration made it\", not \"the shell reserved it\" -- the same mark `list-a-declaration-of-a-reserved-name` needs, and the two should probably be answered together.\n\nDONE WHEN. `unset` on a name local to the running body leaves it in `declare -p` and in `${name@A}` as the reference leaves it, a POSIX `local` is unmoved, a reserved slot is still not listed, and a differential table holds the rows."
+                                    }
+                                )
+                            }
+
+                            {
+                                id give-a-compound-assignment-the-integer-attribute
+                                title "Apply `-i` to the elements a compound assignment stores"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:53:49.888046955Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while writing the attribute-letter table for `spell-a-valueless-name-back`, which had to stop using a non-numeric value because of it. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\nThe integer attribute reshapes a scalar assignment and does not reach a compound one:\n\n    declare -ai v=(Q);   declare -p v   bash: declare -ai v=([0]=\"0\")    nsh: ([0]=\"Q\")\n    declare -Ai v=(1);   declare -p v   bash: declare -Ai v=([1]=\"0\")    nsh: ([1]=\"\")\n    declare -i  v=Q;     declare -p v   bash: declare -i v=\"0\"           nsh: declare -i v=\"0\"\n\nThe scalar row is the control and it already agrees, so this is not the arithmetic conversion being wrong -- it is the conversion not being run on the path a compound assignment takes. `nameref::declared_value` is where a declaration attribute reshapes a value before it is stored, and `builtins/declare/compound.rs` does not go through it.\n\nThe second row is worth reading twice: `declare -Ai v=(1)` is Bash 5.1's key/value form, so `1` is a *key* with an empty value, and the empty value is what `-i` turns into `0`. The key is untouched by `-i` in both shells, which is the boundary.\n\nDONE WHEN. An element stored by a compound assignment on an `-i` name is the arithmetic value of its text, the key of an associative element is not, and a differential table holds the indexed and associative forms with numeric and non-numeric values."
+                                    }
+                                )
+                            }
+
+                            {
+                                id accept-local-dash-in-the-bash-dialect
+                                title "Let `local -` save the option set in Bash mode as it does in POSIX mode"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:54:08.15254001Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while measuring `local` for `spell-a-valueless-name-back`. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\n    h(){ local -; set +e; echo ok; }; h\n      bash: ok\n      nsh:  declare: `-': not a valid identifier, then ok\n\nBash's `local -` saves the option set for the duration of the function and restores it on return, and `tests/corpus/aud_state_var.txt` already pins that behaviour for the POSIX dialect against the C dash reference -- two cases, `local dash saves options` and `local dash restores xtrace`. Both pass.\n\nWHERE. `builtins/local.rs` hands the whole invocation to `builtins::declare::run` when the dialect is Bash, and `declare`'s operand walk rejects `-` with `not a valid identifier` before anything can notice what it means. `variables::make_local_bytes` already has the `-` case and is what the POSIX path reaches; the Bash path never gets there.\n\nNOT MEASURED YET, and worth measuring before fixing: whether Bash's `local -` restores on a `return` out of a nested function, and what `local - x` does with the two operands together.\n\nDONE WHEN. `local -` in Bash mode saves and restores the option set as it does in the POSIX dialect and as the reference does, the corpus cases are unmoved, and a differential table holds the shapes."
+                                    }
+                                )
+                            }
+
+                            {
+                                id refuse-a-reference-to-what-is-not-a-name
+                                title "Refuse `declare -n` on a value that is not a valid name"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:54:27.526973177Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `spell-a-valueless-name-back`. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\nBash refuses to make a name a reference when what it would refer to is not an identifier; this shell accepts it and carries a reference state Bash cannot have:\n\n    ref=1; typeset -n ref; declare -p ref\n      bash: typeset: `1': invalid variable name for name reference\n            declare -- ref=\"1\"          (still a plain scalar)\n      nsh:  declare -n ref=\"1\"\n\n    declare -in r5=x5\n      bash: declare: r5: not found      (the declaration is refused)\n      nsh:  declare -in r5=\"0\"\n\nWHY IT MATTERS MORE THAN A DIAGNOSTIC. Every transform over that state is an answer about a variable the reference cannot hold, so no differential row can ever pin it: `${ref@A}` is `ref='1'` there and `declare -n ref='1'` here, and the difference is not the transform's. `c727cb3` had to reason about it rather than measure it when it made `declaration_target` decline a reference holding no name.\n\n`variables::nameref::is_valid_target` exists and `builtins/declare.rs` already calls it for `declare -n ref=value`. The path that is missing the check is the one that turns an *existing* value into a reference -- `typeset -n ref` with no `=`, where the value was already there.\n\nDONE WHEN. `declare -n` on a name whose value is not a valid identifier is refused as the reference refuses it, the name is left as it was, the status matches, and a differential table holds `typeset -n` over an existing non-name value and the `-in` combination."
+                                    }
+                                )
+                            }
+
+                            {
+                                id unset-every-name-it-was-given
+                                title "Carry on past a refused operand in `unset`"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:54:46.588286769Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `list-the-names-that-only-carry-attributes`: the widened `declare -p` listing made it visible, and it has nothing to do with listings. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\n`unset` stops at its first refused operand and leaves the rest of them set:\n\n    readonly x=1; a=1; b=2\n    unset a x b\n    echo \"status=$? a=[${a-gone}] b=[${b-gone}]\"\n      bash: status=1 a=[gone] b=[gone]\n      nsh:  status=1 a=[gone] b=[2]\n\nSo a script that unsets a list of names, one of which happens to be read-only, silently keeps every name after it. The status is already right in both, which is what makes this quiet: the caller sees the failure and has no way to know how much of the list ran.\n\nTHE SAME BUILT-IN, A SECOND DIVERGENCE, and this one is against dash rather than Bash. `tests/corpus/aud_state_var.txt` has it as its one failing case:\n\n    readonly R=1; unset R; echo \"rc=$?\"\n      ref (C dash): rc=2, `unset: R: is read only`\n      nsh:          rc=1, `unset: R is read-only`\n\ndash answers 2 because `unset` is a special built-in and a special built-in's failure is fatal there. The two questions are the same built-in's error path and are probably one change: what a refused operand costs, and what the command answers afterwards.\n\nDONE WHEN. `unset` reports a refused operand and carries on to the next as the reference does, the exit status is the dialect's own -- 2 in the POSIX dialect, 1 in Bash -- `tests/corpus/aud_state_var.txt` passes its `readonly unset` case, and a differential table holds a list with a refused name in the middle."
+                                    }
+                                )
+                            }
+
+                            {
+                                id expand-a-command-substitution-in-a-subscript
+                                title "Read a command substitution written inside an array subscript"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:55:07.367645998Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing `quote-a-subscript-the-way-bash-quotes-one`, and not part of it: that node was about quoting and this is about expansion. Measured against the pinned Bash 5.3.15 on `7265a96`; pre-existing and unmoved by that node.\n\nA command substitution inside a subscript does not work at all, and the two spellings fail differently:\n\n    declare -a a=(10 11 12)\n    echo \"${a[$(echo 1)]}\"   bash: 11   nsh: eval: Syntax error: end of file unexpected (expecting \")\")\n    echo \"${a[`echo 1`]}\"    bash: 11   nsh: 10\n\nThe `$( )` form is a parse failure and the backtick form silently reads element zero, which is the worse of the two: a script indexing an array by a command's output gets the wrong element and no diagnostic.\n\nWHERE. `parser::bash::parameter_subscript` scans the raw bytes to the matching `]` with a quote state, and it has no state for `$(` -- the `)` inside is read as ordinary text and the `]` it finds is the right one, but what the scan produces is then re-parsed by `arrays::text_word`'s `expand_run` as a *word*, and the `$(...)` in it is cut. The parser's own comment above `track_assignment_subscript` says Bash skips a whole expansion while looking for the matching `]`, which is the rule this side is missing.\n\nThe backtick form reaching zero rather than reporting suggests the substitution is expanding to nothing and the empty expression is being read as `0` -- the same `${a[]}` shape `parameter.rs` reports for, but reached after expansion rather than before, where the shell does not look.\n\nNOT MEASURED YET, and worth measuring first: `${a[$(echo 1) + 1]}`, a substitution inside an *associative* subscript where the text is a key rather than an expression, and the assignment side `a[$(echo 1)]=v`.\n\nDONE WHEN. Both substitution forms read the element the reference reads, in a subscript on an indexed and on an associative array and on both sides of an assignment, and a differential table holds them."
+                                    }
+                                )
+                            }
+
+                            {
+                                id publish-the-names-bash-publishes
+                                title "Publish the seventeen start-up names Bash has and this shell does not"
+                                kind @feat
+                                log (
+                                    {
+                                        at 2026-09-02T15:55:32.570095743Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "THE OTHER HALF OF `mark-the-shell-facts-bash-marks`, WHICH CLOSED THE ATTRIBUTES AND NOT THE SET. Found 2026-09-02 while closing it; measured against the pinned Bash 5.3.15 on `7265a96`.\n\nThat node made every name *both* shells publish carry the reference's letters -- all 29 of them agree now. What it did not do, because its `DONE WHEN` said \"every name this shell publishes\", is close the difference in *which* names are published. Measured with `env -i PATH=... LC_ALL=C` on each shell and `declare -p` on both:\n\n    bash publishes 48, this shell 31, 29 in common.\n\nIN BASH AND NOT HERE, seventeen:\n\n    _  BASH_ALIASES  BASH_ARGC  BASH_ARGV  BASH_ARGV0  BASH_CMDS\n    BASH_COMMAND  BASH_EXECUTION_STRING  BASH_LINENO  BASH_LOADABLES_PATH\n    BASH_MONOSECONDS  BASH_SOURCE  COMP_WORDBREAKS  FUNCNAME  HISTCMD\n    OLDPWD  OPTERR  SHELL  TERM\n\nThey are not one job. `FUNCNAME`, `BASH_SOURCE`, `BASH_LINENO`, `BASH_ARGC` and `BASH_ARGV` are the call stack, and `variables::call_stack` already computes what three of them answer -- they are missing from the *listing*, not from the shell, and `declare -a FUNCNAME` with no value is exactly the invisible-array spelling `92f97f9` built. `TERM` and `SHELL` are environment facts with defaults (`TERM=dumb` in the reference when nothing supplied one). `OLDPWD`, `OPTERR`, `HISTCMD` and `_` are ordinary state this shell keeps elsewhere or not at all. `BASH_ALIASES`, `BASH_CMDS` and `COMP_WORDBREAKS` belong to the interactive surface. Split it before starting.\n\nHERE AND NOT IN BASH, two: `PS1` and `PS2`. `initialize_variables` gives them defaults unconditionally; a non-interactive Bash has neither, so `declare -p` lists two names the reference does not and a script walking the listing sees them.\n\nWHY IT IS WORTH A NODE RATHER THAN A LIST IN A MESSAGE. `bash_shell_facts.rs` had to carry the 29 shared names as a literal because the two sets are not otherwise comparable; every name closed here is a name that table can stop enumerating, and the whole-listing comparison the differential tests cannot make today becomes possible when the sets meet.\n\nDONE WHEN. The start-up `declare -p` sets can be compared whole rather than name by name, and `bash_shell_facts.rs` compares them that way instead of listing what they share."
+                                    }
+                                )
+                            }
+
+                            {
+                                id judge-a-shell-whose-target-is-a-link
+                                title "Judge a shell built under a `target` that is a symbolic link"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-02T15:56:15.746191455Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Found 2026-09-02 while closing five nodes from a private measurement worktree. Measured on `7265a96`.\n\n`crates/nsh-survey/src/shell.rs`'s `a_shell_older_than_its_sources_is_named` fails when the checkout's `target` is a symbolic link:\n\n    cargo test -p nsh-survey --bin nsh-survey\n      /home/brendan/work/dash          82 passed\n      /home/brendan/work/dash-spellback (target -> /data/...)  81 passed, 1 failed\n        a shell from 1971 was accepted as built from today's tree\n\nThe test writes a scratch shell under `target/` -- \"so it is judged\", its own comment says -- gives it a 1971 mtime and expects `built_before_its_sources` to complain. With `target` a link, the scratch path resolves outside the checkout root, the shell is treated as one from somewhere else, and the staleness check declines to judge it. Nothing else in the workspace notices; the release binaries, the sandbox and the Oils survey all work through the link.\n\nWHY IT IS NOT AN EXOTIC SETUP. This machine's root filesystem reached 100% on 2026-09-02 and the response, for two sessions, was to put a private worktree's build tree on `/data` and link `target` to it -- 3.8G off `/` at the cost of one symlink. Every house rule here points agents at private worktrees, so the next one to run out of disk will do the same and will see a red test that is nothing to do with their change. That is the cost: not a broken check, a misleading one.\n\nWHAT TO DO. `provenance::checkout_root` and the \"is this shell ours\" test disagree about whether to resolve symlinks, and the fix is to make them agree -- canonicalize both sides, or neither. The test itself could also say what it assumes: it depends on `target/` being a real directory inside the root, which is worth an assertion with a message rather than a failure that reads as a staleness bug.\n\nDONE WHEN. The check judges a shell under a linked `target` as it judges one under a real directory, or says plainly that it cannot; and the test passes in a worktree whose `target` is a link."
                                     }
                                 )
                             }
