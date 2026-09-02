@@ -1,0 +1,275 @@
+#!/bin/bash
+# Answer "where has the disk gone, and what of it is safe to take back?" for
+# this repository's own checkouts.
+#
+# `scripts/sandboxed` refuses to start a build on a machine with no room for
+# it, and names the free space and the threshold. That leaves the reader with
+# a number and nowhere to go: the reason a session loses an hour here is not
+# that it cannot read `df`, it is that deciding which of eight `target/`
+# directories belongs to somebody still using it takes longer than the build
+# did. This answers that, and will do the removal it has justified.
+#
+# WHAT IT WILL NEVER TOUCH, because on this machine those are the expensive
+# mistakes:
+#
+#   - anything outside a checkout `git worktree list` names. Other projects
+#     live on this machine and their build output is none of our business.
+#     The abandoned-process check in `scripts/sandboxed` learned the same
+#     lesson the same way.
+#   - a worktree with a dirty working tree. Uncommitted work is the one thing
+#     in a `target/` directory's neighbourhood that no build can regenerate.
+#   - a tree anything is currently building into, by either of two tests: a
+#     live process whose command line names it, or a recent write inside it.
+#   - the main checkout's `target/` beyond its caches. Removing it would cost
+#     the next worker a full rebuild -- 2.79 GiB and some minutes, measured --
+#     for space that the next build immediately wants back. Its size is
+#     reported so the choice can be made deliberately, and it is never in the
+#     total this script offers to reclaim.
+set -euo pipefail
+
+usage() {
+    echo "usage: scripts/disk-headroom [--reclaim] [--recent MINUTES]" >&2
+    echo "Reports free space and reclaimable build output; --reclaim removes" >&2
+    echo "what it has shown to be safe. MINUTES guards a tree written to that" >&2
+    echo "recently as still in use (default 60; 10 for a pure cache, which" >&2
+    echo "NSH_DISK_CACHE_RECENT_MINUTES sets)." >&2
+    exit 2
+}
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+# The same threshold `scripts/sandboxed` refuses under, read from the same
+# variable, so the two can never disagree about what "enough" means.
+DISK_MIN=${NSH_TEST_DISK_MIN:-2048}
+RECENT=${NSH_DISK_RECENT_MINUTES:-60}
+# The guard on a pure cache. See `in_use`: a shorter window is safe here
+# because a wrong answer costs incrementality rather than a rebuild, and it is
+# necessary because the shared checkout is never quiet for an hour.
+CACHE_RECENT=${NSH_DISK_CACHE_RECENT_MINUTES:-10}
+RECLAIM=false
+
+while (($#)); do
+    case $1 in
+        --reclaim)
+            RECLAIM=true
+            shift
+            ;;
+        --recent)
+            (($# >= 2)) || usage
+            RECENT=$2
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+done
+case $DISK_MIN in '' | *[!0-9]*) usage ;; esac
+case $RECENT in '' | *[!0-9]*) usage ;; esac
+case $CACHE_RECENT in '' | *[!0-9]*) usage ;; esac
+
+gib() { /usr/bin/awk -v b="$1" 'BEGIN { printf "%.2f GiB", b / 1073741824 }'; }
+bytes_of() { /usr/bin/du -sb "$1" 2>/dev/null | /usr/bin/awk '{print $1}'; }
+
+# A build in flight is the thing that must not be deleted, and a tree it is
+# writing into does not always have a fresh mtime at the top. Two independent
+# tests, either of which is enough to keep the tree.
+#
+# The first is a process whose command line names the directory -- how a live
+# `cargo` and every `rustc` it spawns identify their `--out-dir`. It is the
+# precise test: a plain `cargo build` does not name the path itself, but each
+# rustc it runs does. This is what found another project's build running on
+# this machine while the check was being written.
+#
+# The second is a recent write anywhere shallow inside it, covering the moment
+# between two rustc invocations when no process names anything. It is
+# deliberately shallow -- walking a multi-gigabyte tree to date it costs more
+# than the question is worth, and cargo touches the profile and `deps`
+# directories on every build.
+#
+# THE WINDOW IS AS LONG AS A WRONG ANSWER IS EXPENSIVE, which is why it is an
+# argument rather than a constant. Deleting a worktree's whole `target/` out
+# from under a session that has paused costs it a full rebuild, so that is
+# asked with the long window. Deleting an incremental cache costs the next
+# build some of its incrementality and nothing else, so a short window is
+# enough there -- and it has to be short, because the shared checkout is
+# touched by every session on the machine and would otherwise never be
+# offered, which would leave the single largest reclaimable item on this disk
+# permanently invisible.
+#
+# NAMING THE PATH IS NOT USING IT, which is this check's version of the
+# correction `scripts/sandboxed` records as "orphaned is not yet abandoned".
+# A process that merely mentions the directory is usually the agent asking
+# the question: a shell running `stat target/debug/incremental`, or the very
+# session that typed `disk-headroom`, carries that path in its own
+# `/proc/self/cmdline`. Matching on the path alone made the shared checkout's
+# 2.1 GiB cache read as in use every single time it was asked -- the tool
+# reporting itself, and hiding the largest reclaimable item on the disk behind
+# a permanent false positive.
+#
+# So the process has to be a build tool as well as name the path, by argv[0]
+# or by the executable behind it. `scripts/sandboxed` fingerprints binary
+# names for the same reason and learned it the same way.
+#
+# THE SCAN ALSO RUNS NO PROCESS OF ITS OWN, which is a second thing that went
+# wrong here. `grep -f - -- /proc/[0-9]*/cmdline` puts around fifteen hundred
+# filenames into one argv on this machine, and an argv that outgrows ARG_MAX
+# makes the `exec` fail -- producing no output, which reads as "nothing is
+# using it", which is the one answer that deletes a running build's tree. It
+# was flaky rather than broken, which is worse: it passed this script's own
+# self-test and failed it on the next run. The loop is bash's instead, reading
+# each NUL-separated `cmdline` directly, forking nothing. `readlink` is the
+# one fork, and it runs only for a process that already names the path.
+BUILD_TOOLS=' cargo rustc rustdoc cc gcc clang ld ld.lld lld collect2 ar sccache '
+
+is_build_tool() { # is_build_tool PROC-ENTRY ARGV0
+    local exe
+    [[ $BUILD_TOOLS != *" ${2##*/} "* ]] || return 0
+    exe=$(/usr/bin/readlink "$1/exe" 2>/dev/null) || return 1
+    exe=${exe% (deleted)}
+    [[ $BUILD_TOOLS != *" ${exe##*/} "* ]] || return 0
+    return 1
+}
+
+in_use() { # in_use TARGET-DIR MINUTES
+    local dir=$1 minutes=$2 probe entry argument argv0 names_dir
+    for entry in /proc/[0-9]*; do
+        [[ -r $entry/cmdline ]] || continue
+        argv0=
+        names_dir=false
+        while IFS= read -r -d '' argument; do
+            [[ -n $argv0 ]] || argv0=$argument
+            if [[ $argument == *"$dir"* ]]; then
+                names_dir=true
+                break
+            fi
+        done <"$entry/cmdline" 2>/dev/null
+        $names_dir || continue
+        ! is_build_tool "$entry" "$argv0" || return 0
+    done
+    for probe in "$dir" "$dir"/* "$dir"/*/deps "$dir"/*/.fingerprint; do
+        [[ -e $probe ]] || continue
+        [[ -z $(/usr/bin/find "$probe" -maxdepth 0 -newermt "-$minutes minutes" -print 2>/dev/null) ]] || return 0
+    done
+    return 1
+}
+
+SAFE_PATHS=()
+SAFE_LABELS=()
+SAFE_BYTES=()
+SAFE_WINDOWS=()
+KEPT=()
+TOTAL=0
+
+offer() { # offer PATH MINUTES LABEL
+    local size
+    size=$(bytes_of "$1") || return 0
+    [[ -n $size ]] || return 0
+    SAFE_PATHS+=("$1")
+    SAFE_WINDOWS+=("$2")
+    SAFE_LABELS+=("$3")
+    SAFE_BYTES+=("$size")
+    TOTAL=$((TOTAL + size))
+}
+
+echo "== room =="
+SEEN_DEVICES=' '
+CHECKOUTS=()
+while IFS= read -r line; do
+    [[ -n ${line#worktree } ]] || continue
+    CHECKOUTS+=("${line#worktree }")
+done < <(/usr/bin/git -C "$ROOT" worktree list --porcelain | /bin/grep '^worktree ')
+
+for checkout in "${CHECKOUTS[@]}"; do
+    [[ -d $checkout ]] || continue
+    device=$(/usr/bin/stat -c '%d' "$checkout")
+    [[ $SEEN_DEVICES != *" $device "* ]] || continue
+    SEEN_DEVICES+="$device "
+    free=$(($(/usr/bin/stat -f -c '%a' "$checkout") * $(/usr/bin/stat -f -c '%S' "$checkout")))
+    source=$(/usr/bin/df --output=source -- "$checkout" | /usr/bin/tail -n 1)
+    fstype=$(/usr/bin/stat -f -c '%T' "$checkout")
+    verdict=ok
+    ((free >= DISK_MIN * 1024 * 1024)) || verdict="UNDER the $(gib $((DISK_MIN * 1024 * 1024))) threshold"
+    printf '  %-14s %-9s %10s free   %s\n' "$source" "$fstype" "$(gib "$free")" "$verdict"
+    # A checkout on a tmpfs is spending RAM, not disk, and nothing on this
+    # machine says so. 6.6 GiB of this machine's tmpfs was abandoned cargo
+    # output on 2026-09-02.
+    [[ $fstype != tmpfs ]] || echo "                 ($checkout is on a tmpfs: that space is RAM)"
+done
+
+echo
+echo "== reclaimable =="
+for checkout in "${CHECKOUTS[@]}"; do
+    target=$checkout/target
+    [[ -d $target ]] || continue
+    # The shared checkout is the one every other session builds against, and
+    # it is never offered whole: only its caches are pure cache, and the rest
+    # is what the next worker would otherwise have to rebuild. It is reported
+    # either way, so that choice can be made deliberately rather than by not
+    # knowing the number.
+    if [[ $checkout == "$ROOT" ]]; then
+        echo "  keeping   $(gib "$(bytes_of "$target")") in $target"
+        echo "            the shared checkout's build output. Removing it costs the"
+        echo "            next worker a full rebuild -- 2.79 GiB, measured -- so it"
+        echo "            is never counted below."
+        for cache in "$target"/*/incremental; do
+            [[ -d $cache ]] || continue
+            if in_use "$cache" "$CACHE_RECENT"; then
+                KEPT+=("$cache -- a build is writing to it now")
+            else
+                offer "$cache" "$CACHE_RECENT" "incremental compilation cache: pure cache, regenerated on demand"
+            fi
+        done
+        continue
+    fi
+    if in_use "$target" "$RECENT"; then
+        KEPT+=("$target -- written to within $RECENT minutes, or a build tool names it")
+        continue
+    fi
+    if [[ -n $(/usr/bin/git -C "$checkout" status --porcelain 2>/dev/null) ]]; then
+        # The build output of a dirty worktree is regenerable, but a worktree
+        # somebody is still working in is one this script has no business
+        # slowing down, and the dirt is the only evidence available that
+        # somebody is.
+        KEPT+=("$target -- $checkout has uncommitted changes")
+        continue
+    fi
+    offer "$target" "$RECENT" "build output of a clean worktree ($checkout)"
+done
+
+if ((${#SAFE_PATHS[@]} == 0)); then
+    echo "  nothing"
+else
+    for i in "${!SAFE_PATHS[@]}"; do
+        printf '  %10s  %s\n' "$(gib "${SAFE_BYTES[$i]}")" "${SAFE_PATHS[$i]}"
+        printf '              %s\n' "${SAFE_LABELS[$i]}"
+    done
+    printf '  %10s  total\n' "$(gib "$TOTAL")"
+fi
+
+if ((${#KEPT[@]})); then
+    echo
+    echo "== kept =="
+    for k in "${KEPT[@]}"; do echo "  $k"; done
+fi
+
+echo
+if ((${#SAFE_PATHS[@]} == 0)); then
+    echo "Nothing here is safe to reclaim. If the machine is still short, the"
+    echo "space is in another project or in a worktree this repository no longer"
+    echo "records -- 'git worktree prune' drops the records of deleted ones."
+    exit 0
+fi
+if ! $RECLAIM; then
+    echo "Run 'scripts/disk-headroom --reclaim' to remove the $(gib "$TOTAL") above."
+    exit 0
+fi
+for i in "${!SAFE_PATHS[@]}"; do
+    # Re-ask immediately before removing: this script has spent seconds in
+    # `du` since it decided, and a build can have started in them.
+    if in_use "${SAFE_PATHS[$i]}" "${SAFE_WINDOWS[$i]}"; then
+        echo "skipped ${SAFE_PATHS[$i]} -- it came into use while this ran"
+        continue
+    fi
+    /bin/rm -rf -- "${SAFE_PATHS[$i]}"
+    echo "removed $(gib "${SAFE_BYTES[$i]}")  ${SAFE_PATHS[$i]}"
+done
+free=$(($(/usr/bin/stat -f -c '%a' "$ROOT") * $(/usr/bin/stat -f -c '%S' "$ROOT")))
+echo "$(gib "$free") free on $ROOT's filesystem now."

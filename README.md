@@ -210,6 +210,37 @@ and runs anyway, `=ignore` skips the check, and `NSH_TEST_DISK_MIN` sets the
 threshold in mebibytes. `tests/harness/disk-selftest.sh` is its self-test, and
 unlike the other two it may be run through the wrapper.
 
+A refusal leaves you with a number and nowhere to go, so `scripts/disk-headroom`
+answers the other half: where the space went, and which of it is safe to take
+back.
+
+```sh
+scripts/disk-headroom              # report
+scripts/disk-headroom --reclaim    # remove what it has shown to be safe
+```
+
+It looks only at checkouts `git worktree list` names — other projects live on
+this machine and their build output is not ours — and it offers a `target/`
+only when the worktree is clean and nothing is building into it. "Building into
+it" is two tests: a **build tool** whose command line names the directory
+(`rustc`, `cargo`, `ld`, `cc` and friends — naming the path is not using it,
+or the session that typed the question would keep hiding the answer), and a
+recent write inside it. The window is as long as a wrong answer is expensive:
+an hour for a worktree's whole `target/`, whose loss is a full rebuild, and ten
+minutes for an incremental cache, whose loss is only some incrementality —
+`NSH_DISK_RECENT_MINUTES` and `NSH_DISK_CACHE_RECENT_MINUTES` set them. The
+shared checkout's `target/` is reported but never offered whole: only its
+caches are pure cache, and the rest is a rebuild somebody else would pay for.
+
+Budget for this. The practice that makes measurements here trustworthy — a
+detached worktree with its own `CARGO_TARGET_DIR`, because the shared checkout
+is transiently unbuildable from another session's in-flight files — is also
+what fills the disk, at up to 2.79 GiB a time with six to eight worktrees live
+at once. Remove a worktree when its node is done, and note that a checkout
+under `/tmp` is spending RAM rather than disk, which `disk-headroom` says out
+loud. `tests/harness/disk-headroom-selftest.sh` is its self-test; every case in
+it is about something the tool must refuse to delete.
+
 The budget itself is spent inside the boundary: `timeout` stands in front of
 the command *within* the namespace, with a wider one outside as a backstop for
 a sandbox that never got as far as running anything. Stopping a command by
@@ -241,6 +272,7 @@ tests/                differential tests, reference lock, and survey suites
 docs/                 API design, specifications, and divergence records
 plan/                 nplan work breakdown and decision records
 scripts/sandboxed     test containment wrapper
+scripts/disk-headroom where the disk went and what is safe to reclaim
 ```
 
 The C oracle is fetched at its pinned upstream tag into ignored test build

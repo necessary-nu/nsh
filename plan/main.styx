@@ -9005,6 +9005,13 @@ children (
                                         kind @note
                                         text "SEE `tell-a-full-disk-from-a-compiler-bug`, filed independently the same afternoon from the other end of the same problem: it names the symptom (eight simultaneous `ld terminated with signal 7 [Bus error]` failures with an LLVM stack trace and an invitation to file an upstream bug, at `df` 100%), where this one is about not reaching that state. Both are worth keeping and neither subsumes the other -- a machine that never fills up needs no symptom guide, and a symptom guide does not stop the fill.\n\nTwo more data points for this one. The two failures recorded above were an ENOSPC from `cargo build` and, immediately before it, a `rustc` ICE with no message at all -- so the same cause produces at least three distinct-looking failures, only one of which says \"space\". And the pressure is structural rather than accidental: five sessions were running, each measuring in a private detached worktree with its own `CARGO_TARGET_DIR` because the shared checkout is transiently unbuildable from other sessions' in-flight files, and each of those costs up to 1.6 GB. Freeing 3 GB by removing two finished worktrees' build output took `/` from 1.9 GB to 4.8 GB free, which is roughly three more measurements' worth. The practice this repository depends on for trustworthy numbers is the thing filling the disk."
                                     }
+
+                                    {
+                                        at 2026-09-02T17:29:48.784915269Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -9068,6 +9075,7 @@ children (
                                 id tell-a-full-disk-from-a-compiler-bug
                                 title "Name the full disk that looks like a linker crash"
                                 kind @build
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T14:18:06.41972196Z
@@ -9081,6 +9089,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T17:29:43.392437073Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

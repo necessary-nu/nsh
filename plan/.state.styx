@@ -1450,7 +1450,8 @@ assertions (
     {id commit-only-the-paths-a-node-staged, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:16:46.524276819Z}
     {id stop-selecting-the-locale-per-byte-everywhere-else, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:17:27.44352099Z}
     {id bound-what-a-prefix-or-suffix-trim-costs, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:17:46.118950239Z}
-    {id tell-a-full-disk-from-a-compiler-bug, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:21:59.203012544Z}
+    {id tell-a-full-disk-from-a-compiler-bug, kind @complete, author "brendan@necessary.nu", at 2026-09-02T17:29:43.392437073Z}
+    {id stop-the-machine-running-out-of-disk, kind @doing, author "brendan@necessary.nu", at 2026-09-02T17:29:48.784915269Z}
 )
 
 impl_evidence (
