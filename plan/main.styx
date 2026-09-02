@@ -7138,12 +7138,20 @@ children (
                                 id check-that-a-cited-decision-is-live
                                 title "Fail when the source cites a decision that is no longer decided"
                                 kind @test
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-30T22:24:07.982692954Z
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Four stale reasons were found in one week, each a refusal or a limitation recorded beside the code with a justification that had stopped being true. Nothing in the tree looks for them.\n\n  * `builtin-trap-err.test.sh:12` was registered `not-implemented` because \"this tree does not keep the braces\". The token rewrite gave it `Node::Group`; the entry was not re-read for six days, and when it was, the braces turned out to be irrelevant anyway.\n  * `toysh.test.sh:6` was registered as blocked on a fixed `[DescriptorSlot; 10]`. `01d1b14` made the table a `BTreeMap` *the same day* the reason was written.\n  * `bound-recursive-evaluation` carried a blocker naming two segfaults that three commits had already fixed, all three carrying that node's own id.\n  * `timed.rs` refuses `TIMEFORMAT` citing `[dec:nsh:no-format-interpreters]`, which is `@obsolesced`. The refusal is still right, but under a successor that says something narrower.\n\nTHE COMMON SHAPE. A reason is written next to the thing it justifies, and is not re-read when what it depends on changes. Three of the four were caught only because someone re-measured the behaviour for an unrelated purpose. The gate caught none of them -- `gate-bash` does refuse a *disposition* whose case has started passing, which is why the trap entry could not be carried once the behaviour changed, but it cannot see a reason that is wrong while the behaviour is unchanged.\n\nWHAT IS MECHANICALLY CHECKABLE, and it is the cheapest of the four:\n\nA source comment citing `[dec:nsh:...]` for a decision whose `state` is not `@decided` is a defect the plan can answer without running anything. `plan/decisions/*.md` carries `state @decided` / `@obsolesced` / `@superseded`, and `nplan_decisions` reports it. The check is: collect every `[dec:...]` literal under `crates/`, resolve each against the plan, and fail on any whose state is not live -- naming the successor where there is one, because the citation usually wants replacing rather than deleting.\n\nThat would have caught `timed.rs` the day `printf-is-parsed-not-interpreted` was decided. It would not have caught the other three, which are prose about code rather than citations, and there is no honest mechanical check for those -- which is worth saying plainly rather than pretending the lint covers the class.\n\nIt belongs with the four structural lints already kept as tests (`crates/nsh/tests/idiomatic_control_flow.rs`, `oracle_measurement.rs`, `rust_naming.rs`, `port_provenance.rs`), and like `oracle_measurement.rs` it must be watched to fail before it is trusted: point a test citation at an obsolesced decision and see it reported.\n\nDONE WHEN. A citation of a non-live decision fails the suite, the failure names the successor, and the check has been seen to reject a deliberate instance."
+                                    }
+
+                                    {
+                                        at 2026-09-02T01:59:02.31920432Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
                                     }
                                 )
                             }

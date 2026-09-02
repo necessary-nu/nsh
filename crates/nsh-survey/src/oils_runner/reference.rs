@@ -77,6 +77,8 @@ pub(crate) fn run_reference_group(
         case_filter: None,
         max_cases: None,
         summary: None,
+        baseline: None,
+        update_baseline: false,
         posix: false,
         verbose: false,
         base_path: Some(OsString::from("/usr/bin:/bin")),

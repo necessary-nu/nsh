@@ -19,6 +19,7 @@ spec/                       imported specs and their fixture data
 BASH_REFERENCE.toml         pinned GNU Bash 5.3 reference profile
 BASH_REFERENCE_CASES.json   Bash case eligibility and exclusions
 BASH_DISPOSITIONS.toml      why each eligible case nsh does not pass is expected
+BASH_COMPARISON_FAILURES.toml  which bash-comparison cases nsh fails, by id
 results/                    recorded nsh results for Bash-selected groups
 ```
 
@@ -166,6 +167,45 @@ pinned Bash 5.3 build does not itself pass already carries a disposition in
 The gate is symmetric. A registered case that starts passing fails it, exactly
 as an unregistered case that stops passing does: a stale excuse is how a real
 regression eventually gets waved through. When a fix lands, delete the entry.
+
+## Comparing a run against the failing-case list
+
+The summary's `fail=` count is not a check. It cannot tell a case that was
+fixed from one that broke, and two `process-sub` cases move between runs under
+load -- one of them toward a *pass* -- so the number drifts for reasons no
+register describes. A commit once credited two fixes that were not real
+because it read the count.
+
+`BASH_COMPARISON_FAILURES.toml` is the list the count cannot be: every
+`bash-comparison` case `nsh` fails, by `spec:index` id. Compare a run against
+it in one command:
+
+```sh
+scripts/sandboxed -- target/release/nsh-survey run-oils \
+  --shell target/gate/bash --expect-shell bash --group bash-comparison \
+  --baseline tests/surveys/oils/BASH_COMPARISON_FAILURES.toml
+```
+
+It names every id on either side of a difference and exits non-zero when there
+is one; with `--baseline` the run's verdict is the comparison rather than the
+score, since a group with hundreds of expected failures is never otherwise a
+check. The verdict goes to stderr so it cannot corrupt `--format json` or
+`--format ids` on stdout.
+
+Add `--update-baseline` to re-record the file. It prints the difference it is
+about to enshrine before writing, so a refresh is never silent.
+
+`--format ids` prints just the failing ids, one per line, sorted. Do not
+recover them from the text report with a pattern: the one used before this
+existed was `[a-z0-9-]`, which has no underscore, so `case_.test.sh:1`,
+`command_.test.sh:3` and `command_.test.sh:12` sat outside every comparison
+made with it and a regression in either spec would have passed in silence.
+
+A baseline records the group, the expectation namespace, POSIX mode, the
+per-case timeout and the Oils commit, and a run that differs in any of them is
+refused rather than compared. `--spec`, `--case` and `--max-cases` are refused
+with `--baseline` outright: a filtered run would report every unselected case
+as fixed.
 
 ## Updating the Oils pin
 

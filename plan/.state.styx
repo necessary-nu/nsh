@@ -1412,6 +1412,7 @@ assertions (
     {id split-the-editor-bindings, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:51.026958215Z}
     {id move-the-special-variable-readers, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:52.927409997Z}
     {id split-the-arithmetic-lexer, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:24:59.38751016Z}
+    {id check-that-a-cited-decision-is-live, kind @complete, author "brendan@necessary.nu", at 2026-09-02T01:59:02.31920432Z}
 )
 
 impl_evidence (

@@ -15,6 +15,7 @@ use crate::process::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+mod baseline;
 pub(crate) mod helpers;
 mod reference;
 
@@ -43,8 +44,17 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
     match options.format {
         OutputFormat::Text => report.write_text(options.verbose),
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        OutputFormat::Ids => report.write_ids(),
     }
-    Ok(report.totals.is_success())
+    /* With a baseline the run's verdict is the comparison, not the score.
+     * A group like `bash-comparison` has hundreds of expected failures and
+     * so is never `is_success`; without this it could not be a check at
+     * all, and reading its summary count instead is the mistake the
+     * baseline exists to retire. */
+    match &options.baseline {
+        Some(path) => baseline::apply(&report, path, options.update_baseline),
+        None => Ok(report.totals.is_success()),
+    }
 }
 
 #[derive(Debug)]
@@ -59,6 +69,8 @@ struct Options {
     case_filter: Option<String>,
     max_cases: Option<usize>,
     summary: Option<PathBuf>,
+    baseline: Option<PathBuf>,
+    update_baseline: bool,
     posix: bool,
     verbose: bool,
     base_path: Option<OsString>,
@@ -70,6 +82,12 @@ struct Options {
 enum OutputFormat {
     Text,
     Json,
+    /// Just the failing case ids, one per line, sorted.
+    ///
+    /// The whole reason this exists is that the ids used to be recovered
+    /// from the text report with a regular expression, and the one in use
+    /// dropped every spec whose name contains an underscore.
+    Ids,
 }
 
 impl Options {
@@ -85,6 +103,8 @@ impl Options {
             case_filter: None,
             max_cases: None,
             summary: None,
+            baseline: None,
+            update_baseline: false,
             posix: false,
             verbose: false,
             base_path: None,
@@ -117,6 +137,7 @@ impl Options {
                     options.format = match required_string(&mut args, "--format")?.as_str() {
                         "text" => OutputFormat::Text,
                         "json" => OutputFormat::Json,
+                        "ids" => OutputFormat::Ids,
                         value => return Err(format!("unsupported output format {value:?}").into()),
                     }
                 }
@@ -130,6 +151,10 @@ impl Options {
                     options.max_cases = Some(required_string(&mut args, "--max-cases")?.parse()?);
                 }
                 Some("--summary") => options.summary = Some(required_path(&mut args, "--summary")?),
+                Some("--baseline") => {
+                    options.baseline = Some(required_path(&mut args, "--baseline")?)
+                }
+                Some("--update-baseline") => options.update_baseline = true,
                 Some("--posix") => options.posix = true,
                 Some("--verbose") => options.verbose = true,
                 Some(value) if value.starts_with('-') => {
@@ -160,13 +185,47 @@ impl Options {
                 options.shell.display()
             )
         })?;
+        options.check_baseline_is_answerable()?;
         Ok(Some(options))
+    }
+
+    /// Refuse a baseline comparison that cannot mean what it says.
+    ///
+    /// A baseline is the failing-case list of a whole group. Compare a
+    /// filtered run against one and every unselected case reads as
+    /// fixed -- a mismatch of hundreds that says nothing, or worse, a
+    /// filtered *re-record* that quietly shrinks the list to whatever
+    /// the filter happened to select. Neither is a comparison, so
+    /// neither is allowed to look like one.
+    fn check_baseline_is_answerable(&self) -> Result<()> {
+        if self.update_baseline && self.baseline.is_none() {
+            return Err("--update-baseline needs --baseline PATH to write".into());
+        }
+        if self.baseline.is_none() {
+            return Ok(());
+        }
+        let filters = [
+            ("--spec", !self.specs.is_empty()),
+            ("--case", self.case_filter.is_some()),
+            ("--max-cases", self.max_cases.is_some()),
+        ];
+        for (option, given) in filters {
+            if given {
+                return Err(format!(
+                    "--baseline covers a whole group and {option} selects part of one; \
+                     every unselected case would read as fixed"
+                )
+                .into());
+            }
+        }
+        Ok(())
     }
 
     fn usage() -> &'static str {
         "usage: nsh-survey run-oils [--group ID] [--shell PATH] [--expect-shell LABEL]\n\
-                [--timeout-ms N] [--format text|json] [--spec NAME] [--case TEXT]\n\
-                [--max-cases N] [--summary PATH] [--posix] [--verbose] [ROOT]"
+                [--timeout-ms N] [--format text|json|ids] [--spec NAME] [--case TEXT]\n\
+                [--max-cases N] [--summary PATH] [--baseline PATH] [--update-baseline]\n\
+                [--posix] [--verbose] [ROOT]"
     }
 }
 
@@ -591,6 +650,49 @@ struct RunReport {
 }
 
 impl RunReport {
+    /// The ids of the cases that failed, deduplicated and ordered.
+    ///
+    /// An id is `spec:index`, exactly as the text report and the Bash
+    /// gate spell it. The runner has always known these; until now the
+    /// only way to get at them was to parse them back out of the text
+    /// report, which is what put three underscore-named specs outside
+    /// every comparison made this week.
+    fn failing_ids(&self) -> BTreeSet<String> {
+        self.case_ids(|outcome| outcome == Outcome::Fail)
+    }
+
+    /// The ids of the cases that decided nothing.
+    ///
+    /// A timeout or a harness error is not a failure and so never joins
+    /// the failing set. A case that stops passing by timing out would
+    /// therefore leave a list comparison perfectly silent, which is the
+    /// same shape of hole the underscore was.
+    fn unstable_ids(&self) -> BTreeSet<String> {
+        self.case_ids(|outcome| matches!(outcome, Outcome::Timeout | Outcome::Error))
+    }
+
+    /// Every case the run reached, whatever it decided about it.
+    ///
+    /// A baseline entry naming none of these is stale rather than fixed,
+    /// and the two must not report as the same thing.
+    fn all_ids(&self) -> BTreeSet<String> {
+        self.case_ids(|_| true)
+    }
+
+    fn case_ids(&self, wanted: impl Fn(Outcome) -> bool) -> BTreeSet<String> {
+        self.cases
+            .iter()
+            .filter(|case| wanted(case.outcome))
+            .map(|case| format!("{}:{}", case.spec, case.index))
+            .collect()
+    }
+
+    fn write_ids(&self) {
+        for id in self.failing_ids() {
+            println!("{id}");
+        }
+    }
+
     fn write_text(&self, verbose: bool) {
         println!("Oils shell-spec survey: {}", self.group_label);
         println!("shell: {}", self.shell);
