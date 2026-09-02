@@ -39,7 +39,6 @@ failing = [
     "arg-parse.test.sh:1",
     "arg-parse.test.sh:2",
     "arith-dynamic.test.sh:1",
-    "arith.test.sh:0",
     "arith.test.sh:40",
     "arith.test.sh:48",
     "arith.test.sh:50",

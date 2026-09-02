@@ -69,7 +69,14 @@ pub(super) fn expand_parameter(
         return Err(shell.diagnostics().dialect_error(b"Bad substitution"));
     }
 
-    let mut name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
+    /* The name is what the parser delimited and nothing else. Cutting it
+     * at the first `=` is dash's, where `${name=word}` sits in one buffer
+     * and the operator has to be found again; here the operand is a part
+     * of its own, so the only `=` a name can carry is one inside a
+     * subscript -- and `${m['a=1']}` read the key `m['a` and answered
+     * nothing for it. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    let mut name = parameter.name.clone();
     if parameter.indirect
         && let Some(expansion) =
             bash::indirect_names(shell, name.as_bstr(), parameter.operation, context)?

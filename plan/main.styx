@@ -8240,6 +8240,7 @@ children (
                                 id give-the-failing-case-baseline-the-gates-control
                                 title "Stop the failing-case baseline reporting the machine as a difference"
                                 kind @test
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T05:56:12.4449021Z
@@ -8253,6 +8254,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-02T11:39:48.635663285Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

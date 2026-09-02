@@ -115,7 +115,7 @@ const KEY_VALUE_PAIRS: &[&str] = &[
     /* The first element decides, so a written subscript after one is a
      * literal key. */
     "declare -A m=(foo [a]=1)\ndeclare -p m\n",
-    "declare -A m=(foo bar [a]=1 x)\necho \"${#m[@]} ${m[foo]}\"\n",
+    "declare -A m=(foo bar [a]=1 x)\necho \"${#m[@]} ${m[foo]} ${m['[a]=1']}\"\n",
     "declare -A m=(k1 v1 [k1]+=x)\necho \"${#m[@]} ${m[k1]}\"\n",
     "declare -A m=(x[a b]=1)\ndeclare -p m\n",
     /* Neither split nor globbed nor brace-expanded: one field per
@@ -143,10 +143,11 @@ const KEY_VALUE_PAIRS: &[&str] = &[
 
 /// `${name@A}`, the assignment that would put a name back.
 ///
-/// A name declared without ever being assigned is left out: Bash keeps
-/// such a name invisible and prints `declare -a z` where this shell
-/// prints `declare -a z=()`, which is a `declare -p` difference of its
-/// own and is filed as `spell-an-unassigned-array-back`.
+/// A name declared without ever being assigned is left out because it is
+/// a question of its own: Bash keeps such a name invisible and prints
+/// `declare -a z` where `declare -a z=()` prints the empty list. That was
+/// filed as `spell-an-unassigned-array-back` when this file was written
+/// and closed by `92f97f9`; `bash_declared_array.rs` holds its rows.
 const SPELLED_BACK: &[&str] = &[
     "declare -A m\nm[k]=v\nprintf '[%s]' \"${m[@]@A}\"\necho\n",
     "declare -A m\nm['a b']=1\necho \"${m[@]@A}\"\n",
