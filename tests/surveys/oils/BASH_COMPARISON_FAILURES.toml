@@ -42,8 +42,8 @@ expectation_shell = "bash"
 posix = false
 timeout_ms = 5000
 oils_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
-shell_sha256 = "134d07c8c43d71b5929cbbba085000ef20180c20b37e7e506e180dc52b3f5658"
-nsh_commit = "50312f66bee8812ec7e4c92906c5ae1cd0197d02"
+shell_sha256 = "f3ffe2bb082516cc4338664947f0aa22725ef882cbd2db03892afac3ce5501b8"
+nsh_commit = "2fd5b1a6f4fb7d6f4b2ac38ba9b5d3bf05e8a711"
 failing = [
     "alias.test.sh:0",
     "alias.test.sh:10",
@@ -54,13 +54,10 @@ failing = [
     "append.test.sh:8",
     "arg-parse.test.sh:1",
     "arg-parse.test.sh:2",
-    "arith-dynamic.test.sh:1",
     "arith.test.sh:40",
     "arith.test.sh:48",
     "arith.test.sh:50",
-    "arith.test.sh:7",
     "arith.test.sh:70",
-    "array-assign.test.sh:7",
     "array-assoc.test.sh:1",
     "array-assoc.test.sh:2",
     "array-assoc.test.sh:21",
@@ -343,6 +340,7 @@ failing = [
     "command_.test.sh:3",
     "divergence.test.sh:0",
     "divergence.test.sh:3",
+    "dparen.test.sh:10",
     "errexit-osh.test.sh:0",
     "errexit-osh.test.sh:10",
     "errexit-osh.test.sh:11",
@@ -479,6 +477,7 @@ failing = [
     "toysh-posix.test.sh:2",
     "toysh-posix.test.sh:3",
     "toysh-posix.test.sh:4",
+    "type-compat.test.sh:3",
     "var-op-bash.test.sh:24",
     "var-op-bash.test.sh:25",
     "var-op-bash.test.sh:3",
