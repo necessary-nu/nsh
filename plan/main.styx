@@ -8453,6 +8453,7 @@ children (
                                 id deliver-a-prompt-interrupt-without-eating-the-next-line
                                 title "Take a prompt's interrupt at the prompt, not one line late"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T10:27:50.110235398Z
@@ -8473,6 +8474,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "INTERRUPTED MID-FLIGHT 2026-09-02 ~15:0x by an API session limit, not by anything in the work. Six agents were killed in the same second. The node stays Doing and its work is uncommitted in the checkout, not lost:\n\n    crates/nsh/src/input/read.rs                          +135/-...\n    crates/nsh-cli/tests/interactive_signal_at_the_prompt.rs  +99\n\nIts last words were \"now the new test case\", so the change exists and the coverage was being written when it stopped. The test file it is extending is `2a46bd5`'s, which is pty-driven against the shipped binary and whose settle between the signal and the next keystroke is load-bearing -- `kill` returns once the signal is queued, so typing immediately races it and an unfixed shell passes.\n\nHEAD compiles; checked in a clean detached worktree at `a81455c`.\n\nDo not `git checkout` or `git stash` either path. The tree is the only copy."
+                                    }
+
+                                    {
+                                        at 2026-09-02T14:48:33.78290022Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }

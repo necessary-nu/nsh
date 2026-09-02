@@ -1440,7 +1440,7 @@ assertions (
     {id keep-allexport-off-an-array, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:59:56.201085872Z}
     {id spend-the-wrappers-budget-inside-the-boundary, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:28:15.013856328Z}
     {id refuse-to-regenerate-a-file-another-session-changed, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:22:30.277642427Z}
-    {id deliver-a-prompt-interrupt-without-eating-the-next-line, kind @doing, author "brendan@necessary.nu", at 2026-09-02T12:58:47.016231255Z}
+    {id deliver-a-prompt-interrupt-without-eating-the-next-line, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:48:33.78290022Z}
     {id refuse-to-destroy-an-array-kind, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:15:07.483177095Z}
     {id list-the-names-that-only-carry-attributes, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:33:58.434607178Z}
     {id give-each-gate-run-its-own-shell, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:45:12.756467306Z}

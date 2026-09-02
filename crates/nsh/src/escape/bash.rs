@@ -13,7 +13,10 @@
 //! `$'...'`, because every other form would have to put the raw byte in
 //! the output. Everything else takes the caller's ordinary spelling --
 //! backslashes for `printf %q`, double quotes for `declare -p`, single
-//! quotes for `set`.
+//! quotes for `${x@Q}`. `set` and `set -x` ask a question before that
+//! one -- whether the value needs quoting at all -- and answer it with
+//! the same metacharacter set and opposite precedences; see
+//! [`listed_quote`] and [`trace_quote`].
 
 use bstr::{BStr, BString};
 
@@ -212,13 +215,35 @@ pub(crate) fn subscript_quote(locale: &nsh_platform::Locale, key: &BStr) -> BStr
 /// The difference from [`requote`] is not cosmetic. Both spellings read
 /// back as the same bytes, but Bash quotes here even when nothing needs
 /// it -- `${x@Q}` on `x` is `'x'` where `printf %q` is a bare `x` -- and
-/// a script that compares the text can tell.
+/// a script that compares the text can tell. `set` reaches it through
+/// [`listed_quote`], which asks first whether anything needs quoting at
+/// all.
 // [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn readable_quote(locale: &nsh_platform::Locale, value: &BStr) -> BString {
     if needs_ansi_c(locale, value) {
         return ansi_c_quote(locale, value);
     }
     bash_quote(value)
+}
+
+/// `set`: the spelling a `name=value` listing gives a value.
+///
+/// Bash quotes only what would not read back as itself, so `x=1`,
+/// `x=a=b`, `x=a#b`, `x=héllo` and an empty `x=` are all bare where
+/// `x='a b'` and `x=$'a\tb'` are not. It is [`trace_quote`]'s question
+/// with two of the answers different: an empty value is bare rather
+/// than `''`, and a value holding both a metacharacter and a byte that
+/// needs `$'...'` takes the `$'...'` -- `set` prints `$'a\tb'` where
+/// `set -x` traces `'a<TAB>b'`. The table of characters is measured
+/// rather than transcribed: `bash_set_listing.rs` runs all 127
+/// single-byte values through the listing in both positions, in this
+/// shell and in the pinned Bash, and compares.
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub(crate) fn listed_quote(locale: &nsh_platform::Locale, value: &BStr) -> BString {
+    if !contains_shell_metacharacter(value) && !needs_ansi_c(locale, value) {
+        return value.to_owned();
+    }
+    readable_quote(locale, value)
 }
 
 /// `set -x`: the spelling Bash traces one word with.

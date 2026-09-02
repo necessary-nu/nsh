@@ -830,18 +830,7 @@ pub(crate) fn show_vars(
                 record.push(b' ');
             }
             record.extend_from_slice(name.as_ref());
-            if let Some(value) = shell.variables.entries.get(name).and_then(Variable::scalar) {
-                record.push(b'=');
-                // Bash's listing reaches for `$'...'` where single quotes
-                // could not carry the bytes; POSIX's never does.
-                // [spec:nsh:req:compat.bash.builtins-special-variables]
-                let quoted = if bash {
-                    crate::escape::bash::readable_quote(&locale, value)
-                } else {
-                    crate::escape::shell_quote(value)
-                };
-                record.extend_from_slice(&quoted);
-            }
+            record.extend_from_slice(&listed_value(shell, name, bash, &locale));
         }
         record.push(b'\n');
         records.push(record);
@@ -850,6 +839,45 @@ pub(crate) fn show_vars(
         shell.write_output(crate::output::OutputDestination::Stdout, &record)?;
     }
     Ok(())
+}
+
+/// The `=value` a `name=value` listing writes, in the dialect's own
+/// form.
+///
+/// The two dialects disagree twice, and both are Bash's doing. Bash
+/// quotes only what would not read back as itself -- `x=1` bare against
+/// dash's `x='1'` -- and it spells an array as the compound assignment
+/// that would rebuild it, out of the same renderer `declare -p` uses:
+/// `z=([0]="1" [1]="2")`, where reading element zero and calling it the
+/// variable gave `z='1'` and gave a bare `m` for an associative array
+/// with no `"0"` key. dash has no arrays and quotes unconditionally,
+/// and `[spec:posix:req:builtin.readonly.p-output-reinput]` is what
+/// asks it to.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+// [spec:dash:sem:var.showvars-fn]
+fn listed_value(shell: &Shell, name: &BStr, bash: bool, locale: &nsh_platform::Locale) -> Vec<u8> {
+    let mut text = Vec::new();
+    if !bash {
+        if let Some(value) = shell.variables.entries.get(name).and_then(Variable::scalar) {
+            text.push(b'=');
+            text.extend_from_slice(&crate::escape::shell_quote(value));
+        }
+        return text;
+    }
+    let Some(value) = value::variable_value(shell, name) else {
+        return text;
+    };
+    let VariableValue::Scalar(scalar) = value else {
+        text.extend_from_slice(&declaration::declaration_value(shell, value));
+        return text;
+    };
+    text.push(b'=');
+    text.extend_from_slice(&crate::escape::bash::listed_quote(
+        locale,
+        BStr::new(scalar.as_slice()),
+    ));
+    text
 }
 
 // [spec:dash:sem:var.mklocal-fn]
