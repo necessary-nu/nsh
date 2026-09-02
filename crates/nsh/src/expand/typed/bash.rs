@@ -141,7 +141,7 @@ pub(super) fn indirect_names(
      * in it: `hello=()` declares `hello` and Bash lists it here even
      * though there is no element to read. */
     // [spec:nsh:req:compat.bash.arrays-declarations]
-    let mut names = crate::variables::value::declared_names(shell)
+    let mut names = crate::variables::value::valued_names(shell)
         .into_iter()
         .filter(|name| name.starts_with(&prefix))
         .collect::<Vec<_>>();
@@ -802,8 +802,22 @@ pub(super) fn transform(
         b"a" => true,
         /* `@A` prints a declaration, and a name that has none prints
          * nothing: `${undeclared[@]@A}` and `${1@A}` are both empty in
-         * Bash, where `${x[@]@A}` on a plain scalar is `x='...'`. */
-        b"A" => !value.is_unset() && declaration_target(shell, name).is_some(),
+         * Bash, where `${x[@]@A}` on a plain scalar is `x='...'`. An
+         * array is the one name that still has a declaration to print
+         * with nothing to read: `${z@A}` on `declare -a z` is
+         * `declare -a z`, and so is `${z[5]@A}` on an array whose fifth
+         * element is not there. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        b"A" => declaration_target(shell, name).is_some_and(|base| {
+            !value.is_unset()
+                || matches!(
+                    crate::variables::value::variable_kind(shell, BStr::new(base.as_slice())),
+                    Some(
+                        crate::variables::value::VariableKind::Indexed
+                            | crate::variables::value::VariableKind::Associative
+                    )
+                )
+        }),
         _ => has_transformable_bytes(&value),
     };
     if !available {
@@ -955,9 +969,12 @@ fn assignment_fields(
     }
     let base = BStr::new(base.as_slice());
     let stored = crate::variables::value::variable_value(shell, base);
+    /* The *kind* decides that this is an array line, not the presence of
+     * a value: a name declared with `-a` and never assigned is still an
+     * array, and Bash spells it `declare -a z` rather than `z=''`. */
     let whole_array = matches!(value, Value::At(_) | Value::Star(_))
-        && stored
-            .is_some_and(|stored| stored.kind() != crate::variables::value::VariableKind::Scalar);
+        && crate::variables::value::variable_kind(shell, base)
+            .is_some_and(|kind| kind != crate::variables::value::VariableKind::Scalar);
     let flags = crate::variables::special::declaration_flags(shell, base).unwrap_or_default();
     if whole_array {
         let mut assignment = base.to_owned();
@@ -971,9 +988,13 @@ fn assignment_fields(
     }
     /* An array with no element to read as a scalar has no `=` at all:
      * `declare -a z` prints itself, where `z=''` would claim an element
-     * zero the array does not have. */
+     * zero the array does not have. A subscript naming an element that
+     * is not there reads the same way -- `${z[5]@A}` is `declare -a z`
+     * in Bash -- so an unset value prints the declaration alone. */
     let mut assignment = base.to_owned();
-    if !matches!(value, Value::Variable(stored) if stored.scalar_ref().is_none()) {
+    let unreadable = value.is_unset()
+        || matches!(value, Value::Variable(stored) if stored.scalar_ref().is_none());
+    if !unreadable {
         let text = super::value_bytes(shell, value.clone(), context);
         assignment.push(b'=');
         assignment.extend_from_slice(&quote(shell, BStr::new(text.as_slice())));

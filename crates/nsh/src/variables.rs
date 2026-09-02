@@ -20,7 +20,7 @@ use crate::options::{OptionSet, ShellOption, options_changed};
 // [spec:nsh:def:idiom.shell-options]
 
 pub(crate) mod value;
-use value::{BashAttributes, VariableValue};
+use value::{BashAttributes, VariableKind, VariableValue};
 
 pub(crate) mod arrays;
 
@@ -72,11 +72,25 @@ pub(crate) enum VariableSelection {
     ReadOnly,
 }
 
-/// Whether a variable is unset or owns a value of a particular kind.
+/// Whether a variable is unset, declared with a kind and nothing in it,
+/// or owns a value.
+///
+/// The middle state is Bash's *invisible* variable, and it is the whole
+/// of the difference between a declared array and an assigned empty one:
+/// `declare -a z` spells itself back as `declare -a z`, where
+/// `declare -a z=()` spells the empty list it was given. Both printers
+/// -- `declare -p` and `${name[@]@A}` -- read one renderer, so the
+/// distinction has to live here rather than in either of them.
+// [spec:nsh:def:idiom.variable-expansion-state]
+// [spec:nsh:req:compat.bash.arrays-declarations]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 enum VariableState {
     #[default]
     Unset,
+    /// An array kind with no value yet. Only `-a` and `-A` reach here:
+    /// a scalar declared without a value is simply `Unset`, which is
+    /// what already makes `declare -i n` print `declare -i n`.
+    Declared(VariableKind),
     Set(VariableValue),
 }
 
@@ -546,16 +560,26 @@ fn set_entry(
 
     let callback = old.callback;
     let bash_attributes = old.bash_attributes;
-    let mut state = old.state;
-    match (&mut state, value) {
-        (VariableState::Set(existing), Some(value)) => existing.assign_scalar(value),
-        (state @ VariableState::Unset, Some(value)) => {
-            *state = VariableState::Set(VariableValue::Scalar(value.to_owned()));
+    /* A plain `name=value` on a declared array writes its zero element
+     * and makes the name visible: `declare -a z; z=q` is
+     * `declare -a z=([0]="q")` in Bash, not a scalar. */
+    let state = match (old.state, value) {
+        (VariableState::Set(mut existing), Some(value)) => {
+            existing.assign_scalar(value);
+            VariableState::Set(existing)
         }
-        (state, None) => *state = VariableState::Unset,
-    }
+        (VariableState::Declared(kind), Some(value)) => {
+            let mut fresh = VariableValue::empty(kind);
+            fresh.assign_scalar(value);
+            VariableState::Set(fresh)
+        }
+        (VariableState::Unset, Some(value)) => {
+            VariableState::Set(VariableValue::Scalar(value.to_owned()))
+        }
+        (_, None) => VariableState::Unset,
+    };
     let callback_value = match &state {
-        VariableState::Unset => None,
+        VariableState::Unset | VariableState::Declared(_) => None,
         VariableState::Set(value) => value.scalar_owned(),
     };
     shell.variables.entries.insert(

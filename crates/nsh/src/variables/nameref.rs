@@ -88,7 +88,7 @@ fn reference_target(shell: &Shell, name: &BStr) -> Option<Target> {
         return None;
     }
     let text = match &shell.variables.entries.get(name)?.state {
-        VariableState::Unset => return None,
+        VariableState::Unset | VariableState::Declared(_) => return None,
         VariableState::Set(value) => value.scalar_ref()?.to_owned(),
     };
     if text.is_empty() {

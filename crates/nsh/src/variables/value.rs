@@ -176,7 +176,9 @@ impl BashAttributes {
 
 pub(crate) fn variable_value<'a>(shell: &'a Shell, name: &BStr) -> Option<&'a VariableValue> {
     match &shell.variables.entries.get(name)?.state {
-        VariableState::Unset => None,
+        // A declared array holds nothing until something is stored, so
+        // there is no value to borrow and `${z[@]}` reads none.
+        VariableState::Unset | VariableState::Declared(_) => None,
         VariableState::Set(value) => Some(value),
     }
 }
@@ -186,16 +188,39 @@ pub(crate) fn variable_value_owned(shell: &mut Shell, name: &BStr) -> Option<Var
     variable_value(shell, name).cloned()
 }
 
+/// The kind `declare -p` spells, which a name has from the moment it is
+/// declared rather than from the moment it is assigned.
 pub(crate) fn variable_kind(shell: &Shell, name: &BStr) -> Option<VariableKind> {
-    variable_value(shell, name).map(VariableValue::kind)
+    match &shell.variables.entries.get(name)?.state {
+        VariableState::Unset => None,
+        VariableState::Declared(kind) => Some(*kind),
+        VariableState::Set(value) => Some(value.kind()),
+    }
 }
 
-/// The names a bare `declare` listing prints.
+/// The names a `declare -p` listing prints.
 ///
-/// Only names that currently hold a value: an entry that exists solely
-/// to carry attributes has nothing to render, and Bash omits it rather
-/// than reporting it as missing.
+/// A name declared as an array and never assigned belongs here: it has
+/// a declaration to render even though it holds nothing, and Bash's own
+/// listing carries it. An entry that exists solely to carry attributes
+/// has nothing to say about a kind and is left out, which is what makes
+/// `declare -a z` a line and `readonly x` none.
 pub(crate) fn declared_names(shell: &Shell) -> Vec<BString> {
+    shell
+        .variables
+        .entries
+        .iter()
+        .filter(|(_, var)| !matches!(var.state, VariableState::Unset))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+/// The names that hold a value, which `${!prefix@}` answers with.
+///
+/// Bash lists `hello=()` there, an assigned empty array being a value,
+/// and leaves out the declared-and-never-assigned `declare -a z`.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn valued_names(shell: &Shell) -> Vec<BString> {
     shell
         .variables
         .entries
@@ -239,14 +264,14 @@ pub(crate) fn set_bash_attribute(
 impl Variable {
     pub(super) fn scalar(&self) -> Option<&BStr> {
         match &self.state {
-            VariableState::Unset => None,
+            VariableState::Unset | VariableState::Declared(_) => None,
             VariableState::Set(value) => value.scalar_ref(),
         }
     }
 
     pub(super) fn scalar_owned(&self) -> Option<BString> {
         match &self.state {
-            VariableState::Unset => None,
+            VariableState::Unset | VariableState::Declared(_) => None,
             VariableState::Set(value) => value.scalar_owned(),
         }
     }

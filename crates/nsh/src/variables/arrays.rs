@@ -285,13 +285,26 @@ pub(crate) fn ensure_kind(
     reject_bad_name(shell, name)?;
     reject_read_only(shell, name, guard)?;
 
-    let existing = super::value::variable_value(shell, name).cloned();
-    let converted = match existing {
-        Some(value) if value.kind() == kind => return Ok(()),
-        Some(value) => convert(value, kind),
-        None => VariableValue::empty(kind),
-    };
-    store(shell, name, converted, attributes, guard)
+    if super::value::variable_kind(shell, name) == Some(kind) {
+        return Ok(());
+    }
+    match super::value::variable_value(shell, name).cloned() {
+        Some(value) => store(shell, name, convert(value, kind), attributes, guard),
+        /* A declaration with nothing to store leaves Bash's *invisible*
+         * variable: the kind is known and there is no value, so
+         * `declare -a z` spells `declare -a z` where `declare -a z=()`
+         * spells the list it was handed. The empty value still goes
+         * through `store`, because a brand-new name picks up its export
+         * state and callbacks there; the state is corrected after. */
+        // [spec:nsh:req:compat.bash.arrays-declarations]
+        None => {
+            store(shell, name, VariableValue::empty(kind), attributes, guard)?;
+            if let Some(entry) = shell.variables.entries.get_mut(name) {
+                entry.state = VariableState::Declared(kind);
+            }
+            Ok(())
+        }
+    }
 }
 
 fn convert(value: VariableValue, kind: VariableKind) -> VariableValue {
@@ -559,9 +572,15 @@ pub(crate) fn assign_compound(
      * array reads the running value either way. Measured against the
      * pinned 5.3.15; without the snapshot this shell loses the `z`. */
     // [spec:nsh:req:compat.bash.arrays-declarations]
-    let previous = (kind == VariableKind::Associative && !append)
-        .then(|| super::value::variable_value(shell, name).cloned())
-        .flatten();
+    let previous = (kind == VariableKind::Associative && !append).then(|| {
+        /* A name that holds nothing yet -- an array declared and never
+         * assigned among them -- has an empty base rather than no
+         * snapshot: falling back to the running value here would let
+         * `m=([k]+=1 [k]+=2)` read the `1` it just wrote. */
+        super::value::variable_value(shell, name)
+            .cloned()
+            .unwrap_or_else(|| VariableValue::empty(kind))
+    });
 
     for element in elements {
         /* A bare word names no key, and an associative array reading

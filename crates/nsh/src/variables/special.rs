@@ -495,7 +495,10 @@ fn write_back(shell: &mut Shell, name: &BStr, value: &BStr) {
     if let Some(entry) = shell.variables.entries.get_mut(name) {
         match &mut entry.state {
             VariableState::Set(current) => current.assign_scalar(value),
-            state @ VariableState::Unset => {
+            /* A recomputed name is never declared as an array, so the
+             * declared state takes the same fresh scalar as the unset
+             * one rather than an empty list of the declared kind. */
+            state @ (VariableState::Unset | VariableState::Declared(_)) => {
                 *state = VariableState::Set(VariableValue::Scalar(value.to_owned()));
             }
         }
