@@ -716,6 +716,7 @@ fn conditional_test(
             Some(super::PendingRedirection::File {
                 operator,
                 descriptor,
+                with_stderr: false,
             }) if *operator == FileRedirectionOperator::Read
                 && descriptor.fixed() == Some(LogicalDescriptor::STDIN) =>
             {
@@ -724,6 +725,7 @@ fn conditional_test(
             Some(super::PendingRedirection::File {
                 operator,
                 descriptor,
+                with_stderr: false,
             }) if *operator == FileRedirectionOperator::Write
                 && descriptor.fixed() == Some(LogicalDescriptor::STDOUT) =>
             {

@@ -9319,6 +9319,7 @@ children (
                                         id expand-a-command-substitution-in-a-subscript
                                         title "Read a command substitution written inside an array subscript"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T15:55:07.367645998Z
@@ -9332,6 +9333,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T17:01:17.458720557Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

@@ -51,7 +51,7 @@ use crate::jobs::{ForkMode, JobId};
 // [spec:nsh:def:idiom.job-control-model]
 use crate::nodes::{
     BinaryCommand, CaseCommand, CompoundCommand, DescriptorTarget, ForCommand, FunctionDefinition,
-    Node, Pipeline, Redirection, SimpleCommand,
+    Node, Pipeline, Redirection, RedirectionDescriptor, SimpleCommand,
 };
 use crate::options::ShellOption;
 use crate::output::OutputDestination;
@@ -1211,6 +1211,19 @@ fn expand_redirections<'a>(
         match redirection {
             Redirection::File(redirection) => {
                 expanded.push(crate::redirection::expand_file_target(shell, redirection)?);
+                /* `&>file` is `>file 2>&1`, in that order and by Bash's own
+                 * definition of the form. Adding the duplication here rather
+                 * than at the open keeps every property the list already has:
+                 * the file is opened once, a failed open leaves descriptor 2
+                 * alone because the loop stops, and the save-and-restore
+                 * frame records both slots. */
+                // [spec:nsh:req:compat.bash.expansion-globbing]
+                if redirection.with_stderr {
+                    expanded.push(ExpandedRedirection::Descriptor {
+                        descriptor: RedirectionDescriptor::Fixed(LogicalDescriptor::STDERR),
+                        source: Some(LogicalDescriptor::STDOUT),
+                    });
+                }
             }
             Redirection::Descriptor(redirection) => {
                 let source = match &redirection.target {

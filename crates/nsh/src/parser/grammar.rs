@@ -639,6 +639,7 @@ fn parse_redirection_target(
         PendingRedirection::File {
             operator,
             descriptor,
+            with_stderr,
         } => Redirection::File(FileRedirection {
             operator,
             descriptor,
@@ -646,6 +647,7 @@ fn parse_redirection_target(
                 tokens: tokens::run(shell, target_mark),
                 word: mem::take(&mut shell.input.word),
             },
+            with_stderr,
         }),
     };
     Ok(redirection)

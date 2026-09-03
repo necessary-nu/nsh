@@ -1475,7 +1475,7 @@ assertions (
     {id refuse-to-take-back-the-read-only-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:14.8134587Z}
     {id refuse-a-reference-to-what-is-not-a-name, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:16.579259124Z}
     {id make-a-substitution-linear-in-its-value, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:48:32.594398742Z}
-    {id expand-a-command-substitution-in-a-subscript, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:56:24.718071895Z}
+    {id expand-a-command-substitution-in-a-subscript, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:01:17.458720557Z}
 )
 
 impl_evidence (

@@ -172,6 +172,21 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
     for redirection in redirections {
         push_command_text(b" ", text);
         match redirection {
+            Redirection::File(redirection) if redirection.with_stderr => {
+                /* `&>` and `&>>` name no slot: the ampersand is where the
+                 * number would go, so the descriptor the parser stored is
+                 * the operator's own default and printing it would spell a
+                 * form Bash does not have. */
+                // [spec:nsh:req:compat.bash.expansion-globbing]
+                push_command_text(
+                    match redirection.operator {
+                        FileRedirectionOperator::Append => b"&>>",
+                        _ => b"&>",
+                    },
+                    text,
+                );
+                redirection.target.word.render(text);
+            }
             Redirection::File(redirection) => {
                 push_command_text(&redirection.descriptor.text(), text);
                 push_command_text(

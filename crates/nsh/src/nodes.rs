@@ -531,6 +531,17 @@ pub struct FileRedirection {
     pub operator: FileRedirectionOperator,
     pub descriptor: RedirectionDescriptor,
     pub target: WordNode,
+    /// Bash's `&>` and `&>>`: the standard error follows the standard
+    /// output into the same file.
+    ///
+    /// A flag rather than two more operators, because the file half is
+    /// the ordinary `>` and `>>` down to the last detail -- `set -C`
+    /// refuses `&>` on an existing file and allows `&>>`, exactly as it
+    /// does for the operators without the ampersand -- and because the
+    /// AST has to print back as what was typed, which two redirections
+    /// desugared here could not do.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub with_stderr: bool,
 }
 
 /// The side of a descriptor-duplication redirection.
