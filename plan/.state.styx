@@ -1345,6 +1345,7 @@ assertions (
     {id bash-select-and-time-grammar, kind @doing, author "brendan@necessary.nu", at 2026-08-24T10:07:50.753985924Z}
     {id fuzz-the-shell, kind @complete, author "brendan@necessary.nu", at 2026-08-25T14:31:05.885569498Z}
     {id shell-construction-costs-more-than-the-command, kind @complete, author "brendan@necessary.nu", at 2026-08-30T23:42:10.903816659Z}
+    {id an-embedder-cannot-read-a-script-without-running-it, kind @doing, author "brendan@necessary.nu", at 2026-09-03T12:19:00.375084237Z}
 )
 
 impl_evidence (

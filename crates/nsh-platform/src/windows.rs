@@ -2086,14 +2086,14 @@ pub fn snapshot_process_fd(number: i32, minimum: i32) -> std::io::Result<Option<
     // is borrowed from the process table until explicitly duplicated below.
     let raw = unsafe { GetStdHandle(kind) };
     if raw.is_null() || raw == INVALID_HANDLE_VALUE {
-        Ok(None)
-    } else {
-        duplicate_windows_handle(raw, minimum).map(Some)
+        return Ok(None);
     }
+    duplicate_windows_handle(raw, minimum).map(Some)
 }
 
-pub fn open_null_input() -> std::io::Result<Descriptor> {
-    descriptor_from_file(File::open(null_device_path())?, 0)
+pub fn open_null_device(write: bool) -> std::io::Result<Descriptor> {
+    let path = null_device_path();
+    descriptor_from_file(File::options().read(!write).write(write).open(path)?, 0)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

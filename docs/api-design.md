@@ -78,6 +78,7 @@ Ten types, and the methods on them. The full signatures are in
 | `Disposition`, `SignalSink` | `Host`'s vocabulary. |
 | `Error` | §3. |
 | `ExitStatus`, `Signal` | `u8` and a numeric newtype. |
+| `script::Reader`, `script::Script` and its `Command`, `Word`, `Piece` | A script as the shell reads it, without running it — a projection of the tree, every type `#[non_exhaustive]`. The one module added since the surface closed; §2.2. |
 
 **The honest item count is fifty, not twenty.** Measured on the sketch:
 
@@ -108,6 +109,27 @@ a variable after construction, `export_var(&BStr, &BStr)` is the addition
 and it is additive.
 
 **No `impl Read` source.** §4.4.
+
+### 2.2 One module was added after the surface closed, and what it is not
+
+`nsh::script` reads a script and says what it holds — which commands run
+after which, under what, and whether each piece of each word is quoted —
+without running any of it. Ronin needed it: composing a recursive `$(MAKE)`
+out of a recipe line means knowing what the line *would* do, and a build
+tool reading shell bytes with a grammar of its own can only disagree with
+the shell that will run them.
+
+It is a projection and not the tree. `crate::nodes` is the evaluator's
+working state, thirty-odd types the evaluator is free to change; the
+projection keeps the grammar and the quoting and nothing else, says
+`Command::Other` and `Piece::Expansion` where it does not describe a form,
+and is `#[non_exhaustive]` throughout so that it can grow without breaking
+a match on it. A `Reader` owns one shell built on the null device, because
+the parser reports a syntax error as well as returning it and the report
+must not reach the host's stderr. Nothing in the module executes, expands
+or reads a variable; the property [dec:nsh:public-surface] measured — a
+surface two orders of magnitude below the internals — still holds, and
+`missing_docs` still measures it.
 
 ---
 

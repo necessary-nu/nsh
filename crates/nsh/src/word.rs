@@ -247,7 +247,7 @@ impl ParsedWord {
                 WordUnit::Part(part) => parts.push(part.clone()),
             }
         }
-        finish(parts)
+        Self::from_parts(parts)
     }
 
     /// Render a compact shell spelling for diagnostics and job display.
@@ -381,7 +381,7 @@ impl TokenDecoder<'_> {
                 WordToken::ParameterEnd | WordToken::ArithmeticEnd => break,
             }
         }
-        finish(parts)
+        ParsedWord::from_parts(parts)
     }
 }
 
@@ -393,16 +393,22 @@ fn push_literal(parts: &mut Vec<WordPart>, byte: u8) {
     }
 }
 
-fn finish(parts: Vec<WordPart>) -> ParsedWord {
-    let mut word = ParsedWord {
-        parts,
-        spelling: BString::new(Vec::new()),
-    };
-    word.render_spelling();
-    word
-}
-
 impl ParsedWord {
+    /// A word made of parts already shaped, with its spelling rendered.
+    ///
+    /// The lexer's decoder builds every word this way, and [`crate::script`]
+    /// uses it to hold the value half of a `name=value` word as a word of its
+    /// own: the parts after the `=` are the value's parts exactly, so nothing
+    /// is re-lexed.
+    pub(crate) fn from_parts(parts: Vec<WordPart>) -> Self {
+        let mut word = Self {
+            parts,
+            spelling: BString::new(Vec::new()),
+        };
+        word.render_spelling();
+        word
+    }
+
     fn render_spelling(&mut self) {
         fn append(word: &ParsedWord, output: &mut BString) {
             for part in &word.parts {

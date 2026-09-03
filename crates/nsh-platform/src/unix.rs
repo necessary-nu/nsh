@@ -1123,9 +1123,13 @@ pub fn snapshot_process_fd(number: i32, minimum: i32) -> std::io::Result<Option<
     }
 }
 
-/// Open `/dev/null` for reading and transfer ownership of the descriptor.
-pub fn open_null_input() -> std::io::Result<Descriptor> {
-    std::fs::File::open("/dev/null")
+/// Open `/dev/null` for reading, or for writing, and transfer ownership of
+/// the descriptor.
+pub fn open_null_device(write: bool) -> std::io::Result<Descriptor> {
+    std::fs::File::options()
+        .read(!write)
+        .write(write)
+        .open("/dev/null")
         .map(OwnedFd::from)
         .map(Descriptor::from)
 }

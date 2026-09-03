@@ -7994,4 +7994,25 @@ children (
             }
         )
     }
+
+    {
+        id an-embedder-cannot-read-a-script-without-running-it
+        title "Expose a script as the shell reads it, for an embedder that reasons about one without running it"
+        kind @feat
+        log (
+            {
+                at 2026-09-03T12:19:00.375084237Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-09-03T12:44:53.750762837Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "WHERE THIS COMES FROM. Ronin (github.com/necessary-nu/ronin) composes a recipe's `$(MAKE)` into the parent's build graph instead of forking a Make, and could only recognise a line that already looked like an invocation, by byte-matching. zsh reaches every child through `for subdir in Src Doc; do (cd $$subdir && $(MAKE) …) || exit 1; done`, so its whole tree forked. Ronin runs recipes through this shell, so the right reading of that line is this shell's, not a second grammar in the build tool.\n\nWHAT IS EXPOSED, AND WHY NOT THE TREE. `nsh::script::Reader::new()` builds one shell on the null device (`Streams::discarding`, crate-private, backed by a new `nsh_platform::open_null_output` on both platforms — the parser reports a syntax error as well as returning it, and a reader must never write to the host's stderr and must never accumulate). `Reader::read(&BStr) -> Result<Script, Error>` parses with `parse_command` exactly as the hidden fuzzing entry does, under `with_resources` so the input frame is restored on every path, and never evaluates. What it returns is a PROJECTION: `Command` (Simple, Pipeline{negated}, And, Or, Sequence, Background, Subshell, Redirected, If, For, While, Until, Case, Function, Other), `SimpleCommand`, `Assignment`, `CaseClause`, `Word{pieces, source}`, `Piece` (Literal{bytes, quoted}, Parameter{name, quoted}, Expansion{quoted}, CommandSubstitution, Arithmetic), `Redirection{source}`. Every type is `#[non_exhaustive]`. Quoting is resolved into the `quoted` flag — single and double quotes, backslash escapes, escaped multibyte — because that is the one fact about a word that decides its meaning without expanding it. `Word::source` is the printer's canonical spelling, so an embedder that needs to hand a word back to a shell gets one the shell reads the same way; the printer's `word` and `redirection` renderers are opened crate-wide for it, and `ParsedWord::from_parts` lets the value half of a `name=value` word be a word of its own.\n\nExporting `Node` was considered and rejected: it drags some thirty-five `pub(crate)` types (ParsedWord, WordPart, LogicalDescriptor, the BashNode family) into a surface [dec:nsh:public-surface] closed on purpose, under `#![deny(missing_docs)]`, and freezes the evaluator's working state as API. The projection can grow a variant without breaking a match, and says `Other`/`Expansion` where it does not describe a form rather than guessing. Recorded as AMENDED (+2) on the decision and as §2.2 of docs/api-design.md.\n\nEVIDENCE: 14 unit tests in the module (quoting per piece, assignment split, substitutions named, grammar shape of zsh's line, redirections/negation/background kept, conditionals/loops/cases kept, `for` without `in`, several lines, a syntax error returned with the reader still usable, determinism, Bash forms as Other under POSIX). Workspace suite under scripts/sandboxed at -j4: every suite ok, exit 0 (the first run at default parallelism died in the linker with \"could not exec the linker `cc`\" — a process limit under the sandbox's link storm, not a failure of the code). `cargo fmt --check` and `clippy --workspace --all-targets -D warnings` clean; `cargo check` for x86_64-pc-windows-gnu and -msvc clean. The repository gate `fallible_results_are_explicit` refused a first draft that drained a captured stderr with `let _ =`; the null-device streams are what replaced it, and are the better design."
+            }
+        )
+    }
 )
