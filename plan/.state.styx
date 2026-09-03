@@ -1468,8 +1468,10 @@ assertions (
     {id fold-pattern-rs-into-the-characters-module, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:34:27.974563803Z}
     {id stop-the-noclobber-append-case-flaking, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:32:39.331601243Z}
     {id keep-a-local-declared-after-unset, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:37:16.333688448Z}
-    {id list-a-declaration-of-a-reserved-name, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:33:03.648084764Z}
+    {id list-a-declaration-of-a-reserved-name, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:38:02.222963589Z}
     {id decode-a-character-from-the-buffer-the-parser-already-holds, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:34:41.421764672Z}
+    {id accept-local-dash-in-the-bash-dialect, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:46:52.909965087Z}
+    {id take-an-export-back-with-the-n-letter, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:46:55.729539692Z}
 )
 
 impl_evidence (

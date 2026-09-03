@@ -115,14 +115,61 @@ impl Pattern {
         &self.quoted
     }
 
+    /// Whether this pattern holds an operator that can make it match a
+    /// name other than its own text, and so has to be matched against
+    /// the filenames that exist.
+    ///
+    /// A `[` counts only when a `]` follows it in the same
+    /// slash-delimited component. That is POSIX's own trigger -- a `*`,
+    /// `?` or `[` "that will be treated as special", where a `[` that
+    /// introduces nothing stands for itself -- and it is Bash's test
+    /// exactly. dash's is the same but for a leading `!`, which it steps
+    /// over, so `[!]` is ordinary there and a pattern here; both answer
+    /// without opening a directory. Reaching the same answer by
+    /// generating the names and finding none of them matched is not the
+    /// same answer: under `nullglob` the word is then dropped, under
+    /// `failglob` it is an error, and under `nocaseglob` a file whose
+    /// name differs from the word only in case replaces it.
+    ///
+    /// The test deliberately under-reads the bracket syntax that
+    /// `Matcher::bracket` reads in full: it asks only whether a `]` is
+    /// there to close the list, not whether what lies between them is a
+    /// well-formed member. Erring that way costs a directory read for a
+    /// word like `[!]`, which the matcher then settles as literal text
+    /// and which comes back as itself either way. Erring the other way,
+    /// by calling a real bracket expression ordinary, would drop an
+    /// expansion, so the loose test is the safe one and is what Bash
+    /// itself does.
+    ///
+    /// A `/` closes the question, because pathname expansion identifies
+    /// slashes before bracket expressions: `a[b/c]d` matches the name
+    /// `a[b/c]d` and nothing else. Every `/` byte counts, quoted or not,
+    /// because that is how the walk splits a pattern into components.
+    // [spec:posix:req:pattern.filename-expansion-trigger]
+    // [spec:posix:req:pattern.no-special-chars-unchanged]
+    // [spec:posix:sem:pattern.left-bracket-literal]
+    // [spec:posix:syn:pattern.slash-terminates-bracket]
     pub(crate) fn has_meta(&self) -> bool {
-        self.bytes.iter().enumerate().any(|(at, byte)| {
-            !self.quoted[at]
-                && (matches!(byte, b'*' | b'?' | b'[')
-                    || (self.options.extended
-                        && matches!(byte, b'+' | b'@' | b'!')
-                        && self.active(at + 1, b'(')))
-        })
+        let mut opened = false;
+        for (at, byte) in self.bytes.iter().enumerate() {
+            if *byte == b'/' {
+                opened = false;
+                continue;
+            }
+            if self.quoted[at] {
+                continue;
+            }
+            match byte {
+                b'*' | b'?' => return true,
+                b'[' => opened = true,
+                b']' if opened => return true,
+                b'+' | b'@' | b'!' if self.options.extended && self.active(at + 1, b'(') => {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     pub(crate) fn starts_with_literal_dot(&self) -> bool {
@@ -954,6 +1001,53 @@ mod tests {
         assert!(matches(&locale, b"[![:digit:]]", b"a"));
         assert!(!matches(&locale, b"[![:digit:]]", b"7"));
         assert!(!matches(&locale, b"[[.zz.]]", b"zz"));
+    }
+
+    /// A work assertion rather than a timing one, which is what makes it
+    /// worth anything on a loaded machine: a word that is not a candidate
+    /// performs no directory read at all, so `[ "$i" -lt 3 ]` costs the
+    /// current directory nothing however large it is.
+    // [spec:posix:req:pattern.filename-expansion-trigger/test]
+    // [spec:posix:req:pattern.no-special-chars-unchanged/test]
+    // [spec:posix:sem:pattern.left-bracket-literal/test]
+    // [spec:posix:syn:pattern.slash-terminates-bracket/test]
+    #[test]
+    fn an_unclosed_bracket_is_not_a_pathname_candidate() {
+        for text in [
+            "[", "[abc", "a[b", "[a-", "[[", "]", "a]b", "]a[",
+            /* A slash is identified before a bracket expression, so
+             * neither component of these holds a closed list. */
+            "a[b/c]d", "sub/[", "[/x", "x/[",
+        ] {
+            assert!(
+                !Pattern::unquoted(text).has_meta(),
+                "`{text}` reads the directory it should have been left beside"
+            );
+        }
+        for text in [
+            "*",
+            "?",
+            "[a]",
+            "[]",
+            "[^]",
+            "[!]",
+            "[]]",
+            "a*[",
+            "*/[",
+            "[[:alpha:]",
+            /* The bracket closes inside one component even though the
+             * word spans two. */
+            "a/[b]c",
+        ] {
+            assert!(
+                Pattern::unquoted(text).has_meta(),
+                "`{text}` is a pattern and has to be matched against the names that exist"
+            );
+        }
+        /* Quoting the bracket takes the question away entirely, and
+         * quoting the `]` leaves the `[` with nothing to close it. */
+        assert!(!Pattern::new(BString::from("[a]"), vec![true, false, false]).has_meta());
+        assert!(!Pattern::new(BString::from("[a]"), vec![false, false, true]).has_meta());
     }
 
     #[test]

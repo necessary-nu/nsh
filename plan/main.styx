@@ -332,6 +332,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                children (
+                    {
+                        id give-a-null-commands-failed-redirection-dashs-status
+                        title "Give a null command's failed redirection dash's status"
+                        kind @fix
+                        log (
+                            {
+                                at 2026-09-03T16:40:26.193858085Z
+                                author "brendan@necessary.nu"
+                                kind @blocker
+                                text "FOUND 2026-09-03 WHILE CLOSING `stop-the-noclobber-append-case-flaking`, AND NOT PART OF IT. It surfaced as a row in that node's new POSIX differential table and is pre-existing: it is nothing to do with `&>`, and reproduces on `d0ffd39`.\n\nA redirection that fails on a command with **no words** -- POSIX's null command, `> file` with nothing in front of it -- leaves a different status here than in dash:\n\n    echo one > f; set -C; > f; echo s=$?     dash: 2   nsh: 1   bash 5.3: 1\n    > /no/such/dir/x; echo s=$?              dash: 2   nsh: 1   bash 5.3: 1\n    < /no/such/file; echo s=$?               dash: 2   nsh: 1\n    exec 2>/dev/null; > /no/such/dir/x       dash: 2   nsh: 1\n\nMeasured against `/usr/bin/dash` 0.5.12 and `target/bash-reference/bash` 5.3.15 on `4db6db2`, each case in its own scratch directory.\n\nIT IS THE NULL COMMAND SPECIFICALLY. The same failure on a command that *has* words agrees: `echo one > f; set -C; echo two > f` is status 2 in both. So the divergence is not in the noclobber refusal, nor in the open, nor in the diagnostic -- it is what status a redirection error leaves when there is no command to give it to. Dash's `exitshell`/`exerrno` path answers 2 there; this shell answers 1, which happens to be what Bash answers.\n\nWHY IT MATTERS AND WHY IT IS AWKWARD. `[dec:nsh:differential-is-the-oracle]` makes `/usr/bin/dash` the oracle for the POSIX dialect, and this is a plain disagreement with it -- a script doing `set -C` and `> lockfile` to take a lock reads 1 where dash reads 2, and `set -e` behaves the same either way only because both are non-zero. But the value this shell gives is *Bash's*, so whichever way it is fixed one of the two dialects has to keep the other's answer, and that is a `bash::active` question rather than a one-line constant.\n\nWORTH CHECKING FIRST, because it decides the shape of the fix: whether the 2 is dash's general \"redirection error in a non-interactive shell\" status or specific to the wordless command, and whether an interactive dash answers the same. `[spec:posix:req:redir.open-failure]` and `[spec:posix:sem:exit.command-not-executed]` are the two rules in scope.\n\nDONE WHEN a failed redirection on a null command leaves dash's status in the POSIX dialect and Bash's in the Bash dialect, and a differential table holds the four rows above plus the with-words rows that must not move."
+                            }
+                        )
+                    }
+                )
                 log (
                     {
                         at 2026-08-18T02:19:29.999250369Z
@@ -8765,6 +8780,13 @@ children (
                                         kind @status
                                         text "Todo → Doing (nplan start)"
                                     }
+
+                                    {
+                                        at 2026-09-03T16:46:43.307327946Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "THE MECHANISM, MEASURED 2026-09-03. It is not a harness effect, not a scratch-directory effect, and not a race the survey introduces. This shell has no reading for Bash's `&>` and `&>>` at all, so `echo baz &>> f` is `echo baz &` followed by `>> f`: the echo is a BACKGROUND JOB and the redirection belongs to a command with no words. The output stays on the shell's own standard output, the file is created empty, and the backgrounded echo then races the foreground shell's next writes to the same pipe. Which of them wins is the scheduler's answer, and the scheduler's answer depends on what else is running -- which is exactly \"it is the run it is in\".\n\nSTRACE SETTLES IT. `strace -f` on the seven-line reduction, one process:\n\n    clone(...) = 3396293\n    3396258 write(11, \"both=0\\n\", 7 <unfinished ...>\n    3396293 write(11, \"baz\\n\", 4 <unfinished ...>\n\nParent and forked child writing to the same descriptor, and descriptor 11 is the shell's own standard output rather than the file. `cat` then prints nothing, because the file the redirection made is empty. The upstream corpus reached the same diagnosis about dash and wrote it into `redirect.test.sh:30`: \"Fix for flaky tests: dash behaves non-deterministically under load! It doesn't implement the behavior anyway so I don't care why.\"\n\nTHE OUTPUT IS A PERMUTATION, WHICH IS THE SIGNATURE. Forty runs of the reduction at load 22.5 gave four distinct answers, every one of them the same eight lines in a different order, including one in which the *file* read `foo` before `baz`. A shell that had the operator could not produce that; two writers on one descriptor produce nothing else.\n\nWHY THE CONTROL COULD NEVER EXCUSE IT, AND WHY THAT IS NOT A COINCIDENCE. Twenty-five interleaved isolated runs each at load 23:\n\n    sh-options.test.sh:23    nsh lost 24 of 25    pinned Bash lost 0 of 25\n    background.test.sh:7     nsh lost  0 of 25    pinned Bash lost 0 of 25\n\nThe reference has no race here because it implements the operator, so P(the reference loses 0 of 15) is 1 and not 0.001. `give-the-failing-case-baseline-the-gates-control`'s caveat -- three gate misses each with the reference at 0 of 15 -- reads as a 1-in-1000 coincidence only if the case's instability is shared. For a case whose instability is this shell's alone the control is answering a different question, correctly, and no constant would change that. The caveat's own subject was `process-sub.test.sh:1`, where both shells do race, so it stands unexplained for that case; what this settles is that \"the reference lost 0 of 15\" is not one piece of evidence but two different ones depending on whose race it is.\n\nAND THE NODE'S \"6 OF 6 ALONE\" WAS A SMALL SAMPLE. At load 23 the isolated form loses 24 of 25, not 25 of 25: the case can win its race alone too, just rarely. \"It never flakes when it runs alone\" is 6 draws from a distribution whose other side is about 4%.\n\n`background.test.sh:7` RECONCILED, which the two records disagreed about. Neither shell loses it in isolation -- 0 of 25 each at load 26 -- so this node's \"the control excuses it at 5 of 15\" and the 2026-09-02 erratum's \"the control did not excuse it\" are both observations of a case that is stable alone and unstable in a group. Its expectations rest on `sleep 0.03`, `0.02` and `0.01` completing in that order, which is a real race in every shell and belongs to the machine; the disagreement is between two samples of a near-zero rate, not between two facts."
+                                    }
                                 )
                             }
 
@@ -9275,6 +9297,13 @@ children (
                                                 kind @note
                                                 text "Found 2026-09-02 while measuring `local` for `spell-a-valueless-name-back`. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\n    h(){ local -; set +e; echo ok; }; h\n      bash: ok\n      nsh:  declare: `-': not a valid identifier, then ok\n\nBash's `local -` saves the option set for the duration of the function and restores it on return, and `tests/corpus/aud_state_var.txt` already pins that behaviour for the POSIX dialect against the C dash reference -- two cases, `local dash saves options` and `local dash restores xtrace`. Both pass.\n\nWHERE. `builtins/local.rs` hands the whole invocation to `builtins::declare::run` when the dialect is Bash, and `declare`'s operand walk rejects `-` with `not a valid identifier` before anything can notice what it means. `variables::make_local_bytes` already has the `-` case and is what the POSIX path reaches; the Bash path never gets there.\n\nNOT MEASURED YET, and worth measuring before fixing: whether Bash's `local -` restores on a `return` out of a nested function, and what `local - x` does with the two operands together.\n\nDONE WHEN. `local -` in Bash mode saves and restores the option set as it does in the POSIX dialect and as the reference does, the corpus cases are unmoved, and a differential table holds the shapes."
                                             }
+
+                                            {
+                                                at 2026-09-03T16:46:52.909965087Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -9383,6 +9412,7 @@ children (
                                         id list-a-declaration-of-a-reserved-name
                                         title "List a bare `declare` of a name this shell reserved for a callback"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T14:32:24.336072124Z
@@ -9396,6 +9426,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:38:02.222963589Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -9495,6 +9532,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found 2026-09-02 while closing `apply-a-declaring-builtin-through-the-reference`, and not part of it: that node was about which name an attribute lands on, and this is about a letter the built-in does not accept at all. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\n`export -n NAME` takes the export attribute back off a name. It is Bash's mirror of `declare +x`, and this shell has neither the letter nor the effect:\n\n    x=1; export x; export -n x; declare -p x\n      bash: declare -- x=\"1\"\n      nsh:  export: -n: invalid option (the letters are `paA` in Bash mode, `p` in POSIX)\n\n    declare -n rr=t; t=1; export rr; export -n rr; declare -p t\n      bash: declare -- t=\"1\"        -- and it reads through the reference\n      nsh:  t keeps the export\n\nIt is the one script of the seventy that node measured that still differs after it.\n\nWHERE. `builtins/export.rs` builds its option letters as `b\"paA\"` under the Bash dialect and `b\"p\"` otherwise, and `crate::variables::value::clear_exported` is the effect `declare +x` already uses. The letter is Bash's alone: POSIX gives `export` no `-n`, and dash refuses it too, so the letter belongs inside the dialect test that is already there.\n\nWATCH TWO THINGS. `readonly -n` is not the same letter and Bash does not take a read-only attribute back at all, so only the `export` name may grow it. And the reference walk `c36aecc` added, `nameref::attributed_name`, is where `-n` has to resolve its operand, or `export -n rr` would clear the reference's own export rather than the target's.\n\nDONE WHEN. `export -n` clears the export on a plain name and on a reference's target, is refused in the POSIX dialect exactly as it is now, and a differential row covers each."
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:46:55.729539692Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
                                             }
                                         )
                                     }
@@ -9683,6 +9727,34 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "FOUND 2026-09-03 WHILE CLOSING `guard-the-process-file-creation-mask`, WHICH DOCUMENTED THIS WINDOW RATHER THAN CLOSING IT.\n\n`crates/nsh-platform/src/unix/process.rs`:\n\n    /// Read the process file-creation mask, restoring it before returning.\n    pub fn creation_mask() -> u32 {\n        let mask = replace_creation_mask(0);\n        replace_creation_mask(mask);\n        mask\n    }\n\nThat is the POSIX dance and it is what dash does, because `umask(2)` sets and returns in one call and POSIX gives no way to ask. `crates/nsh/src/builtins/umask.rs` says so in its own module doc and wraps the pair in `with_interrupts_deferred`, which stops a signal stranding the zero.\n\nWHAT DEFERRING INTERRUPTS DOES NOT STOP IS ANOTHER THREAD. For the width of two syscalls the process's mask is zero, and any file another thread creates in that window is created with the mode its caller asked for and nothing removed -- 0o666 for a redirection that meant 0o644, 0o777 for a directory. `[dec:nsh:shell-as-library]` is what makes this different from dash: an embedder's other threads are real, and a bare `umask` with no operand -- which reports the mask and is documented as not changing it -- is a shell command that transiently unmasks the whole process.\n\nLINUX CAN ACTUALLY READ IT, which is why this is a node rather than a documented limit. `/proc/self/status` carries a `Umask:` line; measured on this host 2026-09-03:\n\n    $ grep -i '^umask' /proc/self/status\n    Umask:  0002\n\nSo on Linux `creation_mask()` can be a read with no write at all, and the window disappears for the reporting path -- which is the common one, since `umask` with no operand is how a script asks. `umask MODE` still has to write, and that is a write the script asked for.\n\nWHAT TO CHECK BEFORE COMMITTING TO IT. `Umask:` is not in the oldest `/proc` (added in Linux 4.7), so the fallback dance has to stay and be selected by whether the line is there rather than by a version test. It is Linux-only: `[dec:nsh:host-owns-the-process]` and the Windows half of `nsh-platform` both have to keep working, and `crates/nsh-platform/src/windows/process.rs` already has its own `creation_mask`. Parsing `/proc/self/status` for one field on every `umask` call is a file open where there was a syscall pair, so it is not obviously cheaper -- measure it, and if the cost matters the answer may be to read `/proc/self/status` only when reporting and keep the dance for the arithmetic in `umask MODE`.\n\nDONE WHEN `umask` with no operand does not set the process mask to zero on a host whose kernel can be asked, the fallback is chosen by capability rather than by `cfg`, and `docs/api-design.md` s6's file-creation-mask entry -- which currently states this window as a fact of the crate -- is corrected to say where it still applies."
+                                    }
+                                )
+                            }
+
+                            {
+                                id let-the-platform-children-be-a-real-module
+                                title "Stop include! forcing a path attribute on every platform child"
+                                kind @refactor
+                                log (
+                                    {
+                                        at 2026-09-03T16:40:24.637523471Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "SIX `#[path]` ATTRIBUTES IN `crates/nsh-platform/src/unix.rs`, AND THE FILE SAYS WHY ITSELF:\n\n    /* The subject split of this file, in `src/unix/`. This file is\n     * `include!`d into the crate root rather than declared as a module, so a\n     * bare `mod paths;` here would name `src/paths.rs`; `#[path]` is what\n     * puts the children in a directory named for their parent. */\n    #[path = \"unix/endpoints.rs\"]\n    mod endpoints;\n\nThat is an accurate description of a workaround, not a justification. `#[path]` is not the defect; `include!` is. A file textually pasted into the crate root is not a module, so the ordinary `foo.rs` + `foo/` convention -- the one every other split in this workspace uses -- cannot resolve, and six declarations have to say by hand where their own children live.\n\nWHERE IT CAME FROM. `60752b6` split `unix.rs` from 142 functions and 1,789 lines into 8 and 229 with six children, under the rule that made the whole splitting burst cheap: a private item is visible in its defining module *and every descendant*, so split downward into `foo/bar.rs` and only moved entry points need `pub(super)`. Every other split that week landed as a plain child module. This one could not, because its parent is an `include!`, and the workaround was taken rather than the include being questioned.\n\nWHAT TO ESTABLISH FIRST. Why `unix.rs` is `include!`d at all. The likely answer is that it puts its items directly in the crate root without a wall of `pub use`, which is a real thing to want -- `crates/nsh-platform/src/windows.rs` is presumably the same shape, and the comment mentions an asymmetry `ca0fa37` had to work around on the Windows side. So this is not \"delete the include\", it is \"find out what the include buys and whether a `mod unix;` plus one re-export line buys the same thing\". If it does, all six attributes go and the children resolve by convention. If it does not, the comment should say what is actually load-bearing rather than only how the workaround works.\n\nA SECOND EFFECT, SMALL BUT REAL. `rustfmt` on a module root recurses through every `mod` it declares, so formatting `unix.rs` reformats its children -- four of them were reformatted this way on 2026-09-03 by an agent that had named only the parent, and had to keep four unrelated pre-existing format fixes it never intended to make. That is a property of `mod`, not of `#[path]`, and it would remain after this node; it is recorded here only so the next person does not attribute it to the fix.\n\nNot urgent. Nothing is broken, no behaviour depends on it, and the workaround is honest about itself. It is on the list because a reader of `src/unix/` should not have to be told where `src/unix/` is."
+                                    }
+                                )
+                            }
+
+                            {
+                                id give-the-differential-helper-a-crate
+                                title "Share the differential helper as a crate, not by file path"
+                                kind @refactor
+                                log (
+                                    {
+                                        at 2026-09-03T16:40:42.352000993Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "THIRTY-ONE FILES REACH ACROSS A PACKAGE BOUNDARY WITH A RELATIVE PATH:\n\n    #[path = \"../../nsh/tests/pinned_bash/mod.rs\"]\n    mod pinned_bash;\n\nEvery differential test in `crates/nsh-cli/tests/` opens with that line, to get the `answer(shell, dialect, script)` helper that runs one script through both this shell and the pinned Bash. It is 31 of the 38 `#[path]` attributes in the workspace.\n\nWHY IT EXISTS, AND WHY THE REASON IS GOOD. Each file under `tests/` is its own crate, so integration tests cannot share code by ordinary means; and the `duplication` gate refused three copies of `answer()` when the first differential tests landed, correctly. Moving the helper to one file and pointing at it was the cheap answer, and it was the right call at three files.\n\nWHY IT IS NOT THE RIGHT ANSWER AT THIRTY-ONE. The path is `../../nsh/tests/...`: it leaves `nsh-cli` and reaches into a *different package's* test directory, which Cargo does not know about and cannot check. `nsh-cli`'s tests now compile a file that belongs to `nsh`, with no dependency edge recording it. Move or rename `crates/nsh/tests/pinned_bash/mod.rs` and thirty-one files in another crate stop compiling, with nothing in either `Cargo.toml` having hinted that they could. The scoped `#[allow(dead_code)]` each copy carries is a second symptom: every test binary compiles the whole helper and uses part of it.\n\nTHE FIX IS A CRATE. A small `nsh-test-support` (or similar) with the helper as its only public surface, a `dev-dependencies` entry in both `nsh` and `nsh-cli`, and `use nsh_test_support::answer;` replacing all thirty-one attributes. That is the arrangement Cargo has for exactly this, it makes the edge visible to the tool, and it lets the helper have its own tests. Check what else has quietly accumulated in `pinned_bash/mod.rs` while it was being shared this way.\n\nWatch `test-footprint` when the crate is created: a new crate whose lines are nearly all production and whose ratio starts at zero is the shape that fired the gate on `crates/nsh-lint` twice, and `stop-a-required-register-entry-firing-test-footprint` is the recent precedent for how that argument goes.\n\nNot urgent -- nothing is broken and the tests pass. It is on the list because thirty-one files depend on a path no manifest mentions."
                                     }
                                 )
                             }
