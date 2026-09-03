@@ -692,4 +692,51 @@ mod tests {
             Some(BString::from("echo yes"))
         );
     }
+
+    /// `buffered_line_bytes` answers only for bytes the frame will hand
+    /// over next as bytes, and answers empty rather than guessing.
+    ///
+    /// The three refusals are the whole contract, because a caller uses
+    /// this to decide how far it may read ahead: an exhausted line, whose
+    /// next unit may be an alias boundary rather than a byte; an
+    /// outstanding `pungetc`, which is served from *before* the cursor and
+    /// so is not the run starting at it; and a cursor that has advanced,
+    /// after which the answer must shrink rather than repeat bytes already
+    /// handed out.
+    // [spec:nsh:req:shell-locale.operation-binding/test]
+    #[test]
+    fn only_bytes_the_frame_will_hand_over() {
+        let _guard = lock();
+        let mut shell = Shell::new(crate::streams::Streams::INHERIT);
+        set_input_string(&mut shell, BStr::new(b"abcdef"));
+
+        let frame = current_input_frame(&mut shell.input);
+        frame.position = 1;
+        frame.line_remaining = 3;
+        frame.unread_count = 0;
+        assert_eq!(buffered_line_bytes(&mut shell.input), b"bcd");
+
+        /* The cursor moves and the answer shrinks with it. */
+        let frame = current_input_frame(&mut shell.input);
+        frame.position = 3;
+        frame.line_remaining = 1;
+        assert_eq!(buffered_line_bytes(&mut shell.input), b"d");
+
+        /* An exhausted line offers nothing, whatever the buffer holds. */
+        current_input_frame(&mut shell.input).line_remaining = 0;
+        assert_eq!(buffered_line_bytes(&mut shell.input), b"");
+
+        /* An outstanding put-back offers nothing either. */
+        let frame = current_input_frame(&mut shell.input);
+        frame.line_remaining = 3;
+        frame.unread_count = 1;
+        assert_eq!(buffered_line_bytes(&mut shell.input), b"");
+
+        /* A count reaching past the text is clamped, not trusted. */
+        let frame = current_input_frame(&mut shell.input);
+        frame.unread_count = 0;
+        frame.position = 4;
+        frame.line_remaining = 99;
+        assert_eq!(buffered_line_bytes(&mut shell.input), b"ef");
+    }
 }

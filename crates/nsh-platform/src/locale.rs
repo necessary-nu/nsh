@@ -315,14 +315,33 @@ impl Locale {
         })
     }
 
+    /// Whether the locale calls this byte a letter.
+    ///
+    /// A byte of the portable character set is answered without asking,
+    /// and that is not an approximation: POSIX fixes the classification
+    /// of those characters in every locale -- the letters are `alpha`
+    /// everywhere, and no character of `digit`, `punct`, `cntrl` or
+    /// `space` may be. So the C library can only agree, and asking it
+    /// costs a thread-locale selection per byte of every name the shell
+    /// reads. `every_locale_agrees_on_portable_characters` holds
+    /// the guarantee against the charmaps the tests run in.
     pub fn is_alpha(&self, byte: u8) -> bool {
+        if byte.is_ascii() {
+            return byte.is_ascii_alphabetic();
+        }
         self.with_selected(|| {
             // SAFETY: `isalpha` accepts every unsigned-char value.
             unsafe { libc::isalpha(byte.into()) != 0 }
         })
     }
 
+    /// Whether the locale calls this byte a letter or a digit. The
+    /// portable characters are answered without asking, for the reason
+    /// [`Self::is_alpha`] gives.
     pub fn is_alphanumeric(&self, byte: u8) -> bool {
+        if byte.is_ascii() {
+            return byte.is_ascii_alphanumeric();
+        }
         self.with_selected(|| {
             // SAFETY: `isalnum` accepts every unsigned-char value.
             unsafe { libc::isalnum(byte.into()) != 0 }
@@ -705,6 +724,145 @@ mod tests {
             latin1.character_encoding(0x100),
             CharacterEncoding::Unrepresentable
         ));
+    }
+
+    /// `decode_prefix` answers what the incremental decoder answers, and
+    /// says which of the two "no character" cases it found.
+    ///
+    /// `Incomplete` and `Invalid` are different instructions to the
+    /// caller -- fetch more bytes, or step over one -- and conflating
+    /// them is what `Option` would have done. The truncated sequence and
+    /// the lone continuation byte are the two that separate them, and the
+    /// same bytes in a single-byte charmap are neither: there every byte
+    /// begins a character one byte wide.
+    // [spec:nsh:req:shell-locale.operation-binding/test]
+    #[test]
+    fn a_prefix_decodes_or_says_why_not() {
+        let utf8 = utf8();
+        assert!(matches!(
+            utf8.decode_prefix(&[0xc3, 0x8c, b'a']),
+            LocaleCharacter::Complete {
+                wide: 0xcc,
+                width: 2
+            }
+        ));
+        assert!(matches!(
+            utf8.decode_prefix(b"az"),
+            LocaleCharacter::Complete {
+                wide: 0x61,
+                width: 1
+            }
+        ));
+        /* Valid so far, and the string ends too soon to finish it. */
+        assert!(matches!(
+            utf8.decode_prefix(&[0xc3]),
+            LocaleCharacter::Incomplete
+        ));
+        assert!(matches!(
+            utf8.decode_prefix(&[0xe2, 0x82]),
+            LocaleCharacter::Incomplete
+        ));
+        /* A continuation byte begins nothing, however many follow it. */
+        assert!(matches!(
+            utf8.decode_prefix(&[0x8c, 0x8c]),
+            LocaleCharacter::Invalid
+        ));
+        /* Nothing to read is not an answer about a character. */
+        assert!(matches!(
+            utf8.decode_prefix(&[]),
+            LocaleCharacter::Incomplete
+        ));
+
+        /* The null character consumes a byte even though `mbrtowc`
+         * reports zero, because one byte is what a caller has to step. */
+        assert!(matches!(
+            utf8.decode_prefix(&[0, b'a']),
+            LocaleCharacter::Complete { wide: 0, width: 1 }
+        ));
+
+        /* The C locale is ASCII and nothing else, which is easy to get
+         * wrong in the other direction: it does not call a high byte a
+         * one-byte character, it refuses it. `character_widths` is what
+         * turns that refusal into "step one byte" for a walking caller;
+         * `decode_prefix` reports what the charmap said. */
+        let c = Locale::c().unwrap();
+        for bytes in [&[0xc3_u8][..], &[0x8c, 0x8c][..], &[0xe2, 0x82][..]] {
+            assert!(matches!(c.decode_prefix(bytes), LocaleCharacter::Invalid));
+        }
+
+        /* A single-byte charmap is where every byte does begin a
+         * character: the answer follows the charmap, not the bytes. */
+        let latin1 = Locale::new(b"en_US.ISO-8859-1", &[]).unwrap_or_else(|error| {
+            panic!(
+                "en_US.ISO-8859-1 is required by this test and could not be opened: {error}\n\
+                 build it and name it to the run:\n\
+                 \x20   export LOCPATH=$(tests/build-locales.sh)"
+            )
+        });
+        for bytes in [&[0xcc_u8][..], &[0xc3][..], &[0x8c, 0x8c][..]] {
+            assert!(matches!(
+                latin1.decode_prefix(bytes),
+                LocaleCharacter::Complete { width: 1, .. }
+            ));
+        }
+
+        let before = current();
+        let _ = utf8.decode_prefix(&[0xc3, 0x8c]);
+        assert_eq!(
+            current(),
+            before,
+            "decode_prefix left the thread locale moved"
+        );
+    }
+
+    /// The portable characters classify the same way in every charmap,
+    /// which is what lets `is_alpha` and `is_alphanumeric` answer for an
+    /// ASCII byte without selecting the locale.
+    ///
+    /// POSIX fixes this: the letters of the portable character set are
+    /// `alpha` in every locale, and no member of `digit`, `punct`,
+    /// `cntrl` or `space` may be. The check is exhaustive rather than
+    /// sampled because there are only 128 bytes to try, so this is the
+    /// whole of the guarantee the shortcut rests on rather than evidence
+    /// for it. The high bytes are deliberately not asserted: those are
+    /// exactly the ones the shortcut still asks the C library about, and
+    /// ISO-8859-1 answers differently from C for a great many of them.
+    // [spec:nsh:req:shell-locale.operation-binding/test]
+    #[test]
+    fn every_locale_agrees_on_portable_characters() {
+        let latin1 = Locale::new(b"en_US.ISO-8859-1", &[]).unwrap_or_else(|error| {
+            panic!(
+                "en_US.ISO-8859-1 is required by this test and could not be opened: {error}\n\
+                 build it and name it to the run:\n\
+                 \x20   export LOCPATH=$(tests/build-locales.sh)"
+            )
+        });
+        for locale in [Locale::c().unwrap(), utf8(), latin1.clone()] {
+            for byte in 0..=127_u8 {
+                let alpha = locale.with_selected(|| {
+                    // SAFETY: `isalpha` accepts every unsigned-char value.
+                    unsafe { libc::isalpha(byte.into()) != 0 }
+                });
+                let alnum = locale.with_selected(|| {
+                    // SAFETY: `isalnum` accepts every unsigned-char value.
+                    unsafe { libc::isalnum(byte.into()) != 0 }
+                });
+                assert_eq!(alpha, byte.is_ascii_alphabetic(), "isalpha({byte})");
+                assert_eq!(alnum, byte.is_ascii_alphanumeric(), "isalnum({byte})");
+                assert_eq!(locale.is_alpha(byte), alpha, "is_alpha({byte})");
+                assert_eq!(
+                    locale.is_alphanumeric(byte),
+                    alnum,
+                    "is_alphanumeric({byte})"
+                );
+            }
+        }
+
+        /* And the high half is why the shortcut stops at 127: 0xE9 is a
+         * letter in ISO-8859-1 and nothing in C, so a shortcut that
+         * covered it would answer for the wrong charmap. */
+        assert!(latin1.is_alpha(0xe9));
+        assert!(!Locale::c().unwrap().is_alpha(0xe9));
     }
 
     /// A value no `wchar_t` can hold is refused rather than wrapped.
