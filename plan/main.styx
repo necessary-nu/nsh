@@ -9290,6 +9290,7 @@ children (
                                         id accept-local-dash-in-the-bash-dialect
                                         title "Let `local -` save the option set in Bash mode as it does in POSIX mode"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T15:54:08.15254001Z
@@ -9304,6 +9305,13 @@ children (
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
                                             }
+
+                                            {
+                                                at 2026-09-03T16:48:06.844771301Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
+                                            }
                                         )
                                     }
 
@@ -9317,6 +9325,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found 2026-09-02 while closing `quote-a-subscript-the-way-bash-quotes-one`, and not part of it: that node was about quoting and this is about expansion. Measured against the pinned Bash 5.3.15 on `7265a96`; pre-existing and unmoved by that node.\n\nA command substitution inside a subscript does not work at all, and the two spellings fail differently:\n\n    declare -a a=(10 11 12)\n    echo \"${a[$(echo 1)]}\"   bash: 11   nsh: eval: Syntax error: end of file unexpected (expecting \")\")\n    echo \"${a[`echo 1`]}\"    bash: 11   nsh: 10\n\nThe `$( )` form is a parse failure and the backtick form silently reads element zero, which is the worse of the two: a script indexing an array by a command's output gets the wrong element and no diagnostic.\n\nWHERE. `parser::bash::parameter_subscript` scans the raw bytes to the matching `]` with a quote state, and it has no state for `$(` -- the `)` inside is read as ordinary text and the `]` it finds is the right one, but what the scan produces is then re-parsed by `arrays::text_word`'s `expand_run` as a *word*, and the `$(...)` in it is cut. The parser's own comment above `track_assignment_subscript` says Bash skips a whole expansion while looking for the matching `]`, which is the rule this side is missing.\n\nThe backtick form reaching zero rather than reporting suggests the substitution is expanding to nothing and the empty expression is being read as `0` -- the same `${a[]}` shape `parameter.rs` reports for, but reached after expansion rather than before, where the shell does not look.\n\nNOT MEASURED YET, and worth measuring first: `${a[$(echo 1) + 1]}`, a substitution inside an *associative* subscript where the text is a key rather than an expression, and the assignment side `a[$(echo 1)]=v`.\n\nDONE WHEN. Both substitution forms read the element the reference reads, in a subscript on an indexed and on an associative array and on both sides of an assignment, and a differential table holds them."
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:56:24.718071895Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
                                             }
                                         )
                                     }
@@ -9469,6 +9484,7 @@ children (
                                         id refuse-a-reference-to-what-is-not-a-name
                                         title "Refuse `declare -n` on a value that is not a valid name"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T15:54:27.526973177Z
@@ -9483,6 +9499,13 @@ children (
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
                                             }
+
+                                            {
+                                                at 2026-09-03T16:48:16.579259124Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
+                                            }
                                         )
                                     }
 
@@ -9490,6 +9513,7 @@ children (
                                         id refuse-to-take-back-the-read-only-attribute
                                         title "Refuse `declare +r` as Bash refuses it"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T13:12:08.263966286Z
@@ -9503,6 +9527,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:48:14.8134587Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -9540,6 +9571,7 @@ children (
                                         id take-an-export-back-with-the-n-letter
                                         title "Implement `export -n`"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T12:46:10.544532115Z
@@ -9553,6 +9585,21 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:48:08.50260369Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:48:28.943864109Z
+                                                author "brendan@necessary.nu"
+                                                kind @errata
+                                                text "\"`readonly -n` IS NOT THE SAME LETTER\" WAS WRONG. Corrected 2026-09-03 while closing this node; measured against the pinned Bash 5.3.15 on `c5988e4`.\n\nThe node said \"only the `export` name may grow it\". Bash gives the letter to both:\n\n    readonly -n x;              declare -p x   bash: not found, status 0\n    readonly x=1; readonly -n x; declare -p x  bash: declare -r x=\"1\"\n    readonly -n x=1;            declare -p x   bash: declare -- x=\"1\", status 0\n    x=1; export x; readonly -n x; declare -p x bash: declare -x x=\"1\"\n\nSo `readonly` accepts `-n`, assigns a value written beside it, applies no attribute, and takes nothing back -- because a read-only attribute cannot be removed by any means. What the node got right is the *effect*: only the export attribute can go. The implementation is therefore one rule on both built-ins rather than a letter on one of them, which is smaller than what the node described.\n\nThree shapes the node did not name, all now rows in `crates/nsh-cli/tests/bash_declaration_letters.rs`:\n\n* `export -n x=2` still assigns -- `declare -- x=\"2\"` -- and `set -a` does not re-mark what `-n` just cleared.\n* `export -n zz` brings no name into being, where a bare `export zz` creates an invisible one.\n* With no operand at all the letter spends itself on the listing, exactly as `-a` and `-A` already did."
+                                                after_done true
                                             }
                                         )
                                     }
@@ -9661,6 +9708,20 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "THE RESIDUE OF `unset-every-name-it-was-given`, LEFT ON PURPOSE. Found 2026-09-03 while closing that node; measured against `/usr/bin/dash` and the imported Smoosh corpus on `2f6c63c`.\n\nTwo conformance oracles fix the same case in opposite directions, and the POSIX dialect can only satisfy one:\n\n    readonly R=1; unset R; echo \"rc=$?\"\n      /usr/bin/dash:  `dash: 1: unset: R: is read only`, status 2, and the\n                      `echo` never runs -- a special built-in's failure is\n                      fatal to a non-interactive shell\n      Smoosh:         `unset: x is read-only`, status 1, the script continues\n      nsh today:      `unset: x is read-only`, status 1, and the script does\n                      *not* continue -- the special-builtin boundary applies\n                      but the status is Smoosh's\n\nWHAT PINS EACH. dash is the C reference `tests/corpus/aud_state_var.txt` is judged against, and its `readonly unset` case is the file's one failing case. Smoosh is pinned by `[spec:nsh:req:compat.smoosh.error-contracts]`, by the corpus bytes in `tests/surveys/smoosh/shell/builtin.unset.err` and `builtin.unset.ec`, and by `crates/nsh/tests/smoosh_errors.rs:105`, which asserts the exact string and the status and passes.\n\nNOTE THE THIRD ROW. nsh matches Smoosh's status and dash's *fatality*, which is neither oracle exactly. Whether the script continues was not measured when the Smoosh contract was written down, so it is not obvious which of the two nsh is meant to be following.\n\nTHREE WAYS OUT, and choosing between them is the work:\n\n1. Take dash's answer and register the Smoosh case as a sanctioned divergence, the way `tests/harness/divergences.sh` already registers `getopts_optarg_unset`. Cheapest, and it moves a contract this repository imported rather than wrote.\n2. Take dash's answer and re-record the Smoosh corpus entry, saying in `docs/divergences.md` why the imported bytes are wrong for a dash port.\n3. Keep Smoosh's answer and register the corpus case in `divergences.sh`, which is the only option that changes no behaviour -- and which needs an entry written narrowly enough that it cannot swallow a real regression, which `tests/harness/divtest.sh` exists to check.\n\nNOT MEASURED YET, and worth measuring before choosing: what Smoosh's own model shells answer for the *fatality* question, and whether any other Smoosh case depends on `unset`'s status rather than its message.\n\nDONE WHEN. One oracle is chosen, the reason is written in `docs/divergences.md`, the loser is registered rather than silently failing, and `tests/corpus/aud_state_var.txt` and `crates/nsh/tests/smoosh_errors.rs` are both green."
+                                            }
+                                        )
+                                    }
+
+                                    {
+                                        id state-a-re-entered-parse-starts-clean
+                                        title "Decide whether the POSIX dialect keeps dash's lost prompt substitution"
+                                        kind @fix
+                                        log (
+                                            {
+                                                at 2026-09-03T16:55:28.367272346Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FOUND WHILE FIXING THE BASH HALF, AND LEFT ON PURPOSE. Found 2026-09-03 while closing `expand-a-command-substitution-in-a-subscript`; measured against `/usr/bin/dash`, the pinned Bash 5.3.15 and a pristine nsh built at `d0ffd39`.\n\n`parser::expand_string` starts a fresh parse of text the caller handed it, and it ran on top of the caller's pushed-back token. With a *string*-fed shell the outer parse has already pushed `Eof` back, so a `$( )` inside the re-parsed text replayed it:\n\n    dash -c 'PS4=\"$(echo P)+ \"; set -x; echo hi'\n      dash: `Syntax error: end of file unexpected (expecting \")\")`, then\n            the trace prefix is the unexpanded `$(echo P)+ `\n      bash: `P+ echo hi`\n\nFed the same script on standard input dash gets it right, so it is the invocation shape and not the prompt.\n\n**dash has the defect and this is a port of dash**, which is why the fix in `f6a3e0e`-adjacent work is gated on the Bash dialect: `crates/nsh/tests/errors_are_values.rs`'s `unparsable_prompt_is_swallowed` pins dash's answer for `PS4='$(exit 7)+ '` and was written from the C reference, and `tests/corpus` is judged against the same build. Ungating it moves the POSIX dialect off its oracle.\n\nTHE TEST NAME IS THE EVIDENCE. `unparsable_prompt_is_swallowed` calls `PS4='$(exit 7)+ '` an unterminated command substitution -- its own doc comment says \"readtoken1 reaching an unterminated command substitution\" -- and it is nothing of the kind: it is well-formed, and the syntax error is the stale token. The test pinned a defect as though it were the design, and it would have to be rewritten (`PS4='$(exit 7+ '` is a genuinely unterminated one) for the POSIX half to move.\n\nTHREE WAYS OUT:\n\n1. Fix both dialects, register the divergence from dash in `docs/divergences.md` and `tests/harness/divergences.sh`, and rewrite `unparsable_prompt_is_swallowed` around a prompt that really is unparsable. This is the only one that makes `PS1='$(hostname)'` work in the POSIX dialect, which is a shape real prompts use.\n2. Leave it as it is. The cost is that the two dialects now answer differently for a prompt, which is a boundary nothing else in `expand_string` has.\n3. Report it upstream to dash and take whatever it decides.\n\nNOT MEASURED YET: whether `eval` and `.` inside a *file*-fed dash reach the same state at end of file, and what the other `expand_string` caller -- `render_prompt` for an interactive `PS1` -- does under `-c`, which cannot arise but which `fc -e` may reach.\n\nDONE WHEN. One answer is chosen for the POSIX dialect, the loser is registered rather than silently failing, and `unparsable_prompt_is_swallowed` names a construct that is actually unparsable whichever way it goes."
                                             }
                                         )
                                     }
@@ -11554,6 +11615,13 @@ children (
                         kind @note
                         text "FOUND 2026-09-02 WHILE CLOSING `bound-what-a-prefix-or-suffix-trim-costs`, AND DELIBERATELY LEFT OUT OF IT. That node took `${v/p/r}` from a cube of the value's length to a square, which is what its own DONE WHEN asked for. The remaining square looks removable, and the reason it was not removed there is a real one rather than time.\n\nWHERE IT IS. `crates/nsh/src/expand/typed/bash.rs`, `replace` and `longest_match`: an unanchored substitution walks the value and, at each offset, asks `Trial::ends_from(at)` for every end the pattern can reach from there, then takes the last one. `ends_from` is a traversal of the pattern over the rest of the value -- O(pattern x value) -- and there are O(value) offsets, so the operation is a square. MEASURED interleaved, release, load 9 to 15, one `${s/*zz/X}` over n bytes of `a`:\n\n    n=511    2.95s -> 0.03s\n    n=1023  26.62s -> 0.11s\n    n=2047 175.75s -> 0.44s\n\nThe after column is 3.7 then 4.0 times per doubling: a square, and the whole of what is left.\n\nWHY EACH OFFSET GETS ITS OWN MEMO TODAY. `Trial::matches_from` shares one memo across every question because a state's yes-or-no answer does not depend on which question reached it. `Trial::ends_from` cannot: a collecting walk answers \"no match\" at every state and records reachable ends into *its own* `ends` vector as a side effect, so a memoized `false` from an earlier start would make a later start skip a state whose ends it has not yet collected. Sharing the memo as it stands would silently drop ends. `pattern.rs` says this where `ends_from` builds its memo.\n\nWHAT THE ANSWER PROBABLY IS. `longest_match` does not want the set of ends. It wants the maximum. `(pattern node, subject offset) -> furthest end reachable from here` is one `usize` per state, it does not depend on which start reached the state, and it composes: the furthest end from a state is the maximum over its successors. A memo of that shape is shareable across every start, which would make the whole substitution one traversal -- O(pattern x value) for the operation rather than per offset. The prefix trim wants the same thing at `from = 0` and would be unaffected; `${v#p}` and `${v##p}` want the first and last of the *set*, so `ends_from` has to stay for them.\n\nWHAT TO WATCH. The extended-glob budget is charged per question today and each question gets the whole of `EXTENDED_MATCH_BUDGET`; if one traversal answers for every start, the budget stops being per start and the bound it enforces changes shape. That is an improvement, but `${v//@(a|b)/x}` over a long value is the case to measure before and after, because it is the one that legitimately spends millions of units.\n\nDONE WHEN. `${s/*zz/X}` and `${s//*zz/X}` are flat in n where they are now a square, the work-unit count in `an_operation_over_a_value_costs_a_walk_of_it` for the span row falls from a per-offset allowance to a single walk (2,102,274 units at n=2048 today), the extended-glob fences are re-read rather than assumed, and the corpus differential -- all 2,723 `fuzz/corpus/matcher` inputs, both charmaps -- is byte-identical again."
                     }
+
+                    {
+                        at 2026-09-03T16:48:32.594398742Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
                 )
             }
 
@@ -11722,42 +11790,7 @@ children (
         id a-bracket-test-reads-the-current-directory
         title "Stop scanning the directory for every `[ ... ]` the shell runs"
         kind @perf
-        children (
-            {
-                id an-empty-bracket-class-matches-where-bash-matches-nothing
-                title "Decide what `[[::]]` means, because this shell and Bash read it differently"
-                kind @fix
-                log (
-                    {
-                        at 2026-09-03T16:10:50.507535814Z
-                        author "brendan@necessary.nu"
-                        kind @note
-                        text "FOUND WHILE CLOSING `a-bracket-test-reads-the-current-directory`, AND NOT CAUSED BY IT -- the same answer comes back from the binary built at `d0ffd39` and from the one with that node's change.\n\n`[[::]]` NAMES NO CHARACTER CLASS, AND THE TWO SHELLS DISAGREE ABOUT WHAT IS LEFT. Measured 2026-09-03 against the pinned Bash 5.3.15, in a directory holding files named `a`, `ab`, `[abc`, `[ABC`, `a[b`, `a]b`, `[a]` and directories `sub` and `x`:\n\n    printf '<%s>' [[::]]                 nsh <[]>            bash <[[::]]>\n    shopt -s nullglob; ... [[::]]        nsh <[]>            bash <>\n    shopt -s failglob; ... [[::]]        nsh <[]>            bash: no match\n    shopt -s nocaseglob; ... [[::]]      nsh <[]>            bash <[[::]]>\n    shopt -s dotglob; ... [[::]]         nsh <[]>            bash <[[::]]>\n\nThose are the only five rows of a 245-row sweep (49 words x 5 glob options) on which nsh and the pinned Bash still disagree after that node's change; before it there were 18.\n\nWHERE IT COMES FROM. `Matcher::nested_member` refuses a `[:...:]` member with an empty body, so `crates/nsh/src/pattern.rs` reads `[[::]]` as an ordinary list whose members are `[`, `:` and `:`, closing at the first `]` -- a pattern that matches any one of those three characters, which is why the file named `[]` is not produced but the file named `[` would be. Wait: what it actually produces here is `<[]>`, the two-character name, so the list is closed later than that; either way it is a list that matches. Bash reads the whole thing as a pattern that matches nothing at all, which is what `nullglob` dropping it and `failglob` refusing it both say.\n\nWHAT HAS TO BE DECIDED. Whether an empty class body makes the `[` ordinary (this shell) or makes the enclosing bracket expression unsatisfiable (Bash). POSIX does not say: XBD 9.3.5 gives no meaning to `[::]` with an empty class name, so this is the `[dec:nsh:we-own-the-defects]` question, and whichever answer is taken belongs in docs/divergences.md beside the `[^]]` entry that was settled the same way.\n\nDONE WHEN. The five rows above agree with the pinned Bash, or the divergence is registered in docs/divergences.md with the reading it takes and why; and `[[.a.]` and `[[=a=]`, which are the same shape with the other two delimiters, are checked at the same time."
-                    }
-
-                    {
-                        at 2026-09-03T16:11:28.277779264Z
-                        author "brendan@necessary.nu"
-                        kind @note
-                        text "CORRECTION TO \"WHERE IT COMES FROM\" IN THE NOTE ABOVE, 2026-09-03. That paragraph was written before the reading was checked and thinks aloud in the middle of itself. The original is left as it stands, as this repository's practice for a correction; this is the measured reading.\n\n`Matcher::nested_member` refuses a `[:...:]` member whose body is empty, so `[[::]]` is read as an ordinary bracket list `[[::]` whose members are `[`, `:` and `:`, closing at the first `]`, followed by a literal `]`. The pattern is therefore \"one of `[` or `:`, then `]`\", and it matches a two-character subject. Checked with `case`, so no directory is involved:\n\n    case X in [[::]] )        subject  [   :   ]   []   ::\n      nsh                              n   n   n   Y    n\n      pinned bash 5.3.15               n   n   n   n    n\n\nThe pathname expansion produced `<[]>` because the fixture held a file of that name; it is not the `[` alone that matched.\n\n`[[==]]` behaves identically in both shells to `[[::]]`. `[[.-.]]` does not: its body is not empty, so both shells read it as a collating symbol and both answer `<[[.-.]]>`. So the question is exactly what an empty class, collating-symbol or equivalence-class body means, and it has to be answered once for all three delimiters.\n\nBash matches nothing at all for either empty-bodied spelling, which is what `nullglob` dropping the word and `failglob` refusing it both say."
-                    }
-                )
-            }
-
-            {
-                id an-unclosed-extglob-group-is-a-parse-error-in-bash
-                title "Decide what an unclosed `@(` means when `extglob` is on"
-                kind @fix
-                log (
-                    {
-                        at 2026-09-03T16:27:19.369362906Z
-                        author "brendan@necessary.nu"
-                        kind @note
-                        text "FOUND WHILE CLOSING `a-bracket-test-reads-the-current-directory`, WHICH ASKED THE SAME QUESTION ABOUT `[` AND ANSWERED IT. The `[` half is done: a `[` with no `]` after it in the same component is ordinary text and no longer makes the word a pathname-expansion candidate. The `X(` half is not, and it is not the same shape of problem, because Bash does not decide it during expansion at all.\n\nMEASURED 2026-09-03 against the pinned Bash 5.3.15. Script, run as a file so the second line matters:\n\n    shopt -s extglob\n    printf \"<%s>\" @(a\n    echo\n\n    nsh -o bash    prints `<@(a\\necho\\n>` and exits 0\n    bash 5.3.15    `line 2: unexpected EOF while looking for matching `)'`, exits 2\n\nTwo things are wrong at once. Bash refuses the script: with `extglob` on, `@(` opens a group in the *parser*, and reaching end of input inside it is a syntax error. This shell accepts the script, and then its word rule swallows the newline and the following command into the word, because nothing closes the group and nothing stops the word either.\n\nWHY THIS IS NOT THE BRACKET FIX AGAIN. `Pattern::has_meta` treats `+`, `@`, `!`, `?` or `*` followed by `(` as an operator without asking whether the group closes, which is the same looseness the `[` test now has deliberately -- and for `[` that looseness is harmless, because a word that is not a pattern comes back as itself. Here it is not harmless, because the divergence is upstream of expansion: nsh has already tokenised a word Bash would have refused. Tightening `has_meta` would not help and would not be the fix.\n\nCARE. `extglob` is off by default and off in POSIX mode, so this cannot be reached by a POSIX script; `[dec:nsh:we-own-the-defects]` governs whether to reproduce Bash's parse error or to keep accepting the word, and whichever is chosen has to be said in docs/divergences.md. Check `?(`, `*(`, `+(` and `!(` at the same time, and check a group left unclosed at end of line but closed on the next line, which Bash reads as one group across the newline.\n\nDONE WHEN. The two shells agree about the script above, or the divergence is registered with the reading taken and why, and a differential test holds it."
-                    }
-                )
-            }
-        )
+        sealed true
         log (
             {
                 at 2026-09-02T18:20:09.73633471Z
@@ -11771,6 +11804,13 @@ children (
                 author "brendan@necessary.nu"
                 kind @status
                 text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-09-03T16:48:14.874917173Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan complete)"
             }
         )
     }
@@ -11813,6 +11853,41 @@ children (
                 author "brendan@necessary.nu"
                 kind @note
                 text "`crates/nsh/src/expand/typed/split.rs::separators` REBUILDS THE IFS CHARACTER TABLE FOR EVERY FIELD SPLIT, and each entry costs a `decode_exact` and a `wide_is_space` -- two thread-locale selections -- for a value that changes only when `IFS` is assigned.\n\nMEASURED, release, `LC_ALL=C.UTF-8`, 20,000 iterations of `n=${#s}` in a `while test ...` loop, after `stop-selecting-the-locale-per-byte-everywhere-else`:\n\n    decode_exact    240,018    12 per iteration\n    wide_is_space   240,018    12\n    multibyte_len   240,018    12\n\nTwelve of each, for a default `IFS` of three characters, in a loop whose body expands no field at all -- the arguments of `test` and the arithmetic each take a split, and each split rebuilds the same three-entry table. The benchmark's actual subject, the 300-character value, cost two selections.\n\nTHE PRECEDENT IS ALREADY THERE. `crates/nsh/src/expand.rs::update_ifs_cache` does exactly this for the byte-oriented split the `read` builtin uses: `shell.ifs` holds `bytes`, `wide_characters` and an `ascii_membership` table, refreshed when the variable is assigned. `split.rs` is the typed expansion's own split and does not use it; it recomputes from `effective_ifs(shell)` each time.\n\nWHAT THE ANSWER PROBABLY IS. Either `split.rs` reads the existing cache, or the cache grows the `IfsCharacter` vector `separators` builds. The second is likelier to be right: `IfsCharacter` carries the character's bytes and whether it is whitespace, which is what the typed split needs and what the byte cache does not hold in that shape. Invalidation is already solved -- `update_ifs_cache` is called where `IFS` is assigned.\n\nCARE. `effective_ifs` distinguishes unset `IFS` (default) from empty `IFS` (no splitting), and a cache has to keep that distinction. `an_empty_locale_assignment_is_not_an_unset` is the shape of test that catches getting it wrong.\n\nDONE WHEN. A loop that splits n times with an unchanged `IFS` builds the table once, the counts above fall to O(1) per assignment rather than O(1) per split, and field splitting still follows an `IFS` assigned in the middle of a script."
+            }
+        )
+    }
+
+    {
+        id an-empty-bracket-class-matches-where-bash-matches-nothing
+        title "Decide what `[[::]]` means, because this shell and Bash read it differently"
+        kind @fix
+        log (
+            {
+                at 2026-09-03T16:10:50.507535814Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "FOUND WHILE CLOSING `a-bracket-test-reads-the-current-directory`, AND NOT CAUSED BY IT -- the same answer comes back from the binary built at `d0ffd39` and from the one with that node's change.\n\n`[[::]]` NAMES NO CHARACTER CLASS, AND THE TWO SHELLS DISAGREE ABOUT WHAT IS LEFT. Measured 2026-09-03 against the pinned Bash 5.3.15, in a directory holding files named `a`, `ab`, `[abc`, `[ABC`, `a[b`, `a]b`, `[a]` and directories `sub` and `x`:\n\n    printf '<%s>' [[::]]                 nsh <[]>            bash <[[::]]>\n    shopt -s nullglob; ... [[::]]        nsh <[]>            bash <>\n    shopt -s failglob; ... [[::]]        nsh <[]>            bash: no match\n    shopt -s nocaseglob; ... [[::]]      nsh <[]>            bash <[[::]]>\n    shopt -s dotglob; ... [[::]]         nsh <[]>            bash <[[::]]>\n\nThose are the only five rows of a 245-row sweep (49 words x 5 glob options) on which nsh and the pinned Bash still disagree after that node's change; before it there were 18.\n\nWHERE IT COMES FROM. `Matcher::nested_member` refuses a `[:...:]` member with an empty body, so `crates/nsh/src/pattern.rs` reads `[[::]]` as an ordinary list whose members are `[`, `:` and `:`, closing at the first `]` -- a pattern that matches any one of those three characters, which is why the file named `[]` is not produced but the file named `[` would be. Wait: what it actually produces here is `<[]>`, the two-character name, so the list is closed later than that; either way it is a list that matches. Bash reads the whole thing as a pattern that matches nothing at all, which is what `nullglob` dropping it and `failglob` refusing it both say.\n\nWHAT HAS TO BE DECIDED. Whether an empty class body makes the `[` ordinary (this shell) or makes the enclosing bracket expression unsatisfiable (Bash). POSIX does not say: XBD 9.3.5 gives no meaning to `[::]` with an empty class name, so this is the `[dec:nsh:we-own-the-defects]` question, and whichever answer is taken belongs in docs/divergences.md beside the `[^]]` entry that was settled the same way.\n\nDONE WHEN. The five rows above agree with the pinned Bash, or the divergence is registered in docs/divergences.md with the reading it takes and why; and `[[.a.]` and `[[=a=]`, which are the same shape with the other two delimiters, are checked at the same time."
+            }
+
+            {
+                at 2026-09-03T16:11:28.277779264Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "CORRECTION TO \"WHERE IT COMES FROM\" IN THE NOTE ABOVE, 2026-09-03. That paragraph was written before the reading was checked and thinks aloud in the middle of itself. The original is left as it stands, as this repository's practice for a correction; this is the measured reading.\n\n`Matcher::nested_member` refuses a `[:...:]` member whose body is empty, so `[[::]]` is read as an ordinary bracket list `[[::]` whose members are `[`, `:` and `:`, closing at the first `]`, followed by a literal `]`. The pattern is therefore \"one of `[` or `:`, then `]`\", and it matches a two-character subject. Checked with `case`, so no directory is involved:\n\n    case X in [[::]] )        subject  [   :   ]   []   ::\n      nsh                              n   n   n   Y    n\n      pinned bash 5.3.15               n   n   n   n    n\n\nThe pathname expansion produced `<[]>` because the fixture held a file of that name; it is not the `[` alone that matched.\n\n`[[==]]` behaves identically in both shells to `[[::]]`. `[[.-.]]` does not: its body is not empty, so both shells read it as a collating symbol and both answer `<[[.-.]]>`. So the question is exactly what an empty class, collating-symbol or equivalence-class body means, and it has to be answered once for all three delimiters.\n\nBash matches nothing at all for either empty-bodied spelling, which is what `nullglob` dropping the word and `failglob` refusing it both say."
+            }
+        )
+    }
+
+    {
+        id an-unclosed-extglob-group-is-a-parse-error-in-bash
+        title "Decide what an unclosed `@(` means when `extglob` is on"
+        kind @fix
+        log (
+            {
+                at 2026-09-03T16:27:19.369362906Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "FOUND WHILE CLOSING `a-bracket-test-reads-the-current-directory`, WHICH ASKED THE SAME QUESTION ABOUT `[` AND ANSWERED IT. The `[` half is done: a `[` with no `]` after it in the same component is ordinary text and no longer makes the word a pathname-expansion candidate. The `X(` half is not, and it is not the same shape of problem, because Bash does not decide it during expansion at all.\n\nMEASURED 2026-09-03 against the pinned Bash 5.3.15. Script, run as a file so the second line matters:\n\n    shopt -s extglob\n    printf \"<%s>\" @(a\n    echo\n\n    nsh -o bash    prints `<@(a\\necho\\n>` and exits 0\n    bash 5.3.15    `line 2: unexpected EOF while looking for matching `)'`, exits 2\n\nTwo things are wrong at once. Bash refuses the script: with `extglob` on, `@(` opens a group in the *parser*, and reaching end of input inside it is a syntax error. This shell accepts the script, and then its word rule swallows the newline and the following command into the word, because nothing closes the group and nothing stops the word either.\n\nWHY THIS IS NOT THE BRACKET FIX AGAIN. `Pattern::has_meta` treats `+`, `@`, `!`, `?` or `*` followed by `(` as an operator without asking whether the group closes, which is the same looseness the `[` test now has deliberately -- and for `[` that looseness is harmless, because a word that is not a pattern comes back as itself. Here it is not harmless, because the divergence is upstream of expansion: nsh has already tokenised a word Bash would have refused. Tightening `has_meta` would not help and would not be the fix.\n\nCARE. `extglob` is off by default and off in POSIX mode, so this cannot be reached by a POSIX script; `[dec:nsh:we-own-the-defects]` governs whether to reproduce Bash's parse error or to keep accepting the word, and whichever is chosen has to be said in docs/divergences.md. Check `?(`, `*(`, `+(` and `!(` at the same time, and check a group left unclosed at end of line but closed on the next line, which Bash reads as one group across the newline.\n\nDONE WHEN. The two shells agree about the script above, or the divergence is registered with the reading taken and why, and a differential test holds it."
             }
         )
     }

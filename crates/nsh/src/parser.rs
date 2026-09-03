@@ -426,6 +426,9 @@ pub(crate) enum PendingRedirection {
     File {
         operator: FileRedirectionOperator,
         descriptor: RedirectionDescriptor,
+        /// Bash's `&>` / `&>>`, which carry the standard error along.
+        // [spec:nsh:req:compat.bash.expansion-globbing]
+        with_stderr: bool,
     },
     Descriptor {
         operator: DescriptorRedirectionOperator,
@@ -753,10 +756,38 @@ fn read_next_token(shell: &mut Shell, context: &TokenContext) -> Result<Token, E
                 return Ok(token);
             }
         } else if input.is(b'&') {
-            if read_unit_skipping_line_continuations(shell)?.is(b'&') {
+            let after = read_unit_skipping_line_continuations(shell)?;
+            if after.is(b'&') {
                 shell.input.last_token = TokenKind::AndIf;
                 shell.input.last_token_quoted = false;
                 return Ok(Token::plain(TokenKind::AndIf));
+            }
+            /* Bash's `&>file` and `&>>file`. Read here rather than beside
+             * the other redirections because the `&` reaches the operator
+             * reader first, and without this arm it is the whole of the
+             * command: `echo x &>f` runs `echo x` in the *background* and
+             * opens `f` for a command with no words, which leaves the
+             * output on the terminal, the file empty, and the echo racing
+             * whatever the shell does next. POSIX means exactly that and
+             * `/usr/bin/dash` does it, so the form belongs to the dialect
+             * and not to the option: `bash --posix` still reads it as one
+             * operator. */
+            // [spec:nsh:req:compat.bash.expansion-globbing]
+            if after.is(b'>') && bash::active(shell) {
+                let operator = if read_unit_skipping_line_continuations(shell)?.is(b'>') {
+                    FileRedirectionOperator::Append
+                } else {
+                    unread_input_unit(shell);
+                    FileRedirectionOperator::Write
+                };
+                shell.input.pending_redirection = Some(PendingRedirection::File {
+                    operator,
+                    descriptor: RedirectionDescriptor::Fixed(LogicalDescriptor::STDOUT),
+                    with_stderr: true,
+                });
+                shell.input.last_token = TokenKind::Redirection;
+                shell.input.last_token_quoted = false;
+                return Ok(Token::plain(TokenKind::Redirection));
             }
             unread_input_unit(shell);
             shell.input.last_token = TokenKind::Background;
@@ -895,6 +926,75 @@ pub(crate) enum MultibyteInput {
 /// the caller appends only the prefix this reports, and the scribble is
 /// simply not copied out. Same bytes, same length, and the reservation
 /// stops being a memory-safety contract.
+/// Decode the character starting at `first` from bytes the input frame
+/// is already holding, or answer `None` when it is not holding them all.
+///
+/// One thread-locale selection for the whole character, which is what
+/// makes this worth having beside the incremental decoder. `None` is not
+/// a failure: the buffer ran out mid-character, and only the incremental
+/// loop can finish the job, because finishing it may mean blocking on a
+/// read -- and must, for a terminal with one byte to give.
+///
+/// Every byte this consumes goes back through `read_input_unit_or_alias_end`
+/// rather than being lifted out of the buffer, so the line count, the
+/// token record and the alias bookkeeping see the same reads either way.
+/// The buffer decides only *how many*, and answering that costs no read.
+fn decode_buffered_character(
+    shell: &mut Shell,
+    first: u8,
+    mode: MultibyteMode,
+) -> Result<Option<MultibyteInput>, Error> {
+    let mut window = [0_u8; MAX_MULTIBYTE_LENGTH];
+    window[0] = first;
+    let buffered = crate::input::buffered_line_bytes(&mut shell.input);
+    if buffered.is_empty() {
+        return Ok(None);
+    }
+    let taken = buffered.len().min(MAX_MULTIBYTE_LENGTH - 1);
+    window[1..=taken].copy_from_slice(&buffered[..taken]);
+
+    let width = match shell.locale.decode_prefix(&window[..=taken]) {
+        // A byte the locale will not start a character with is a byte the
+        // caller keeps, and the incremental loop reaches that verdict
+        // without consuming anything either.
+        nsh_platform::LocaleCharacter::Invalid => return Ok(Some(MultibyteInput::SingleByte)),
+        nsh_platform::LocaleCharacter::Complete { width, .. } if width <= 1 => {
+            return Ok(Some(MultibyteInput::SingleByte));
+        }
+        nsh_platform::LocaleCharacter::Complete { wide, width } => {
+            if matches!(mode, MultibyteMode::FieldBoundary) && shell.locale.wide_is_blank(wide) {
+                consume_buffered(shell, width - 1)?;
+                return Ok(Some(MultibyteInput::FieldBoundary));
+            }
+            width
+        }
+        nsh_platform::LocaleCharacter::Incomplete => return Ok(None),
+    };
+
+    consume_buffered(shell, width - 1)?;
+    Ok(Some(MultibyteInput::Character {
+        bytes: BString::new(window[..width].to_vec()),
+        escaped: matches!(mode, MultibyteMode::Escaped),
+    }))
+}
+
+/// Take `count` units the buffer was just seen to be holding.
+///
+/// Each is a byte by construction -- `buffered_line_bytes` answers only
+/// for a run the frame will hand over as bytes -- so a unit that is not
+/// one means the invariant broke rather than that input ended, and the
+/// walk stops rather than guessing.
+fn consume_buffered(shell: &mut Shell, count: usize) -> Result<(), Error> {
+    for _ in 0..count {
+        let unit = read_input_unit_or_alias_end(shell)?;
+        debug_assert!(unit.byte().is_some(), "a buffered unit was not a byte");
+        if unit.byte().is_none() {
+            break;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn read_multibyte_character(
     shell: &mut Shell,
     input: InputUnit,
@@ -903,15 +1003,20 @@ pub(crate) fn read_multibyte_character(
     let Some(mut byte) = input.byte() else {
         return Ok(MultibyteInput::SingleByte);
     };
-    let mut decoder = shell.locale.decoder();
-    let mut bytes = BString::new(Vec::new());
-    let mut wc: i32 = 0;
-    let mut complete = false;
     let escaped = matches!(mode, MultibyteMode::Escaped);
 
     if byte.is_ascii() {
         return Ok(MultibyteInput::SingleByte);
     }
+
+    if let Some(decoded) = decode_buffered_character(shell, byte, mode)? {
+        return Ok(decoded);
+    }
+
+    let mut decoder = shell.locale.decoder();
+    let mut bytes = BString::new(Vec::new());
+    let mut wc: i32 = 0;
+    let mut complete = false;
 
     loop {
         bytes.push(byte);
@@ -1105,6 +1210,7 @@ fn parse_redirection(
         ParsedRedirection::File(operator) => PendingRedirection::File {
             operator,
             descriptor,
+            with_stderr: false,
         },
     });
     Ok(())
@@ -1193,6 +1299,27 @@ fn select_prompt(shell: &mut Shell, prompt: PromptKind) -> Result<(), Error> {
 pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error> {
     let saved_here_documents = core::mem::take(&mut shell.input.pending_here_documents);
     let saved_prompt_state = shell.input.prompt_before_read;
+    /* A pushed-back token belongs to the source the caller was reading,
+     * and the text below is a different one. `read_token` is reached
+     * from here whenever the string holds a `$( )` or a backquote, and
+     * it replays whatever was pushed back rather than reading the new
+     * source: with a string-fed shell the outer parse has left `Eof`
+     * there, so `-c 'a=(9 8 7); echo "${a[$(echo 1)]}"'` reported
+     * `end of file unexpected (expecting ")")` and the backquote form
+     * silently expanded to nothing. Both work from a file, where the
+     * outer parse has not reached its end.
+     *
+     * THE DIALECT DECIDES, because dash has the same defect and this is
+     * a port of dash: `dash -c 'PS4="$(echo P)+ "; set -x; echo hi'`
+     * reports the same syntax error and traces with the unexpanded
+     * text, and `tests/corpus` and `errors_are_values.rs` are written
+     * against that. Bash expands it, and Bash mode is what a subscript
+     * needs. `state-a-re-entered-parse-starts-clean` holds the POSIX
+     * half. */
+    // [spec:nsh:def:idiom.token-stream]
+    let re_entering = shell.options.dialect() == crate::options::Dialect::Bash;
+    let saved_pushed_back = shell.input.token_pushed_back;
+    let saved_last_token = shell.input.last_token;
     /* `result = ps` — the C seeds the answer with the string it was given
      * and the failure path is what leaves the seed standing.
      *
@@ -1208,6 +1335,9 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
         set_input_string(shell, source);
         shell.input.prompt_before_read = false;
         shell.input.prompt_needed = false;
+        if re_entering {
+            shell.input.token_pushed_back = false;
+        }
         /* Parse and expand inside one fallible operation so a failure leaves
          * the seeded result unchanged. */
         let caught = (|| -> Result<(), crate::error::Error> {
@@ -1266,6 +1396,10 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
 
     shell.input.prompt_before_read = saved_prompt_state;
     shell.input.pending_here_documents = saved_here_documents;
+    if re_entering {
+        shell.input.token_pushed_back = saved_pushed_back;
+        shell.input.last_token = saved_last_token;
+    }
 
     match caught {
         Some(e) if e.is_interrupt() => Err(e),
