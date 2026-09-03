@@ -1648,7 +1648,7 @@ assertions (
     {id struct.windows-locale-export, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:25.604961066Z}
     {id tooling.tests.read-the-umask, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:36.984941764Z}
     {id perf.locale.unreachable-positions, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:48.355714681Z}
-    {id bash.divergences.unclosed-extglob, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:59:05.970153272Z}
+    {id bash.divergences.unclosed-extglob, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:25:28.139093667Z}
 )
 
 impl_evidence (

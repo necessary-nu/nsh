@@ -9573,6 +9573,7 @@ children (
                                         title "Decide what an unclosed `@(` means when `extglob` is on"
                                         kind @fix
                                         constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-03T16:27:19.369362906Z
@@ -9586,6 +9587,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @decision
                                                 text "DECIDED 2026-09-04: REPRODUCE BASH'S PARSE ERROR. There is no divergence to sanction here, because the present behaviour is not a reading of the script -- it is the loss of a command from it.\n\nMEASURED on an attributable build of `6d9bd67` (private worktree, own CARGO_TARGET_DIR, `-p nsh-cli`), against the pinned Bash 5.3.15, load 10.5. Script run as a file so the second line matters:\n\n    shopt -s extglob\n    printf \"<%s>\" X(a\n    echo AFTER\n\n    X = @  ?  *  +  !   -- all five identical, in both shells\n\n    bash 5.3.15  rc=2  `line 2: unexpected EOF while looking for matching `)'`\n    nsh -o bash  rc=0  `<@(a<newline>echo AFTER<newline>>`\n\nnsh does not merely accept what Bash refuses. It swallows the newline AND THE FOLLOWING COMMAND into the word, so `echo AFTER` stops being a command and becomes pattern text. No option this node offered covers that: \"keep accepting the word\" would be a defensible reading if the word ended at the line, and it does not.\n\nTWO THINGS THE NODE ASKED FOR, BOTH MEASURED, BOTH ALREADY RIGHT:\n\n* A group opened on one line and closed on the next -- `@(a` / `b)` -- reads as ONE group across the newline in both shells: `<@(a\\nb)>AFTER`, rc=0. So the word reader already tracks the group across newlines; what it lacks is an end-of-input error, which is why this fix is small.\n* With `extglob` OFF both shells refuse the same script, rc=2, differing only in the message text (`syntax error near unexpected token '('` against `Syntax error: \"(\" unexpected`). No divergence.\n\nSo the change is exactly one thing: with `extglob` enabled in the Bash dialect, reaching end of input inside an open extended-glob group is a syntax error. `?(`, `*(`, `+(` and `!(` land with `@(` -- all five were measured, not assumed.\n\nWHY THIS IS NOT A `[dec:nsh:we-own-the-defects]` JUDGEMENT. That decision governs a case where the two shells disagree and the question is which is right. Here only one candidate answer exists: `[spec:nsh:sem:idiom.specified-defects+1]` requires observable behaviour to follow POSIX, an explicit compatibility rule, or a documented divergence, and \"the rest of the script becomes part of a word\" is none of the three. The node's framing -- \"whether to reproduce Bash's parse error or to keep accepting the word\" -- was written from the `@(a` line alone and did not have the `AFTER` measurement in front of it.\n\nDONE WHEN. All five operators refuse an unclosed group at end of input in the Bash dialect with a diagnostic and a non-zero status; the next-line close keeps working; the POSIX dialect is untouched; and a differential test holds all seven shapes above through both shells."
+                                            }
+
+                                            {
+                                                at 2026-09-03T23:25:28.139093667Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
