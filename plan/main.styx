@@ -9081,6 +9081,13 @@ children (
                                         kind @blocker
                                         text "FOUND 2026-09-02 WHILE CLOSING `spend-the-wrappers-budget-inside-the-boundary`, AND NOT PART OF IT. `tests/harness/sandboxed.sh`'s `ds_sandboxed` is the one wrapper that node listed as already having the right shape, and it does -- inner `timeout \"$DS_TIMEOUT\"` with `timeout $((DS_TIMEOUT + 5))` outside -- but its inner one has no `--kill-after`.\n\nSO A CASE THAT IGNORES SIGTERM IS STILL STOPPED FROM OUTSIDE. The inner budget sends TERM, the case ignores it, and nothing follows: the case then runs until the *outer* deadline, which signals the sandbox process. That is precisely the shape `86d2ce6` measured leaking and `3bebb72` has just removed from `scripts/sandboxed`, surviving in the third wrapper.\n\nIT CANNOT LEAK THERE TODAY, WHICH IS WHY THIS IS FILED RATHER THAN FOLDED IN. The leak needs the signal to land in the sandbox's setup window, measured at 5-20 ms on this machine at load 21 (17 of 20 runs leaked at 5 ms, 0 of 20 at 30 ms and beyond). `DS_TIMEOUT` defaults to 10 seconds and the outer deadline is 5 seconds past it, so the signal arrives fifteen seconds after a setup that took tens of milliseconds. The defect is that the arrangement depends on that gap rather than on the boundary, and `DS_TIMEOUT` is a knob.\n\nWHAT IT ALSO COSTS. Every TERM-ignoring case in the corpus burns `DS_TIMEOUT + 5` seconds instead of `DS_TIMEOUT + 1`, in a harness that runs thousands of cases through two shells.\n\nTHE OTHER TWO AGREE ON THE SIGNAL AS WELL AS THE PLACE. `crates/nsh-survey/src/process.rs` runs `timeout --signal=TERM --kill-after=1`, and `scripts/sandboxed` now does too.\n\nDONE WHEN `ds_sandboxed`'s inner `timeout` carries `--signal=TERM --kill-after=1`, a case that ignores TERM is measured ending about a second after its budget rather than five, and `tests/harness/runall.sh` is compared before and after -- both shells get the same treatment, so the recorded outcome of a timing-out case should not move, and that is the claim to check rather than assume."
                                     }
+
+                                    {
+                                        at 2026-09-03T16:07:24.684224374Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -9123,6 +9130,7 @@ children (
                                 id judge-a-shell-whose-target-is-a-link
                                 title "Judge a shell built under a `target` that is a symbolic link"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T15:56:15.746191455Z
@@ -9136,6 +9144,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T16:07:18.351158587Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -9475,6 +9490,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "THE HALF OF `stop-a-required-register-entry-firing-test-footprint` THAT WAS DELIBERATELY NOT DONE. That node offered two exits and said the first \"looks right and the second is worth measuring anyway\": either the gate stops counting checked-in data, or `crates/nsh-lint`'s ratio is lifted over the floor once and on purpose. `5a13522` took the first. This is the second, and it is now a question about tests rather than about a gate.\n\nMEASURED 2026-09-03 with nplan's own `quality::metrics::analyze` (nplan `f66f7eab`), which is the gate's own arithmetic rather than an estimate of it:\n\n    crates/nsh-lint    278 test / 1851 prod = 0.150   (register exempt)\n      src/main.rs      132 test / 1340 prod = 0.099\n      src/citations.rs  72 test /  276 prod = 0.261\n      src/density.rs    74 test /  222 prod = 0.333\n    crates/ as a whole 19,699 test / 49,283 prod = 0.400\n\nThe floor is 0.200. `main.rs` is the whole of the gap: 1,340 production lines against 132 of test, in the file that decides what every other file in this repository is allowed to look like. `citations.rs` and `density.rs` are both comfortably over the floor, so this is not a crate-wide habit -- it is one file, and it is the one carrying the checks that have no unit tests because they were verified by running the binary.\n\nWHY IT MATTERS MORE HERE THAN IN AN AVERAGE CRATE. `nsh-lint` is what fires when somebody renames a function or lets a file drift past the density mark; a false negative in it is silent by definition, and nothing else in the tree would notice. `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` is the argument, and it is the same one that justified fixing the descriptor-table flake rather than retrying it.\n\nNOT A GATE PROBLEM ANY MORE. With the register exempt the crate's ratio no longer moves when an entry is written, so nothing is being blocked by this and no commit is waiting on it. That is exactly why it needs a node: it is now invisible.\n\nDONE WHEN `crates/nsh-lint/src/main.rs`'s checks have unit tests over their own inputs rather than over the binary's exit status, the crate's measured ratio is at or above 0.200, and the number is recorded here so the next person can tell a deliberate figure from a drifted one."
+                                    }
+                                )
+                            }
+
+                            {
+                                id stop-a-forked-child-holding-a-sibling-tests-pipe-open
+                                title "Stop a forked child holding a sibling test's pipe open"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-03T16:08:58.473992418Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "FOUND 2026-09-03 WHILE MEASURING `stop-a-freed-descriptor-number-racing-its-test`, IN THE SAME BINARY AND THE SAME FAMILY, AND IT IS A SECOND DEFECT RATHER THAN A REMNANT OF THE FIRST. It appeared once in the 9,000 post-fix runs of `nsh_platform` at `--test-threads 32`, and never in the 3,000 pre-fix runs, which is sampling rather than causation -- the change it followed cannot produce it.\n\n`crates/nsh-platform/src/unix_facts.rs:175`:\n\n    fn end_of_input_counts_as_available() {\n        let (read, write) = super::super::pipe().expect(\"pipe\");\n        drop(write);\n        assert!(wait_for_input(&read, Some(0.0)).expect(\"poll at end\"));\n    }\n\n    thread 'unix_facts::tests::end_of_input_counts_as_available' panicked at\n    crates/nsh-platform/src/unix_facts.rs:175:9:\n    assertion failed: wait_for_input(&read, Some(0.0)).expect(\"poll at end\")\n\nWHY IT CAN FAIL. `drop(write)` closes this thread's write end, and the test then asks the read end whether it is at end of input. A pipe reaches end of input when the *last* write end anywhere closes, and `tests::descriptor_transaction_installs_slots` in the same binary calls `run_in_child`, which forks. A fork copies the whole descriptor table, so a child alive at the wrong moment holds a duplicate of this pipe's write end and the pipe is not at end of input at all. `wait_for_input` correctly answers \"nothing to observe yet\", and the assertion reads as a bug in `poll`.\n\nSAME FAMILY AS THIS NODE'S SIBLING AND AS `reap-only-the-children-this-shell-forked`: one process, many test threads, a process-wide resource, and a verdict that depends on what an unrelated test is doing. It is the mirror image of the descriptor-number race -- that one was a freed number a sibling could take, this one is a live number a sibling's *child* keeps.\n\nNOT MEASURED, and worth doing before fixing: whether the window is the child's whole lifetime (`run_in_child` forks, the child writes six bytes and exits) or only its setup, and whether `pipe()` here is the only test with the exposure -- `readiness_is_answered_without_consuming` two functions above builds a pipe the same way but never asserts on end of input, so it should be immune, and that should be checked rather than assumed.\n\nWHAT THE ANSWER PROBABLY IS. The pipe wants close-on-exec plus a fork that does not carry it, or the test wants a descriptor whose end of input no other process can hold open -- an empty regular file, or an already-closed socket pair -- so that the property under test is local the way `descriptor_transaction_validates_targets` was made local in `stop-a-freed-descriptor-number-racing-its-test`.\n\nDONE WHEN the assertion does not depend on whether another test's child is alive, and a run of the order of 10,000 at `--test-threads 32` is clean on both trees -- the rate here is about 1 in 9,000, so a hundred green runs prove nothing."
                                     }
                                 )
                             }

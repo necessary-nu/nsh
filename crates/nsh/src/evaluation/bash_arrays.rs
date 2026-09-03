@@ -373,6 +373,7 @@ pub(crate) fn expand_command_argument<'a>(
     let was_read_only = crate::variables::variable_attributes(shell, name)
         .is_some_and(|attributes| attributes.read_only);
     fields.fields.push(ExpandedField::from_bytes(name.as_ref()));
+    shell.evaluation.held_declarations.push(name.to_owned());
     held.push(Declaration {
         assignment,
         was_read_only,
@@ -442,13 +443,12 @@ pub(crate) fn apply_declarations(
         /* `readonly -A m=([a b]=1)` is associative only because `-A` was
          * seen, and the letter reaches the name here rather than in the
          * built-in: `export` and `readonly` were handed the bare name
-         * and cannot tell an operand that carries a compound value from
-         * one that does not. Bash consults the letter only for the
-         * former, which is why `readonly -A m` is `declare -r m` there. */
+         * and cannot tell an operand that carries a value from one that
+         * does not. There is no test of the value's shape here because
+         * every operand held carries one: a bare name is an ordinary
+         * word and never reaches this. */
         // [spec:nsh:req:compat.bash.arrays-declarations]
-        if let Some(kind) = kind
-            && matches!(declaration.assignment.value, BashArrayValue::Compound(_))
-        {
+        if let Some(kind) = kind {
             let name = declaration.assignment.name.as_bstr();
             arrays::ensure_kind(
                 shell,

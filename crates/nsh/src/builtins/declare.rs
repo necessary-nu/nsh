@@ -111,7 +111,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut status = ExitStatus::SUCCESS;
     for operand in operands {
         let name = operand_name(operand);
-        if apply(shell, &requested, operand, scope)?
+        if apply(shell, args[0], &requested, operand, scope)?
             && crate::parser::is_valid_name(&shell.locale, name)
         {
             continue;
@@ -178,6 +178,7 @@ fn parse<'a>(args: &'a [&'a BStr]) -> Result<(Requested, &'a [&'a BStr]), u8> {
 // [spec:nsh:req:compat.bash.functions-scoping]
 fn apply(
     shell: &mut Shell,
+    builtin: &BStr,
     requested: &Requested,
     operand: &BStr,
     scope: Scope,
@@ -189,7 +190,8 @@ fn apply(
     /* An operand that does not name a variable is reported and skipped;
      * the operands beside it are unaffected, as they are in Bash. */
     if !crate::parser::is_valid_name(&shell.locale, base) {
-        let mut message = b"declare: `".to_vec();
+        let mut message = builtin.to_vec();
+        message.extend_from_slice(b": `");
         message.extend_from_slice(operand.as_ref());
         message.extend_from_slice(b"': not a valid identifier\n");
         shell.write_output(OutputDestination::Stderr, &message)?;
@@ -231,7 +233,8 @@ fn apply(
     {
         /* Bash names the operand it was given rather than the array a
          * reference led it to. */
-        let mut message = b"declare: ".to_vec();
+        let mut message = builtin.to_vec();
+        message.extend_from_slice(b": ");
         message.extend_from_slice(written.as_slice());
         message.extend_from_slice(b": cannot destroy array variables in this way\n");
         shell.write_output(OutputDestination::Stderr, &message)?;
@@ -254,7 +257,7 @@ fn apply(
 
     if let Some(kind) = requested.kind {
         if !arrays::convertible(shell, base, kind) {
-            reject_conversion(shell, base, kind)?;
+            arrays::reject_conversion(shell, builtin, base, kind)?;
             return Ok(false);
         }
         arrays::ensure_kind(
@@ -335,24 +338,6 @@ fn exported_by_allexport(shell: &Shell, requested: &Requested, base: &BStr, scop
         && shell
             .options
             .enabled(crate::options::ShellOption::AllExport)
-}
-
-/// Report the array kind a name may not be given.
-// [spec:nsh:req:compat.bash.arrays-declarations]
-fn reject_conversion(shell: &mut Shell, base: &BStr, kind: VariableKind) -> Result<(), Error> {
-    let word = |kind| match kind {
-        VariableKind::Associative => b"associative".as_slice(),
-        VariableKind::Indexed | VariableKind::Scalar => b"indexed".as_slice(),
-    };
-    let existing = crate::variables::value::variable_kind(shell, base).unwrap_or(kind);
-    let mut message = b"declare: ".to_vec();
-    message.extend_from_slice(base.as_ref());
-    message.extend_from_slice(b": cannot convert ");
-    message.extend_from_slice(word(existing));
-    message.extend_from_slice(b" to ");
-    message.extend_from_slice(word(kind));
-    message.extend_from_slice(b" array\n");
-    shell.write_output(OutputDestination::Stderr, &message)
 }
 
 /// Whether `name` holds an array, which decides how `(…)` is read.

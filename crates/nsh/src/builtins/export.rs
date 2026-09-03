@@ -12,8 +12,12 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
+use bstr::BString;
+
 use crate::evaluation::Flow;
 use crate::options::Options;
+use crate::status::ExitStatus;
+use crate::variables::arrays::{self, ArraySelector, ReadOnlyGuard};
 use crate::variables::nameref::{self, RefusedTarget};
 use crate::variables::value::VariableKind;
 use crate::variables::{
@@ -74,12 +78,13 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     let export_operands = !print;
     let operands = option_scan.operands();
+    let mut status = ExitStatus::SUCCESS;
     if export_operands && !operands.is_empty() {
         for word in operands {
             /* `export NAME${suffix}+=value` reaches here as one expanded
              * word, so the `+=` is the built-in's to read. */
             // [spec:nsh:req:compat.bash.arrays-declarations]
-            match crate::variables::arrays::split_assignment_operand(word) {
+            match arrays::split_assignment_operand(word) {
                 (name, Some(value), append) => {
                     let name = BStr::new(name.as_slice());
                     if variable_attributes(shell, name)
@@ -91,16 +96,29 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         return Err(shell.diagnostics().builtin_error_value(1, &message));
                     }
                     let value = BStr::new(value.as_slice());
-                    if append {
-                        crate::variables::arrays::assign_text_target(shell, name, value, true)?;
-                        match nameref::attributed_name(shell, name) {
-                            Ok(target) => {
-                                add_attributes(shell, BStr::new(target.as_slice()), attribute);
-                            }
-                            Err(refusal) => report_refusal(shell, name, &refusal),
+                    match shell.evaluation.declared_kind {
+                        /* The attribute still lands: Bash reports the
+                         * kind it will not convert, drops the value, and
+                         * leaves `declare -ar a` behind. */
+                        // [spec:nsh:req:compat.bash.arrays-declarations]
+                        Some(kind) if !arrays::convertible(shell, name, kind) => {
+                            arrays::reject_conversion(shell, args[0], name, kind)?;
+                            status = ExitStatus::FAILURE;
+                            add_attributes(shell, name, attribute);
+                            continue;
                         }
-                    } else {
-                        set_bytes(shell, name, Some(value), attribute)?;
+                        Some(kind) => store_array_element(shell, name, kind, value, append)?,
+                        None if append => arrays::assign_text_target(shell, name, value, true)?,
+                        None => {
+                            set_bytes(shell, name, Some(value), attribute)?;
+                            continue;
+                        }
+                    }
+                    match nameref::attributed_name(shell, name) {
+                        Ok(target) => {
+                            add_attributes(shell, BStr::new(target.as_slice()), attribute);
+                        }
+                        Err(refusal) => report_refusal(shell, name, &refusal),
                     }
                 }
                 (_, None, _) => {
@@ -116,9 +134,21 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         }
                     };
                     let target = BStr::new(target.as_slice());
-                    if !add_attributes(shell, target, attribute) {
-                        set_bytes(shell, target, None, attribute)?;
+                    if add_attributes(shell, target, attribute) {
+                        continue;
                     }
+                    /* The entry is brought into being bare rather than
+                     * through `set_bytes`, which would let `set -a` mark
+                     * it: `set -a; readonly -a z=(1)` is `declare -ar z`
+                     * in the reference where `set -a; readonly -a z`,
+                     * with nothing behind it, is `declare -rx z`. */
+                    // [spec:nsh:req:compat.bash.arrays-declarations]
+                    if declares_a_held_value(shell, word) {
+                        nameref::ensure_entry(shell, target);
+                        add_attributes(shell, target, attribute);
+                        continue;
+                    }
+                    set_bytes(shell, target, None, attribute)?;
                 }
             }
         }
@@ -130,7 +160,56 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         // [spec:nsh:req:compat.bash.arrays-declarations]
         show_vars(shell, args[0], selection, shell.evaluation.declared_kind)?;
     }
-    Ok(Flow::Done((0).into()))
+    Ok(Flow::Done(status))
+}
+
+/// Store the value of an operand the array letter reached, as the zero
+/// element of the array it declares.
+///
+/// The element writer rather than `set_bytes` because that one marks the
+/// name under `set -a` and this must not: `set -a; readonly -a z=1` is
+/// `declare -ar z` in the reference where `set -a; readonly z=1` is
+/// `declare -rx z`.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn store_array_element(
+    shell: &mut Shell,
+    name: &BStr,
+    kind: VariableKind,
+    value: &BStr,
+    append: bool,
+) -> Result<(), Error> {
+    arrays::ensure_kind(
+        shell,
+        name,
+        kind,
+        VariableAttributes::NONE,
+        ReadOnlyGuard::Enforce,
+    )?;
+    let selector = match kind {
+        VariableKind::Associative => ArraySelector::Key(BString::from("0")),
+        VariableKind::Indexed | VariableKind::Scalar => ArraySelector::Index(0),
+    };
+    arrays::assign_element(
+        shell,
+        name,
+        &selector,
+        value,
+        append,
+        ReadOnlyGuard::Enforce,
+    )
+}
+
+/// Whether the array letter has a compound value coming for this
+/// operand, which is what makes it a declaration rather than an
+/// assignment and so puts it out of `set -a`'s reach.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn declares_a_held_value(shell: &Shell, word: &BStr) -> bool {
+    shell.evaluation.declared_kind.is_some()
+        && shell
+            .evaluation
+            .held_declarations
+            .iter()
+            .any(|held| held == word)
 }
 
 /// Report a reference the attribute could not be applied through.

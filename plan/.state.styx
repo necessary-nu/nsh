@@ -1459,7 +1459,8 @@ assertions (
     {id take-the-array-letter-for-a-plain-operand, kind @doing, author "brendan@necessary.nu", at 2026-09-03T13:28:35.875548737Z}
     {id keep-allexport-off-a-compound-readonly-operand, kind @doing, author "brendan@necessary.nu", at 2026-09-03T15:57:06.351458772Z}
     {id stop-a-freed-descriptor-number-racing-its-test, kind @doing, author "brendan@necessary.nu", at 2026-09-03T15:59:04.177435764Z}
-    {id judge-a-shell-whose-target-is-a-link, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:00:57.803138143Z}
+    {id judge-a-shell-whose-target-is-a-link, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:07:18.351158587Z}
+    {id give-the-differential-wrapper-a-kill-after, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:07:24.684224374Z}
 )
 
 impl_evidence (

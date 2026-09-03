@@ -209,6 +209,16 @@ pub struct EvaluationState {
     /// name and the value arrives after they have returned.
     // [spec:nsh:req:compat.bash.arrays-declarations]
     pub(crate) declared_kind: Option<crate::variables::value::VariableKind>,
+    /// The operands whose structural value is still waiting to land.
+    ///
+    /// `export` and `readonly` are handed the bare name of a compound
+    /// operand, so `readonly -a z` and `readonly -a z=(1)` are the same
+    /// argument list to them; Bash answers the two differently, because
+    /// only the second is an array *declaration* and `set -a` marks an
+    /// assignment. Without this the two built-ins cannot tell which of
+    /// their operands has a value coming.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    pub(crate) held_declarations: Vec<BString>,
     /// How many string re-entries into the evaluator are active.
     ///
     /// `eval`, a trap action and `fc -e` all parse a string and run it on
@@ -256,6 +266,7 @@ impl EvaluationState {
             diagnostic_line: 0,
             refused_declarations: Vec::new(),
             declared_kind: None,
+            held_declarations: Vec::new(),
             nested_evaluations: 0,
             live_evaluation_bytes: 0,
             command_name: None,

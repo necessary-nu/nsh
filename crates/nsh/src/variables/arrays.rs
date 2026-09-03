@@ -362,6 +362,34 @@ pub(crate) fn convertible(shell: &Shell, name: &BStr, kind: VariableKind) -> boo
     }
 }
 
+/// Report the array kind a name may not be given.
+///
+/// `builtin` is the word the command was called as, because Bash names
+/// that rather than the built-in: `typeset -A` on an indexed array says
+/// `typeset:` and `readonly -A` says `readonly:`.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+pub(crate) fn reject_conversion(
+    shell: &mut Shell,
+    builtin: &BStr,
+    name: &BStr,
+    kind: VariableKind,
+) -> Result<(), Error> {
+    let word = |kind| match kind {
+        VariableKind::Associative => b"associative".as_slice(),
+        VariableKind::Indexed | VariableKind::Scalar => b"indexed".as_slice(),
+    };
+    let existing = super::value::variable_kind(shell, name).unwrap_or(kind);
+    let mut message = builtin.to_vec();
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(name.as_ref());
+    message.extend_from_slice(b": cannot convert ");
+    message.extend_from_slice(word(existing));
+    message.extend_from_slice(b" to ");
+    message.extend_from_slice(word(kind));
+    message.extend_from_slice(b" array\n");
+    shell.write_output(crate::output::OutputDestination::Stderr, &message)
+}
+
 /// Give `name` an array kind without disturbing a value it already holds.
 ///
 /// Converting a scalar keeps its bytes as element zero, matching Bash's
@@ -492,7 +520,12 @@ pub(crate) fn append_unsubscripted(
     /* Element zero for an indexed array; for an associative one that is
      * the *key* `0`, which is a key like any other and is what Bash
      * writes. */
-    let selector = match super::value::variable_value(shell, name).map(VariableValue::kind) {
+    /* The *kind* and not the value: a name declared and never assigned
+     * is an array with nothing in it, and `declare -a z; z+=v` appends
+     * to its zero element in the reference rather than turning it back
+     * into a scalar. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    let selector = match super::value::variable_kind(shell, name) {
         Some(VariableKind::Indexed) => Some(ArraySelector::Index(0)),
         Some(VariableKind::Associative) => Some(ArraySelector::Key(BString::from("0"))),
         Some(VariableKind::Scalar) | None => None,
