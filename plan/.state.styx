@@ -1343,7 +1343,7 @@ assertions (
     {id close-associative-assignment-diagnostics, kind @complete, author "brendan@necessary.nu", at 2026-09-02T05:49:17.419364089Z}
     {id close-the-pattern-replacement-divergence, kind @complete, author "brendan@necessary.nu", at 2026-09-02T03:54:38.807236466Z}
     {id close-untargeted-fuzz-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-28T19:17:20.963272486Z}
-    {id commit-only-the-paths-a-node-staged, kind @complete, author "brendan@necessary.nu", at 2026-09-02T18:08:17.33535695Z}
+    {id tooling.nplan.commit-a-pathspec, kind @complete, author "brendan@necessary.nu", at 2026-09-02T18:08:17.33535695Z}
     {id contain-the-workspace-tests-that-run-cases, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:55:17.219508871Z}
     {id crate-rename, kind @complete, author "brendan@necessary.nu", at 2026-08-08T02:12:48.664729127Z}
     {id decide-tree-canonicity, kind @complete, author "brendan@necessary.nu", at 2026-08-27T23:20:26.878567937Z}
@@ -1383,7 +1383,7 @@ assertions (
     {id list-the-names-that-only-carry-attributes, kind @complete, author "brendan@necessary.nu", at 2026-09-02T14:33:58.434607178Z}
     {id locale-sweep, kind @complete, author "brendan@necessary.nu", at 2026-08-18T00:25:43.344831243Z}
     {id logical-descriptor-table, kind @complete, author "brendan@necessary.nu", at 2026-08-17T22:09:30.050387716Z}
-    {id make-a-substitution-linear-in-its-value, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:43:53.155641929Z}
+    {id perf.pattern.substitution-linear, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:43:53.155641929Z}
     {id make-fuzz-runner-containment-aware, kind @complete, author "brendan@necessary.nu", at 2026-08-30T17:41:53.049957135Z}
     {id make-the-bash-gate-able-to-fail, kind @complete, author "brendan@necessary.nu", at 2026-08-28T20:26:55.958418593Z}
     {id mark-seconds-when-it-is-read, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:25:06.226390647Z}
@@ -1468,7 +1468,7 @@ assertions (
     {id stop-the-fuzz-budget-paying-for-the-build, kind @complete, author "brendan@necessary.nu", at 2026-09-02T02:09:16.656636099Z}
     {id stop-the-locale-tests-passing-vacuously, kind @complete, author "brendan@necessary.nu", at 2026-08-29T12:35:51.627877045Z}
     {id stop-the-machine-running-out-of-disk, kind @complete, author "brendan@necessary.nu", at 2026-09-02T18:00:18.807269689Z}
-    {id stop-the-noclobber-append-case-flaking, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:15:39.937015427Z}
+    {id harness.noclobber-append-flake, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:15:39.937015427Z}
     {id take-an-export-back-with-the-n-letter, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:08.50260369Z}
     {id take-the-array-letter-for-a-plain-operand, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:09:52.09429014Z}
     {id tell-a-full-disk-from-a-compiler-bug, kind @complete, author "brendan@necessary.nu", at 2026-09-02T17:29:43.392437073Z}
@@ -1487,6 +1487,7 @@ assertions (
     {id repin-the-editor-crates-for-aarch64, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:04:29.477759536Z}
     {id restore-a-head-that-does-not-compile, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:04:31.425935024Z}
     {id master-has-not-built-since-a-commit-took-half-a-file, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:04:33.32456068Z}
+    {id tooling.plan-shape, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:53:20.641514146Z}
 )
 
 impl_evidence (
