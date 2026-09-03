@@ -148,13 +148,16 @@ pub(crate) fn substitute(
         };
         let name = BString::from(name.to_shell_bytes());
 
-        /* No job: the shell neither waits for this child nor reports it, so
-         * it must not hold a job record that `jobs` would print, `wait`
-         * would block on, or `$!` would name. */
-        if matches!(
-            crate::jobs::fork_shell(shell, None, None, crate::jobs::ForkMode::WithoutJob)?,
-            nsh_platform::ForkResult::Child
-        ) {
+        /* No job: the shell must not hold a job record that `jobs` would
+         * print. The pid is kept all the same, because `wait` with no
+         * operands does block on the most recent one, and the job table
+         * is exactly where it cannot be kept. */
+        // [spec:nsh:req:compat.bash.process-substitution]
+        let forked = crate::jobs::fork_shell(shell, None, None, crate::jobs::ForkMode::WithoutJob)?;
+        if let nsh_platform::ForkResult::Parent(child) = forked {
+            shell.last_process_substitution = Some(child);
+        }
+        if matches!(forked, nsh_platform::ForkResult::Child) {
             crate::error::clear_interrupt_deferral(&mut shell.interrupt_deferral);
             drop(shell_end);
             /* The names its parent is holding belong to the command that

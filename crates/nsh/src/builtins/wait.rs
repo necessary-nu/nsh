@@ -12,6 +12,7 @@ use crate::error::Error;
 use crate::evaluation::Flow;
 use crate::jobs::{
     JobId, WaitMode, job_exit_status, reap_children, remove_waited_job, resolve_job,
+    wait_for_process_substitution,
 };
 use bstr::BStr;
 
@@ -45,7 +46,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     'wait_complete: {
         if operands.is_empty() {
             /* wait for all jobs */
-            loop {
+            'jobs: loop {
                 job_id = None;
                 for job_index in shell.jobs.order_snapshot() {
                     if shell.jobs[job_index].is_running() {
@@ -57,7 +58,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 }
                 if job_id.is_none() {
                     /* no running procs */
-                    break 'wait_complete;
+                    break 'jobs;
                 }
                 if !reap_children(shell, WaitMode::CommandAll, None)? {
                     // sigout:
@@ -68,6 +69,19 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     break 'wait_complete;
                 }
             }
+            /* A process substitution is nobody's job, and Bash blocks
+             * on the most recent one here all the same: `echo hi >
+             * >(sleep 0.4; cat); wait` prints `hi` before whatever
+             * follows the wait. Only the operand-less form does, because
+             * a substitution has no name a `wait` operand could give. */
+            // [spec:nsh:req:compat.bash.process-substitution]
+            if !wait_for_process_substitution(shell)? {
+                status = crate::signal_inbox::signals()
+                    .pending_signal()
+                    .expect("an interrupted wait records its signal")
+                    .as_status();
+            }
+            break 'wait_complete;
         }
 
         for spec in operands {

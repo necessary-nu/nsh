@@ -399,6 +399,38 @@ fn block_for_child(
     }
 }
 
+/// Block until the process substitution `wait` with no operands blocks
+/// on has reported.
+///
+/// `false` reports a signal that arrived first, which is the answer the
+/// job loop gives for the same interruption.
+///
+/// By name, and by *that* name: the generic reaper would come to rest on
+/// whichever child of this shell reported first, and a here-document
+/// writer, a command substitution and a background job are none of them
+/// what `wait` was told to wait for.
+// [spec:nsh:req:compat.bash.process-substitution]
+pub(crate) fn wait_for_process_substitution(
+    shell: &mut crate::context::Shell,
+) -> Result<bool, Error> {
+    while let Some(target) = shell.last_process_substitution {
+        if let ChildScan::SignalArrived = block_for_child(shell, target, false) {
+            if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
+                return Err(error);
+            }
+            if crate::signal_inbox::signals().pending_signal().is_some() {
+                return Ok(false);
+            }
+            continue;
+        }
+        /* Whatever else came back, this pid is not one to wait for
+         * again: it reported, or the operating system says it is not
+         * ours to reap. */
+        shell.last_process_substitution = None;
+    }
+    Ok(true)
+}
+
 // [spec:dash:sem:jobs.waitproc-fn]
 // [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
 fn wait_for_process(

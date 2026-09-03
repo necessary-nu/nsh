@@ -78,6 +78,21 @@ pub struct Shell {
     /// child the host forked.
     // [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
     pub(crate) forked_children: crate::jobs::ForkedChildren,
+    /// The process substitution this shell forked most recently, which
+    /// `wait` with no operands blocks on.
+    ///
+    /// One and not a set, because that is what the reference waits for:
+    /// `echo a > >(sleep 0.5; cat); echo c > >(sleep 0.1; cat); wait;
+    /// echo after` prints `c`, then `after`, then `a`, so `wait`
+    /// returned as soon as the *last* substitution reported and the one
+    /// before it outlived the shell. Bash's own name for this is
+    /// `last_procsub_child`.
+    ///
+    /// Apart from [`Self::forked_children`] because that set also holds
+    /// the here-document writers and the command substitutions, and
+    /// `wait` must not block on either.
+    // [spec:nsh:req:compat.bash.process-substitution]
+    pub(crate) last_process_substitution: Option<nsh_platform::ProcessId>,
     /// `$!` — the process id of the last command the shell put in the
     /// background.
     ///
@@ -248,6 +263,7 @@ impl Shell {
             evaluation: crate::evaluation::EvaluationState::new(),
             jobs: crate::jobs::JobTable::new(),
             forked_children: crate::jobs::ForkedChildren::new(),
+            last_process_substitution: None,
             options: crate::options::ShellOptions::new(),
             redirections: crate::redirection::RedirectionStack::new(),
             process_substitutions:

@@ -41,6 +41,7 @@ pub(crate) use terminal::terminal_settings_error;
 pub use wait::has_stopped_jobs;
 pub(crate) use wait::reap_children;
 pub use wait::wait_for_job;
+pub(crate) use wait::wait_for_process_substitution;
 mod model;
 mod render;
 mod terminal;

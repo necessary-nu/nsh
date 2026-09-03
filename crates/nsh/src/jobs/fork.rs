@@ -56,6 +56,7 @@ fn initialize_child_process(
      * which is the whole of what this shell must not do. */
     // [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
     shell.forked_children.clear();
+    shell.last_process_substitution = None;
 
     let parent_shell_level = shell.shell_level;
     shell.shell_level += 1;
