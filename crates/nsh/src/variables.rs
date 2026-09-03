@@ -570,9 +570,29 @@ fn set_entry(
     } else if old.attributes.fixed {
         attributes = VariableAttributes::FIXED;
     } else {
-        shell.variables.entries.remove(name);
-        if old.callback == Callback::Locale {
-            run_callback(shell, name, old.callback, None);
+        /* Bash's `unset` on a name the running body made local leaves an
+         * invisible local behind rather than taking the entry away. The
+         * values were never in question either way -- the frame holds
+         * the caller's and restores it on return -- so only a
+         * declaration printer can see the difference, which is why the
+         * entry has to survive at all. Everything the declaration
+         * carried goes with the value: `local -i pv=1; unset pv` is
+         * `declare -- pv` there and not `declare -i pv`, and
+         * `local -a pv=(1)` leaves no kind either. */
+        // [spec:nsh:req:compat.bash.functions-scoping]
+        let keep = shell.options.dialect() == crate::options::Dialect::Bash
+            && declaration::is_local(shell, name);
+        let callback = old.callback;
+        if keep {
+            shell.variables.entries.insert(
+                name.to_owned(),
+                Variable::unset(VariableAttributes::NONE, callback),
+            );
+        } else {
+            shell.variables.entries.remove(name);
+        }
+        if keep || callback == Callback::Locale {
+            run_callback(shell, name, callback, None);
         }
         return Ok(());
     }

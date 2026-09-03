@@ -400,15 +400,30 @@ pub(crate) fn declared_value(
 }
 
 /// Record a declared name so its attributes have an entry to live on.
+///
+/// The state is [`VariableState::Declared`] and not `Unset`, which is
+/// what tells a bare `declare MAIL` from the slot `initialize_variables`
+/// reserved for `MAIL`'s callback: the two are otherwise the same entry,
+/// because a declaration carrying no letter and no value leaves nothing
+/// else behind to look at. `declare -p MAIL` is a line in Bash and
+/// `declare -p LANG` in a shell that was never given one is `not found`,
+/// so the listing has to be able to ask.
 // [spec:nsh:req:compat.bash.functions-scoping]
+// [spec:nsh:req:compat.bash.arrays-declarations]
 pub(crate) fn ensure_entry(shell: &mut Shell, name: &BStr) {
-    if !valid_name(&shell.locale, name) || shell.variables.entries.contains_key(name) {
+    if !valid_name(&shell.locale, name) {
         return;
     }
-    shell.variables.entries.insert(
-        name.to_owned(),
-        Variable::unset(VariableAttributes::NONE, Callback::None),
-    );
+    let declared = VariableState::Declared(super::value::VariableKind::Scalar);
+    let Some(entry) = shell.variables.entries.get_mut(name) else {
+        let mut fresh = Variable::unset(VariableAttributes::NONE, Callback::None);
+        fresh.state = declared;
+        shell.variables.entries.insert(name.to_owned(), fresh);
+        return;
+    };
+    if matches!(entry.state, VariableState::Unset) {
+        entry.state = declared;
+    }
 }
 
 /// Whether a function body is currently running.

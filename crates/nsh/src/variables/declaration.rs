@@ -123,7 +123,7 @@ pub(crate) fn transform_flags(shell: &Shell, name: &BStr) -> Option<BString> {
 /// call pushed upwards belongs to the same call, a declaration
 /// built-in's transient frame included.
 // [spec:nsh:req:compat.bash.functions-scoping]
-fn is_local(shell: &Shell, name: &BStr) -> bool {
+pub(super) fn is_local(shell: &Shell, name: &BStr) -> bool {
     use super::LocalVariable;
 
     let Some(frame) = shell.variables.function_frames.last().copied() else {

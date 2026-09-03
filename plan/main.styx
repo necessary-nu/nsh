@@ -11578,6 +11578,7 @@ children (
         id fold-pattern-rs-into-the-characters-module
         title "Leave one spelling of where a character ends, not two"
         kind @refactor
+        sealed true
         log (
             {
                 at 2026-09-02T18:19:33.263078025Z
@@ -11592,6 +11593,13 @@ children (
                 kind @status
                 text "Todo → Doing (nplan start)"
             }
+
+            {
+                at 2026-09-03T16:34:27.974563803Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan complete)"
+            }
         )
     }
 
@@ -11605,6 +11613,13 @@ children (
                 author "brendan@necessary.nu"
                 kind @note
                 text "THE LAST PER-BYTE THREAD-LOCALE SELECTION IN THE TREE, AND THE ONLY ONE THAT IS NOT SIMPLY A MISTAKE. `Locale::decode_byte` takes one `uselocale` pair per byte. `stop-selecting-the-locale-per-byte-everywhere-else` removed two of its four callers -- `expand.rs`'s `character_length` and `escape/bash.rs`'s `printable_character_width`, both of which had the whole character in hand and now ask once. Two remain:\n\n    crates/nsh/src/parser.rs:906           read_multibyte_character\n    crates/nsh/src/builtins/read/bash.rs:257  wide_character\n\nMEASURED, release, load 32, `LC_ALL=C.UTF-8`, counted with a temporary `atexit` reporter on `Locale::select`:\n\n    parse of 4,000 lines each holding 40 U+00CC   320,000 decode_byte calls\n                                                  399,208 selections in the run\n                                                  so 80% of them, and `perf`\n                                                  put `__uselocale` at 5.3%\n    `read` of 2,000 records, 40,000 wide chars     80,000 decode_byte calls\n                                                  (was 160,000 before that node)\n\nTwo selections per two-byte character, which is one per byte.\n\nWHY THE OBVIOUS FIXES ARE BOTH WRONG. Holding one selection for the decoder's life is what `[dec:nsh:per-shell-locale]` exists to prevent, and here it is not a stylistic objection: between two pushes these loops call `read_input_unit_or_alias_end(shell)` and `ReadStream::next_unit(shell, true)`, which pop aliases and read input. A `uselocale` scope around that is a scope around arbitrary shell execution. Reading MB_CUR_MAX bytes up front and asking once would block a terminal read that has one byte to give, which is the reason these loops are incremental in the first place.\n\nWHAT THE ANSWER PROBABLY IS. The bytes are usually already in a buffer. If the input stack can answer \"how many bytes are buffered after the cursor, without reading\" then the loop can hand that prefix to `Locale::multibyte_len` in one selection, consume exactly the width, and fall back to the byte-at-a-time loop only when the buffer is short -- which is the terminal case and the only one where blocking matters. `read_multibyte_character`'s own doc comment already describes the speculation-and-unread dance it does today, so the shape is not foreign to it.\n\nDONE WHEN. A script of n non-ASCII characters read from a file costs O(n) `mbrtowc` calls and O(1) thread-locale selections per character rather than one per byte, a terminal read still returns as soon as one character is complete, and the count above is re-measured."
+            }
+
+            {
+                at 2026-09-03T16:34:41.421764672Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
             }
         )
     }
