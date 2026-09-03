@@ -30,7 +30,7 @@
 //! unaffordable to sixteen items.
 //!
 //!
-//! ## Three things an embedder has to know, which are not types
+//! ## Four things an embedder has to know, which are not types
 //!
 //! `docs/api-design.md` §6 and §11 carry these; they are here because a
 //! reader of the crate should not have to find the document first.
@@ -54,6 +54,18 @@
 //! and the library's children allocate before they `exec` -- or never
 //! `exec` at all, a subshell being a shell. Same caveat as
 //! `Command::pre_exec`, same cause, and not removable.
+//!
+//! **The file-creation mask is the process's, and a script's `umask`
+//! moves it.** `umask 077` in a shell you drive changes the mode of
+//! everything your process creates from then on, and no per-call argument
+//! escapes it: `open` and `mkdir` take a mode, and the kernel applies
+//! `mode & ~umask` to that mode, so a request for 0o700 under a 0o777 mask
+//! arrives 0o000. Two `Shell`s cannot hold different masks, and [`Builder`]
+//! cannot give one a mask of its own, for the reason the working directory
+//! is not per-instance either: there is one process. Reading the mask is a
+//! write as well, POSIX offering no read — the shell sets it to zero and
+//! puts it straight back, and whatever another of your threads creates
+//! inside that window is created unmasked.
 //!
 //! **[`Shell`]'s `Drop` neither waits nor kills, and that is a promise
 //! rather than an omission.** A foreground job is waited to completion

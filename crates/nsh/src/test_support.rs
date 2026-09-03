@@ -4,10 +4,20 @@
 //!
 //! **A few operating-system properties are process-global.** Shell-owned
 //! variables, files, and control state live on each `Shell`, but locale,
-//! signal dispositions, the current directory, and inherited descriptors
-//! still belong to the hosting process. Cargo runs tests on multiple threads,
-//! so a test that changes one of those properties holds [`lock`] for its
-//! duration. Tests confined to one shell instance do not need it.
+//! signal dispositions, the current directory, the file-creation mask and
+//! inherited descriptors still belong to the hosting process. Cargo runs
+//! tests on multiple threads, so a test that changes one of those
+//! properties holds [`lock`] for its duration -- and so does a test that
+//! only *observes* one. Observing is not the weaker case:
+//! `builtins::umask`'s tests drive the mask to 0o777 and restore it, all
+//! under the lock and exactly as this asks, while
+//! `editor::completion`'s fixture merely creates a temporary directory
+//! and three entries in it, and got them mode 000 and an `EACCES` in 201
+//! runs out of 2,000. Nor is there a per-call way out: the kernel
+//! applies `mode & ~umask` to every
+//! `mkdir` and `open`, so an explicit mode is masked too, and only
+//! `chmod` on an existing file escapes. Tests confined to one shell
+//! instance do not need the lock. `docs/api-design.md` §6 is the list.
 //!
 //! **Errors are values.** A fallible function returns
 //! `Result<_, error::Error>` and a test asserts on the returned error --

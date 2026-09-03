@@ -726,6 +726,35 @@ There are further process-wide facts the API has to be honest about:
   the sense that the syscall is. Two shells in different directories is
   not achievable without `openat`-relative resolution everywhere, which is
   out of scope. Say so in the crate docs.
+* **The file-creation mask.** `umask(2)` is per-process;
+  `crates/nsh/src/builtins/umask.rs` reads and writes it through
+  `nsh_platform::creation_mask` and `replace_creation_mask`, and the
+  module says so in its own first paragraph. It is the working
+  directory's twin — mutated by a builtin, inherited by every child, not
+  restorable by a second `Shell` that did not set it — and it belongs on
+  this list rather than being struck, because it does *not* divide. The
+  escape that looks available is not one: `open` and `mkdir` take a mode,
+  but the kernel applies `mode & ~umask` to it, so a caller asking for
+  0o700 under a 0o777 mask gets 0o000 and the first write into that
+  directory is `EACCES`. Measured 2026-09-03. Only `chmod`, which is not
+  masked, can name a mode outright, and it can only do so after the file
+  exists. Two `Shell`s cannot hold different masks, and one running
+  `umask 077` changes what the other's `>` creates.
+
+  **Reading it is a write, which is the sharper half.** POSIX offers no
+  way to read the mask, so `creation_mask()` is `umask(0)` followed by
+  `umask(saved)`: a shell asking what the mask *is* leaves it at zero for
+  the width of two syscalls, and anything another thread creates in that
+  window is created unmasked. `umask.rs` defers interrupts across the
+  pair, which stops a signal stranding the zero; nothing stops a second
+  `Shell`.
+
+  The cost of its absence here was a test.
+  `editor::completion::tests::completion_marks_files_and_directories`
+  built its fixture with `create_dir` while `builtins::umask`'s tests
+  held the mask at 0o777, and failed `EACCES` 201 times in 2,000 runs at
+  `--test-threads 8` — reading, every time, as a permissions bug in the
+  test's own temporary directory.
 * ~~**The children of the process, which are one pool.**~~ **Struck
   2026-09-02; the pool divides after all.** It read: `waitproc` calls
   `wait3(status, flags, NULL)` — that is `waitpid(-1)`, and it reaps *any*
@@ -758,10 +787,17 @@ The honest statement, which belongs on the decision, is now:
 
 > Two `Shell` values in one process have independent variables and locales.
 > They still share the C library's `strtok` cursor and `getopt` state, the
-> working directory, the process group and controlling terminal, the kernel's
-> pool of child processes — and one thing this crate does own, the signal
+> working directory, the file-creation mask, the process group and
+> controlling terminal — and one thing this crate does own, the signal
 > inbox, because a signal disposition and the handler that reads it are
 > per-process facts that no amount of per-instance storage can divide.
+
+**Corrected 2026-09-03**, in two places. The sentence above read "the
+working directory, the process group and controlling terminal, the
+kernel's pool of child processes" until now: it kept the pool after
+`750758b` divided it, which is the entry struck above, so the strike and
+the summary disagreed for a day. And it never carried the file-creation
+mask, which the entry above adds.
 
 The earlier form of that sentence read "share nothing this crate owns",
 and the inbox is the counter-example. It is stated as a shared *fact*
@@ -774,7 +810,10 @@ C library's globals" and never was — it acquired that shape because the
 first three entries happened to be libc statics and §5's `static mut`
 audit was the tool at hand. Three of the seven entries are not libc's at
 all: the working directory and the child-process pool are the kernel's,
-and the signal inbox is this crate's. **A process-wide fact is anything
+and the signal inbox is this crate's. *(The count is the one that stood
+when this paragraph was written; the file-creation mask has since been
+added and the child-process pool struck. The point it makes does not
+depend on the arithmetic.)* **A process-wide fact is anything
 one `Shell` can change that another observes, whoever stores it.** That is
 the test to apply when the next one is found, and applying the narrower
 one is how the child-process pool went unlisted through

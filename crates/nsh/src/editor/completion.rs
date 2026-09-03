@@ -81,6 +81,15 @@ mod tests {
 
     #[test]
     fn completion_marks_files_and_directories() {
+        /* Every mode below comes from the process's file-creation mask,
+         * which `builtins::umask`'s tests drive to 0o777 while they run,
+         * and an explicit mode cannot escape it: the kernel applies
+         * `mode & ~umask` to each `mkdir` and `open`, so a
+         * `DirBuilder::mode(0o700)` under a 0o777 mask arrives 0o000 and
+         * the first write into the directory is EACCES. The mask has to
+         * be excluded rather than overridden. Unlocked, this failed 201
+         * times in 2,000 runs at `--test-threads 8`. */
+        let _guard = crate::test_support::lock();
         static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
         let serial = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let directory = std::env::temp_dir().join(format!(

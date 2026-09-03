@@ -9407,6 +9407,7 @@ children (
                                         id stop-allexport-creating-a-name-unset-removed
                                         title "Keep `set -a` out of `unset`"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T13:00:19.630497778Z
@@ -9420,6 +9421,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:27:53.519348487Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -9471,6 +9479,7 @@ children (
                                         id unset-every-name-it-was-given
                                         title "Carry on past a refused operand in `unset`"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T15:54:46.588286769Z
@@ -9484,6 +9493,21 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:27:55.921955841Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:28:06.046456843Z
+                                                author "brendan@necessary.nu"
+                                                kind @errata
+                                                text "THE SECOND HALF OF THIS NODE CANNOT BE DONE AS WRITTEN, AND THE NODE DID NOT KNOW IT. Corrected 2026-09-03 while closing it; measured on `2f6c63c`.\n\nThe node asked for \"the exit status is the dialect's own -- 2 in the POSIX dialect, 1 in Bash\" and for `tests/corpus/aud_state_var.txt` to pass its `readonly unset` case. The POSIX half is not free: it is pinned the other way by a second conformance profile.\n\n    /usr/bin/dash:  `unset: R: is read only`, status 2, fatal\n    Smoosh corpus:  `unset: x is read-only`, status 1\n\n`[spec:nsh:req:compat.smoosh.error-contracts]` states it in as many words -- \"attempting to unset readonly `x` writes `unset: x is read-only\\n` and returns 1\" -- and the imported corpus carries the bytes: `tests/surveys/smoosh/shell/builtin.unset.err` holds that string and `builtin.unset.ec` holds `1`. `crates/nsh/tests/smoosh_errors.rs:105` asserts both, and passes today.\n\nSo the corpus case was left failing rather than traded for a Smoosh regression, and the POSIX dialect is untouched by `2f6c63c`. The Bash half -- carry on past a refused operand, answer 1 -- is done and pinned by `crates/nsh-cli/tests/bash_unset_leaves_nothing.rs`.\n\n`reconcile-the-unset-readonly-contracts` holds what is left."
+                                                after_done true
                                             }
                                         )
                                     }
@@ -9512,6 +9536,20 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found 2026-09-03 while closing `give-a-compound-assignment-the-integer-attribute`, and left out of it because it is the *error boundary* and not the reshape. Measured against the pinned Bash 5.3.15 on `c847934`, and confirmed identical against a pristine nsh built at `d0ffd39` in a detached worktree, so it is pre-existing and that node did not move it.\n\n    declare -i x=1+; echo st=$?; declare -p x\n      bash: reports, status 1, and NOTHING AFTER IT RUNS\n      nsh:  reports, st=1, then `declare -i x` -- the list carries on\n\nThe compound spelling of the same thing already agrees after `c847934`:\n\n    declare -ai v=(1+); declare -p v; echo st=$?\n      both: report, status 1, list abandoned\n\nso the two halves of one command now answer differently, which is what\nmakes this worth a node rather than a line in a message. The element\npath raises through `Error` because `crate::arithmetic::evaluate`'s\nfailure propagates out of `assign_compound`; the scalar path in\n`builtins/declare.rs`'s `apply` swallows it into a per-operand refusal.\n\nWHERE. `nameref::declared_value` returns `Err` for both, and `apply` is\nwhat turns the operand's failure into `Ok(false)` plus a recorded\nrefusal. What is missing is the distinction Bash makes: an operand Bash\nmerely *refuses* (a bad identifier, a kind it will not convert) leaves\nthe rest of the command running, while an *assignment error* -- which\nis what an unreadable arithmetic value is -- is fatal to the list in a\nnon-interactive shell.\n\nNOT MEASURED YET, and worth measuring first: `declare -i x=1+ y=2`\n(does `y` land?), `x=1+` on a name already carrying `-i` without the\nbuilt-in, and `(( ))` beside it, which is a different boundary again.\n\nDONE WHEN. `declare -i x=1+` abandons the command list as the reference\ndoes, the compound spelling is unmoved, an operand Bash merely refuses\nstill leaves its siblings running, and a differential row holds each."
+                                            }
+                                        )
+                                    }
+
+                                    {
+                                        id reconcile-the-unset-readonly-contracts
+                                        title "Decide which oracle `unset` on a read-only name answers to in the POSIX dialect"
+                                        kind @fix
+                                        log (
+                                            {
+                                                at 2026-09-03T16:28:25.749565419Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "THE RESIDUE OF `unset-every-name-it-was-given`, LEFT ON PURPOSE. Found 2026-09-03 while closing that node; measured against `/usr/bin/dash` and the imported Smoosh corpus on `2f6c63c`.\n\nTwo conformance oracles fix the same case in opposite directions, and the POSIX dialect can only satisfy one:\n\n    readonly R=1; unset R; echo \"rc=$?\"\n      /usr/bin/dash:  `dash: 1: unset: R: is read only`, status 2, and the\n                      `echo` never runs -- a special built-in's failure is\n                      fatal to a non-interactive shell\n      Smoosh:         `unset: x is read-only`, status 1, the script continues\n      nsh today:      `unset: x is read-only`, status 1, and the script does\n                      *not* continue -- the special-builtin boundary applies\n                      but the status is Smoosh's\n\nWHAT PINS EACH. dash is the C reference `tests/corpus/aud_state_var.txt` is judged against, and its `readonly unset` case is the file's one failing case. Smoosh is pinned by `[spec:nsh:req:compat.smoosh.error-contracts]`, by the corpus bytes in `tests/surveys/smoosh/shell/builtin.unset.err` and `builtin.unset.ec`, and by `crates/nsh/tests/smoosh_errors.rs:105`, which asserts the exact string and the status and passes.\n\nNOTE THE THIRD ROW. nsh matches Smoosh's status and dash's *fatality*, which is neither oracle exactly. Whether the script continues was not measured when the Smoosh contract was written down, so it is not obvious which of the two nsh is meant to be following.\n\nTHREE WAYS OUT, and choosing between them is the work:\n\n1. Take dash's answer and register the Smoosh case as a sanctioned divergence, the way `tests/harness/divergences.sh` already registers `getopts_optarg_unset`. Cheapest, and it moves a contract this repository imported rather than wrote.\n2. Take dash's answer and re-record the Smoosh corpus entry, saying in `docs/divergences.md` why the imported bytes are wrong for a dash port.\n3. Keep Smoosh's answer and register the corpus case in `divergences.sh`, which is the only option that changes no behaviour -- and which needs an entry written narrowly enough that it cannot swallow a real regression, which `tests/harness/divtest.sh` exists to check.\n\nNOT MEASURED YET, and worth measuring before choosing: what Smoosh's own model shells answer for the *fatality* question, and whether any other Smoosh case depends on `unset`'s status rather than its message.\n\nDONE WHEN. One oracle is chosen, the reason is written in `docs/divergences.md`, the loser is registered rather than silently failing, and `tests/corpus/aud_state_var.txt` and `crates/nsh/tests/smoosh_errors.rs` are both green."
                                             }
                                         )
                                     }

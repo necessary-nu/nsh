@@ -27,7 +27,10 @@ consequences {
         "Nearly every function in the crate changes shape. This is the largest single piece of wave 4."
         "The unit tests' `testutil::lock()` becomes unnecessary: tests serialise today only because the state is shared."
     )
-    deferred ("The current directory, process group, controlling terminal, child-reaping pool and signal inbox remain process-wide for reasons that are not storage placement and are recorded by their owning decisions.")
+    deferred (
+        "The current directory, process group, controlling terminal, child-reaping pool and signal inbox remain process-wide for reasons that are not storage placement and are recorded by their owning decisions."
+        "Corrected 2026-09-03; the sentence above is kept as written. Two of its terms have moved. The child-reaping pool is not process-wide any more: `750758b` gives each Shell the pids it forked and asks `waitpid(pid)` after those and no others, and `docs/api-design.md` s6 struck its entry on 2026-09-02. The file-creation mask belonged in the list from the start and was never in it: `umask(2)` is per-process, the `umask` builtin writes it, every child inherits it, and it does not divide -- `open` and `mkdir` take a mode but the kernel applies `mode & ~umask` to it, so a caller asking for 0o700 under a 0o777 mask gets 0o000. Reading it is a write as well, POSIX offering no read: `creation_mask()` is `umask(0)` followed by `umask(saved)`, and whatever another thread creates in that window is created unmasked."
+    )
 }
 edges {
     requires ([dec:nsh:shell-as-library])

@@ -1463,8 +1463,8 @@ assertions (
     {id give-the-differential-wrapper-a-kill-after, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:07:24.684224374Z}
     {id give-a-compound-assignment-the-integer-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:15:34.307455862Z}
     {id guard-the-process-file-creation-mask, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:12:04.530679662Z}
-    {id stop-allexport-creating-a-name-unset-removed, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:26:25.376300306Z}
-    {id unset-every-name-it-was-given, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:26:27.52059908Z}
+    {id stop-allexport-creating-a-name-unset-removed, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:27:53.519348487Z}
+    {id unset-every-name-it-was-given, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:27:55.921955841Z}
     {id fold-pattern-rs-into-the-characters-module, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:27:13.66457814Z}
 )
 
