@@ -1643,6 +1643,11 @@ assertions (
     {id wait-for-a-process-substitution-to-finish, kind @complete, author "brendan@necessary.nu", at 2026-09-02T07:17:03.531322482Z}
     {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
     {id widen-the-survey-failure-list-extraction, kind @complete, author "brendan@necessary.nu", at 2026-09-02T04:39:21.797323296Z}
+    {id harness.group-run-wrong-dialect, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:48:51.116736018Z}
+    {id bash.divergences.publish-names.withhold-prompts, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:04.758628788Z}
+    {id struct.windows-locale-export, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:25.604961066Z}
+    {id tooling.tests.read-the-umask, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:36.984941764Z}
+    {id perf.locale.unreachable-positions, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:48.355714681Z}
 )
 
 impl_evidence (
