@@ -13,7 +13,7 @@ edit = ["dep:nshedit-plat"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-nshedit-plat = { version = "0.1.1", optional = true }
+nshedit-plat = { version = "0.1.2", optional = true }
 rustix = { version = "1", features = ["event", "fs", "param", "process", "system", "termios", "pipe", "pty", "stdio", "runtime"] }
 
 [target.'cfg(windows)'.dependencies]

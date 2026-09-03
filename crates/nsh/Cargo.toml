@@ -23,8 +23,8 @@ fuzzing = []
 [dependencies]
 bstr = "1"
 nsh-platform = { path = "../nsh-platform" }
-nshedit = { version = "0.1.1", optional = true }
-nshterm = { version = "0.1.1", optional = true }
+nshedit = { version = "0.1.2", optional = true }
+nshterm = { version = "0.1.2", optional = true }
 
 [[example]]
 name = "embed"
