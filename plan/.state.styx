@@ -1482,7 +1482,7 @@ assertions (
     {id wait-for-process-substitutions-in-the-wait-builtin, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:13:35.015275991Z}
     {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
     {id widen-the-survey-failure-list-extraction, kind @complete, author "brendan@necessary.nu", at 2026-09-02T04:39:21.797323296Z}
-    {id split-the-locale-character-half, kind @doing, author "brendan@necessary.nu", at 2026-09-03T18:53:39.274955962Z}
+    {id split-the-locale-character-half, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:07:54.773469165Z}
     {id integrate-the-remote-master-branch, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:04:27.491820334Z}
     {id repin-the-editor-crates-for-aarch64, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:04:29.477759536Z}
     {id restore-a-head-that-does-not-compile, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:04:31.425935024Z}

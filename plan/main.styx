@@ -10099,6 +10099,7 @@ children (
                                 id split-the-locale-character-half
                                 title "Split the character half out of the platform locale, which the merge took over the cap"
                                 kind @refactor
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-03T18:12:10.034030514Z
@@ -10112,6 +10113,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T19:07:54.773469165Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -10127,6 +10135,20 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Done (nplan complete)"
+                                    }
+                                )
+                            }
+
+                            {
+                                id export-locale-character-on-the-windows-host
+                                title "Re-export LocaleCharacter from the Windows platform, which the shell names unconditionally"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-03T19:09:29.733331498Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "FOUND 2026-09-03 WHILE SPLITTING `crates/nsh-platform/src/locale.rs`, AND NOT PART OF IT. It was noticed by reading the two hosts' re-export lines side by side, because the split had to keep the POSIX one working.\n\n`crates/nsh-platform/src/windows.rs:56`\n\n    pub use locale::{Locale, LocaleCategory, LocaleDecode, LocaleDecoder};\n\n`crates/nsh-platform/src/unix.rs:17`\n\n    pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};\n\nThe Windows list is missing `LocaleCharacter`. It is not missing the type: `crates/nsh-platform/src/windows/locale.rs:25` declares `pub enum LocaleCharacter` with the same three variants, and `windows/locale.rs:132`'s `decode_prefix` returns it. Only the re-export is short, so the type exists on that host and cannot be named from outside the crate.\n\nWHY THAT IS A BUILD FAILURE AND NOT A COSMETIC GAP. The shell crate names it unconditionally, with no `cfg` anywhere near either site:\n\n    crates/nsh/src/parser.rs:960,961,964,971      nsh_platform::LocaleCharacter::{Invalid,Complete,Incomplete}\n    crates/nsh/src/builtins/read/bash.rs:276-278  the same three\n\n`grep -c 'cfg(unix)\\|cfg(windows)'` is 0 in both files. So `cargo build --target x86_64-pc-windows-*` cannot resolve `nsh_platform::LocaleCharacter` and `crates/nsh` does not compile for that host at all. `decode_prefix` is this tree's own recent work -- `LocaleCharacter` and the Incomplete/Invalid distinction are what `9bad7cb`'s neighbourhood added -- and the Windows shim was written to match it while its re-export line was not.\n\nNOT MEASURED. No Windows target is installed here and no cross build was attempted, so the failure is read off the source rather than observed; that is the first thing to do rather than assume. Worth checking at the same time whether anything else the two `pub use` lines disagree about has the same shape -- the lists differ only in this one name today, but nothing checks that they agree, and a check that they do is probably the real fix. `crates/nsh-platform/src/windows/locale.rs` is a file of its own and was untouched by the character-half split, so this predates it.\n\nDONE WHEN `windows.rs` re-exports `LocaleCharacter`, a cross build of `crates/nsh` for a Windows target resolves every `nsh_platform::` path the shell names, and something fails when the two hosts' public locale surfaces drift apart again."
                                     }
                                 )
                             }

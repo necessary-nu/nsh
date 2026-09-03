@@ -53,7 +53,7 @@ pub use errors::{
     is_path_error, is_pseudoterminal_end, platform_error,
 };
 mod locale;
-pub use locale::{Locale, LocaleCategory, LocaleDecode, LocaleDecoder};
+pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};
 mod paths;
 pub use paths::{
     AccessMode, DirectoryEntry, FileKind, FileMetadata, absolute_path,
