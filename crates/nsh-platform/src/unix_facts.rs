@@ -168,10 +168,41 @@ mod tests {
 
     /// End of input counts as available: the reader has something to
     /// observe, even if it is only the end.
+    ///
+    /// A pipe is at end of input when the last write end *anywhere*
+    /// closes, and `fork` copies the whole descriptor table, so a
+    /// sibling test's child forked between this pipe's creation and the
+    /// closing of its write end holds one this thread can neither see
+    /// nor close. The pipe is then not at end of input, `wait_for_input`
+    /// says so correctly, and the assertion reads as a defect in `poll`.
+    /// No flag makes a descriptor un-inheritable across `fork`, so the
+    /// check takes a process of its own and builds the pipe inside it,
+    /// where nothing else can hold an end.
     #[test]
     fn end_of_input_counts_as_available() {
-        let (read, write) = super::super::pipe().expect("pipe");
-        drop(write);
-        assert!(wait_for_input(&read, Some(0.0)).expect("poll at end"));
+        let status = super::super::run_in_child(|| {
+            let Ok((read, write)) = super::super::pipe() else {
+                super::super::exit_immediately(2);
+            };
+            drop(write);
+            match wait_for_input(&read, Some(0.0)) {
+                Ok(true) => {}
+                Ok(false) => super::super::exit_immediately(3),
+                Err(_) => super::super::exit_immediately(4),
+            }
+        })
+        .expect("a process of its own to hold the pipe in");
+
+        assert_eq!(
+            status,
+            0,
+            "{}",
+            match status {
+                2 => "the child could not make a pipe to ask about",
+                3 => "a pipe past its last write end was reported as having nothing to observe",
+                4 => "asking a pipe past its last write end failed outright",
+                _ => "the child died without reporting why",
+            }
+        );
     }
 }
