@@ -7,7 +7,8 @@
 use crate::context::Shell;
 use crate::error::Error;
 use crate::evaluation::Flow;
-use crate::options::Options;
+use crate::options::{Dialect, Options};
+use crate::status::ExitStatus;
 use crate::variables::{unset_bytes, variable_attributes};
 use bstr::BStr;
 
@@ -31,6 +32,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         flag = option;
     }
 
+    let mut status = ExitStatus::SUCCESS;
     for name in option_scan.operands() {
         if flag != b'f' {
             // Bash unsets the variable a name reference points at.
@@ -42,7 +44,18 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if variable_attributes(shell, name).is_some_and(|attributes| attributes.read_only) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" is read-only");
+                /* Bash reports the operand and keeps unsetting the rest
+                 * of the list, where a special built-in's failure is
+                 * fatal in the POSIX dialect and there is no rest to
+                 * reach. A script that unsets a list of names, one of
+                 * which happens to be read-only, silently kept every
+                 * name after it. */
                 // [spec:nsh:req:compat.bash.error-boundary]
+                if shell.options.dialect() == Dialect::Bash {
+                    shell.diagnostics().builtin_warning(&message);
+                    status = ExitStatus::FAILURE;
+                    continue;
+                }
                 return Err(shell.diagnostics().builtin_error_value(1, &message));
             }
             /* Bash lets one `unset` reach either table: a name with no
@@ -89,7 +102,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             );
         }
     }
-    Ok(Flow::Done((0).into()))
+    Ok(Flow::Done(status))
 }
 
 /// Split `a[expr]` into its name and subscript, when the operand is one.

@@ -702,6 +702,19 @@ impl Diagnostics<'_> {
         status: impl Into<crate::status::ExitStatus>,
         msg: &[u8],
     ) -> Error {
+        self.builtin_warning(msg);
+        Error::reported(self.line, status)
+    }
+
+    /// Write that same `command: message` where the failure is not a
+    /// control-flow value.
+    ///
+    /// A built-in may report an operand and carry on to the next: Bash's
+    /// `unset a x b` reports the read-only `x` and still unsets `b`, so
+    /// its operand loop must be left standing rather than handed an
+    /// [`Error`] to return.
+    // [spec:nsh:req:compat.bash.error-boundary]
+    pub fn builtin_warning(&mut self, msg: &[u8]) {
         let name = self
             .command_name
             .map_or(BStr::new(b"sh"), |name| name.as_bstr());
@@ -711,7 +724,6 @@ impl Diagnostics<'_> {
         record.push(b'\n');
         self.write_diagnostic(&record);
         self.flush_after_diagnostic();
-        Error::reported(self.line, status)
     }
 
     /// Write `$0: command: message` for an output failure detected after a

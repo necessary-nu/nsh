@@ -732,7 +732,31 @@ pub(crate) fn lookup_integer_bytes(shell: &mut Shell, name: &BStr) -> Result<i64
 
 // [spec:dash:sem:var.unsetvar-fn]
 pub(crate) fn unset_bytes(shell: &mut Shell, name: &BStr) -> Result<(), Error> {
-    set_bytes(shell, name, None, VariableAttributes::NONE)
+    /* `unset` is not an assignment, and Bash's `set -a` does not reach
+     * one: `set -a; unset zz` leaves nothing behind there, where the
+     * option's mark makes the attributes non-empty and so brings an
+     * entry into being that `declare -p` then lists and the next
+     * declaration of the same name inherits. dash creates that entry --
+     * `set -a; unset zz; export -p` names `zz` -- so the option keeps
+     * its reach in the POSIX dialect, which is why the write below
+     * cannot simply stop consulting it. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    let all_export = if shell.options.dialect() == crate::options::Dialect::Bash {
+        AllExport::Declines
+    } else {
+        AllExport::Marks
+    };
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        set_entry(
+            shell,
+            name,
+            None,
+            VariableAttributes::NONE,
+            CallbackPolicy::Run,
+            arrays::ReadOnlyGuard::Enforce,
+            all_export,
+        )
+    })
 }
 
 pub(crate) fn add_attributes(

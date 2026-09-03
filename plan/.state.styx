@@ -1461,8 +1461,11 @@ assertions (
     {id stop-a-freed-descriptor-number-racing-its-test, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:11:56.46879794Z}
     {id judge-a-shell-whose-target-is-a-link, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:07:18.351158587Z}
     {id give-the-differential-wrapper-a-kill-after, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:07:24.684224374Z}
-    {id give-a-compound-assignment-the-integer-attribute, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:10:07.645022165Z}
+    {id give-a-compound-assignment-the-integer-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:15:34.307455862Z}
     {id guard-the-process-file-creation-mask, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:12:04.530679662Z}
+    {id stop-allexport-creating-a-name-unset-removed, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:26:25.376300306Z}
+    {id unset-every-name-it-was-given, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:26:27.52059908Z}
+    {id fold-pattern-rs-into-the-characters-module, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:27:13.66457814Z}
 )
 
 impl_evidence (
