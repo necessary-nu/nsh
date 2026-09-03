@@ -89,6 +89,39 @@ const AN_INTEGER_FACT_IS_ARITHMETIC: &[&str] = &[
     "echo $(( EUID - EUID ))\n",
 ];
 
+/// A prompt is a name for a shell somebody is watching.
+///
+/// Measured on the pinned 5.3.15: fed on standard input the reference
+/// answers `declare: PS1: not found` for both names, `${PS1+set}` is
+/// empty, and `PS4="+ "` is the only `PS` name in its listing. An
+/// *interactive* reference has both -- `PS1="\s-\v\$ "` and
+/// `PS2="> "` under `--norc` -- so the condition is the invocation and
+/// not the dialect, and no row here can ask about it: a script on a pipe
+/// is never interactive on either side.
+///
+/// The rows with `PS1` in the environment are the ones that make the
+/// point. The reference does not merely decline to *default* the name,
+/// it takes an inherited one away and does not pass it on, so
+/// `${PS1-unset}` reads `unset` and `env` carries no `PS1` into a child.
+const A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL: &[&str] = &[
+    "declare -p PS1\necho status=$?\n",
+    "declare -p PS2\necho status=$?\n",
+    "echo \"[${PS1-unset}][${PS2-unset}]\"\n",
+    "echo \"[${PS1+set}][${PS2+set}][${PS4+set}]\"\n",
+    "declare -p | grep -c ' PS1='\n",
+    "declare -p | grep -c ' PS2='\n",
+    "declare -p | grep -c ' PS4='\n",
+    "set | grep -c '^PS1='\n",
+    "env | grep -c '^PS1='\n",
+    "echo \"${#PS1}/${#PS2}\"\n",
+    /* A script that wants the name has it: withholding is not a
+     * refusal, and the assignment lands as an ordinary variable. */
+    "PS1=mine\ndeclare -p PS1\n",
+    "PS2=mine\ndeclare -p PS2\n",
+    "unset PS1\necho status=$?\n",
+    "PS1=mine\nunset PS1\necho \"status=$? [${PS1-unset}]\"\n",
+];
+
 /// Every name both shells publish, through `declare -p`, with the value
 /// cut off.
 ///
@@ -96,8 +129,9 @@ const AN_INTEGER_FACT_IS_ARITHMETIC: &[&str] = &[
 /// letters and the name have to agree for all of them, and the two
 /// shells' start-up sets are otherwise not comparable at all -- the
 /// reference has `FUNCNAME`, `BASH_SOURCE`, `OLDPWD` and fifteen others
-/// this shell does not publish, and this one has `PS1` and `PS2` that a
-/// non-interactive reference does not.
+/// this shell does not publish. `PS1` and `PS2` are not shared either,
+/// and the reference is the one without them:
+/// [`A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL`] is where those two are asked.
 ///
 /// `SECONDS` is the one shared name left out, and it is out because it
 /// is measured rather than because it was missed: in the reference it
@@ -145,20 +179,21 @@ fn every_shared_name() -> Vec<String> {
 }
 
 /// Both shells on one script, as `(what nsh said, what the pinned Bash
-/// said)`.
-fn both(script: &str) -> ((Vec<u8>, i32), (Vec<u8>, i32)) {
+/// said)`, with `environment` inherited by each.
+fn both(environment: &[(&str, &str)], script: &str) -> ((Vec<u8>, i32), (Vec<u8>, i32)) {
     let nsh = Path::new(env!("CARGO_BIN_EXE_nsh"));
     let bash = pinned_bash::path();
     (
-        pinned_bash::answer(nsh, &["-o", "bash"], script),
-        pinned_bash::answer(&bash, &[], script),
+        pinned_bash::answer_with_env(nsh, &["-o", "bash"], environment, script),
+        pinned_bash::answer_with_env(&bash, &[], environment, script),
     )
 }
 
-/// Every script in `cases` produces the reference's bytes and status.
-fn agrees(cases: &[&str]) {
+/// Every script in `cases` produces the reference's bytes and status,
+/// started with `environment` and nothing else.
+fn agrees(environment: &[(&str, &str)], cases: &[&str]) {
     for script in cases {
-        let (ours, theirs) = both(script);
+        let (ours, theirs) = both(environment, script);
         assert_eq!(
             String::from_utf8_lossy(&ours.0),
             String::from_utf8_lossy(&theirs.0),
@@ -174,14 +209,25 @@ fn agrees(cases: &[&str]) {
 // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
 #[test]
 fn a_read_only_fact_refuses_a_write() {
-    agrees(A_READ_ONLY_FACT_REFUSES_A_WRITE);
+    agrees(&[], A_READ_ONLY_FACT_REFUSES_A_WRITE);
 }
 
 /// A fact the reference publishes as an integer behaves as one.
 // [spec:nsh:req:compat.bash.builtins-special-variables/test]
 #[test]
 fn an_integer_fact_is_arithmetic() {
-    agrees(AN_INTEGER_FACT_IS_ARITHMETIC);
+    agrees(&[], AN_INTEGER_FACT_IS_ARITHMETIC);
+}
+
+/// Neither prompt is on the table of a shell nobody is watching.
+// [spec:nsh:req:compat.bash.names.only-what-the-reference-has/test]
+#[test]
+fn a_prompt_is_only_for_a_watched_shell() {
+    agrees(&[], A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL);
+    agrees(
+        &[("PS1", "inherited$ "), ("PS2", "inherited> ")],
+        A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL,
+    );
 }
 
 /// Every name both shells publish carries the reference's letters.
@@ -191,5 +237,5 @@ fn an_integer_fact_is_arithmetic() {
 fn the_shared_names_carry_the_same_letters() {
     let cases = every_shared_name();
     let borrowed: Vec<&str> = cases.iter().map(String::as_str).collect();
-    agrees(&borrowed);
+    agrees(&[], &borrowed);
 }

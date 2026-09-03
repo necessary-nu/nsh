@@ -84,6 +84,12 @@ pub(crate) struct SpecialState {
     seconds_origin: f64,
     /// What `SECONDS` was assigned at that origin.
     seconds_base: i64,
+    /// Whether `PS1` and `PS2` are currently on the table on the shell's
+    /// own behalf. True to begin with because
+    /// [`super::initialize_variables`] enters both before the shell reads
+    /// a line, and only a change of answer is acted on, so a script's own
+    /// `PS1=` is never taken back.
+    prompts_entered: bool,
 }
 
 impl SpecialState {
@@ -93,6 +99,7 @@ impl SpecialState {
             random: 0,
             seconds_origin: 0.0,
             seconds_base: 0,
+            prompts_entered: true,
         }
     }
 
@@ -380,11 +387,13 @@ fn import_shell_options(shell: &mut Shell) {
     }
 }
 
-/// Keep the two option listings current in the variable table.
+/// Follow an option change through the names that depend on one.
 ///
-/// They are recomputed on the read path, but an exported `SHELLOPTS`
-/// leaves through the environment rather than through a read, so the
-/// stored bytes have to be right at the moment an option changes.
+/// The two option listings are recomputed on the read path, but an
+/// exported `SHELLOPTS` leaves through the environment rather than
+/// through a read, so the stored bytes have to be right at the moment an
+/// option changes. The two prompts are here because whether the
+/// reference has those names at all is decided by the invocation.
 // [spec:nsh:req:compat.bash.builtins-special-variables]
 pub(crate) fn options_changed(shell: &mut Shell) {
     if !shell.variables.special.published {
@@ -392,6 +401,51 @@ pub(crate) fn options_changed(shell: &mut Shell) {
     }
     for name in [b"SHELLOPTS".as_slice(), b"BASHOPTS"] {
         refresh(shell, BStr::new(name));
+    }
+    publish_prompts(shell);
+}
+
+/// `PS1` and `PS2` belong to a shell somebody is watching.
+///
+/// A non-interactive reference has neither name -- not even when the
+/// environment supplied one, which it drops -- and this shell had both
+/// unconditionally, because [`super::initialize_variables`] is shared
+/// with the POSIX dialect and dash's `set` listing carries them. So Bash
+/// mode withholds the two rather than never entering them, which leaves
+/// the `FIXED` slot each was entered in standing and holding nothing,
+/// the way `TERM`'s slot stands empty until something fills it.
+///
+/// Followed rather than settled once, because interactivity belongs to
+/// the invocation and not to the dialect: this shell kept dash's `set -o
+/// interactive`, which the reference refuses, so a Bash-mode script can
+/// still ask for a prompt after startup and has to be given one. Leaving
+/// Bash mode gives them back for the same reason -- the POSIX dialect is
+/// judged against dash, which has both. Only a change of answer is acted
+/// on and a restore writes only into a name holding nothing, so a
+/// script's own `PS1=` is never taken back.
+// [spec:nsh:req:compat.bash.names.only-what-the-reference-has]
+fn publish_prompts(shell: &mut Shell) {
+    let entered =
+        shell.options.dialect() != Dialect::Bash || shell.options.enabled(ShellOption::Interactive);
+    if entered == shell.variables.special.prompts_entered {
+        return;
+    }
+    shell.variables.special.prompts_entered = entered;
+    for (name, default) in [
+        (b"PS1".as_slice(), default_primary_prompt()),
+        (b"PS2".as_slice(), default_continuation_prompt()),
+    ] {
+        let name = BStr::new(name);
+        if !entered {
+            drop(super::unset_bytes(shell, name));
+        } else if super::lookup_bytes(shell, name).is_none() {
+            drop(super::set_bytes(
+                shell,
+                name,
+                Some(default),
+                VariableAttributes::NONE,
+            ));
+        }
     }
 }
 
@@ -654,6 +708,21 @@ pub fn default_ifs() -> &'static BStr {
 
 pub fn default_path() -> BString {
     BString::from(nsh_platform::default_search_path().to_shell_bytes())
+}
+
+/// A shell running as root prompts with `#`, which is what POSIX asks
+/// for and what tells the reader of a transcript which shell it was.
+// [spec:posix:req:param.ps1-default]
+pub fn default_primary_prompt() -> &'static BStr {
+    if nsh_platform::effective_uid().is_root() {
+        BStr::new(b"# ")
+    } else {
+        BStr::new(b"$ ")
+    }
+}
+
+pub fn default_continuation_prompt() -> &'static BStr {
+    BStr::new(b"> ")
 }
 
 fn builtin_value(shell: &Shell, name: &[u8]) -> BString {

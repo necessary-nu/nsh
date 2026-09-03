@@ -325,19 +325,16 @@ fn builtin(name: &[u8], value: Option<&[u8]>, callback: Callback) -> (BString, V
 // [spec:posix:req:param.ppid]
 // [spec:posix:req:param.ps1-default]
 pub fn initialize_variables(shell: &mut Shell) {
-    let prompt: &[u8] = if nsh_platform::effective_uid().is_root() {
-        b"# "
-    } else {
-        b"$ "
-    };
+    let prompt = special::default_primary_prompt();
+    let continuation = special::default_continuation_prompt();
     let default_path = nsh_platform::default_search_path().to_shell_bytes();
     let mut entries = [
         builtin(b"IFS", Some(DEFAULT_IFS), Callback::Ifs),
         builtin(b"MAIL", None, Callback::Mail),
         builtin(b"MAILPATH", None, Callback::Mail),
         builtin(b"PATH", Some(&default_path), Callback::Path),
-        builtin(b"PS1", Some(prompt), Callback::None),
-        builtin(b"PS2", Some(b"> "), Callback::None),
+        builtin(b"PS1", Some(prompt.as_ref()), Callback::None),
+        builtin(b"PS2", Some(continuation.as_ref()), Callback::None),
         builtin(b"PS4", Some(b"+ "), Callback::None),
         builtin(b"OPTIND", Some(b"1"), Callback::Getopts),
         builtin(b"LINENO", Some(b"0"), Callback::None),

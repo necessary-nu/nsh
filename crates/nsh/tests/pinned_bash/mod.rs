@@ -84,6 +84,22 @@ pub fn path() -> PathBuf {
 /// reserves for nothing at all.
 #[allow(dead_code)]
 pub fn answer(shell: &std::path::Path, dialect: &[&str], script: &str) -> (Vec<u8>, i32) {
+    answer_with_env(shell, dialect, &[], script)
+}
+
+/// The same, with `environment` added to the cleared environment first.
+///
+/// Whether a shell *inherited* a name is a different question from
+/// whether it published a default for one, and no script can tell the
+/// two apart from inside a single shell: `TERM=dumb` reads the same
+/// either way. The only way to ask is to start the shell twice.
+#[allow(dead_code)]
+pub fn answer_with_env(
+    shell: &std::path::Path,
+    dialect: &[&str],
+    environment: &[(&str, &str)],
+    script: &str,
+) -> (Vec<u8>, i32) {
     use std::io::Write as _;
     use std::process::{Command, Stdio};
 
@@ -92,6 +108,7 @@ pub fn answer(shell: &std::path::Path, dialect: &[&str], script: &str) -> (Vec<u
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("LC_ALL", "C")
+        .envs(environment.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

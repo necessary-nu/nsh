@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-03T23:08:02.138152207Z
+last_sync_at 2026-09-03T23:15:13.109354178Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -1434,6 +1434,7 @@ derived_priorities (
     {id stop-the-fuzz-budget-paying-for-the-build, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id stop-the-locale-tests-passing-vacuously, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id struct.conditional-sub-grammar, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id struct.dead-decision-citations-in-spec, priority 0, derived_at 2026-09-03T23:15:13.109354178Z}
     {id struct.differential-helper-crate, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id struct.platform-children-module, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id struct.printers-unread-locale, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1643,11 +1644,11 @@ assertions (
     {id wait-for-a-process-substitution-to-finish, kind @complete, author "brendan@necessary.nu", at 2026-09-02T07:17:03.531322482Z}
     {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
     {id widen-the-survey-failure-list-extraction, kind @complete, author "brendan@necessary.nu", at 2026-09-02T04:39:21.797323296Z}
-    {id bash.divergences.publish-names.withhold-prompts, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:04.758628788Z}
     {id tooling.tests.read-the-umask, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:04:16.527250808Z}
     {id perf.locale.unreachable-positions, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:48.355714681Z}
     {id tooling.tests.forked-child-holds-pipe, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:04:54.850614257Z}
     {id harness.derived-corpus-age, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:08:24.265440915Z}
+    {id struct.platform-children-module, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:18:17.05984823Z}
 )
 
 impl_evidence (
@@ -5693,6 +5694,13 @@ impl_evidence (
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
     )}
+    {id struct.windows-locale-export, covered_rules (
+        idiom.platform-surface-parity
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.platform-surface-parity}
+    ), rule_versions_seen (
+        {id idiom.platform-surface-parity, version 0}
+    )}
     {id structure-evaluator-builtin-control-flow, covered_rules (
         idiom.evaluator-control-flow
     ), covered_claims (
@@ -5812,9 +5820,9 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
     )}
-    {id struct.windows-locale-export, covered_rules (
-        idiom.platform-surface-parity
+    {id bash.divergences.publish-names.withhold-prompts, covered_rules (
+        compat.bash.names.only-what-the-reference-has
     ), covered_claims (
-        {impl_name nsh-library, rule idiom.platform-surface-parity}
+        {impl_name nsh-library, rule compat.bash.names.only-what-the-reference-has}
     )}
 )
