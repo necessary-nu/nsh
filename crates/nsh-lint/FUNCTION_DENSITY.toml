@@ -29,7 +29,7 @@
 #
 # AN ANSWER IS A PREDICTION, AND EVERY ONE WRITTEN SO FAR WAS WRONG
 # SOMEWHERE. Naming a seam is a claim about the code on *both* sides of
-# it, and the first five entries here were written from the half that
+# it, and the first six entries here were written from the half that
 # moves. Each was found by the person who acted on it:
 #
 #   * `arithmetic.rs` predicted "a `pub(super)` on two types and nothing
@@ -53,8 +53,28 @@
 #     gate does not count. It never became an entry at all, and only
 #     because the figure was checked before this file was written.
 #
+#   * `nsh-platform/src/locale.rs`'s own entry, when it was acted on the
+#     day after it was written, was wrong in three ways and right about
+#     the seam. Its total was 52 -- the count of the *remote* side of the
+#     merge, not of the merged file, which is 54; the two missing are the
+#     tests this tree contributed, `a_prefix_decodes_or_says_why_not` and
+#     `every_locale_agrees_on_portable_characters`, so it is 20 moved and
+#     34 left rather than 20 and 32. "Nothing changes visibility" held
+#     for the code and not for the tests: `current()` was never mentioned
+#     and six tests split across both halves call it, and `utf8()` was
+#     listed as moving with "nothing that stays does [use it]" when
+#     `every_locale_agrees_on_portable_characters` stays -- it is about
+#     `is_alpha` -- and calls it. Both helpers stayed in the parent as
+#     `pub(super)`, which is what privacy running downward buys. And the
+#     re-export in `unix.rs` was named as "the thing easiest to miss"
+#     while a third file was not named at all: a new file under
+#     `crates/nsh-platform/src/` that says `unsafe` has to join
+#     `PRIVATE_PLATFORM_ALLOWLIST` in `nsh-lint`'s `main.rs` or two
+#     checks refuse it. The `unsafe extern "C"` block did move whole,
+#     exactly as predicted.
+#
 # None of those made an entry useless -- every seam was in the right
-# place, and all five splits landed. But an entry that is wrong about
+# place, and all six splits landed. But an entry that is wrong about
 # what crosses the boundary understates the work, and the numbers being
 # right is no evidence that the prose is: the first two were wrong in
 # prose alone.
@@ -62,7 +82,7 @@
 # So write the answer from the code that *stays* as much as from the code
 # that goes, count with `density.rs`'s counter rather than by eye, and if
 # you are picking an entry up, verify it rather than trust it. That is
-# what caught all three.
+# what caught all four.
 #
 # COUNTED THE WAY THE GATE COUNTS. `exempt-test-scope` is false, so a
 # file's own `mod tests { ... }` counts against the same fifty as its
@@ -97,42 +117,4 @@ stays `pub(super)`, and `conditional_primary` keeps reaching `super::keywords::n
 `super::tokens::mark`, so the move is imports and no signature changes. Counted with \
 `density.rs`'s counter on 2026-09-02, the day the file reached 46 by gaining `conditional_chain` \
 and `conditional_test` for the `[[ ]]` newline work.
-"""
-
-
-[[file]]
-path = "crates/nsh-platform/src/locale.rs"
-answer = """
-Split the character half out to `crates/nsh-platform/src/locale/characters.rs`: everything \
-that answers "what character do these bytes spell, and what is it". Thirteen functions move -- \
-`LocaleDecoder::push`, and `Locale`'s `decoder`, `decode_byte`, `decode_prefix`, \
-`wide_is_blank`, `wide_is_space`, `charmap_is_utf8`, `encode_character`, `multibyte_len`, \
-`character_widths`, `decode_exact`, `wide_class_matches` and `wide_chars` -- with the \
-`LocaleDecode`, `LocaleCharacter` and `LocaleDecoder` types, both spellings of `MbState`, and \
-the whole `unsafe extern "C"` block: all eight of its declarations are called only from this \
-set, so none of them stays behind. Seven tests go with them -- `a_charmap_answers_for_its_own_characters`, \
-`a_value_beyond_wchar_is_refused`, `encoding_preserves_thread_locale`, \
-`character_widths_answer_every_byte_position`, `character_widths_preserve_thread_locale`, \
-`decoder_keeps_locale_handle_alive`, and the `utf8()` helper, which four of them use and \
-nothing that stays does. That is 20 moving and 32 left here. \
-WHAT CROSSES THE SEAM AND STAYS: `Locale`, `RawLocale`, `select` and `with_selected`. Every \
-moved function opens with `self.with_selected(...)` and several read `self.0.handle`, and a \
-child module sees its parent's private items, so the new file takes all four from `super` and \
-no visibility changes. `LocaleGuard` and its `Drop` stay with them. `ByteClass`, \
-`byte_classes` and the three `is_alpha`/`is_alphanumeric`/`is_space` stay too, and are not a \
-near miss: they ask `libc::isalpha` and never touch the extern block, which is why the block \
-can move whole. \
-ONE RE-EXPORT CROSSES AND IS EASY TO MISS: `crates/nsh-platform/src/unix.rs` names \
-`pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder}`, so \
-`locale.rs` gains a `pub use characters::{LocaleCharacter, LocaleDecode, LocaleDecoder}` or \
-`unix.rs` is retyped. `crates/nsh-platform/src/lib.rs`'s `Locale::character_encoding` calls \
-`encode_character`, which is `pub(crate)` and stays `pub(crate)` wherever it lives, so `lib.rs` \
-is untouched -- but `a_charmap_answers_for_its_own_characters` tests `character_encoding` and \
-not anything in this file, and belongs beside `encode_character` rather than where it is. \
-`crates/nsh-platform/src/windows/locale.rs` is a file of its own and is unaffected. \
-Counted with `density.rs`'s counter on 2026-09-03, the day merging `origin/master` took the \
-file from 45 to 52 -- over the cap -- by landing `4cc143b`'s `[ByteClass; 256]` table beside \
-this tree's `decode_prefix`. The split is not done: this is the plan, and the merge that \
-required it recorded a `function-density` bypass rather than restructure a file two \
-histories had just met inside.
 """

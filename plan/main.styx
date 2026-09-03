@@ -10042,6 +10042,15 @@ children (
                                 id repin-the-editor-crates-for-aarch64
                                 title "Repin the editor crates so aarch64 Linux builds"
                                 kind @build
+                                sealed true
+                                log (
+                                    {
+                                        at 2026-09-03T19:04:29.477759536Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
+                                    }
+                                )
                             }
 
                             {
@@ -10097,6 +10106,13 @@ children (
                                         kind @blocker
                                         text "`crates/nsh-platform/src/locale.rs` HOLDS 52 FUNCTIONS, TWO OVER THE CAP OF FIFTY, BECAUSE TWO LOCALE EFFORTS LANDED IN IT FROM DIFFERENT DIRECTIONS.\n\nCounted with `crates/nsh-lint/src/density.rs`'s counter, which is the gate's counter, on 2026-09-03:\n\n    9788287 (the merge base)  33\n    origin/master             40   -- 4cc143b's `[ByteClass; 256]` table and the run-joined `newlocale`\n    abe28ce (this tree)       45   -- `decode_prefix`, `LocaleCharacter` and the decoder work\n    merged                    52\n\n`nsh-lint` was ALREADY failing at `abe28ce`: 45 is the register's mark, and the file had no entry. The merge took it past the cap as well.\n\nThe register entry is written -- `crates/nsh-lint/FUNCTION_DENSITY.toml`, added by the merge commit -- and names the seam and everything that crosses it: `crates/nsh-platform/src/locale/characters.rs` takes thirteen functions, the `LocaleDecode`/`LocaleCharacter`/`LocaleDecoder` types, both spellings of `MbState`, the whole `unsafe extern \"C\"` block (all eight declarations are called only from the moving set, verified line by line) and seven tests including the `utf8()` helper. 20 move, 32 stay, and nothing changes visibility because a child module sees its parent's private items. One re-export in `crates/nsh-platform/src/unix.rs` is the thing easiest to miss.\n\nTHE SPLIT WAS NOT DONE IN THE MERGE, FOR TWO REASONS AND BOTH SHOULD BE SAID. A merge commit that also restructures a 1030-line file is unreviewable as either. And `restore-a-head-that-does-not-compile` records that a session was mid-change inside this exact file the same day -- `abe28ce` had to land 112 lines of somebody else's in-flight work to get a HEAD that compiled -- so moving 600 lines of it out from under them is how a colleague loses an afternoon. The merge recorded a `function-density` bypass naming this node instead.\n\nDONE WHEN the split is made as the register entry describes, the entry is corrected wherever it turns out to be wrong -- the register's own header is emphatic that every answer written so far was wrong somewhere, and the honest way to pick one up is to verify it rather than trust it -- and `nsh-lint` reports the entry stale and it is deleted, both halves being under the mark."
                                     }
+
+                                    {
+                                        at 2026-09-03T18:53:39.274955962Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -10104,6 +10120,15 @@ children (
                                 id integrate-the-remote-master-branch
                                 title "Integrate the remote master into this history"
                                 kind @chore
+                                sealed true
+                                log (
+                                    {
+                                        at 2026-09-03T19:04:27.491820334Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
+                                    }
+                                )
                             }
                         )
                     }
@@ -10193,12 +10218,20 @@ children (
                 id restore-a-head-that-does-not-compile
                 title "Restore a HEAD that does not compile from a swept file"
                 kind @fix
+                sealed true
                 log (
                     {
                         at 2026-09-03T17:05:21.952213145Z
                         author "brendan@necessary.nu"
                         kind @blocker
                         text "MASTER DOES NOT BUILD AS OF `59b9f6a`, AND THE SHARED CHECKOUT HIDES IT. Found 2026-09-03 19:05 while closing `stop-the-noclobber-append-case-flaking`. Nothing in the working tree shows it, because the working tree carries the uncommitted files that make it compile; only a fresh worktree at HEAD sees it.\n\n    git worktree add --detach <path> 59b9f6a && cargo build -p nsh\n      error[E0433]: cannot find `LocaleCharacter` in `nsh_platform`   parser.rs:960,961,964,971\n      error[E0425]: cannot find function `buffered_line_bytes` in module `crate::input`  parser.rs:949\n      error[E0599]: no method named `decode_prefix` found for struct `Locale`           parser.rs:956\n\nWHAT HAPPENED. `89ee017` (\"Start a re-entered parse from its own source, not the caller's\") committed `crates/nsh/src/parser.rs` whole. That file held three sessions' hunks at the time: its own, this session's `&>` reader, and the locale follow-ons' `decode_buffered_character`, which calls `nsh_platform::LocaleCharacter`, `crate::input::buffered_line_bytes` and `Locale::decode_prefix` -- all of them still uncommitted in `crates/nsh-platform/src/locale.rs` and `crates/nsh/src/input.rs`. So a function landed without its dependencies.\n\nThe `&>` half was repaired by `59b9f6a`, which had to be taken ahead of the survey re-record it should have carried, for exactly this reason: `parser.rs` at HEAD declared `PendingRedirection::File`'s third field while `grammar.rs` at HEAD destructured the variant without it. The locale half is still open and is not this session's to commit -- `crates/nsh-platform/src/locale.rs` is mid-change and sits at the function-density mark.\n\nDONE WHEN a fresh worktree at master runs `cargo build -p nsh` clean: either the locale session commits `locale.rs` and `input.rs`, or the swept `decode_buffered_character` is taken back out of `parser.rs`. The first is much the better, since the function is presumably wanted.\n\nTHE RULE THIS IS THE THIRD INSTANCE OF. `9fb9e56` swept a sibling's five files; `commit-only-the-paths-a-node-staged` fixed that with a pathspec; and a pathspec still commits the WORKING TREE's bytes, so two sessions' hunks in ONE file defeat it. `944cef3` shows the route that works and it is not obvious: stage only your own hunks into the index, call `nplan commit` with no `paths` so it commits the index, and disclose it as `partial-stage`. That is now the third defect of the same family in two days, and it is worth being in the house rules rather than rediscovered: NAMING A PATH IS NOT ENOUGH WHEN SOMEBODY ELSE IS INSIDE THE SAME FILE.\n\nWHAT WOULD HAVE CAUGHT IT. Nothing does. `nplan commit`'s checks run against the working tree, which builds; the platform check cannot see that the committed tree does not. A check that builds the *committed* content -- `git stash`-free, in a scratch worktree at the new commit -- is the only thing that distinguishes them, and it is the same distinction `oracle.cannot-measure-is-a-failure` keeps being about: the thing checked was not the thing shipped."
+                    }
+
+                    {
+                        at 2026-09-03T19:04:31.425935024Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
                     }
                 )
             }
@@ -12203,12 +12236,20 @@ children (
         id master-has-not-built-since-a-commit-took-half-a-file
         title "Restore the tree: `89ee017` committed a parser that needs three uncommitted files"
         kind @fix
+        sealed true
         log (
             {
                 at 2026-09-03T17:21:25.226092875Z
                 author "brendan@necessary.nu"
                 kind @note
                 text "FOUND 2026-09-03 WHILE CLOSING `make-a-substitution-linear-in-its-value`, BY BUILDING A WORKTREE AT HEAD. The shared checkout builds and every gate passes there, because it holds the missing half uncommitted. A clean checkout of master does not build at all.\n\n    git worktree add --detach /tmp/x $(git rev-parse HEAD)\n    cargo build -p nsh\n    error[E0433]: cannot find `LocaleCharacter` in `nsh_platform`   (parser.rs:960, 961, 964, 971)\n    error[E0425]: cannot find function `buffered_line_bytes` in module `crate::input`  (parser.rs:949)\n    error[E0599]: no method named `decode_prefix` found for struct `Locale`  (parser.rs:956)\n\nWHICH COMMIT. `git log -S LocaleCharacter -- crates/nsh/src/parser.rs` names exactly one: `89ee017` \"fix: Start a re-entered parse from its own source, not the caller's\". Its four paths are `crates/nsh-cli/tests/bash_subscript_substitution.rs`, `crates/nsh/src/parser.rs` and the two plan files. The 144 lines it added to `parser.rs` include a block that belongs to a different session's work -- the one on `decode-a-character-from-the-buffer-the-parser-already-holds`, whose other three files are still uncommitted in the checkout as `crates/nsh-platform/src/locale.rs`, `crates/nsh-platform/src/unix.rs`, `crates/nsh-platform/src/windows/locale.rs` and `crates/nsh/src/input.rs`.\n\nSO THIS IS THE SWEEP THE HOUSE RULES WARN ABOUT, in its worst form: naming a path in `paths` commits that path's whole WORKING TREE content, and the working tree held two sessions' edits to `parser.rs`. The commit took the half that could not stand alone. Nothing is lost -- the other half is still in the checkout -- but master has not built since, and every measurement anyone takes in a private worktree at HEAD fails to build rather than answering.\n\nWHY IT WAS NOT CAUGHT. The commit gates run against the working tree, which builds. Nothing in the pipeline builds the tree the commit actually creates.\n\nDONE WHEN a clean worktree at master builds, which needs the four files above committed -- by the session that owns them, since only it knows whether that half is finished. If it is not finished, the alternative is to take the block back out of `parser.rs`. And there is a second question worth answering while someone is here: a gate that built the committed tree rather than the working tree would have caught this in the commit that caused it."
+            }
+
+            {
+                at 2026-09-03T19:04:33.32456068Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Done (nplan complete)"
             }
         )
     }

@@ -144,6 +144,7 @@ const PRIVATE_PLATFORM_ALLOWLIST: &[&str] = &[
     "crates/nsh-platform/src/descriptor_name.rs",
     "crates/nsh-platform/src/editor_terminal.rs",
     "crates/nsh-platform/src/locale.rs",
+    "crates/nsh-platform/src/locale/characters.rs",
     "crates/nsh-platform/src/signal_names.rs",
     "crates/nsh-platform/src/terminal.rs",
     "crates/nsh-platform/src/unix.rs",
