@@ -470,14 +470,14 @@ pub(crate) fn assign_element(
 
     // `+=` on one element concatenates that element's bytes; the whole
     // value is never re-read as a scalar here.
-    let appended;
-    let element = if append {
+    let appended = if append {
         let existing = existing_element(&current, selector).unwrap_or_default();
-        appended = append_element(shell, name, BStr::new(existing.as_slice()), value)?;
-        BStr::new(appended.as_slice())
+        append_element(shell, name, BStr::new(existing.as_slice()), value)?
     } else {
-        value
+        value.to_owned()
     };
+    let appended = declared_element(shell, name, BStr::new(appended.as_slice()))?;
+    let element = BStr::new(appended.as_slice());
 
     match selector {
         ArraySelector::Index(index) => {
@@ -537,6 +537,7 @@ pub(crate) fn append_unsubscripted(
     reject_read_only(shell, name, guard)?;
     let existing = super::lookup_bytes(shell, name).unwrap_or_default();
     let appended = append_element(shell, name, BStr::new(existing.as_slice()), value)?;
+    let appended = declared_element(shell, name, BStr::new(appended.as_slice()))?;
     /* `store` rather than `set_bytes`, because the guard has to reach the
      * write: `readonly r+=bar` declares `r` and assigns it in one command,
      * and the declaration is allowed to write the name it just marked. */
@@ -570,6 +571,20 @@ fn append_element(
     let mut combined = existing.to_owned();
     combined.extend_from_slice(value);
     Ok(combined)
+}
+
+/// Reshape an element's bytes the way the array's declaration requires.
+///
+/// The attribute belongs to the variable and not to the scalar slot, so
+/// every element of an `-i`, `-u` or `-l` array takes it: `declare -ai
+/// v=(1+1)` stores `2` and `v[5]=3+4` stores `7`.
+///
+/// After the append and never before it. `declare -al v=(AB); v[0]+=CD`
+/// is `abcd` in the reference, which is the whole value lowercased once
+/// -- lowercasing only what `+=` contributed would give `ABcd`.
+// [spec:nsh:req:compat.bash.arrays-declarations]
+fn declared_element(shell: &mut Shell, name: &BStr, value: &BStr) -> Result<BString, Error> {
+    Ok(super::nameref::declared_value(shell, name, value)?.unwrap_or_else(|| value.to_owned()))
 }
 
 /// An integer variable reads empty text as zero rather than refusing it.
@@ -757,17 +772,16 @@ pub(crate) fn assign_compound(
             }
             None => ArraySelector::Index(next),
         };
-        let value = BStr::new(element.value.as_slice());
-        let combined;
-        let value = if element.append {
-            let base = previous.as_ref().unwrap_or(&current);
-            let mut existing = existing_element(base, &selector).unwrap_or_default();
-            existing.extend_from_slice(value);
-            combined = existing;
-            BStr::new(combined.as_slice())
+        let written = BStr::new(element.value.as_slice());
+        let combined = if element.append {
+            let existing = existing_element(previous.as_ref().unwrap_or(&current), &selector)
+                .unwrap_or_default();
+            append_element(shell, name, BStr::new(existing.as_slice()), written)?
         } else {
-            value
+            written.to_owned()
         };
+        let combined = declared_element(shell, name, BStr::new(combined.as_slice()))?;
+        let value = BStr::new(combined.as_slice());
         match &selector {
             ArraySelector::Index(index) => {
                 current.set_indexed(*index, value);

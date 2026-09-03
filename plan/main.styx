@@ -8085,6 +8085,13 @@ children (
                                         kind @blocker
                                         text "`editor::completion::tests::completion_marks_files_and_directories` FAILS WITH EACCES UNDER LOAD, AND THE CAUSE IS ANOTHER TEST'S UMASK.\n\n`crates/nsh/src/builtins/umask.rs`'s tests set the process's file-creation mask to `0o777` -- `a_symbolic_operand_is_complemented` asserts `set(b\"a=\") == 0o777` -- and they are honest about it: `with_mask` takes `crate::test_support::lock()`, saves the mask and puts it back, with a comment saying the umask is the process's.\n\n`completion_marks_files_and_directories` (`crates/nsh/src/editor/completion.rs:83`) does not take that lock. It calls `std::fs::create_dir` under `temp_dir()` and then reads the directory back. While the umask is `0o777` those directories are created mode `000`, and reading one is `EACCES`. Both tests are in the same binary and cargo runs them on different threads, so the window is real and widens with load. The `--features edit` build is where it shows, because `mod editor` is a stub without it.\n\nTHE LOCK IS THE FIX FOR THE TEST AND NOT FOR THE PROBLEM. `test_support::lock()` only works if every test that touches the mask agrees to take it, which is the property no reviewer can check and no gate enforces. The reason it was missed here is that the umask is not written down: `docs/api-design.md` §6 lists the process-wide facts the API has to be honest about -- `strtok`, `getopt`/`optind`, the signal inbox, the process's own identity, the working directory, the process group and controlling terminal, and (struck 2026-09-02) the child pool -- and the file-creation mask is in none of them. It is exactly the same kind of fact as the working directory, which §6 does list: per-process, mutated by a builtin, inherited by every child, and not restorable by a second `Shell` that did not set it.\n\nSo this node is two things and the second is the point:\n\n1. The immediate flake: whatever makes `completion_marks_files_and_directories` independent of another test's ambient state. Taking the lock is the cheap answer; creating the fixture with an explicit mode is the better one, because it removes the dependency instead of scheduling around it.\n2. §6 gains the file-creation mask, with the same honesty the other entries get: `umask` is per-process, two `Shell`s share one, and the crate docs say so. If it turns out to *divide* -- `open`/`mkdir` take a mode and the mask is only a default, so a shell that applies its own mask itself would not need the process's -- then say that instead, the way the child-pool entry was struck rather than restated.\n\nFound while investigating an unrelated flake; the failure is `EACCES` from the directory read, not from `create_dir`, which is why it reads as a permissions problem in the test's own temp directory and not as a umask at all."
                                     }
+
+                                    {
+                                        at 2026-09-03T16:12:04.530679662Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -9095,6 +9102,7 @@ children (
                                 id stop-a-freed-descriptor-number-racing-its-test
                                 title "Stop a freed descriptor number racing a sibling test"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T14:29:18.432052645Z
@@ -9108,6 +9116,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T16:11:56.46879794Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -9596,6 +9611,20 @@ children (
                         author "brendan@necessary.nu"
                         kind @status
                         text "Doing → Done (nplan complete)"
+                    }
+                )
+            }
+
+            {
+                id bind-a-work-directory-the-harness-reaches-through-a-link
+                title "Bind a work directory reached through a symbolic link"
+                kind @fix
+                log (
+                    {
+                        at 2026-09-03T16:14:39.504636506Z
+                        author "brendan@necessary.nu"
+                        kind @blocker
+                        text "FOUND 2026-09-03 WHILE CLOSING `give-the-differential-wrapper-a-kill-after`, AND NOT PART OF IT. It made a brand-new check report `ok` for a sandbox that never started, which is how it was noticed.\n\n`tests/harness/sandboxed.sh`'s `ds_sandboxed` binds its work directory as `--bind \"$dir:$dir\"`. When `$dir` is reached through a symbolic link -- the checkout's `target` being one, which is what a full root disk drives people to and what `judge-a-shell-whose-target-is-a-link` is about -- the sandbox refuses before running anything:\n\n    sandbox: Can't mkdir parents for /home/brendan/work/dash-boundary-wt/target/probe-2673673: No such file or directory\n    rc=1\n\nMeasured in a worktree at `d0ffd39` whose `target` was a link to its own build tree, load 20.7. `scripts/sandboxed` given the same directory writes into it happily, with and without `--writable`, so this is `ds_sandboxed`'s bind and not the sandbox tool's rule.\n\nWHY IT IS WORTH A NODE RATHER THAN A LINE. It is a zero-second, status-1 failure with a message on stderr, which reads exactly like a case that failed instantly. A new `budget-selftest.sh` check written as \"status is non-zero and elapsed is under five seconds\" reported `ok status=1 elapsed=0s` against a wrapper that had not been fixed yet -- a check that passed because nothing ran, which is `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` in the check rather than in the shell. The corrected spelling asserts 137, a floor and a ceiling; the point is that the failure mode is quiet enough to be mistaken for the thing being measured.\n\nNOT REACHED BY THE CORPUS TODAY, which is why this is filed rather than folded in. `dsdiff.sh` and `dscase.sh` build their work directories under `tests/.build`, a real directory in every checkout seen so far, and `ds_assert_harness_live` would refuse the run with \"HARNESS DEAD\" if they were not -- so the differential sweep fails closed rather than passing vacuously. Only `budget-selftest.sh` puts its work under `target/`, deliberately (\"so the sandbox and the host agree on the path\"), which is exactly the assumption a linked `target` breaks.\n\nDONE WHEN `ds_sandboxed` resolves the directory before binding it -- `realpath` or the equivalent, the same thing `crates/nsh-survey/src/process.rs` does with `fs::canonicalize` and `shell::judged_against` now does with its prefix -- or says plainly that it cannot bind that path; and a work directory under a linked `target` runs a case."
                     }
                 )
             }
