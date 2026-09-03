@@ -12152,6 +12152,14 @@ children (
                         kind @status
                         text "Todo → Done (nplan complete)"
                     }
+
+                    {
+                        at 2026-09-03T22:13:05.611042576Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "THE RESHAPE SILENTLY UNDID 36 COMPLETIONS. Corrected 2026-09-04.\n\n`04b92a8` renamed 74 node ids and rewrote the `deps (...)` lists that pointed at them. It did not rewrite `plan/.state.styx`'s `assertions` block, which addresses nodes by id too. Every completion recorded under an old id was left addressing a node that no longer exists:\n\n    assertions: 173      orphaned by the rename: 36\n\nSo 36 finished nodes went back to reading as todo, and `nplan ready` answered 63 where the true figure was 31. Nothing was `sealed` back open and no log entry was lost -- each node's own log still carried its `Doing -> Done (nplan complete)` line, which is how the discrepancy was found: a node listed as ready whose own log said it had been completed the previous afternoon.\n\nWHY THE CHECKS DID NOT SEE IT. `nplan lint` was clean before the rename and clean after it. It validates the plan's own invariants -- dangling deps, id uniqueness, priority monotonicity -- and an assertion naming a node that does not exist is not among them; the reconciler simply finds nothing to apply it to. That is worth reporting upstream, because an orphaned assertion is exactly as dangling as an orphaned dep and the second is a violation.\n\nTHE REPAIR. Old ids were mapped to new by title, which is sound here because `04b92a8` changed no titles and all 407 titles are unique. All 36 mapped and none was ambiguous. Only the `assertions` block referenced old ids -- `derived_priorities` and `impl_evidence` did not -- and the block was re-sorted afterwards to keep it diffable.\n\nWHAT IT MEANS FOR RENAMING. `nplan mv` moves a node and keeps its id; a rename is a different operation and this tool has none for it. Renaming 74 ids by editing one file was therefore an edit to a two-file structure made as though it were one. Anything that addresses a node by id has to move with it: assertions, deps, and the `nplan-id:` trailers in the commits already made -- and those last cannot be repaired, which was known and accepted when the rename was made."
+                        after_done true
+                    }
                 )
             }
         )
