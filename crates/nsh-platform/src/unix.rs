@@ -9,7 +9,14 @@
  * `locale`, `terminal` and `editor_terminal` were split out one at a
  * time and sit beside this file in `src/`, while everything this change
  * moved is in `src/unix/`. `signal_names` is shared with the Windows
- * host and belongs in neither. */
+ * host and belongs in neither.
+ *
+ * Every name published below is published by `windows.rs` too, under the
+ * same conditions. The shell names them with no `cfg`, so a host short of
+ * one fails in the shell on a target nobody here builds rather than in
+ * the file that is short; `nsh-lint`'s `hosts_publish_the_same_surface`
+ * compares the two lists so the shortfall is reported where it is. */
+// [spec:nsh:req:idiom.platform-surface-parity]
 
 mod descriptor;
 pub use descriptor::{AsDescriptor, BorrowedDescriptor, Descriptor, move_fd_cloexec};

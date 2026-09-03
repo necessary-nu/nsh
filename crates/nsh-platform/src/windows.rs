@@ -8,6 +8,14 @@
 //! `spawn`, because Windows will not replace a running image, and
 //! `broker`, because the process a native clone produces may not create
 //! one.
+//!
+//! Every name published below is published by `unix.rs` too, under the
+//! same conditions. The shell names them with no `cfg`, so a host short
+//! of one fails in the shell on a target nobody here builds rather than
+//! in the file that is short; `nsh-lint`'s
+//! `hosts_publish_the_same_surface` compares the two lists so the
+//! shortfall is reported where it is.
+// [spec:nsh:req:idiom.platform-surface-parity]
 
 /* The private items one child needs from another. A child sees this
  * module's names through `use super::*`, so a helper crosses from the
@@ -33,7 +41,15 @@ pub use descriptor::{
     AsDescriptor, BorrowedDescriptor, Descriptor, duplicate_cloexec, duplicate_fd, duplicate_file,
     move_fd_cloexec,
 };
+/* Gated as the POSIX file of this name is, though nothing here needs
+ * `nshedit-plat` and the console answers without it. A name published on
+ * one host and not the other is what this file's list is checked for,
+ * and a name published in more builds is the same drift as a name
+ * missing: an embedder that leaves the feature off would find these on
+ * one host only. */
+#[cfg(feature = "edit")]
 mod editor_terminal;
+#[cfg(feature = "edit")]
 pub use editor_terminal::{
     EditorTerminalAttributes, TerminalApply, TerminalControlCharacter,
     apply_editor_terminal_attributes, editor_terminal_attributes, editor_terminal_size,

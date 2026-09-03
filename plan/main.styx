@@ -9888,6 +9888,27 @@ children (
                                 kind @note
                                 text "THE RESIDUE OF `bound-what-a-campaign-pays-to-replay-its-corpus`, LEFT ON PURPOSE. That node moved the full-archive replay out of every campaign and into `fuzz/run.sh --derive`, which is what made `fuzz/run.sh parse 10` a 26-second campaign instead of a 274-second one. What it did not do is give anyone a reason to run the derivation again.\n\nWHAT IS TRACKED AND WHAT IS NOT. `fuzz/campaign/TARGET.archived` records the archive listing a derivation was made from, so a campaign knows what has *arrived* since and seeds those as well -- staleness never costs coverage. It records nothing about *when*, and nothing about *which build*. So:\n\n    fuzz/corpus.sh: seeding from 2659 campaign inputs standing for 21305 archived\n\nis printed every campaign and is true whether the archive was last run against this build or against the tree of three weeks ago. The archive is the regression set; a regression set nothing has run is not a regression set, and the honest reading of `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` is that a campaign should be able to say so.\n\nWHAT WOULD SAY IT. The derivation knows the commit it ran against and the time it ran; both belong beside the listing. A campaign could then print \"the archive was last run against 04582ce, 340 commits ago\" -- which is a fact, not a policy -- and a threshold could be argued about separately. The commit is the better half of the pair: wall-clock age says nothing when nothing has changed, and one commit to `crates/nsh/src/pattern.rs` says a great deal.\n\nNOT TO BE SOLVED BY RE-DERIVING AUTOMATICALLY. A derivation is a full replay -- 286s for `parse` at load 102, 149s for `differential` at load 22 -- and folding it back into every campaign would undo the node that removed it. The point is to make the cost visible, not to pay it silently.\n\nALSO HERE, because it is the same bookkeeping: the campaign corpus grows monotonically between derivations, by about twenty inputs a campaign, so the start-up it bounds creeps back up. Nothing reports that either, and the same stamp would.\n\nDONE WHEN. A campaign says what build the archive was last run against and how far the tree has moved since, the derivation records it, and neither answer costs a replay."
                             }
+
+                            {
+                                at 2026-09-03T23:08:24.265440915Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-03T23:08:24.265440915Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "single-flight overridden: started while bash.divergences.publish-names.withhold-prompts had uncommitted WIP"
+                            }
+
+                            {
+                                at 2026-09-03T23:08:30.399283144Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Started with `force` because the single-flight WIP gate named `bash.divergences.publish-names.withhold-prompts`, which is another session's Doing node in this shared checkout (crates/nsh/src/variables/special.rs, crates/nsh-cli/tests/bash_shell_facts.rs, crates/nsh-cli/tests/default_history_navigation.rs). This node's footprint is fuzz/** and does not touch any of them."
+                            }
                         )
                     }
                 )
@@ -11736,6 +11757,20 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
+
+                    {
+                        id struct.dead-decision-citations-in-spec
+                        title "Check spec prose for decision citations the corpus does not declare"
+                        kind @fix
+                        log (
+                            {
+                                at 2026-09-03T23:11:31.611732752Z
+                                author "brendan@necessary.nu"
+                                kind @blocker
+                                text "`[dec:nsh:platform-boundary]` IS CITED TWICE IN docs/spec/nsh/ AND NO FILE IN plan/decisions/ DECLARES IT.\n\n    docs/spec/nsh/idiomatic-core.md:104   the body of [spec:nsh:req:idiom.platform-surface-parity]\n    docs/spec/nsh/verification.md:93      the reason a host fact reaches a test as a `pub const fn`\n\n    $ ls plan/decisions/ | grep platform    # nothing\n    $ grep -l 'id \\[dec:nsh:platform-boundary\\]' plan/decisions/*.md    # nothing\n\nFound 2026-09-04 while implementing `idiom.platform-surface-parity`: the check module written for it opened by citing the decision its own rule cites, and `cited_decisions_are_live` reported the citation on the first run. The reference was removed from the Rust file, which is why nothing in `crates/` names it now and why nothing will report it again.\n\nWHY THE EXISTING CHECK DOES NOT REACH THIS. `crates/nsh-lint/src/citations.rs` sweeps one tree and says so -- `const TREE: &str = \"crates\"`. Spec prose under `docs/spec/` is not swept, so a rule may cite a decision the corpus never held, or one it has since obsolesced, and the only thing that reports it is a person writing code against that rule and copying the sentence. The two hits above have been in the tree for some time and neither was reported.\n\nWHICH WAY TO FIX IT IS NOT ESTABLISHED, and that is the work. Either the decision exists under another id and the two citations are misspelt -- `[dec:nsh:host-owns-the-process]` and `[dec:nsh:public-surface]` are the nearest live things, and neither says what the sentences claim -- or the corpus is genuinely missing a decision that both spec rules already treat as binding, in which case the fix is to write it rather than to reword them. Establish which before touching either file. The property \"no `cfg(target_os ...)` in the shell crate\" is real and load-bearing whichever way it lands: `grep -c 'cfg(target_os' crates/nsh/src -r` is 0 today.\n\nWidening `TREE` to cover `docs/spec/**` is the mechanical half and is cheap; it is second, because turning it on before the two hits are resolved makes `nsh-lint` red for everyone."
                             }
                         )
                     }

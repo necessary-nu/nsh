@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-03T22:17:55.056597249Z
+last_sync_at 2026-09-03T23:08:02.138152207Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -1644,10 +1644,10 @@ assertions (
     {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
     {id widen-the-survey-failure-list-extraction, kind @complete, author "brendan@necessary.nu", at 2026-09-02T04:39:21.797323296Z}
     {id bash.divergences.publish-names.withhold-prompts, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:04.758628788Z}
-    {id struct.windows-locale-export, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:25.604961066Z}
     {id tooling.tests.read-the-umask, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:04:16.527250808Z}
     {id perf.locale.unreachable-positions, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:48.355714681Z}
     {id tooling.tests.forked-child-holds-pipe, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:04:54.850614257Z}
+    {id harness.derived-corpus-age, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:08:24.265440915Z}
 )
 
 impl_evidence (
@@ -2275,6 +2275,13 @@ impl_evidence (
         compat.bash.options-builtins-dispatch
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.options-builtins-dispatch}
+    )}
+    {id harness.group-run-wrong-dialect, covered_rules (
+        oracle.refuses-a-mismeasurement
+    ), covered_claims (
+        {impl_name nsh-library, rule oracle.refuses-a-mismeasurement}
+    ), rule_versions_seen (
+        {id oracle.refuses-a-mismeasurement, version 0}
     )}
     {id implement-bash-arrays-declarations, covered_rules (
         compat.bash.arrays-declarations
@@ -5805,9 +5812,9 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
     )}
-    {id harness.group-run-wrong-dialect, covered_rules (
-        oracle.refuses-a-mismeasurement
+    {id struct.windows-locale-export, covered_rules (
+        idiom.platform-surface-parity
     ), covered_claims (
-        {impl_name nsh-library, rule oracle.refuses-a-mismeasurement}
+        {impl_name nsh-library, rule idiom.platform-surface-parity}
     )}
 )

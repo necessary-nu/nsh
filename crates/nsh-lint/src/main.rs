@@ -37,6 +37,12 @@ mod density;
 /// the register mark.
 mod citations;
 
+/// The one check whose subject is a property no single compilation can
+/// see: what two hosts of the platform crate each publish. It keeps its
+/// own module for the third reason -- it reads a file structure rather
+/// than a needle, and the reading is most of it.
+mod platform_surface;
+
 /// A module's whole text: the file, and every file in the directory beside it.
 ///
 /// Every check here is about how a subsystem is *written*, not about which
@@ -1706,6 +1712,10 @@ fn main() {
         (
             "cited_decisions_are_live",
             citations::cited_decisions_are_live,
+        ),
+        (
+            "hosts_publish_the_same_surface",
+            platform_surface::hosts_publish_the_same_surface,
         ),
     ];
     let mut failed = 0_usize;
