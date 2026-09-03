@@ -9992,6 +9992,7 @@ children (
                                 id port-the-script-module-onto-the-canonical-word
                                 title "Port the script module onto the canonical word"
                                 kind @refactor
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-03T17:38:56.822578251Z
@@ -10006,6 +10007,34 @@ children (
                                         kind @status
                                         text "Todo → Doing (nplan start)"
                                     }
+
+                                    {
+                                        at 2026-09-03T18:10:32.608512479Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "THE MAPPING, PART BY PART, AND WHERE THE ONE MISSING DISTINCTION WENT.\n\n`Literal(BString)` -> `Text { bytes, quoted: false }`. `Escaped(u8)` -> `Text { bytes: [byte], quoted: true }`. `Multibyte { bytes, escaped }` -> `Text { bytes, quoted }`, where the decoder has already folded `escaped || inside-quotes` into the one flag -- which is exactly the expression `word_from_parts` was computing by hand (`quoted || *escaped`). `Command(_)` and `Arithmetic(_)` -> the struct variants, and their `quoted` field is now available where the old model had none. `Parameter` keeps its shape and gains `quoted`, so the running `quoted` variable the projection carried across the word is gone: every part answers for itself.\n\n`Quote(QuoteBoundary::Open/Close)` HAS NO COUNTERPART IN THE TREE, AND THAT IS THE WHOLE OF THE PORT'S RISK. The old model bracketed a region; the canonical model records per-run inertness and merges runs of equal inertness, so `'it''s'` and `'its'` are one tree. Its counterpart is the TOKEN RUN, `[dec:nsh:tokens-are-the-truth]`. So `Word::source` is taken from `WordNode::tokens` now -- through `nodes::source::word`, which already prefers a node's run and falls back to `spelled` -- rather than re-spelled from parts. That is strictly better than what it replaced: the embedder is handed the bytes the operator wrote, byte for byte, and `a_words_source_reads_back_as_itself` still gets `'it''s'` back where a structural re-spelling would have said `'its'`. Two words in this module have no run and are spelled from structure instead: the implicit `\"$@\"` of a bare `for`, which the parser builds, and the value half of a `name=value`, which this module cuts.\n\nTHE PROJECTION GAINED A DISTINCTION IT USED TO LOSE. `''` and `\"\"` are an empty inert run in the canonical tree, so they now reach the embedder as `Piece::Literal { bytes: \"\", quoted: true }`. The old model wrote `Quote(Open), Quote(Close)` and `word_from_parts` skipped both, so `a''b` projected to ONE unquoted piece `\"ab\"` and `echo ''` to a word with no pieces at all -- which is what `Word::pieces`' doc said (\"Empty for `''` and `\"\"`\"). That doc is now wrong and is corrected, and `a_quote_that_wrote_nothing_is_a_piece` holds the new reading.\n\n`push_literal`'s merging closure is gone: `push_text` already merges runs of equal inertness when the tree is built, so two adjacent `Text` parts always differ in `quoted` and there is nothing left to join. `word_from_parts(parts, word)` took `parts` and `word` where all three call sites passed `w.parts(), &w`; it is `pieces(&ParsedWord)` and `word_from_node(&WordNode)` now.\n\n`Node::Group` did not exist on the branch this module came from -- `8d14347` added it here, and before that `{ list; }` parsed to `Node::Redirect` around the list. It projects to the list with its redirections on it, which is what the remote's tree produced for the same source and what `redirections_and_negation_and_background_are_kept` already asserted. Nothing is lost by not having a `Command::Group`: `{ a; b; } && c` is `And(Sequence(a,b), c)` and `a; b && c` is `Sequence(a, And(b,c))`, two different shapes, and the braces' whole job -- deciding what a redirection or an `&` attaches to -- is what `Redirected` and `Background` say.\n\nVERIFICATION. The module's 13 tests pass unchanged, with two added. Workspace 80 suites / 912 passed / 0 failed under `LOCPATH=$(tests/build-locales.sh)`; clippy --workspace --all-targets clean; `nsh-lint` 27/27 clean; `gate-bash` PASS (872 eligible, 867 pass, 5 dispositioned, 1 undecided on machine noise); Oils bash-comparison 2735 executed, 2181 pass, 454 fail, baseline matched on all 454. Machine load average 14.8-28.7 across the runs."
+                                    }
+
+                                    {
+                                        at 2026-09-03T18:14:58.962440378Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T18:14:58.962440378Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "claim stolen: Same session, wrong worktree. The claim was taken with project_root /home/brendan/work/dash before the work moved to the merge worktree /data/dash-merge, where branch merge-origin carries the resolved merge. Nothing is being taken from another worker: the claim names this session and this pid."
+                                    }
+
+                                    {
+                                        at 2026-09-03T18:20:29.9347372Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
+                                    }
                                 )
                             }
 
@@ -10013,6 +10042,68 @@ children (
                                 id repin-the-editor-crates-for-aarch64
                                 title "Repin the editor crates so aarch64 Linux builds"
                                 kind @build
+                            }
+
+                            {
+                                id retire-the-printers-unread-locale
+                                title "Take the locale off the printer, which has not read it since the word was canonicalized"
+                                kind @refactor
+                                log (
+                                    {
+                                        at 2026-09-03T18:10:58.575249528Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "`nodes::source::Printer` HOLDS A `&Locale` THAT NOTHING ASKS ANYTHING OF, AND ITS DOC COMMENT SAYS OTHERWISE.\n\n    /// Needed to spell a `$'...'` run back: which bytes are one character\n    /// decides what stays literal and what becomes an octal escape.\n    locale: &'a nsh_platform::Locale,\n\nEvery occurrence of `locale` under `crates/nsh/src/nodes/` is one of: the parameter of an entry point, the argument to `Printer::new`, the field, its initializer, and ONE read -- `redirection.rs:103`, `let mut body = Self::new(self.locale)`, which passes it to a second printer that also never asks it anything. Nothing decides anything by it.\n\nWHEN IT DIED. `e1193e9` added it on 2026-08-27 for the `$'...'` re-encoding. `9bad7cb` deleted that re-encoding the next day, and its own message says why -- \"`ansi_c_quote` was never parse-time, only the printer's re-encoding of an already-decoded run was\". The field outlived the only thing that read it by one commit and has been carried ever since.\n\nWHAT IT COSTS TODAY, WHICH IS WHY THIS IS FILED RATHER THAN LEFT. Five entry points take the parameter (`function_definition`, `command`, `respelled`, and the two `6d9539c` added, `word` and `redirection`). As of the `origin/master` merge, `crates/nsh/src/script.rs` threads a `&Locale` through SEVEN private functions -- `command`, `redirected`, `redirection`, `simple_command`, `word_of`, `assignment`, `word_from_node` -- for no reason except that `nodes::source`'s API asks for one. A reader of `script::command(locale, node)` will reasonably ask what projecting a parse tree needs a locale for, and the answer is nothing.\n\nDONE WHEN the field, the constructor parameter and the five entry-point parameters are gone, `script.rs`'s seven functions lose theirs with them, and `crates/nsh/src/builtins/declare/functions.rs`'s three `function_definition` call sites and `fuzzing.rs`'s one `respelled` call site are retyped. Five call sites, one field. If instead the locale is wanted back -- a `$'...'` re-encoding is a real thing to want when `$\"...\"` translation arrives -- then the comment has to say that it is held against a future reader rather than claiming a present one.\n\nNOT DONE IN THE MERGE THAT FOUND IT, deliberately: a merge commit is the wrong place to change a colleague's file for a reason that has nothing to do with the merge."
+                                    }
+                                )
+                            }
+
+                            {
+                                id say-whether-a-substitution-was-quoted
+                                title "Tell an embedder whether a substitution was quoted, which the tree now knows"
+                                kind @feat
+                                log (
+                                    {
+                                        at 2026-09-03T18:11:21.772692514Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "`script::Piece::CommandSubstitution` AND `Piece::Arithmetic` ARE UNIT VARIANTS, SO THE ONE FACT THE MODULE EXISTS TO REPORT IS MISSING FROM TWO OF ITS FIVE PIECES.\n\nThe module's own doc states the contract: \"`quoted` is the one fact expansion turns on. A quoted piece is text and nothing else; ... an unquoted expansion is split into fields and matched against the disk.\" `Piece::Literal`, `Piece::Parameter` and `Piece::Expansion` all carry `quoted`. `Piece::CommandSubstitution` and `Piece::Arithmetic` carry nothing, so an embedder cannot tell\n\n    make $(cat parts)      -- one word per field of the output, globbed\n    make \"$(cat parts)\"    -- one argument, whatever the output holds\n\napart, and a build tool composing a recursive invocation out of a recipe line is precisely the embedder that has to. Ronin is the consumer.\n\nIT WAS NOT AVAILABLE BEFORE AND IS NOW. `6d9539c` was written against `WordPart::Command(Option<Box<Node>>)` and `WordPart::Arithmetic(Box<ParsedWord>)`, which held no quoting; the projection tracked quoting by walking `Quote(Open)`/`Quote(Close)` boundaries, and for these two parts it simply did not consult the flag it was carrying. On this tree `9bad7cb` made them `Command { command, quoted }` and `Arithmetic { expression, quoted }` and gave `WordPart::quoted()` one answer for every part, so the fact is one field read away. Measured on the ported module: `echo \"a$(b)c\" $(d)` projects to `Literal{\"a\",true}, CommandSubstitution, Literal{\"c\",true}` and `CommandSubstitution` -- the two substitutions are indistinguishable and the literals around one of them say it was inside quotes.\n\nWHY IT IS A NODE AND NOT A LINE OF THE PORT. Adding a field turns two unit variants into struct variants, which breaks every `matches!(piece, Piece::CommandSubstitution)` an embedder wrote -- `#[non_exhaustive]` on the enum permits new VARIANTS, not new fields on an existing one. The module is hours old and `nsh` does not consume it, so the window in which this is free is now and closes when Ronin ships against the current shape. `expansions_that_run_something_say_so` is the test that would grow the assertion.\n\nDONE WHEN both variants carry `quoted`, `pieces()` reads it off `WordPart::quoted()` like every other arm, `docs/api-design.md` §2.2 and `[dec:nsh:public-surface]`'s amendment say the surface moved, and a test reads `\"$(b)\"` and `$(b)` back as different."
+                                    }
+                                )
+                            }
+
+                            {
+                                id keep-a-seal-through-a-plan-merge
+                                title "Stop the semantic plan merge dropping a seal only one side set"
+                                kind @fix
+                                log (
+                                    {
+                                        at 2026-09-03T18:11:48.229889032Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "MERGING `origin/master` INTO THIS TREE SILENTLY UNSEALED EIGHT COMPLETED NODES. Found 2026-09-03 while verifying the merge on branch `merge-origin`; caught only because the whole `plan/main.styx` diff was read line by line, and it would have been invisible in a review that read the merge for conflicts.\n\n`.gitattributes` routes `plan/**/*.styx` to `merge=nplan`, whose driver is `nplan merge-driver --ancestor %O --ours %A --theirs %B ...`. Git reported no conflict in `plan/main.styx`; the driver resolved it and staged its answer.\n\n    sealed true, counted:  base 9788287: 45   ours abe28ce: 155   theirs origin/master: 46\n    merged: 148 -- eight fewer than the 156 the two sides together set\n\nThe eight, each of them `sealed true` on OUR side, absent from base and absent from theirs, so the three-way answer is unambiguously sealed:\n\n    optional-line-editor\n    bash-mode-error-boundary\n    bash-array-assignment-gaps\n    bash-expansion-gaps\n    bash-select-and-time-grammar\n    bash-named-descriptor-redirection\n    bash-introspection-gaps\n    bound-recursive-evaluation\n\nIt is not systematic -- 102 of our other 110 post-base seals survived the same merge -- so it is eight specific nodes and not \"the driver drops `sealed`\". The mechanism is unestablished and finding it is this node's first job; a `nplan merge-driver` run over these three exact blobs is the reproducer, and the three revisions are named above so it can be run without the branch.\n\nWHY IT MATTERS MORE THAN EIGHT FLAGS. `nplan audit` reports \"unsealed completions: completed nodes whose decomposition was never sealed -- work may be missing under them\", so an unsealed completion is a standing invitation to reopen a node that was in fact finished. A merge that quietly manufactures eight of them corrupts exactly the signal that is supposed to say where work is missing. And the loss is in the direction that does not announce itself: nothing fails, no check fires, the plan simply asserts less than it did.\n\nRESTORED BY HAND in the merge commit, by re-inserting `sealed true` before each of the eight nodes' `log (` -- which is where our side had it and where every other sealed node has it. `plan/.state.styx` was checked at the same time and lost nothing: its `assertions` block is re-sorted alphabetically by the driver, and 163 ours plus 59 theirs reconcile to 165 with no id missing from either side.\n\nDONE WHEN the driver keeps a field only one side set, and a test merges a plan whose two sides differ by a seal."
+                                    }
+                                )
+                            }
+
+                            {
+                                id split-the-locale-character-half
+                                title "Split the character half out of the platform locale, which the merge took over the cap"
+                                kind @refactor
+                                log (
+                                    {
+                                        at 2026-09-03T18:12:10.034030514Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "`crates/nsh-platform/src/locale.rs` HOLDS 52 FUNCTIONS, TWO OVER THE CAP OF FIFTY, BECAUSE TWO LOCALE EFFORTS LANDED IN IT FROM DIFFERENT DIRECTIONS.\n\nCounted with `crates/nsh-lint/src/density.rs`'s counter, which is the gate's counter, on 2026-09-03:\n\n    9788287 (the merge base)  33\n    origin/master             40   -- 4cc143b's `[ByteClass; 256]` table and the run-joined `newlocale`\n    abe28ce (this tree)       45   -- `decode_prefix`, `LocaleCharacter` and the decoder work\n    merged                    52\n\n`nsh-lint` was ALREADY failing at `abe28ce`: 45 is the register's mark, and the file had no entry. The merge took it past the cap as well.\n\nThe register entry is written -- `crates/nsh-lint/FUNCTION_DENSITY.toml`, added by the merge commit -- and names the seam and everything that crosses it: `crates/nsh-platform/src/locale/characters.rs` takes thirteen functions, the `LocaleDecode`/`LocaleCharacter`/`LocaleDecoder` types, both spellings of `MbState`, the whole `unsafe extern \"C\"` block (all eight declarations are called only from the moving set, verified line by line) and seven tests including the `utf8()` helper. 20 move, 32 stay, and nothing changes visibility because a child module sees its parent's private items. One re-export in `crates/nsh-platform/src/unix.rs` is the thing easiest to miss.\n\nTHE SPLIT WAS NOT DONE IN THE MERGE, FOR TWO REASONS AND BOTH SHOULD BE SAID. A merge commit that also restructures a 1030-line file is unreviewable as either. And `restore-a-head-that-does-not-compile` records that a session was mid-change inside this exact file the same day -- `abe28ce` had to land 112 lines of somebody else's in-flight work to get a HEAD that compiled -- so moving 600 lines of it out from under them is how a colleague loses an afternoon. The merge recorded a `function-density` bypass naming this node instead.\n\nDONE WHEN the split is made as the register entry describes, the entry is corrected wherever it turns out to be wrong -- the register's own header is emphatic that every answer written so far was wrong somewhere, and the honest way to pick one up is to verify it rather than trust it -- and `nsh-lint` reports the entry stale and it is deleted, both halves being under the mark."
+                                    }
+                                )
+                            }
+
+                            {
+                                id integrate-the-remote-master-branch
+                                title "Integrate the remote master into this history"
+                                kind @chore
                             }
                         )
                     }
@@ -11803,7 +11894,6 @@ children (
                 id make-a-substitution-linear-in-its-value
                 title "Ask for the furthest end once per state, not once per offset a substitution starts from"
                 kind @perf
-                sealed true
                 log (
                     {
                         at 2026-09-02T19:18:35.866288535Z
@@ -11972,7 +12062,6 @@ children (
         id decode-a-character-from-the-buffer-the-parser-already-holds
         title "Stop paying a thread-locale selection per byte to read a character from input"
         kind @perf
-        sealed true
         log (
             {
                 at 2026-09-02T18:19:51.053214554Z
@@ -12148,6 +12237,64 @@ children (
                 author "brendan@necessary.nu"
                 kind @note
                 text "LEFT BY `decode-a-character-from-the-buffer-the-parser-already-holds`. That node made the parser and `read` settle a multi-byte character from bytes the input frame already holds, falling back to the byte-at-a-time decoder whenever the character is not whole in the buffer. The fallback is what keeps a terminal read returning as soon as one character is complete, and it is the half with no regression test.\n\nTHREE ATTEMPTS, AND WHY EACH FAILED, so the next person does not repeat them. Each was checked by breaking the fallback deliberately and watching the test; a test that still passes then proves nothing.\n\n1. Write a two-byte character's bytes in two `write` calls to the shell's stdin pipe, with a flush between. PASSED WITH THE FALLBACK BROKEN. The shell is blocked in `read(2)`; both writes land in the pipe before the kernel returns, so it sees the character whole and the split never happens. The flush does not help: there is no synchronisation point between the two writes.\n\n2. The same with a `printf 'ready\\n'` sync first, so the shell is known to be blocked before the first write. STILL PASSED WITH THE FALLBACK BROKEN, for the same reason -- the sync establishes where the shell is before the first write, and the race is between the first and second.\n\n3. Leave the half-character inside the shell's own buffer rather than in the pipe: one write of `X` and the first two bytes of a three-byte character, then read `a=X` back to prove the shell consumed the first character out of its buffer, then send the last byte. This reaches the fallback by construction and is the right shape. IT HANGS, against the pinned Bash as well as against nsh, and the cause was not established. The likely one is that a shell's `printf` to a pipe is block-buffered, so the `a=X` the test waits for never arrives and both sides wait.\n\nTHE ANSWER IS A PTY, which is why this is filed rather than abandoned. A pty is line-buffered, so `a=X` arrives as soon as it is written, which is exactly the property attempt 3 needs and the pipe lacks. `crates/nsh-cli/tests/default_history_navigation.rs` already has the harness.\n\nTHE DRAFT IS NOT LOST. The attempt-3 source is at `multibyte_across_a_read_boundary.rs.wip` in the session scratchpad, and its shape -- `WIDE = [0xe2, 0x82, 0xac]`, the one-write opening of `X` plus two bytes, the `a=X` handshake, then the last byte -- is what should be ported onto the pty harness.\n\nDONE WHEN. The test fails when `buffered_character_width`'s `Incomplete` arm is made to answer `Some(1)` instead of `None`, and passes otherwise, on both nsh and the pinned Bash."
+            }
+        )
+    }
+
+    {
+        id shell-construction-costs-more-than-the-command
+        title "Stop paying for the locale, the environment and the table on every shell built"
+        kind @perf
+        sealed true
+        log (
+            {
+                at 2026-08-30T23:19:01.22136542Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-08-30T23:19:35.719483532Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "WHERE THE MEASUREMENT CAME FROM. Ronin (github.com/necessary-nu/ronin) runs nsh as its own `/bin/sh`, once per recipe line, and profiled its Make front end against GNU Make 4.4.1. Six shells per no-op build of vim, and `nsh::builder::Builder::build` was 47.78% INCLUSIVE of each one: constructing the shell cost twice what running the command did. 748k instructions an invocation against dash's 269k for the same command; 607k against dash's 217k for `sh -c 'true'`.\n\nTHREE THINGS PAID FOR IT, and the first is most of it.\n\nONE: `valid_name` asked the C library about every byte, and every question selected the locale. `Locale::is_alpha` and `is_alphanumeric` wrap `isalpha`/`isalnum` in `with_selected`, which is a `uselocale` to install this shell's locale, the call, a guard drop, and a `uselocale` to restore. `valid_name` runs that per byte of a name; `import_environment_pairs` runs `valid_name` per variable and `set_entry` runs it AGAIN on the same name. An environment of fifty variables with ten-byte names is on the order of a thousand `uselocale` pairs establishing that ordinary letters are letters.\n\nA locale object is immutable once `newlocale` has returned it, so what it says about a byte is a property of the handle and not of the moment. `RawLocale` now holds a `OnceLock<[ByteClass; 256]>` filled under ONE selection the first time a byte is asked about, and `is_alpha` / `is_alphanumeric` / `is_space` are table lookups. Lazy rather than eager because building a shell constructs seven locales -- a base plus one per category -- and keeps the last, so filling at construction would pay for six tables nothing reads. This is the caching [dec:nsh:per-shell-locale] permits: a decoded answer cached against a handle, not a selection hoisted out of an operation.\n\nTWO: `set_entry` cloned the whole variable to read three flags off it. `entries.get(name).cloned()` copies the `BString` value with it, and the update path then rebuilt the `Variable` and `insert`ed it over itself with `name.to_owned()` -- an allocation and a copy of the name AND of the value, per assignment, for a map slot that was never going to move. It now reads out the two `Copy` fields the decision needs and updates the entry where it stands. The callback value, itself a full copy, is only taken when a callback will read it; it is `Callback::None` for nearly every variable.\n\nTHREE: the environment snapshot copied every string twice. `process_environment()` returns owned `OsString`s and the builder called `to_shell_bytes()` on them, which is `as_bytes().to_vec()` -- four allocations and two memcpys per variable before a single one had reached the table. `IntoShellBytes for OsString` takes the bytes instead; on Unix the native representation IS the byte string, so it costs nothing.\n\nAND A FOURTH, SMALLER: `Locale::new` issued one `newlocale` per category override. A shell selects all six of its categories through one `LANG`, so six identical loads of the same locale data. A run of adjacent overrides naming the same locale is now one call with their masks joined, which is exactly what applying them one at a time says. Runs rather than the whole slice, so a name is still first tried where the caller wrote it and a later override of the same category still wins.\n\nWHAT IT IS WORTH, `perf stat -e instructions:u -r 200`, the shell reached through Ronin's multicall so this is the real caller:\n\n  sh -c 'true'                                607,253 -> 437,704   -27.9%\n  the vim probe, `if test -n \"\" -a -f po/Makefile; ...`\n                                              686,723 -> 525,759   -23.4%\n  dash 0.5.13.5, same commands                217,438      219,000ish\n\nStill twice dash and no longer four times it. What remains, from a fresh profile: `__memcmp_avx2_movbe` at 7.6% is the `BTreeMap<BString, Variable>` probing -- `set_bytes` takes four probes per variable, two of them (`nameref::assign_through`, `nameref::declared_value`) purely to discover that an ordinary name carries no Bash attributes. A shell-wide \"no Bash attributes exist here\" flag would collapse both. The 8,209-byte zeroed input frame and the ten `fcntl` descriptor snapshots are also unread by `-c`.\n\nA PRE-EXISTING FAILURE FOUND ON THE WAY, and it is NOT this change: `posix/harness` case `inv-input-file-long-lines` times out after 20s, having emitted one of the three expected lines. Reproduced on unmodified master at 9788287 in both debug and release, so the harness's headline is 804/805 rather than 805/805 on this host today. Long-line input handling is quadratic or near it somewhere; filed here rather than fixed."
+            }
+
+            {
+                at 2026-08-30T23:42:10.903816659Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan complete)"
+            }
+
+            {
+                at 2026-08-30T23:49:43.900988188Z
+                author "brendan@necessary.nu"
+                kind @errata
+                text "CORRECTING THE NOTE ABOVE ON TWO POINTS.\n\nThe `IntoShellBytes` cut — taking the environment snapshot's bytes out of the owned `OsString` instead of copying them — is NOT in what landed. It added a function to `crates/nsh-platform/src/unix.rs`, which the `function-density` gate holds at its pre-image count of 137 because that file is already five thousand lines of grab-bag, and adding one is exactly what the ratchet exists to refuse. Worth about 10k instructions an invocation, which does not buy a bypass. Whoever wants it should move `NativeStrExt` and its neighbours out of `unix.rs` first, or change `process_environment` to return the bytes rather than `OsString`s — the second is the better boundary anyway, since `OsString` is the host representation this crate exists to keep out of the shell.\n\nThe `test-footprint` gate fired alongside it, and that one was right rather than merely strict: the locale change had no test. Four now: the cached table answers what the C library answers for all 256 byte values; the first byte question leaves the thread's selected locale where it found it (the fill is a selection, and it is the one that could leak); a run of six identical overrides reaches a locale that answers identically to six overrides no two of which are adjacent, which is the joining's whole claim; and an unusable override name still refuses.\n\nTHE NUMBERS, RE-MEASURED PAIRED after the revert, both arms identical but for this change and both through Ronin's multicall (so both on Ronin's allocator), `perf stat -e instructions:u`, 200 and 100 repetitions:\n\n  sh -c 'true'                          816,940 -> 663,912   -18.7%\n  if test -n \"\" -a -f po/Makefile; ...  890,314 -> 738,759   -17.0%\n  dash 0.5.13.5, sh -c 'true'           217,423\n\nAbout 152k instructions of constant removed per invocation, which is the allocator-independent way to say it. On glibc the same three cuts plus the reverted fourth read 607,253 -> 437,704."
+                after_done true
+            }
+        )
+    }
+
+    {
+        id an-embedder-cannot-read-a-script-without-running-it
+        title "Expose a script as the shell reads it, for an embedder that reasons about one without running it"
+        kind @feat
+        log (
+            {
+                at 2026-09-03T12:19:00.375084237Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-09-03T12:44:53.750762837Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "WHERE THIS COMES FROM. Ronin (github.com/necessary-nu/ronin) composes a recipe's `$(MAKE)` into the parent's build graph instead of forking a Make, and could only recognise a line that already looked like an invocation, by byte-matching. zsh reaches every child through `for subdir in Src Doc; do (cd $$subdir && $(MAKE) …) || exit 1; done`, so its whole tree forked. Ronin runs recipes through this shell, so the right reading of that line is this shell's, not a second grammar in the build tool.\n\nWHAT IS EXPOSED, AND WHY NOT THE TREE. `nsh::script::Reader::new()` builds one shell on the null device (`Streams::discarding`, crate-private, backed by a new `nsh_platform::open_null_output` on both platforms — the parser reports a syntax error as well as returning it, and a reader must never write to the host's stderr and must never accumulate). `Reader::read(&BStr) -> Result<Script, Error>` parses with `parse_command` exactly as the hidden fuzzing entry does, under `with_resources` so the input frame is restored on every path, and never evaluates. What it returns is a PROJECTION: `Command` (Simple, Pipeline{negated}, And, Or, Sequence, Background, Subshell, Redirected, If, For, While, Until, Case, Function, Other), `SimpleCommand`, `Assignment`, `CaseClause`, `Word{pieces, source}`, `Piece` (Literal{bytes, quoted}, Parameter{name, quoted}, Expansion{quoted}, CommandSubstitution, Arithmetic), `Redirection{source}`. Every type is `#[non_exhaustive]`. Quoting is resolved into the `quoted` flag — single and double quotes, backslash escapes, escaped multibyte — because that is the one fact about a word that decides its meaning without expanding it. `Word::source` is the printer's canonical spelling, so an embedder that needs to hand a word back to a shell gets one the shell reads the same way; the printer's `word` and `redirection` renderers are opened crate-wide for it, and `ParsedWord::from_parts` lets the value half of a `name=value` word be a word of its own.\n\nExporting `Node` was considered and rejected: it drags some thirty-five `pub(crate)` types (ParsedWord, WordPart, LogicalDescriptor, the BashNode family) into a surface [dec:nsh:public-surface] closed on purpose, under `#![deny(missing_docs)]`, and freezes the evaluator's working state as API. The projection can grow a variant without breaking a match, and says `Other`/`Expansion` where it does not describe a form rather than guessing. Recorded as AMENDED (+2) on the decision and as §2.2 of docs/api-design.md.\n\nEVIDENCE: 14 unit tests in the module (quoting per piece, assignment split, substitutions named, grammar shape of zsh's line, redirections/negation/background kept, conditionals/loops/cases kept, `for` without `in`, several lines, a syntax error returned with the reader still usable, determinism, Bash forms as Other under POSIX). Workspace suite under scripts/sandboxed at -j4: every suite ok, exit 0 (the first run at default parallelism died in the linker with \"could not exec the linker `cc`\" — a process limit under the sandbox's link storm, not a failure of the code). `cargo fmt --check` and `clippy --workspace --all-targets -D warnings` clean; `cargo check` for x86_64-pc-windows-gnu and -msvc clean. The repository gate `fallible_results_are_explicit` refused a first draft that drained a captured stderr with `let _ =`; the null-device streams are what replaced it, and are the better design."
             }
         )
     }

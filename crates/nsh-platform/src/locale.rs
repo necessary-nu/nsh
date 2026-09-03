@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::Signal;
 
@@ -134,7 +134,41 @@ impl LocaleCategory {
 pub struct Locale(Arc<RawLocale>);
 
 // [spec:nsh:req:shell-locale.handle-lifetime]
-struct RawLocale(libc::locale_t);
+struct RawLocale {
+    handle: libc::locale_t,
+    /// What this locale answers about each of the 256 byte values, read out of
+    /// it once and answered from here afterwards.
+    ///
+    /// A locale object is immutable once `newlocale` has returned it, so a
+    /// byte's class is a property of the handle and not of the moment it is
+    /// asked about. Asking the C library instead means selecting this locale
+    /// and restoring the previous one around every single byte, and every
+    /// caller is a loop: validating a variable name, skipping the blanks in
+    /// front of a `printf` conversion, reading an arithmetic identifier.
+    /// Importing an environment of forty variables spent several hundred
+    /// `uselocale` pairs establishing that ordinary letters are letters.
+    ///
+    /// Filled on the first byte question rather than at construction, because
+    /// building a shell constructs seven of these — a base plus one per locale
+    /// category — and keeps the last. A locale nothing asks about a byte never
+    /// pays for the table.
+    classes: OnceLock<[ByteClass; 256]>,
+}
+
+/// What one locale says about one byte value, in the three single-byte classes
+/// this module exposes.
+#[derive(Clone, Copy, Default)]
+struct ByteClass(u8);
+
+impl ByteClass {
+    const ALPHA: u8 = 1 << 0;
+    const ALPHANUMERIC: u8 = 1 << 1;
+    const SPACE: u8 = 1 << 2;
+
+    const fn holds(self, class: u8) -> bool {
+        self.0 & class != 0
+    }
+}
 
 // SAFETY: a successful `newlocale` handle is immutable after construction.
 // POSIX permits the same locale object to be passed to locale-taking APIs and
@@ -148,7 +182,7 @@ impl Drop for RawLocale {
     fn drop(&mut self) {
         // SAFETY: this is the one owning handle returned by `newlocale`, and
         // `Arc` proves that no user remains when this destructor runs.
-        unsafe { libc::freelocale(self.0) };
+        unsafe { libc::freelocale(self.handle) };
     }
 }
 
@@ -175,6 +209,16 @@ impl Locale {
     ///
     /// Empty names are rejected rather than interpreted as requests to read
     /// the process environment.  Overrides are applied in slice order.
+    ///
+    /// A run of adjacent overrides naming the same locale is applied as one
+    /// call with their masks joined. `newlocale` sets every category in the
+    /// mask it is given to the name it is given, so a joined run says exactly
+    /// what applying it a category at a time says — and says it without
+    /// loading and interning the same locale data once per category. A shell
+    /// selects all six of its categories through one `LANG`, so this is the
+    /// ordinary shape rather than an unusual one. Runs rather than the whole
+    /// slice, so that a name is still first tried where the caller wrote it
+    /// and a later override of the same category still wins.
     pub fn new(base: &[u8], overrides: &[(LocaleCategory, &[u8])]) -> std::io::Result<Self> {
         fn explicit_name(name: &[u8]) -> std::io::Result<CString> {
             if name.is_empty() {
@@ -199,7 +243,22 @@ impl Locale {
             return Err(std::io::Error::last_os_error());
         }
 
-        for (category, name) in overrides {
+        /* A run of adjacent overrides naming the same locale is applied as one
+         * call with their masks joined. `newlocale` sets every category in the
+         * mask it is given to the name it is given, so joining a run says
+         * exactly what applying it a category at a time says -- and it says it
+         * without loading and interning the same locale data six times over.
+         * A shell selects all six categories through `LANG`, so this is not an
+         * unusual shape but the ordinary one. Runs rather than the whole slice,
+         * so that a name is still first tried where the caller wrote it and a
+         * later override of the same category still wins. */
+        /// Set every category in `mask` to `name`, taking ownership of `raw`
+        /// and freeing it if the name cannot be used.
+        fn apply(
+            raw: libc::locale_t,
+            mask: core::ffi::c_int,
+            name: &[u8],
+        ) -> std::io::Result<libc::locale_t> {
             let name = match explicit_name(name) {
                 Ok(name) => name,
                 Err(error) => {
@@ -212,17 +271,37 @@ impl Locale {
             // SAFETY: `raw` is a live modifiable locale object and `name` is
             // terminated.  On success only the returned handle may be used;
             // on failure POSIX leaves the base handle valid.
-            let next = unsafe { libc::newlocale(category.mask(), name.as_ptr(), raw) };
+            let next = unsafe { libc::newlocale(mask, name.as_ptr(), raw) };
             if next.is_null() {
                 let error = std::io::Error::last_os_error();
                 // SAFETY: `newlocale` failed, so `raw` is still valid.
                 unsafe { libc::freelocale(raw) };
                 return Err(error);
             }
-            raw = next;
+            Ok(next)
         }
 
-        Ok(Self(Arc::new(RawLocale(raw))))
+        let mut pending: Option<(core::ffi::c_int, &[u8])> = None;
+        for (category, name) in overrides {
+            match pending {
+                Some((mask, held)) if held == *name => {
+                    pending = Some((mask | category.mask(), held));
+                }
+                Some((mask, held)) => {
+                    raw = apply(raw, mask, held)?;
+                    pending = Some((category.mask(), name));
+                }
+                None => pending = Some((category.mask(), name)),
+            }
+        }
+        if let Some((mask, held)) = pending {
+            raw = apply(raw, mask, held)?;
+        }
+
+        Ok(Self(Arc::new(RawLocale {
+            handle: raw,
+            classes: OnceLock::new(),
+        })))
     }
 
     /// Construct the portable POSIX `C` locale.
@@ -234,7 +313,7 @@ impl Locale {
         // SAFETY: the Arc-backed handle is live for the returned guard.  A
         // null return is the error sentinel; a valid previous selection may
         // be `LC_GLOBAL_LOCALE`, which is non-null.
-        let previous = unsafe { libc::uselocale(self.0.0) };
+        let previous = unsafe { libc::uselocale(self.0.handle) };
         assert!(!previous.is_null(), "selecting an owned locale failed");
         LocaleGuard {
             previous,
@@ -315,44 +394,53 @@ impl Locale {
         })
     }
 
-    /// Whether the locale calls this byte a letter.
+    /// This locale's answer for every byte value, read out of it under a
+    /// single selection the first time one is wanted.
     ///
-    /// A byte of the portable character set is answered without asking,
-    /// and that is not an approximation: POSIX fixes the classification
-    /// of those characters in every locale -- the letters are `alpha`
-    /// everywhere, and no character of `digit`, `punct`, `cntrl` or
-    /// `space` may be. So the C library can only agree, and asking it
-    /// costs a thread-locale selection per byte of every name the shell
-    /// reads. `every_locale_agrees_on_portable_characters` holds
-    /// the guarantee against the charmaps the tests run in.
-    pub fn is_alpha(&self, byte: u8) -> bool {
-        if byte.is_ascii() {
-            return byte.is_ascii_alphabetic();
-        }
-        self.with_selected(|| {
-            // SAFETY: `isalpha` accepts every unsigned-char value.
-            unsafe { libc::isalpha(byte.into()) != 0 }
+    /// The three classes are read together because they are read from the same
+    /// table on the C side: separating them would buy a shell that only ever
+    /// asks `is_space` nothing, and would cost one selection per class to the
+    /// shells that ask more than one.
+    fn byte_classes(&self) -> &[ByteClass; 256] {
+        self.0.classes.get_or_init(|| {
+            self.with_selected(|| {
+                let mut classes = [ByteClass::default(); 256];
+                for (value, class) in classes.iter_mut().enumerate() {
+                    // `as` rather than a fallible conversion: the loop bound
+                    // is the number of values the type has.
+                    #[expect(clippy::cast_possible_truncation, reason = "value < 256")]
+                    let byte = i32::from(value as u8);
+                    let mut bits = 0u8;
+                    // SAFETY: these three accept every unsigned-char value,
+                    // and the guard above has this locale selected.
+                    unsafe {
+                        if libc::isalpha(byte) != 0 {
+                            bits |= ByteClass::ALPHA;
+                        }
+                        if libc::isalnum(byte) != 0 {
+                            bits |= ByteClass::ALPHANUMERIC;
+                        }
+                        if libc::isspace(byte) != 0 {
+                            bits |= ByteClass::SPACE;
+                        }
+                    }
+                    *class = ByteClass(bits);
+                }
+                classes
+            })
         })
     }
 
-    /// Whether the locale calls this byte a letter or a digit. The
-    /// portable characters are answered without asking, for the reason
-    /// [`Self::is_alpha`] gives.
+    pub fn is_alpha(&self, byte: u8) -> bool {
+        self.byte_classes()[usize::from(byte)].holds(ByteClass::ALPHA)
+    }
+
     pub fn is_alphanumeric(&self, byte: u8) -> bool {
-        if byte.is_ascii() {
-            return byte.is_ascii_alphanumeric();
-        }
-        self.with_selected(|| {
-            // SAFETY: `isalnum` accepts every unsigned-char value.
-            unsafe { libc::isalnum(byte.into()) != 0 }
-        })
+        self.byte_classes()[usize::from(byte)].holds(ByteClass::ALPHANUMERIC)
     }
 
     pub fn is_space(&self, byte: u8) -> bool {
-        self.with_selected(|| {
-            // SAFETY: `isspace` accepts every unsigned-char value.
-            unsafe { libc::isspace(byte.into()) != 0 }
-        })
+        self.byte_classes()[usize::from(byte)].holds(ByteClass::SPACE)
     }
 
     pub fn wide_is_blank(&self, wide: i32) -> bool {
@@ -815,18 +903,21 @@ mod tests {
         );
     }
 
-    /// The portable characters classify the same way in every charmap,
-    /// which is what lets `is_alpha` and `is_alphanumeric` answer for an
-    /// ASCII byte without selecting the locale.
+    /// The portable characters classify the same way in every charmap.
     ///
     /// POSIX fixes this: the letters of the portable character set are
     /// `alpha` in every locale, and no member of `digit`, `punct`,
     /// `cntrl` or `space` may be. The check is exhaustive rather than
-    /// sampled because there are only 128 bytes to try, so this is the
-    /// whole of the guarantee the shortcut rests on rather than evidence
-    /// for it. The high bytes are deliberately not asserted: those are
-    /// exactly the ones the shortcut still asks the C library about, and
-    /// ISO-8859-1 answers differently from C for a great many of them.
+    /// sampled because there are only 128 bytes to try. The high bytes
+    /// are deliberately not asserted, because they genuinely differ --
+    /// ISO-8859-1 answers unlike C for a great many of them, which is why
+    /// a table read out of one locale may not be reused for another.
+    ///
+    /// This justified an ASCII shortcut in `is_alpha` that
+    /// `byte_classes` has since made redundant: the table answers all
+    /// 256 values under one selection, so no byte needs a shortcut. What
+    /// the test still pins is the premise the table's per-locale
+    /// identity rests on.
     // [spec:nsh:req:shell-locale.operation-binding/test]
     #[test]
     fn every_locale_agrees_on_portable_characters() {
@@ -951,9 +1042,9 @@ mod tests {
         let outer = Locale::c().unwrap();
         let inner = Locale::c().unwrap();
         outer.with_selected(|| {
-            assert_eq!(current(), outer.0.0);
-            inner.with_selected(|| assert_eq!(current(), inner.0.0));
-            assert_eq!(current(), outer.0.0);
+            assert_eq!(current(), outer.0.handle);
+            inner.with_selected(|| assert_eq!(current(), inner.0.handle));
+            assert_eq!(current(), outer.0.handle);
         });
         assert_eq!(current(), before);
     }
@@ -978,5 +1069,102 @@ mod tests {
             decoder.push(b'A'),
             LocaleDecode::Complete(value) if value == i32::from(b'A')
         ));
+    }
+
+    /// The cached table has to answer for every byte value what the C library
+    /// answers with this locale selected, which is what makes reading it
+    /// instead of asking a cache rather than a change of behaviour.
+    // [spec:nsh:req:shell-locale.operation-binding/test]
+    #[test]
+    fn the_byte_table_says_what_the_locale_says() {
+        let locale = Locale::c().unwrap();
+        for value in 0..=u8::MAX {
+            let (alpha, alphanumeric, space) = locale.with_selected(|| {
+                // SAFETY: all three accept every unsigned-char value, and the
+                // guard has this locale selected.
+                unsafe {
+                    (
+                        libc::isalpha(i32::from(value)) != 0,
+                        libc::isalnum(i32::from(value)) != 0,
+                        libc::isspace(i32::from(value)) != 0,
+                    )
+                }
+            });
+            assert_eq!(locale.is_alpha(value), alpha, "is_alpha({value})");
+            assert_eq!(
+                locale.is_alphanumeric(value),
+                alphanumeric,
+                "is_alphanumeric({value})"
+            );
+            assert_eq!(locale.is_space(value), space, "is_space({value})");
+        }
+    }
+
+    /// Filling the table selects this locale, so it has to leave the thread's
+    /// selection where it found it like every other operation here. The first
+    /// question is the one that fills it, so it is the one that has to be
+    /// asked from a locale nothing has touched.
+    // [spec:nsh:req:embedding-safety.process-locale-is-unchanged/test]
+    #[test]
+    fn the_first_byte_question_restores_the_locale() {
+        let before = current();
+        let locale = Locale::c().unwrap();
+        assert!(locale.is_alpha(b'a'));
+        assert_eq!(current(), before);
+    }
+
+    /// Joining a run of overrides that name one locale must reach the same
+    /// object as applying them one at a time, which is the whole claim.
+    #[test]
+    fn one_name_over_six_categories_answers_alike() {
+        let categories = [
+            LocaleCategory::Collate,
+            LocaleCategory::Ctype,
+            LocaleCategory::Messages,
+            LocaleCategory::Monetary,
+            LocaleCategory::Numeric,
+            LocaleCategory::Time,
+        ];
+        let joined: Vec<_> = categories
+            .iter()
+            .map(|category| (*category, &b"C"[..]))
+            .collect();
+        let run = Locale::new(b"POSIX", &joined).unwrap();
+        // Interleaved so that no two adjacent entries share a name, which is
+        // the shape the joining cannot take and has to fall back from.
+        let alternating: Vec<_> = categories
+            .iter()
+            .enumerate()
+            .map(|(index, category)| {
+                (
+                    *category,
+                    if index % 2 == 0 { &b"C"[..] } else { &b"POSIX"[..] },
+                )
+            })
+            .collect();
+        let separate = Locale::new(b"POSIX", &alternating).unwrap();
+        for value in 0..=u8::MAX {
+            assert_eq!(run.is_alpha(value), separate.is_alpha(value));
+            assert_eq!(run.is_alphanumeric(value), separate.is_alphanumeric(value));
+            assert_eq!(run.is_space(value), separate.is_space(value));
+        }
+        assert_eq!(run.collate(b"a", b"b"), separate.collate(b"a", b"b"));
+    }
+
+    /// A bad name still refuses, and refuses without leaking the base handle
+    /// or the ones applied before it.
+    #[test]
+    fn an_unusable_override_name_still_refuses() {
+        let refused = Locale::new(
+            b"C",
+            &[
+                (LocaleCategory::Ctype, &b"C"[..]),
+                (LocaleCategory::Collate, &b""[..]),
+            ],
+        );
+        let Err(error) = refused else {
+            panic!("an empty override name was accepted");
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

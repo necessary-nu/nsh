@@ -178,8 +178,9 @@ pub fn snapshot_process_fd(number: i32, minimum: i32) -> std::io::Result<Option<
     }
 }
 
-pub fn open_null_input() -> std::io::Result<Descriptor> {
-    descriptor_from_file(File::open(null_device_path())?, 0)
+pub fn open_null_device(write: bool) -> std::io::Result<Descriptor> {
+    let path = null_device_path();
+    descriptor_from_file(File::options().read(!write).write(write).open(path)?, 0)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

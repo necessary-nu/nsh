@@ -106,6 +106,38 @@ pub(crate) fn respelled(locale: &nsh_platform::Locale, node: &Node) -> BString {
     printer.out
 }
 
+/// Print one word as it would be written in a command: the run it was
+/// read from, or its parts spelled back when nothing read it.
+///
+/// What [`crate::script`] hands an embedder as a word's `source`, so that
+/// what it reads back from the shell is the word it was shown. The same
+/// entry the printer uses everywhere else, so an embedder is shown the
+/// spelling `declare -f` would show.
+pub(crate) fn word(locale: &nsh_platform::Locale, node: &WordNode) -> BString {
+    let mut printer = Printer::new(locale);
+    printer.word(node, 0);
+    printer.out
+}
+
+/// Print one redirection as it would be written after a command, without
+/// the blank that separates it from the command.
+///
+/// A here-document's body is owed to the next line and has no line to go
+/// to here, so it is written straight after the operator instead.
+pub(crate) fn redirection(locale: &nsh_platform::Locale, redirection: &Redirection) -> BString {
+    let mut printer = Printer::new(locale);
+    printer.redirections(core::slice::from_ref(redirection), 0);
+    let mut out = printer.out;
+    for body in printer.pending {
+        out.push(b'\n');
+        out.extend_from_slice(&body);
+    }
+    if out.first() == Some(&b' ') {
+        out.remove(0);
+    }
+    out
+}
+
 /// The output buffer and the here-document bodies owed to the next line.
 struct Printer<'a> {
     /// Needed to spell a `$'...'` run back: which bytes are one character
@@ -251,8 +283,9 @@ impl<'a> Printer<'a> {
             Node::If(command) => self.if_command(command, indent),
             Node::While(command) => self.loop_command(b"while", command, indent),
             Node::Until(command) => self.loop_command(b"until", command, indent),
-            Node::For(command) => self.for_command(command, indent),
-            Node::Select(command) => self.select_command(command, indent),
+            Node::For(command) => self.iteration(b"for ", command, indent),
+            // `select` reprints as `select`, and is otherwise a `for`.
+            Node::Select(command) => self.iteration(b"select ", command, indent),
             Node::Timed(command) => {
                 self.out.extend_from_slice(b"time ");
                 if command.posix_format {
@@ -356,15 +389,6 @@ impl<'a> Printer<'a> {
         self.terminated_list(&command.right, indent + STEP);
         self.newline(indent);
         self.out.extend_from_slice(b"done");
-    }
-
-    /// `select` reprints as `select`, and is otherwise a `for`.
-    fn select_command(&mut self, command: &ForCommand, indent: usize) {
-        self.iteration(b"select ", command, indent);
-    }
-
-    fn for_command(&mut self, command: &ForCommand, indent: usize) {
-        self.iteration(b"for ", command, indent);
     }
 
     fn iteration(&mut self, keyword: &[u8], command: &ForCommand, indent: usize) {
