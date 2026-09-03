@@ -86,6 +86,85 @@ fn parses_every_imported_oils_case() {
     assert_eq!(cases, 2755);
 }
 
+/// Every group the manifest defines is one `selecting_dialect` has been
+/// told about.
+///
+/// Its unknown arm answers `None`, which is right for a group no dialect
+/// decides and silently wrong for a sixth Bash group. Pinning the list
+/// is what makes a new group cost that decision rather than default past
+/// it.
+// [spec:nsh:req:oracle.refuses-a-mismeasurement/test]
+#[test]
+fn every_group_names_its_dialect() {
+    let manifest: crate::OilsManifest =
+        toml::from_str(&fs::read_to_string(crate::survey_root().join("MANIFEST.toml")).unwrap())
+            .unwrap();
+    let defined: BTreeSet<&str> = manifest
+        .groups
+        .iter()
+        .map(|group| group.id.as_str())
+        .collect();
+    assert_eq!(
+        defined,
+        BTreeSet::from([
+            "full",
+            "posix-candidate",
+            "bash-comparison",
+            "bash-extension",
+            "bash-named-diagnostic",
+        ]),
+        "a group was added or renamed without answering for its dialect",
+    );
+}
+
+/// A Bash-selected group refuses to be scored in the POSIX dialect, and
+/// says which of the two configurations it refused on.
+///
+/// The measurement this exists for is in `run_manifest`'s comment: the
+/// same 60 cases fail 22 times under the default expectation and 7 times
+/// under `bash`, with no third thing in the output to tell them apart.
+// [spec:nsh:req:oracle.refuses-a-mismeasurement/test]
+#[test]
+fn a_bash_group_refuses_posix_scoring() {
+    let shell = Path::new("target/release/nsh");
+    for group in ["bash-comparison", "bash-extension", "bash-named-diagnostic"] {
+        let complaint = refuse_a_dialect_mismatch(group, "osh", shell)
+            .expect_err("a Bash group was scored in the POSIX dialect")
+            .to_string();
+        assert!(complaint.contains(group), "{complaint}");
+        assert!(complaint.contains("--expect-shell bash"), "{complaint}");
+        assert!(complaint.contains("\"osh\""), "{complaint}");
+        assert!(complaint.contains("\"nsh\""), "{complaint}");
+
+        refuse_a_dialect_mismatch(group, "bash", shell)
+            .expect("a Bash group was refused its own dialect");
+        /* The manifest spells some files' expectations `bash-4.4`, and
+         * `expectation_key` folds the version token away, so a run naming
+         * one is asking for the same namespace and not a third dialect. */
+        refuse_a_dialect_mismatch(group, "bash-4.4", shell)
+            .expect("a version-qualified Bash namespace was read as another dialect");
+    }
+}
+
+/// A group no dialect decides is scored in whichever the caller asked
+/// for.
+///
+/// `posix-candidate` is the one that matters: its selector is dash, whose
+/// dialect is the one nsh runs under every name but `bash`, so the
+/// documented `run-oils --group posix-candidate` -- which takes the
+/// default `osh` namespace -- is already asking its own question.
+// [spec:nsh:req:oracle.refuses-a-mismeasurement/test]
+#[test]
+fn an_undecided_group_is_left_alone() {
+    let shell = Path::new("target/release/nsh");
+    for group in ["full", "posix-candidate"] {
+        for expectation in ["osh", "bash", "dash"] {
+            refuse_a_dialect_mismatch(group, expectation, shell)
+                .expect("a group no dialect decides was refused a namespace");
+        }
+    }
+}
+
 #[test]
 fn process_timeout_kills_background_descendants() {
     let shell = system_shell();

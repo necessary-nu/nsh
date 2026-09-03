@@ -768,6 +768,35 @@ fn manifest_groups(file_name: &str, compare_shells: &[String]) -> Vec<String> {
     groups
 }
 
+/// The dialect a group's membership was decided by, where one decided it.
+///
+/// `manifest_groups` above admits a spec to the three bash groups for one
+/// reason and no other, so every answer such a group is scored against is
+/// Bash's. `argv[0]` chooses nsh's dialect, which is why this has to be
+/// asked at all: a run that names some other expectation namespace runs
+/// the POSIX dialect against Bash's recorded answers and reports a number
+/// about nothing.
+///
+/// `full` is decided by no shell -- it is the whole active corpus -- and
+/// `posix-candidate` is `None` on purpose rather than by omission. Its
+/// selector is dash, and dash's dialect is the one nsh runs under every
+/// name but `bash`, so the documented `run-oils --group posix-candidate`
+/// with the default expectation namespace is already in the dialect its
+/// selection is about. Bash is the only dialect here that has to be asked
+/// for by name, and so the only one it is possible to forget.
+///
+/// An unnamed group gets `None`, which is right for a group no dialect
+/// decides and silently wrong for a sixth Bash group.
+/// `every_group_names_its_dialect` holds the
+/// manifest's group list to exactly these five, so a sixth cannot arrive
+/// without somebody answering for it here.
+fn selecting_dialect(group: &str) -> Option<&'static str> {
+    match group {
+        "bash-comparison" | "bash-extension" | "bash-named-diagnostic" => Some("bash"),
+        _ => None,
+    }
+}
+
 fn count_qualified_assertions(bytes: &[u8]) -> usize {
     bytes
         .split(|byte| *byte == b'\n')

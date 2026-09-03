@@ -319,6 +319,48 @@ fn required_path(args: &mut env::ArgsOs, option: &str) -> Result<PathBuf> {
         .ok_or_else(|| format!("{option} requires a path").into())
 }
 
+/// Refuse a run whose expectation namespace is not the one its group is
+/// selected by.
+///
+/// THE GREEN RUN IS THE PROBLEM. `--baseline` already catches this, and
+/// only afterwards: the last line of a 64-second run, printed under a
+/// summary that reads as a catastrophic regression. Without a baseline
+/// nothing was said at all -- `run-oils --group bash-comparison` scored
+/// nsh's POSIX dialect against Bash's recorded answers, printed
+/// `pass=1129 fail=1603` and page after page of `Syntax error: "("
+/// unexpected` on `a+=(v)`, and there was nothing in it to say that the
+/// shell was fine and the run was not. Measured 2026-09-04 on the first
+/// 60 cases of `bash-comparison`: 22 failures under the default `osh`
+/// expectation, 7 under `bash`.
+///
+/// Asked here rather than at the option parse so it also covers the
+/// reference and gate runs, which build `Options` directly, and asked
+/// before the scratch tree so it costs nothing but the manifest read.
+///
+/// The neighbouring defect in `bash_gate` was closed the other way --
+/// the gate scores one group and installs its shell under the name that
+/// group needs. This command scores whatever it is pointed at, including
+/// shells from outside this tree, so it has no name to impose and the
+/// caller's two answers have to be made to agree instead.
+// [spec:nsh:req:oracle.refuses-a-mismeasurement]
+fn refuse_a_dialect_mismatch(group: &str, expectation: &str, shell: &Path) -> Result<()> {
+    let Some(required) = crate::selecting_dialect(group) else {
+        return Ok(());
+    };
+    if expectation_key(expectation) == required {
+        return Ok(());
+    }
+    Err(format!(
+        "group {group} is selected by {required}: every case in it is there because {required} \
+         runs it, and every answer it is scored against is {required}'s. This run asks for the \
+         {expectation:?} expectation namespace and would run the shell as {:?}, and argv[0] is \
+         what selects the dialect -- so it would measure one dialect against another's answers \
+         and report a plausible number about nothing. Pass --expect-shell {required}.",
+        crate::shell::name_for(expectation, shell),
+    )
+    .into())
+}
+
 fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<RunReport> {
     let group = manifest
         .groups
@@ -336,6 +378,7 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
                 options.group
             )
         })?;
+    refuse_a_dialect_mismatch(&group.id, &options.expectation_shell, &options.shell)?;
     let scratch = ScratchTree::new()?;
     let containment = Containment::verified(scratch.path())?;
     containment.verify_reaches(

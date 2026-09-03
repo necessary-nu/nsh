@@ -57,7 +57,7 @@ scripts/sandboxed -- cargo build --release -p nsh-cli --bin nsh
 scripts/sandboxed -- cargo build --release -p nsh-survey
 scripts/sandboxed -- target/release/nsh-survey run-oils --group posix-candidate
 scripts/sandboxed -- target/release/nsh-survey run-oils \
-  --group bash-extension --format json
+  --group bash-extension --expect-shell bash --format json
 scripts/sandboxed --writable tests/.build -- target/release/nsh-survey run-oils \
   --group bash-extension \
   --expect-shell bash \
@@ -67,6 +67,16 @@ scripts/sandboxed --writable tests/.build -- target/release/nsh-survey run-oils 
 The default shell is `target/release/nsh`, the default group is `full`, and
 the default expectation namespace is `osh`. `--expect-shell` selects another
 per-shell expectation namespace.
+
+The three bash groups refuse that default. Their membership is decided by
+Bash and nothing else, so every answer they are scored against is Bash's --
+and `argv[0]` is what selects nsh's dialect, so a run naming any other
+namespace measures the POSIX dialect against Bash's answers. It looks like a
+result: on the first 60 cases of `bash-comparison`, 22 failures under `osh`
+against 7 under `bash`, with nothing in the output to tell them apart. The
+example above therefore carries `--expect-shell bash`, and one that forgets
+it is refused before the first case
+(`[spec:nsh:req:oracle.refuses-a-mismeasurement]`).
 
 Qualified `OK` results count as passes. Matching `N-I` results are unsupported,
 and matching `BUG` results are reported as known bugs. A byte or status

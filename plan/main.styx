@@ -12166,6 +12166,20 @@ children (
                                 kind @note
                                 text "FOUND 2026-09-03 WHILE MEASURING `stop-a-freed-descriptor-number-racing-its-test`, IN THE SAME BINARY AND THE SAME FAMILY, AND IT IS A SECOND DEFECT RATHER THAN A REMNANT OF THE FIRST. It appeared once in the 9,000 post-fix runs of `nsh_platform` at `--test-threads 32`, and never in the 3,000 pre-fix runs, which is sampling rather than causation -- the change it followed cannot produce it.\n\n`crates/nsh-platform/src/unix_facts.rs:175`:\n\n    fn end_of_input_counts_as_available() {\n        let (read, write) = super::super::pipe().expect(\"pipe\");\n        drop(write);\n        assert!(wait_for_input(&read, Some(0.0)).expect(\"poll at end\"));\n    }\n\n    thread 'unix_facts::tests::end_of_input_counts_as_available' panicked at\n    crates/nsh-platform/src/unix_facts.rs:175:9:\n    assertion failed: wait_for_input(&read, Some(0.0)).expect(\"poll at end\")\n\nWHY IT CAN FAIL. `drop(write)` closes this thread's write end, and the test then asks the read end whether it is at end of input. A pipe reaches end of input when the *last* write end anywhere closes, and `tests::descriptor_transaction_installs_slots` in the same binary calls `run_in_child`, which forks. A fork copies the whole descriptor table, so a child alive at the wrong moment holds a duplicate of this pipe's write end and the pipe is not at end of input at all. `wait_for_input` correctly answers \"nothing to observe yet\", and the assertion reads as a bug in `poll`.\n\nSAME FAMILY AS THIS NODE'S SIBLING AND AS `reap-only-the-children-this-shell-forked`: one process, many test threads, a process-wide resource, and a verdict that depends on what an unrelated test is doing. It is the mirror image of the descriptor-number race -- that one was a freed number a sibling could take, this one is a live number a sibling's *child* keeps.\n\nNOT MEASURED, and worth doing before fixing: whether the window is the child's whole lifetime (`run_in_child` forks, the child writes six bytes and exits) or only its setup, and whether `pipe()` here is the only test with the exposure -- `readiness_is_answered_without_consuming` two functions above builds a pipe the same way but never asserts on end of input, so it should be immune, and that should be checked rather than assumed.\n\nWHAT THE ANSWER PROBABLY IS. The pipe wants close-on-exec plus a fork that does not carry it, or the test wants a descriptor whose end of input no other process can hold open -- an empty regular file, or an already-closed socket pair -- so that the property under test is local the way `descriptor_transaction_validates_targets` was made local in `stop-a-freed-descriptor-number-racing-its-test`.\n\nDONE WHEN the assertion does not depend on whether another test's child is alive, and a run of the order of 10,000 at `--test-threads 32` is clean on both trees -- the rate here is about 1 in 9,000, so a hundred green runs prove nothing."
                             }
+
+                            {
+                                at 2026-09-03T23:04:54.850614257Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-03T23:04:54.850614257Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "single-flight overridden: started while bash.divergences.publish-names.withhold-prompts had uncommitted WIP"
+                            }
                         )
                     }
 
@@ -12190,6 +12204,7 @@ children (
                         kind @fix
                         constrained_by ([spec:nsh:req:oracle.checks-do-not-share-state])
                         deps (guard-the-process-file-creation-mask)
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T16:24:01.728742831Z
@@ -12203,6 +12218,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-03T23:04:16.527250808Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

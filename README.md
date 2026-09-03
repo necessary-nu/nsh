@@ -162,7 +162,8 @@ the gate use, so there is never a reason to start a shell on a case by hand:
 
 ```sh
 scripts/sandboxed -- target/release/nsh-survey run-oils \
-    --group bash-comparison --case process-sub.test.sh:2 \
+    --group bash-comparison --expect-shell bash \
+    --case process-sub.test.sh:2 \
     --shell target/release/nsh --verbose
 ```
 
