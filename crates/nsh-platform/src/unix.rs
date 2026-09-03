@@ -47,7 +47,7 @@ mod endpoints;
 pub use endpoints::{
     OpenMode, PIPE_BUFFER, ProcessDescriptorTransaction, anonymous_file, create_temporary_file,
     duplicate_cloexec, duplicate_fd, duplicate_file, fd_is_regular_file, fd_is_seekable,
-    open_null_input, open_path, open_pseudoterminal, pipe, read_exact, read_once, read_to_end,
+    open_null_device, open_path, open_pseudoterminal, pipe, read_exact, read_once, read_to_end,
     reports_pipe_short_writes, seek_relative, seek_start, set_nonblocking, snapshot_process_fd,
     supports_bidirectional_pseudoterminal_pair, supports_tee, take_file_contents, tee, write_all,
     write_once,

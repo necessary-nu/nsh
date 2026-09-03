@@ -402,7 +402,7 @@ mod tests {
     #[test]
     // [spec:nsh:req:idiom.no-raw-fd-core/test]
     fn owned_descriptor_remains_usable_after_hiding() {
-        let source = nsh_platform::open_null_input().unwrap();
+        let source = nsh_platform::open_null_device(false).unwrap();
         let shared = SharedDescriptor::from_owned(source).unwrap();
 
         assert_eq!(nsh_platform::read_to_end(&shared).unwrap(), b"");

@@ -70,9 +70,24 @@ impl Streams {
     // [spec:nsh:req:idiom.filesystem-account-bytes]
     pub fn capture() -> std::io::Result<Streams> {
         Self::from_owned([
-            nsh_platform::open_null_input()?,
+            nsh_platform::open_null_device(false)?,
             nsh_platform::anonymous_file("nsh-stdout")?,
             nsh_platform::anonymous_file("nsh-stderr")?,
+        ])
+    }
+
+    /// The null device on all three: a shell that reads nothing and whose
+    /// output goes nowhere.
+    ///
+    /// What [`crate::script::Reader`] builds its shell on. A reader never
+    /// runs anything, but the parser reports a syntax error as well as
+    /// returning it, and the report has to have somewhere to go that is
+    /// not the host's stderr and does not fill up.
+    pub(crate) fn discarding() -> std::io::Result<Streams> {
+        Self::from_owned([
+            nsh_platform::open_null_device(false)?,
+            nsh_platform::open_null_device(true)?,
+            nsh_platform::open_null_device(true)?,
         ])
     }
 

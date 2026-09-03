@@ -122,3 +122,40 @@ rather than their owner. Counted with `density.rs`'s counter on 2026-09-02, the 
 file reached 49 by gaining `Trial` -- `trial`, `budget`, `match_star`, `matches_from`, \
 `ends_from`, `ask` and one fence test -- for `bound-what-a-prefix-or-suffix-trim-costs`.
 """
+
+[[file]]
+path = "crates/nsh-platform/src/locale.rs"
+answer = """
+Split the character half out to `crates/nsh-platform/src/locale/characters.rs`: everything \
+that answers "what character do these bytes spell, and what is it". Thirteen functions move -- \
+`LocaleDecoder::push`, and `Locale`'s `decoder`, `decode_byte`, `decode_prefix`, \
+`wide_is_blank`, `wide_is_space`, `charmap_is_utf8`, `encode_character`, `multibyte_len`, \
+`character_widths`, `decode_exact`, `wide_class_matches` and `wide_chars` -- with the \
+`LocaleDecode`, `LocaleCharacter` and `LocaleDecoder` types, both spellings of `MbState`, and \
+the whole `unsafe extern "C"` block: all eight of its declarations are called only from this \
+set, so none of them stays behind. Seven tests go with them -- `a_charmap_answers_for_its_own_characters`, \
+`a_value_beyond_wchar_is_refused`, `encoding_preserves_thread_locale`, \
+`character_widths_answer_every_byte_position`, `character_widths_preserve_thread_locale`, \
+`decoder_keeps_locale_handle_alive`, and the `utf8()` helper, which four of them use and \
+nothing that stays does. That is 20 moving and 32 left here. \
+WHAT CROSSES THE SEAM AND STAYS: `Locale`, `RawLocale`, `select` and `with_selected`. Every \
+moved function opens with `self.with_selected(...)` and several read `self.0.handle`, and a \
+child module sees its parent's private items, so the new file takes all four from `super` and \
+no visibility changes. `LocaleGuard` and its `Drop` stay with them. `ByteClass`, \
+`byte_classes` and the three `is_alpha`/`is_alphanumeric`/`is_space` stay too, and are not a \
+near miss: they ask `libc::isalpha` and never touch the extern block, which is why the block \
+can move whole. \
+ONE RE-EXPORT CROSSES AND IS EASY TO MISS: `crates/nsh-platform/src/unix.rs` names \
+`pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder}`, so \
+`locale.rs` gains a `pub use characters::{LocaleCharacter, LocaleDecode, LocaleDecoder}` or \
+`unix.rs` is retyped. `crates/nsh-platform/src/lib.rs`'s `Locale::character_encoding` calls \
+`encode_character`, which is `pub(crate)` and stays `pub(crate)` wherever it lives, so `lib.rs` \
+is untouched -- but `a_charmap_answers_for_its_own_characters` tests `character_encoding` and \
+not anything in this file, and belongs beside `encode_character` rather than where it is. \
+`crates/nsh-platform/src/windows/locale.rs` is a file of its own and is unaffected. \
+Counted with `density.rs`'s counter on 2026-09-03, the day merging `origin/master` took the \
+file from 45 to 52 -- over the cap -- by landing `4cc143b`'s `[ByteClass; 256]` table beside \
+this tree's `decode_prefix`. The split is not done: this is the plan, and the merge that \
+required it recorded a `function-density` bypass rather than restructure a file two \
+histories had just met inside.
+"""

@@ -123,6 +123,14 @@ pub use crate::source::{Source, Startup};
 pub use crate::status::{ExitStatus, Signal};
 pub use crate::streams::Streams;
 
+// A script as the shell reads it, without running it. The one module on
+// the surface besides [`streams`], and for the same kind of reason: an
+// embedder that composes recursive invocations out of recipe lines needs
+// the shell's reading of a line and not a second grammar of its own. It
+// is a projection of the tree, not the tree — see the module's own doc for
+// what that means and why.
+pub mod script;
+
 // Public only for the cargo-fuzz workspace, which is what keeps the normal
 // library surface closed while letting the round-trip property exercise the
 // parser and printer without executing the generated program text.

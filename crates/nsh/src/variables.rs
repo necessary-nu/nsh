@@ -528,12 +528,20 @@ fn set_entry(
         attributes.exported = true;
     }
 
-    let existing = shell.variables.entries.get(name).cloned();
-    let Some(old) = existing else {
+    /* What the decision below needs from an entry already present, read out of
+     * it rather than cloned with it. The value a variable holds is the
+     * expensive part of one and no arm here reads it: each drops it,
+     * overwrites it in place, or leaves it alone. */
+    let existing = shell
+        .variables
+        .entries
+        .get(name)
+        .map(|old| (old.attributes, old.callback));
+    let Some((old_attributes, callback)) = existing else {
         if value.is_none() && attributes == VariableAttributes::NONE {
             return Ok(());
         }
-        let callback = if is_locale_variable!(name) {
+        let fresh_callback = if is_locale_variable!(name) {
             Callback::Locale
         } else {
             Callback::None
@@ -546,17 +554,17 @@ fn set_entry(
                     VariableState::Set(VariableValue::Scalar(value.to_owned()))
                 }),
                 bash_attributes: BashAttributes::new(),
-                callback,
+                callback: fresh_callback,
                 dynamic_lineno: false,
             },
         );
         if callback_policy == CallbackPolicy::Run {
-            run_callback(shell, name, callback, value);
+            run_callback(shell, name, fresh_callback, value);
         }
         return Ok(());
     };
 
-    if old.attributes.read_only && guard == arrays::ReadOnlyGuard::Enforce {
+    if old_attributes.read_only && guard == arrays::ReadOnlyGuard::Enforce {
         let mut message = name.to_vec();
         message.extend_from_slice(b": is read only");
         // [spec:nsh:req:compat.bash.error-boundary]
@@ -564,10 +572,10 @@ fn set_entry(
     }
 
     if value.is_some() || attributes != VariableAttributes::NONE {
-        attributes.exported |= old.attributes.exported;
-        attributes.read_only |= old.attributes.read_only;
-        attributes.fixed |= old.attributes.fixed;
-    } else if old.attributes.fixed {
+        attributes.exported |= old_attributes.exported;
+        attributes.read_only |= old_attributes.read_only;
+        attributes.fixed |= old_attributes.fixed;
+    } else if old_attributes.fixed {
         attributes = VariableAttributes::FIXED;
     } else {
         /* Bash's `unset` on a name the running body made local leaves an
@@ -582,7 +590,6 @@ fn set_entry(
         // [spec:nsh:req:compat.bash.functions-scoping]
         let keep = shell.options.dialect() == crate::options::Dialect::Bash
             && declaration::is_local(shell, name);
-        let callback = old.callback;
         if keep {
             shell.variables.entries.insert(
                 name.to_owned(),
@@ -597,40 +604,45 @@ fn set_entry(
         return Ok(());
     }
 
-    let callback = old.callback;
-    let bash_attributes = old.bash_attributes;
-    /* A plain `name=value` on a declared array writes its zero element
-     * and makes the name visible: `declare -a z; z=q` is
-     * `declare -a z=([0]="q")` in Bash, not a scalar. */
-    let state = match (old.state, value) {
-        (VariableState::Set(mut existing), Some(value)) => {
-            existing.assign_scalar(value);
-            VariableState::Set(existing)
+    /* The entry keeps its slot: only its attributes and the value it holds
+     * change, so both are written where it stands. Rebuilding the whole
+     * variable and inserting it over itself cost a copy of the name and a copy
+     * of the value already there, on every assignment, for a slot that was
+     * never going to move. */
+    let mut callback_value = None;
+    if let Some(entry) = shell.variables.entries.get_mut(name) {
+        entry.attributes = attributes;
+        entry.dynamic_lineno = false;
+        /* A plain `name=value` on a declared array writes its zero element
+         * and makes the name visible: `declare -a z; z=q` is
+         * `declare -a z=([0]="q")` in Bash, not a scalar. */
+        /* Taken out of the slot and put back into it: what the value owns
+         * moves, where reading it out of a clone copied it. */
+        let state = core::mem::take(&mut entry.state);
+        entry.state = match (state, value) {
+            (VariableState::Set(mut existing), Some(value)) => {
+                existing.assign_scalar(value);
+                VariableState::Set(existing)
+            }
+            (VariableState::Declared(kind), Some(value)) => {
+                let mut fresh = VariableValue::empty(kind);
+                fresh.assign_scalar(value);
+                VariableState::Set(fresh)
+            }
+            (VariableState::Unset, Some(value)) => {
+                VariableState::Set(VariableValue::Scalar(value.to_owned()))
+            }
+            (_, None) => VariableState::Unset,
+        };
+        /* Only a callback that reads it: the value is owned out of the table
+         * to say it, and nothing but a callback asks. */
+        if callback_policy == CallbackPolicy::Run && callback != Callback::None {
+            callback_value = match &entry.state {
+                VariableState::Unset | VariableState::Declared(_) => None,
+                VariableState::Set(value) => value.scalar_owned(),
+            };
         }
-        (VariableState::Declared(kind), Some(value)) => {
-            let mut fresh = VariableValue::empty(kind);
-            fresh.assign_scalar(value);
-            VariableState::Set(fresh)
-        }
-        (VariableState::Unset, Some(value)) => {
-            VariableState::Set(VariableValue::Scalar(value.to_owned()))
-        }
-        (_, None) => VariableState::Unset,
-    };
-    let callback_value = match &state {
-        VariableState::Unset | VariableState::Declared(_) => None,
-        VariableState::Set(value) => value.scalar_owned(),
-    };
-    shell.variables.entries.insert(
-        name.to_owned(),
-        Variable {
-            attributes,
-            state,
-            bash_attributes,
-            callback,
-            dynamic_lineno: false,
-        },
-    );
+    }
     if callback_policy == CallbackPolicy::Run {
         run_callback(
             shell,
