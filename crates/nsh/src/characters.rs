@@ -93,28 +93,63 @@ impl<'a> Characters<'a> {
     ///
     /// A position at or past the string's end is its own end, so a
     /// caller stepping with this always terminates.
-    ///
-    /// The block the locale is asked about doubles, so a walk of a whole
-    /// string asks a logarithmic number of times while a walk that stops
-    /// at its first character does not pay for the rest of the string.
-    /// That second half is what the doubling is for: a search restarted
-    /// at every offset of a long subject abandons most attempts at once.
     pub(crate) fn end(&mut self, at: usize) -> usize {
         if at >= self.bytes.len() {
             return at;
         }
-        if at >= self.widths.len() {
-            let known = self.widths.len();
-            let want = (known * 2)
-                .max(CHARACTER_BLOCK)
-                .max(at + 1)
-                .min(self.bytes.len());
-            self.widths.extend(
-                self.locale
-                    .character_widths(&self.bytes[known..], want - known),
-            );
-        }
+        self.learn(at);
         at + usize::from(self.widths[at]).max(1)
+    }
+
+    /// Where the character beginning at `at` runs out, seen from a
+    /// caller that may read only `bytes[..limit]`.
+    ///
+    /// An extended glob's alternative is a slice of the pattern its
+    /// group was read from, and indexes the whole pattern's table once
+    /// shifted, so a character straddling the slice's end has to answer
+    /// "one byte" against the slice while the table goes on holding the
+    /// whole pattern's answer for that position. One byte is what the
+    /// locale itself answers when it is shown the truncated string, so
+    /// this is the same answer reached without asking twice.
+    ///
+    /// Separate from [`Self::end`] rather than the general case it calls,
+    /// because every caller that reads a whole string would then pay a
+    /// comparison per character to be told a bound it already knows:
+    /// measured, folding the two cost the ERE engine 0.8% of its
+    /// instructions on a restarting search.
+    pub(crate) fn end_within(&mut self, at: usize, limit: usize) -> usize {
+        if at >= limit {
+            return at;
+        }
+        self.learn(at);
+        let width = usize::from(self.widths[at]).max(1);
+        if at + width <= limit {
+            at + width
+        } else {
+            at + 1
+        }
+    }
+
+    /// Make sure the locale has been asked about `at`.
+    ///
+    /// The block asked for doubles, so a walk of a whole string asks a
+    /// logarithmic number of times while a walk that stops at its first
+    /// character does not pay for the rest of the string. That second
+    /// half is what the doubling is for: a search restarted at every
+    /// offset of a long subject abandons most attempts at once.
+    fn learn(&mut self, at: usize) {
+        if at < self.widths.len() {
+            return;
+        }
+        let known = self.widths.len();
+        let want = (known * 2)
+            .max(CHARACTER_BLOCK)
+            .max(at + 1)
+            .min(self.bytes.len());
+        self.widths.extend(
+            self.locale
+                .character_widths(&self.bytes[known..], want - known),
+        );
     }
 }
 
@@ -161,6 +196,19 @@ mod tests {
         assert_eq!(jumped.end(0), 2);
         assert_eq!(jumped.end(bytes.len()), bytes.len());
         assert_eq!(jumped.end(bytes.len() + 4), bytes.len() + 4);
+
+        /* A caller reading a slice is answered about the slice, while the
+         * table goes on holding the whole string's answer: the character
+         * at 8 is two bytes wide, and a caller that may read only nine of
+         * them is told to step one -- which is what the locale itself
+         * says when it is shown `bytes[..9]`. Asking again without a
+         * limit still gets ten. */
+        let mut sliced = Characters::of(&locale, bytes);
+        assert_eq!(sliced.end_within(8, 9), 9);
+        assert_eq!(sliced.end(8), 10);
+        assert_eq!(sliced.end_within(8, bytes.len()), 10);
+        assert_eq!(sliced.end_within(9, 9), 9);
+        assert_eq!(width(&locale, &bytes[8..9]), 1);
 
         /* A single-byte charmap holds a character at every byte, and the
          * empty string holds none. */

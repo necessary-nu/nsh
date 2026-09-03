@@ -8758,6 +8758,13 @@ children (
                                         kind @note
                                         text "THE CONTROL DID NOT EXCUSE `background.test.sh:7` ON A QUIET-ISH MACHINE, which is a data point against this node's own record of it. Measured 2026-09-02 while closing `build-the-survey-baseline-from-what-is-committed`, three consecutive `run-oils --group bash-comparison --baseline` comparisons in a worktree at `848e0ab`, load 20 to 28, 77 to 92 seconds each, one shell built for the measurement and kept where nothing else writes:\n\n    run 1   matched on all 469; control excused `process-sub.test.sh:2` at 4 of 15\n    run 2   `+ background.test.sh:7`, not excused, no undecided line at all\n    run 3   `- sh-options.test.sh:23`, not excused\n\nRun 2 matters because this node's entry records `background.test.sh:7` as a case the control *does* excuse, at 5 of 15 at load 64 to 97. Here the reference reproduced its own recorded result on every control run and the case still went red. So either its rate in the pinned Bash falls off faster with load than this shell's does, or the case has a second mode that is not the reference's race at all. Either way the baseline's remaining load dependence is not `sh-options.test.sh:23` alone.\n\nRun 3 is this node's case, unchanged, at a load where the ten quiet comparisons recorded here all matched -- so its 1-in-3 rate does not need load 64 to appear."
                                     }
+
+                                    {
+                                        at 2026-09-03T16:32:39.331601243Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
@@ -9097,6 +9104,7 @@ children (
                                 id give-the-differential-wrapper-a-kill-after
                                 title "Follow the differential harness's TERM with a KILL"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T14:28:56.993672703Z
@@ -9110,6 +9118,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T16:32:37.549425509Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -9317,6 +9332,13 @@ children (
                                                 kind @note
                                                 text "Found 2026-09-02 while closing `spell-a-valueless-name-back`, and not part of it: that node was about what a declaration spells, and this is about whether the declaration is still there to spell. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\n`unset` on a name the running function made local removes the entry here and leaves an invisible local in Bash:\n\n    f(){ local pv=1; unset pv; declare -p pv; echo \"[${pv@A}]\"; }; f\n      bash: declare -- pv  /  [declare pv]\n      nsh:  declare: pv: not found  /  []\n\nTHE VALUES ARE ALREADY RIGHT, which is why this is small and why it is worth writing down rather than guessing at later. `$pv` is empty inside the body and the caller's value is restored on return in both shells, because the frame still holds the `Saved` record whatever happened to the entry. It is the entry's *lifetime* that differs, and only a declaration printer can see it.\n\nWHERE, AND THE INCONSISTENCY THAT MAKES IT ODD. A POSIX `local` on a fresh name goes through `make_local_bytes`, which sets `attributes.fixed = true`, and `set_entry`'s removal path keeps a `fixed` entry -- so that one survives `unset`. Bash mode's `local` is `declare`, which goes through `nameref::make_local`, which inserts `Variable::unset(VariableAttributes::NONE, callback)`. The same construct therefore survives `unset` in one dialect and not in the other, and it is the dialect with `declare -p` that loses.\n\nWATCH WHAT `fixed` MEANS BEFORE REACHING FOR IT. `80388bd` gave `fixed` a second job: an `Unset` entry that is `FIXED` and carries nothing else is a slot this shell reserved for a callback, and `declare -p` deliberately does not list one. Making a Bash-mode local `FIXED` would hide it from the listing, which is the opposite of what this node wants. The mark this needs is \"a declaration made it\", not \"the shell reserved it\" -- the same mark `list-a-declaration-of-a-reserved-name` needs, and the two should probably be answered together.\n\nDONE WHEN. `unset` on a name local to the running body leaves it in `declare -p` and in `${name@A}` as the reference leaves it, a POSIX `local` is unmoved, a reserved slot is still not listed, and a differential table holds the rows."
                                             }
+
+                                            {
+                                                at 2026-09-03T16:33:01.914126568Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -9359,6 +9381,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "THE RESIDUE OF `list-the-names-that-only-carry-attributes`, LEFT ON PURPOSE AND MEASURED. Found 2026-09-02 while widening `declare -p`'s listing; measured against the pinned Bash 5.3.15 on `c727cb3`.\n\n`initialize_variables` enters nine names -- `MAIL`, `MAILPATH`, `HISTSIZE`, `TERM`, `LC_ALL`, `LC_COLLATE`, `LC_CTYPE`, `LC_NUMERIC`, `LANG` -- as `FIXED` entries holding nothing, so that a later assignment has a callback to run. Bash has no variable there at all: `declare -p LANG` in a shell started without one is `not found`, and none of the nine is in its `declare -p`. The listing therefore has to tell a slot from a declaration, and it does it by asking whether anything has marked the entry:\n\n    declare -i MAILPATH   bash: declare -i MAILPATH   nsh: declare -i MAILPATH\n    readonly MAIL         bash: declare -r MAIL       nsh: declare -r MAIL\n    declare -x HISTSIZE   bash: declare -x HISTSIZE   nsh: declare -x HISTSIZE\n    declare -a LC_CTYPE   bash: declare -a LC_CTYPE   nsh: declare -a LC_CTYPE\n    declare -l MAIL       bash: declare -l MAIL       nsh: declare -l MAIL\n    declare MAIL          bash: declare -- MAIL       nsh: (not found, not listed)\n\nTHE LAST ROW IS THE WHOLE OF THIS NODE. A bare `declare MAIL` changes nothing about the entry -- `nameref::ensure_entry` finds one already there and no attribute follows -- so it cannot be told from the slot it found by any test of the entry's contents. The other five leave a mark and are already right.\n\nWHAT WOULD TELL THEM APART. `VariableState::Declared(VariableKind)` is already Bash's invisible variable and already the marker for `declare -a z`; a scalar declared with no value is still `Unset`, which `92f97f9` said in as many words. Extending `Declared` to `Scalar` would make `declare MAIL` a state change and would make `Variable::is_reserved_slot`'s three tests collapse back into the one `!Unset` test `declared_names` used to make. The cost is that `set_entry`'s `(_, None) => VariableState::Unset` arm has to tell a declaration with no value from an `unset`, and both arrive as `value: None`.\n\nTHE OTHER WAY OUT is to stop reserving slots at all: give `set_entry` a name-to-callback lookup the way it already derives `Callback::Locale`, so `MAIL`, `MAILPATH`, `HISTSIZE`, `PATH`, `IFS` and `OPTIND` get their callback when an entry is created rather than needing one to pre-exist. That removes the divergence at its source rather than filtering it out of one listing, and it is the bigger change: it moves the core POSIX write path, and unsetting `MAIL` would stop running the mail callback unless the removal path is taught to.\n\nNOT URGENT AND NOT COSMETIC. It is nine specific names, and a script that says `declare MAIL` is rare. But it is the last place where this shell's bookkeeping is visible as a script's declaration, and `bash_valueless_declaration.rs` carries a comment naming this node where the row would otherwise be.\n\nDONE WHEN. `declare MAIL` on an untouched reserved name is a line in `declare -p` and a `declare -- MAIL` when asked by name, `declare -p LANG` on an untouched one is still `not found`, and the row is in the differential table rather than in a comment explaining its absence."
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:33:03.648084764Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
                                             }
                                         )
                                     }
