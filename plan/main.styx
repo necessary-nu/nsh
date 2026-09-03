@@ -9136,6 +9136,7 @@ children (
                                 title "Install the nplan that commits a pathspec, and demonstrate it here"
                                 kind @chore
                                 deps (commit-only-the-paths-a-node-staged)
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T18:06:26.886101212Z
@@ -9149,6 +9150,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @blocker
                                         text "BUILT AND CONFIRMED, NOT INSTALLED -- and installing is only half of what this node needs.\n\nBuilt from `b8bee180` at 2026-09-02 23:15 with `CARGO_TARGET_DIR=/data/nplan-install-target` (release, `--locked`, 2m51s, both binaries). `/` was at 3.0 GiB free, under `scripts/disk-headroom`'s own comfort, so the build was deliberately put on `/data`, which had 290 GiB.\n\nThe difference is confirmed by the two binaries themselves rather than by reading the diff:\n\n    /data/nplan-install-target/release/nplan commit --help | grep -c 'git pathspec'   -> 1\n    ~/.cargo/bin/nplan commit --help            | grep -c 'git pathspec'   -> 0\n\nThe new option reads: *\"A path this commit is for. Repeat `--path` for multiple. Named paths are staged for you and committed as a git pathspec, so nothing else in the shared index -- another session's staged work -- can be carried along. When omitted, the commit takes whatever is staged when it starts.\"*\n\n**THE MCP SERVER IS A SECOND BINARY AND IT WILL NOT PICK THIS UP ON INSTALL.** `nplan-mcp` is its own `[[bin]]` in `crates/mcp`, and the one serving this session is pid 1271105, started 2026-09-02 16:14, `~/.cargo/bin/nplan-mcp` dated 08-20. The commit logic is linked into it, not shelled out to the CLI, so replacing the file on disk leaves the running process on the old code. Every `mcp__nplan__nplan_commit` in an existing session keeps the whole-index behaviour until that process restarts. So the node's DONE WHEN has two steps and the second is a session restart, not a build:\n\n    cargo install --path crates/cli --locked     # (CARGO_TARGET_DIR=/data/nplan-install-target reuses the build)\n    cargo install --path crates/mcp --locked\n    # then restart the session so a new nplan-mcp is spawned\n\n`cargo install` was refused by this session's permission classifier -- it writes into `~/.cargo/bin` -- so it needs the operator. `~/.cargo/bin/nplan` and `nplan-mcp` are backed up at `/data/nplan.pre-pathspec-backup` and `/data/nplan-mcp.pre-pathspec-backup`.\n\nA live end-to-end demonstration in this checkout could not be taken, and the reason is worth recording rather than retrying: the sanctioned commit path here is `mcp__nplan__nplan_commit`, which is the stale process; the CLI path is the fresh code but this repo's hook tells callers not to use it (*\"bare git commit / nplan commit CLI bypass the lint+audit DoD gate\"*); and building a throwaway nplan repo to demonstrate in is not possible either, because the session's own tooling refuses every `git commit` invocation, `--no-verify` included. The behavioural evidence therefore remains `b8bee180`'s own regression test, which was watched failing with a probe that restored whole-index behaviour before the fix was put back.\n\nThe build tree at `/data/nplan-install-target` (2.2 GiB) was left in place so the install is seconds rather than minutes. Delete it afterwards."
+                                    }
+
+                                    {
+                                        at 2026-09-03T12:46:51.810084975Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Done (nplan complete)"
                                     }
                                 )
                             }
