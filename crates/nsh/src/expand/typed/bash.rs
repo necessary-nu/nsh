@@ -13,7 +13,7 @@ use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
 use crate::nodes::{FileRedirectionOperator, Node, Redirection, WordNode};
 use crate::options::{BashShopt, Dialect};
-use crate::pattern::{Pattern, PatternOptions, Trial};
+use crate::pattern::{Pattern, PatternOptions};
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, WordUnit};
 
 /// Pattern options for `case`, `[[ … ]]`, and `${name/pattern/…}`,
@@ -678,9 +678,12 @@ fn replace(
     let mut at = 0;
     let mut replaced = false;
     while at < text.len() {
-        let matched = (!replaced || all)
-            .then(|| longest_match(&mut trial, &boundaries, at))
-            .flatten();
+        // The furthest the pattern reaches from `at`, at a character
+        // boundary. One memo answers that for every offset the walk
+        // starts from, because how far a state reaches does not depend on
+        // which start arrived at it -- which is what keeps a substitution
+        // a traversal of its value rather than one per offset.
+        let matched = (!replaced || all).then(|| trial.furthest_end(at)).flatten();
         match matched {
             Some(end) if end > at => {
                 replacement.write(&mut result, &text[at..end]);
@@ -702,20 +705,6 @@ fn replace(
     }
     result.extend_from_slice(&text[at.min(text.len())..]);
     result
-}
-
-/// The furthest the pattern reaches from `at`, at a character boundary.
-///
-/// One traversal answers for every end at once. Asking the same question
-/// once per candidate end is what made a substitution a cube of the
-/// value's length: the ends were a factor of it, and each was a match
-/// that walked the value again.
-fn longest_match(trial: &mut Trial<'_>, boundaries: &[usize], at: usize) -> Option<usize> {
-    trial
-        .ends_from(at)
-        .into_iter()
-        .rev()
-        .find(|end| boundaries.binary_search(end).is_ok())
 }
 
 /// `${name^pattern}`, `${name^^pattern}`, `${name,pattern}`, and

@@ -5,9 +5,11 @@
 //! and `[` are operators exactly when their byte is unquoted, while literal
 //! and locale-multibyte characters remain ordinary byte-preserving slices.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use bstr::BString;
+
+mod extended;
 
 /// Matching behaviour a pattern inherits from shell options rather than
 /// from its own bytes.
@@ -39,19 +41,6 @@ pub(crate) struct Pattern {
     bytes: BString,
     quoted: Vec<bool>,
     options: PatternOptions,
-}
-
-/// One `X(alternative|…)` extended-glob group and where the pattern
-/// continues after it.
-// [spec:nsh:req:compat.bash.expansion-globbing]
-struct ExtendedGroup {
-    kind: u8,
-    /// Where `X(` begins. The group is a function of this offset and the
-    /// pattern, so it is also the half of `Matcher::group_ends`'s key
-    /// that names *which* group an end set belongs to.
-    start: usize,
-    alternatives: Vec<core::ops::Range<usize>>,
-    next: usize,
 }
 
 impl Pattern {
@@ -208,6 +197,7 @@ impl Pattern {
             pattern: self,
             characters: Characters::of(locale, &self.bytes, subject),
             memo: Memo::default(),
+            spans: Memo::default(),
             budget: 0,
             spent: 0,
         }
@@ -227,34 +217,13 @@ impl Pattern {
         }
     }
 
-    /// Every subject offset at which this pattern, read from `from`, runs
-    /// out — the set `{ end : this pattern matches subject[from..end] }`.
-    ///
-    /// One traversal answers for every `end` at once, which is the whole
-    /// point of asking it this way round: the same question put once per
-    /// candidate `end` re-walks the same states with a fresh memo each
-    /// time and costs a factor of the subject's length more.
-    // [spec:nsh:req:compat.bash.expansion-globbing]
-    fn ends_within(
-        &self,
-        characters: &mut Characters<'_>,
-        pattern_start: usize,
-        from: usize,
-        budget: &mut u64,
-    ) -> Vec<usize> {
-        let mut memo = Memo::default();
-        let mut matcher = self.matcher(characters, pattern_start, budget, &mut memo, true);
-        matcher.matches_from(0, from);
-        matcher.ends.unwrap_or_default()
-    }
-
     fn matcher<'a, 'b>(
         &'a self,
         characters: &'a mut Characters<'b>,
         pattern_start: usize,
         budget: &'a mut u64,
         memo: &'a mut Memo,
-        collect: bool,
+        goal: Goal,
     ) -> Matcher<'a, 'b> {
         let locale = characters.subject.locale;
         let subject = characters.subject.bytes;
@@ -266,7 +235,8 @@ impl Pattern {
             characters,
             memo,
             budget,
-            ends: collect.then(Vec::new),
+            goal,
+            ends: Vec::new(),
         }
     }
 
@@ -294,6 +264,12 @@ pub(crate) struct Trial<'a> {
     /// Shared by every yes-or-no question, because a state's answer does
     /// not depend on which question reached it.
     memo: Memo,
+    /// The same, for the furthest-end question a substitution asks from
+    /// every offset. It is a memo of its own because the two hold
+    /// different answers under the same key: one says whether the
+    /// subject runs out with the pattern, the other how far the pattern
+    /// can reach from there.
+    spans: Memo,
     /// What the question being asked has left to spend. Each gets the
     /// whole of the pattern's budget, as it did when each was a match of
     /// its own.
@@ -309,7 +285,7 @@ impl Trial<'_> {
     // [spec:nsh:req:compat.bash.expansion-globbing]
     pub(crate) fn matches_from(&mut self, from: usize) -> bool {
         let mut memo = std::mem::take(&mut self.memo);
-        let matched = self.ask(&mut memo, from, false).0;
+        let matched = self.ask(&mut memo, from, Goal::Whole).0.is_some();
         // A question that ran out of budget abandoned branches it had not
         // finished, and the `false` it wrote for those is not an answer
         // the next question may read.
@@ -328,21 +304,45 @@ impl Trial<'_> {
         // out, so what its memo holds is not what a yes-or-no walk would
         // hold at the same state, and it gets a memo of its own.
         let mut memo = Memo::default();
-        let mut ends = self.ask(&mut memo, from, true).1;
+        let mut ends = self.ask(&mut memo, from, Goal::Every).1;
         ends.sort_unstable();
         ends.dedup();
         ends
     }
 
-    fn ask(&mut self, memo: &mut Memo, from: usize, collect: bool) -> (bool, Vec<usize>) {
+    /// The furthest offset at which the pattern, read from its first
+    /// byte, runs out over `subject[from..]`, counting only offsets that
+    /// begin a character.
+    ///
+    /// An unanchored substitution asks this from every offset of its
+    /// value, and it is one number per state that does not depend on
+    /// which start reached the state -- so every start reads one memo and
+    /// the whole operation costs a traversal rather than one apiece. The
+    /// set of ends cannot be shared that way, which is what `ends_from`
+    /// records and why this is a question of its own rather than its
+    /// last element.
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    pub(crate) fn furthest_end(&mut self, from: usize) -> Option<usize> {
+        let mut spans = std::mem::take(&mut self.spans);
+        let reach = self.ask(&mut spans, from, Goal::Furthest).0;
+        // A question that ran out of budget abandoned branches it had not
+        // finished, and what it wrote for those is not an answer the next
+        // question may read.
+        if self.budget > 0 {
+            self.spans = spans;
+        }
+        reach
+    }
+
+    fn ask(&mut self, memo: &mut Memo, from: usize, goal: Goal) -> (Option<usize>, Vec<usize>) {
         self.budget = self.pattern.budget();
         let mut matcher =
             self.pattern
-                .matcher(&mut self.characters, 0, &mut self.budget, memo, collect);
-        let matched = matcher.matches_from(0, from);
-        let ends = matcher.ends.take().unwrap_or_default();
+                .matcher(&mut self.characters, 0, &mut self.budget, memo, goal);
+        let reach = matcher.reach_from(0, from);
+        let ends = std::mem::take(&mut matcher.ends);
         self.spent += self.pattern.budget() - self.budget;
-        (matched, ends)
+        (reach, ends)
     }
 }
 
@@ -382,6 +382,12 @@ struct Characters<'a> {
     /// why one table serves them all.
     pattern: crate::characters::Characters<'a>,
     subject: crate::characters::Characters<'a>,
+    /// Which subject offsets begin a character, built on the first
+    /// question that has to know and empty until then. Only
+    /// `Goal::Furthest` asks, and it asks because a bracket expression
+    /// can consume a collating element wider than the character beside
+    /// it and so run the pattern out in the middle of the next one.
+    subject_boundaries: Vec<bool>,
 }
 
 impl<'a> Characters<'a> {
@@ -389,8 +395,42 @@ impl<'a> Characters<'a> {
         Self {
             pattern: crate::characters::Characters::of(locale, pattern),
             subject: crate::characters::Characters::of(locale, subject),
+            subject_boundaries: Vec::new(),
         }
     }
+
+    fn subject_begins_character(&mut self, at: usize) -> bool {
+        if self.subject_boundaries.is_empty() {
+            let mut flags = vec![false; self.subject.bytes.len() + 1];
+            for boundary in crate::characters::boundaries(self.subject.locale, self.subject.bytes) {
+                if let Some(flag) = flags.get_mut(boundary) {
+                    *flag = true;
+                }
+            }
+            self.subject_boundaries = flags;
+        }
+        self.subject_boundaries.get(at).copied().unwrap_or(false)
+    }
+}
+
+/// What a walk is being asked for, which is the whole of the difference
+/// between the three questions one pattern is put to.
+// [spec:nsh:req:compat.bash.expansion-globbing]
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Goal {
+    /// Whether the pattern runs out exactly where the subject does. One
+    /// answer settles it, so a walk stops at the first branch that has
+    /// one.
+    Whole,
+    /// Every offset the pattern can run out at. Nothing is settled
+    /// early, and the ends are recorded as the walk reaches them rather
+    /// than returned from a state -- which is why this walk's memo
+    /// cannot be read by a later start, and gets a fresh one each time.
+    Every,
+    /// The furthest offset the pattern can run out at that begins a
+    /// character. One number per state, independent of the start that
+    /// reached it, and therefore shareable across every start.
+    Furthest,
 }
 
 /// One pattern matched against one subject.
@@ -426,18 +466,23 @@ struct Matcher<'a, 'b> {
     /// is what a trim does -- can hold one across the lot.
     memo: &'a mut Memo,
     budget: &'a mut u64,
-    /// `Some` while the walk is collecting ends rather than answering a
-    /// yes-or-no question. Running out of pattern then records where the
-    /// subject had got to and reports "no match", so no branch is cut
-    /// short and every reachable end is seen. The memo turns into the
+    goal: Goal,
+    /// Where the pattern ran out, for `Goal::Every`. Running out then
+    /// records the offset and answers "no match", so no branch is cut
+    /// short and every reachable end is seen; the memo turns into the
     /// visited set that keeps the walk linear in its states.
-    ends: Option<Vec<usize>>,
+    ends: Vec<usize>,
 }
 
 /// What one walk has already decided, and may be asked again.
 #[derive(Default)]
 struct Memo {
-    matches: HashMap<(usize, usize), bool>,
+    /// What each state answered. The value is what the goal asked for
+    /// there: the subject's end or nothing for `Whole`, the furthest end
+    /// that begins a character for `Furthest`, and nothing at all for
+    /// `Every`, whose walk uses the key alone to say a state was
+    /// visited.
+    reaches: HashMap<(usize, usize), Option<usize>>,
     /// Where each group, entered at each subject offset, can end. Keyed
     /// on `(group start, from)`, which is complete for the same reason
     /// `matches`'s key is. Its size is bounded by the budget rather than
@@ -475,33 +520,57 @@ impl Matcher<'_, '_> {
     // [spec:posix:sem:pattern.asterisk-matches-any-string]
     // [spec:posix:syn:pattern.concatenation]
     // [spec:posix:sem:pattern.asterisk-longest-match]
-    fn matches_from(&mut self, pattern_at: usize, subject_at: usize) -> bool {
-        if let Some(result) = self.memo.matches.get(&(pattern_at, subject_at)) {
-            return *result;
+    /// What the pattern read from `pattern_at` reaches over the subject
+    /// read from `subject_at`, in whatever the goal counts as reaching.
+    fn reach_from(&mut self, pattern_at: usize, subject_at: usize) -> Option<usize> {
+        if let Some(reach) = self.memo.reaches.get(&(pattern_at, subject_at)) {
+            return *reach;
         }
         if *self.budget == 0 {
-            return false;
+            return None;
         }
         *self.budget -= 1;
-        let result = self.match_uncached(pattern_at, subject_at);
-        self.memo.matches.insert((pattern_at, subject_at), result);
-        result
+        let reach = self.reach_uncached(pattern_at, subject_at);
+        self.memo.reaches.insert((pattern_at, subject_at), reach);
+        reach
     }
 
-    fn match_uncached(&mut self, mut pattern_at: usize, mut subject_at: usize) -> bool {
+    /// Whether an answer settles the question, so a walk holding one need
+    /// not take the branches it has not taken yet.
+    fn settles(&self, reach: Option<usize>) -> bool {
+        reach.is_some() && self.goal == Goal::Whole
+    }
+
+    /// What the pattern running out at `subject_at` is worth to the
+    /// question being asked.
+    fn ran_out(&mut self, subject_at: usize) -> Option<usize> {
+        match self.goal {
+            Goal::Whole => (subject_at == self.subject.len()).then_some(subject_at),
+            Goal::Furthest => self
+                .characters
+                .subject_begins_character(subject_at)
+                .then_some(subject_at),
+            Goal::Every => {
+                if !self.ends.contains(&subject_at) {
+                    self.ends.push(subject_at);
+                }
+                None
+            }
+        }
+    }
+
+    fn reach_uncached(&mut self, mut pattern_at: usize, mut subject_at: usize) -> Option<usize> {
+        // What the branches this loop stepped past reached. The loop
+        // carries on down one of them and answers the rest here, so every
+        // way out of it folds these back in.
+        let mut aside = None;
         loop {
             if pattern_at == self.pattern.bytes.len() {
-                let Some(ends) = self.ends.as_mut() else {
-                    return subject_at == self.subject.len();
-                };
-                if !ends.contains(&subject_at) {
-                    ends.push(subject_at);
-                }
-                return false;
+                return self.ran_out(subject_at).max(aside);
             }
 
             if let Some(group) = self.extended_group(pattern_at) {
-                return self.match_group(&group, subject_at);
+                return self.reach_group(&group, subject_at).max(aside);
             }
 
             if self.pattern.active(pattern_at, b'*') {
@@ -509,18 +578,19 @@ impl Matcher<'_, '_> {
                 while self.pattern.active(pattern_at, b'*') {
                     pattern_at += 1;
                 }
-                // A trailing `*` answers a yes-or-no question at once, but
-                // a collecting walk still has to visit every offset it
-                // reaches, so it goes round the candidate loop below.
-                if pattern_at == self.pattern.bytes.len() && self.ends.is_none() {
-                    return true;
+                // A `*` that ends the pattern reaches the end of the
+                // subject, and the two questions with a single answer can
+                // give it without walking there. `Every` cannot: each
+                // offset the star steps over is an end of its own.
+                if pattern_at == self.pattern.bytes.len() && self.goal != Goal::Every {
+                    return Some(self.subject.len()).max(aside);
                 }
-                return self.match_star(star_at, pattern_at, subject_at);
+                return self.reach_star(star_at, pattern_at, subject_at).max(aside);
             }
 
             if self.pattern.active(pattern_at, b'?') {
                 if subject_at == self.subject.len() {
-                    return false;
+                    return aside;
                 }
                 pattern_at += 1;
                 subject_at = self.subject_end(subject_at);
@@ -532,10 +602,14 @@ impl Matcher<'_, '_> {
             {
                 let mut consumed = consumed.into_iter();
                 let Some(first) = consumed.next() else {
-                    return false;
+                    return aside;
                 };
-                if consumed.any(|count| self.matches_from(next_pattern, subject_at + count)) {
-                    return true;
+                for count in consumed {
+                    let reach = self.reach_from(next_pattern, subject_at + count);
+                    if self.settles(reach) {
+                        return reach;
+                    }
+                    aside = aside.max(reach);
                 }
                 pattern_at = next_pattern;
                 subject_at += first;
@@ -543,7 +617,7 @@ impl Matcher<'_, '_> {
             }
 
             if subject_at == self.subject.len() {
-                return false;
+                return aside;
             }
             let pattern_end = self.pattern_end(pattern_at);
             let subject_end = self.subject_end(subject_at);
@@ -551,7 +625,7 @@ impl Matcher<'_, '_> {
                 &self.pattern.bytes[pattern_at..pattern_end],
                 &self.subject[subject_at..subject_end],
             ) {
-                return false;
+                return aside;
             }
             pattern_at = pattern_end;
             subject_at = subject_end;
@@ -574,30 +648,33 @@ impl Matcher<'_, '_> {
     /// once per offset, and the whole operation is a square of the
     /// value's length while its states are a multiple of it.
     // [spec:posix:sem:pattern.asterisk-matches-any-string]
-    fn match_star(&mut self, star_at: usize, after: usize, subject_at: usize) -> bool {
+    fn reach_star(&mut self, star_at: usize, after: usize, subject_at: usize) -> Option<usize> {
         let mut candidate = subject_at;
         let mut stepped = Vec::new();
-        let matched = loop {
-            if let Some(known) = self.memo.matches.get(&(star_at, candidate)) {
+        let mut best = loop {
+            if let Some(known) = self.memo.reaches.get(&(star_at, candidate)) {
                 break *known;
             }
-            if self.matches_from(after, candidate) {
-                break true;
+            let reach = self.reach_from(after, candidate);
+            if self.settles(reach) {
+                break reach;
             }
-            stepped.push(candidate);
+            stepped.push((candidate, reach));
             if candidate == self.subject.len() {
-                break false;
+                break None;
             }
             candidate = self.subject_end(candidate);
         };
-        // A walk that ran out of budget answered "no match" for branches
-        // it never took, and that answer is this question's alone.
-        if *self.budget > 0 {
-            for at in stepped {
-                self.memo.matches.insert((star_at, at), matched);
+        // A walk that ran out of budget answered for branches it never
+        // took, and that answer is this question's alone.
+        let keep = *self.budget > 0;
+        for (at, reach) in stepped.into_iter().rev() {
+            best = best.max(reach);
+            if keep {
+                self.memo.reaches.insert((star_at, at), best);
             }
         }
-        matched
+        best
     }
 
     /// Whether one pattern character stands for one subject character,
@@ -606,166 +683,6 @@ impl Matcher<'_, '_> {
     fn same_character(&self, pattern: &[u8], subject: &[u8]) -> bool {
         pattern == subject
             || (self.pattern.options.ignore_case && fold_case(pattern) == fold_case(subject))
-    }
-
-    /// Read the extended-glob group that starts at `at`, when the option
-    /// that gives `X(` its meaning is on and the group is well formed.
-    // [spec:nsh:req:compat.bash.expansion-globbing]
-    fn extended_group(&self, at: usize) -> Option<ExtendedGroup> {
-        if !self.pattern.options.extended {
-            return None;
-        }
-        let kind = *self.pattern.bytes.get(at)?;
-        if !matches!(kind, b'?' | b'*' | b'+' | b'@' | b'!')
-            || self.pattern.quoted.get(at).copied().unwrap_or(true)
-            || !self.pattern.active(at + 1, b'(')
-        {
-            return None;
-        }
-
-        let mut alternatives = Vec::new();
-        let mut start = at + 2;
-        let mut depth = 1usize;
-        let mut cursor = start;
-        while cursor < self.pattern.bytes.len() {
-            if self.pattern.quoted[cursor] {
-                cursor += 1;
-                continue;
-            }
-            match self.pattern.bytes[cursor] {
-                b'(' => depth += 1,
-                b')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        alternatives.push(start..cursor);
-                        return Some(ExtendedGroup {
-                            kind,
-                            start: at,
-                            alternatives,
-                            next: cursor + 1,
-                        });
-                    }
-                }
-                b'|' if depth == 1 => {
-                    alternatives.push(start..cursor);
-                    start = cursor + 1;
-                }
-                _ => {}
-            }
-            cursor += 1;
-        }
-        None
-    }
-
-    // [spec:nsh:req:compat.bash.expansion-globbing]
-    fn match_group(&mut self, group: &ExtendedGroup, subject_at: usize) -> bool {
-        match group.kind {
-            b'!' => self.match_group_excluded(group, subject_at),
-            b'?' => self.match_group_once(group, subject_at, true),
-            b'@' => self.match_group_once(group, subject_at, false),
-            b'*' => self.match_group_repeated(group, subject_at, true),
-            _ => self.match_group_repeated(group, subject_at, false),
-        }
-    }
-
-    /// Every subject position one alternative can reach from `from`.
-    ///
-    /// Each alternative is a pattern in its own right, walked over the
-    /// same subject by its own matcher; the work budget is the one thing
-    /// they share, so a nested group cannot escape it.
-    ///
-    /// The answer depends on nothing but the group and `from`, and a
-    /// repeated group asks it about every offset it can reach — from
-    /// every offset it can be entered at. Remembering it is what stops
-    /// that being a cube of the subject's length.
-    fn alternative_ends(&mut self, group: &ExtendedGroup, from: usize) -> Vec<usize> {
-        if let Some(ends) = self.memo.group_ends.get(&(group.start, from)) {
-            return ends.clone();
-        }
-        let mut ends = Vec::new();
-        for range in &group.alternatives {
-            let alternative = self.pattern.slice(range.clone());
-            let start = self.pattern_start + range.start;
-            ends.extend(alternative.ends_within(self.characters, start, from, self.budget));
-        }
-        ends.sort_unstable();
-        ends.dedup();
-        self.memo
-            .group_ends
-            .insert((group.start, from), ends.clone());
-        ends
-    }
-
-    fn match_group_once(
-        &mut self,
-        group: &ExtendedGroup,
-        subject_at: usize,
-        optional: bool,
-    ) -> bool {
-        let mut ends = self.alternative_ends(group, subject_at);
-        if optional && !ends.contains(&subject_at) {
-            ends.push(subject_at);
-        }
-        ends.into_iter()
-            .any(|end| self.matches_from(group.next, end))
-    }
-
-    fn match_group_repeated(
-        &mut self,
-        group: &ExtendedGroup,
-        subject_at: usize,
-        optional: bool,
-    ) -> bool {
-        // A repetition reaches the closure of the group's ends, so an
-        // offset is worth expanding once. `seen` says which have been,
-        // and it is a set rather than a scanned list because the closure
-        // can hold an offset for every position in the subject.
-        let mut seen = HashSet::new();
-        let mut ends = Vec::new();
-        let mut pending: Vec<usize> = self
-            .alternative_ends(group, subject_at)
-            .into_iter()
-            .filter(|end| seen.insert(*end))
-            .collect();
-        while let Some(at) = pending.pop() {
-            ends.push(at);
-            if at > subject_at {
-                let reached = self.alternative_ends(group, at);
-                pending.extend(
-                    reached
-                        .into_iter()
-                        .filter(|end| *end > at && seen.insert(*end)),
-                );
-            }
-        }
-        if optional && seen.insert(subject_at) {
-            ends.push(subject_at);
-        }
-        ends.into_iter()
-            .any(|end| self.matches_from(group.next, end))
-    }
-
-    /// `!(list)` consumes any run of subject characters that no
-    /// alternative matches, then the pattern continues after the group.
-    fn match_group_excluded(&mut self, group: &ExtendedGroup, subject_at: usize) -> bool {
-        let excluded: HashSet<usize> = self
-            .alternative_ends(group, subject_at)
-            .into_iter()
-            .collect();
-        let mut candidates = Vec::new();
-        let mut end = subject_at;
-        loop {
-            if !excluded.contains(&end) {
-                candidates.push(end);
-            }
-            if end == self.subject.len() {
-                break;
-            }
-            end = self.subject_end(end);
-        }
-        candidates
-            .into_iter()
-            .any(|end| self.matches_from(group.next, end))
     }
 
     /// Return the continuation and every subject width matched by one
@@ -1060,53 +977,6 @@ mod tests {
 
     #[test]
     // [spec:nsh:req:compat.bash.expansion-globbing/test]
-    fn extended_groups_repeat_and_negate() {
-        let locale = nsh_platform::Locale::c().unwrap();
-        let extended = PatternOptions {
-            extended: true,
-            ignore_case: false,
-        };
-        let matches = |pattern: &[u8], subject: &[u8]| {
-            Pattern::unquoted(BString::from(pattern))
-                .with_options(extended)
-                .matches(&locale, subject)
-        };
-
-        assert!(matches(b"@(foo|bar)", b"foo"));
-        assert!(!matches(b"@(foo|bar)", b"foobar"));
-        assert!(matches(b"?(foo)", b""));
-        assert!(matches(b"*(foo)", b"foofoofoo"));
-        assert!(!matches(b"+(foo)", b""));
-        assert!(matches(b"+(foo)bar", b"foofoobar"));
-        assert!(matches(b"!(foo)", b"bar"));
-        assert!(!matches(b"!(foo)", b"foo"));
-        assert!(matches(b"--@(help|verbose=@(1|2))", b"--verbose=2"));
-        // The same continuation is reached from inside and outside a
-        // negated group; the memo answers each with its own question.
-        assert!(!matches(b"!(a)x", b"ax"));
-        assert!(matches(b"!(a)x", b"aax"));
-        // Without the option the group is ordinary pattern text.
-        assert!(Pattern::unquoted(BString::from("@(foo|bar)")).matches(&locale, b"@(foo|bar)"));
-    }
-
-    #[test]
-    // [spec:nsh:req:compat.bash.expansion-globbing/test]
-    fn extended_matching_work_is_bounded() {
-        let locale = nsh_platform::Locale::c().unwrap();
-        // Nested negation over a long subject can demand unbounded work
-        // while producing no output; the budget answers "no match"
-        // rather than running on.
-        let pattern =
-            Pattern::unquoted(BString::from("!(!(!(!(!(a*b))))))")).with_options(PatternOptions {
-                extended: true,
-                ignore_case: false,
-            });
-        let subject = vec![b'a'; 4096];
-        assert!(!pattern.matches(&locale, &subject));
-    }
-
-    #[test]
-    // [spec:nsh:req:compat.bash.expansion-globbing/test]
     fn case_folding_is_a_pattern_option() {
         let locale = nsh_platform::Locale::c().unwrap();
         let folded = PatternOptions {
@@ -1158,53 +1028,7 @@ mod tests {
     /// factor of seven and of twenty-five when they were found, because
     /// what each had was a whole factor of the subject's length. A fence
     /// that only just held would be measuring the constant instead.
-    const COST_ALLOWANCE: u64 = 16;
-
-    /// The shape the `matcher` fuzz target found on 2026-09-01: a leading
-    /// `*`, one `+(…)` whose alternatives are mostly empty, one
-    /// alternative holding a parenthesised run of `*`, and a subject made
-    /// of runs. Four such inputs of about four hundred bytes took between
-    /// eleven and ninety-two seconds, because `alternative_ends` asked
-    /// "does this alternative match `subject[from..end]`" once per
-    /// candidate `end` and threw the memo away between the questions.
-    #[test]
-    // [spec:nsh:req:compat.bash.expansion-globbing/test]
-    fn extended_alternation_costs_a_multiple_of_its_input() {
-        let locale = nsh_platform::Locale::c().unwrap();
-        let mut bytes = b"*+(\x9f\x9d\xd6\xff\x9e\x9d\x9e(".to_vec();
-        bytes.extend(std::iter::repeat_n(b'*', 34));
-        bytes.extend_from_slice(b")**$*****");
-        bytes.extend(std::iter::repeat_n(b'|', 18));
-        bytes.extend(std::iter::repeat_n(b'*', 4));
-        bytes.extend(std::iter::repeat_n(0xff, 30));
-        bytes.extend_from_slice(b"aaa)+");
-        let pattern = Pattern::unquoted(BString::from(bytes)).with_options(PatternOptions {
-            extended: true,
-            ignore_case: false,
-        });
-
-        let mut subject = vec![b'a'; 14];
-        for (byte, run) in [
-            (b'*', 4),
-            (0x9a, 37),
-            (b'*', 33),
-            (0xff, 30),
-            (0xd6, 40),
-            (0xff, 60),
-            (b'*', 13),
-            (b'a', 12),
-        ] {
-            subject.extend(std::iter::repeat_n(byte, run));
-        }
-
-        let (matched, cost) = pattern.match_cost(&locale, &subject);
-        assert!(!matched);
-        let allowance = COST_ALLOWANCE * pattern.as_bytes().len() as u64 * subject.len() as u64;
-        assert!(
-            cost < allowance,
-            "cost {cost} exceeds allowance {allowance}"
-        );
-    }
+    pub(super) const COST_ALLOWANCE: u64 = 16;
 
     /// What one operation over a whole value is allowed to cost.
     ///
@@ -1215,15 +1039,15 @@ mod tests {
     /// cube. Measured interleaved at loads 9 to 18, one operation each
     /// on a 2047-byte value: a trim 0.27s and a substitution 175.75s.
     /// What the collecting walk answers for every end at once, and the
-    /// memo the questions now share, make a trim one walk of the value
-    /// and a substitution one walk from each of its offsets.
+    /// two memos the questions share, make each of the three one walk of
+    /// the value -- so all three rows below hold to the same allowance,
+    /// and a substitution costs what a trim does.
     #[test]
     // [spec:nsh:req:compat.bash.expansion-globbing/test]
     fn an_operation_over_a_value_costs_one_walk() {
         let locale = nsh_platform::Locale::c().unwrap();
         let pattern = Pattern::unquoted(BString::from("*zz"));
         let subject = vec![b'a'; 2048];
-        let offsets = subject.len() as u64 + 1;
         let walk = COST_ALLOWANCE * pattern.as_bytes().len() as u64 * subject.len() as u64;
 
         // `${v#*zz}` and `${v##*zz}` are the two ends of one traversal.
@@ -1239,64 +1063,13 @@ mod tests {
         let cost = suffixes.spent;
         assert!(cost < walk, "suffix cost {cost} exceeds allowance {walk}");
 
-        // `${v/*zz/X}` needs the furthest end from each offset, which is
-        // a traversal each and no more than that.
+        // `${v/*zz/X}` needs the furthest end from each offset, and the
+        // whole of it costs one traversal rather than one apiece: how far
+        // a state reaches does not depend on which start reached it, so
+        // every start reads the answers the one before it left.
         let mut spans = pattern.trial(&locale, &subject);
-        assert!((0..=subject.len()).all(|at| spans.ends_from(at).is_empty()));
-        let (cost, allowance) = (spans.spent, walk * offsets);
-        assert!(
-            cost < allowance,
-            "span cost {cost} exceeds allowance {allowance}"
-        );
-    }
-
-    /// The shape the same target found on 2026-09-02, in the campaign run
-    /// to check the first one was closed. A repeated group whose only
-    /// alternative is `*` reaches every offset from wherever it starts,
-    /// and `match_group_repeated` then asks each of those where the group
-    /// can go next — so a group entered at n offsets asked the same n
-    /// questions n times over, and the answer to each was recomputed from
-    /// nothing. A twenty-six byte pattern against a 388-byte subject
-    /// spent the whole budget and took twenty-five seconds to replay.
-    #[test]
-    // [spec:nsh:req:compat.bash.expansion-globbing/test]
-    fn a_repeated_group_asks_each_offset_once() {
-        let locale = nsh_platform::Locale::c().unwrap();
-        let pattern = Pattern::unquoted(BString::from(&b"*aa*(*)aaaa\x8daaaaaaa*(a*)*\x95"[..]))
-            .with_options(PatternOptions {
-                extended: true,
-                ignore_case: false,
-            });
-
-        let mut subject = Vec::new();
-        for (byte, run) in [
-            (b'a', 2),
-            (0xff, 1),
-            (b'?', 3),
-            (0xff, 2),
-            (b'?', 1),
-            (0xff, 45),
-            (b'a', 110),
-            (0xff, 1),
-            (b'?', 1),
-            (0xff, 45),
-            (b'a', 118),
-            (0xff, 3),
-            (b'?', 13),
-            (b'a', 8),
-            (0xff, 3),
-            (b'?', 25),
-            (b'a', 7),
-        ] {
-            subject.extend(std::iter::repeat_n(byte, run));
-        }
-
-        let (matched, cost) = pattern.match_cost(&locale, &subject);
-        assert!(!matched);
-        let allowance = COST_ALLOWANCE * pattern.as_bytes().len() as u64 * subject.len() as u64;
-        assert!(
-            cost < allowance,
-            "cost {cost} exceeds allowance {allowance}"
-        );
+        assert!((0..=subject.len()).all(|at| spans.furthest_end(at).is_none()));
+        let cost = spans.spent;
+        assert!(cost < walk, "span cost {cost} exceeds allowance {walk}");
     }
 }

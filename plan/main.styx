@@ -9987,6 +9987,27 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id port-the-script-module-onto-the-canonical-word
+                                title "Port the script module onto the canonical word"
+                                kind @refactor
+                                log (
+                                    {
+                                        at 2026-09-03T17:38:56.822578251Z
+                                        author "brendan@necessary.nu"
+                                        kind @blocker
+                                        text "A 734-LINE PUBLIC MODULE ARRIVED FROM THE REMOTE WRITTEN AGAINST A WORD REPRESENTATION THIS TREE NO LONGER HAS.\n\n`origin/master` carried three commits this checkout had not seen -- `4cc143b`, `9c3f343`, `6d9539c` -- branched from `9788287`, before the word canonicalization. The merge itself is resolved and lives on branch `merge-origin` in the worktree `/data/dash-merge`; six conflicted files were settled and the tree compiles except for this.\n\n`crates/nsh/src/script.rs` is `6d9539c`'s new module, `pub mod script;` on the crate surface: *\"a script as the shell reads it, without running it ... an embedder that composes recursive invocations out of recipe lines needs the shell's reading of a line and not a second grammar of its own.\"* Ronin is the consumer. It is written against:\n\n    WordPart::Literal(BString)      WordPart::Escaped       WordPart::Quote\n    WordPart::Multibyte             QuoteBoundary           Printer::parsed_word\n    Quoting                         WordPart::Command(..)   WordPart::Arithmetic(..)\n\nNone of the first seven exists here, and the last two are struct variants in this tree, not tuple variants. `WordPart` is now `Text { bytes, quoted }` plus struct-shaped `Command` and `Arithmetic`, from `9bad7cb`, `82d4bb9`, `1760d95` and `87e0007` -- the work `[dec:nsh:no-equivalent-forms]` and `[spec:nsh:req:idiom.printable-ast+2]` drove, where one program has one tree and the tree carries the tokens it was read as. `nodes/source.rs` also fails in four places against the same printer API, and their `Node` match does not cover `Node::Group`, which this tree has and theirs did not.\n\nFIFTEEN ERRORS, AND NOT ONE OF THEM IS A CONFLICT MARKER. That is the point: this is not merge resolution, it is porting a module onto a different data model. A careless mapping here is the dangerous kind, because `script.rs` exists precisely to give an embedder *the shell's own reading* of a line -- a plausible-looking translation that quietly loses a quoting distinction produces an embedder that mis-reads recipe text and no test in this repository would notice, since the module is new and nothing here consumes it.\n\nWHAT THE PORT HAS TO PRESERVE. `Literal` vs `Escaped` vs `Quote` vs `Multibyte` were four ways of saying what one `Text { bytes, quoted }` now says together with the token log; `QuoteBoundary` was how the old model marked where a quoted run began and ended. Establish, from the four canonicalization commits and from `word.rs` as it now stands, what carries each of those facts today -- then port each use, and say in the commit message which old distinction maps onto what. Where a distinction genuinely has no counterpart, that is a finding about the canonical form and belongs in a note, not in a guess.\n\nThe module's own tests came with it and are the check that the reading did not move. `Ronin` is the consumer; `nsh` does not use `script` itself, so the tests are all there is.\n\nDo not simply drop `pub mod script;` to make the build green. That would remove a public module a colleague landed hours ago and leave master lying about what it offers."
+                                    }
+
+                                    {
+                                        at 2026-09-03T17:39:34.261606606Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
+                                )
+                            }
                         )
                     }
                 )
@@ -11937,6 +11958,7 @@ children (
         id decode-a-character-from-the-buffer-the-parser-already-holds
         title "Stop paying a thread-locale selection per byte to read a character from input"
         kind @perf
+        sealed true
         log (
             {
                 at 2026-09-02T18:19:51.053214554Z
@@ -11950,6 +11972,13 @@ children (
                 author "brendan@necessary.nu"
                 kind @status
                 text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-09-03T17:40:24.4528738Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan complete)"
             }
         )
     }
@@ -12007,6 +12036,13 @@ children (
                 author "brendan@necessary.nu"
                 kind @note
                 text "A `${#v}` LOOP SPENDS MORE THREAD-LOCALE SELECTIONS ON THE VARIABLE'S NAME THAN ON ITS VALUE. Found 2026-09-02 while closing `stop-selecting-the-locale-per-byte-everywhere-else`, in the per-operation breakdown that node's instrumentation produced.\n\nMEASURED, release, `LC_ALL=C.UTF-8`, 20,000 iterations of `n=${#s}` over a 360-byte value, after that node's change:\n\n    is_alphanumeric   561,321   28 per iteration\n    decode_exact      240,018   12\n    wide_is_space     240,018   12\n    is_alpha          100,147    5\n    character_widths   40,002    2   <- the value's 300 characters\n    multibyte_len     240,018   12\n\n`Locale::is_alphanumeric` and `Locale::is_alpha` are `with_selected(|| isalnum(byte))` -- a `uselocale` pair around one table lookup, once per byte. 28 of them per expansion is the name `s`, the name `i`, the name `n` and the assignment targets being validated character by character, and it is now the largest single line in the profile of an expansion that reads a 300-character value.\n\nWHY IT IS ODD. POSIX names a valid variable name in terms of the portable character set: underscore, digits and the letters A-Z a-z, and nothing else, in any locale. `[spec:posix:def:variables.name]` is the rule. So the C library does not need to be asked at all for name validation; `is_ascii_alphanumeric` answers it. The locale-taking form is right for `[[:alnum:]]` inside a bracket expression, which is a different question with a different answer.\n\nCARE. Not every caller of `is_alpha`/`is_alphanumeric` is name validation. Find them, split the two questions, and leave the bracket-expression one alone.\n\nDONE WHEN. Validating a variable name takes no thread-locale selection, the count above falls to whatever the bracket-expression callers really need, and a differential test over names holding high bytes shows both dialects unchanged against their references."
+            }
+
+            {
+                at 2026-09-03T17:40:35.445894886Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
             }
         )
     }
@@ -12070,6 +12106,34 @@ children (
                 author "brendan@necessary.nu"
                 kind @note
                 text "FOUND 2026-09-03 WHILE CLOSING `make-a-substitution-linear-in-its-value`, BY BUILDING A WORKTREE AT HEAD. The shared checkout builds and every gate passes there, because it holds the missing half uncommitted. A clean checkout of master does not build at all.\n\n    git worktree add --detach /tmp/x $(git rev-parse HEAD)\n    cargo build -p nsh\n    error[E0433]: cannot find `LocaleCharacter` in `nsh_platform`   (parser.rs:960, 961, 964, 971)\n    error[E0425]: cannot find function `buffered_line_bytes` in module `crate::input`  (parser.rs:949)\n    error[E0599]: no method named `decode_prefix` found for struct `Locale`  (parser.rs:956)\n\nWHICH COMMIT. `git log -S LocaleCharacter -- crates/nsh/src/parser.rs` names exactly one: `89ee017` \"fix: Start a re-entered parse from its own source, not the caller's\". Its four paths are `crates/nsh-cli/tests/bash_subscript_substitution.rs`, `crates/nsh/src/parser.rs` and the two plan files. The 144 lines it added to `parser.rs` include a block that belongs to a different session's work -- the one on `decode-a-character-from-the-buffer-the-parser-already-holds`, whose other three files are still uncommitted in the checkout as `crates/nsh-platform/src/locale.rs`, `crates/nsh-platform/src/unix.rs`, `crates/nsh-platform/src/windows/locale.rs` and `crates/nsh/src/input.rs`.\n\nSO THIS IS THE SWEEP THE HOUSE RULES WARN ABOUT, in its worst form: naming a path in `paths` commits that path's whole WORKING TREE content, and the working tree held two sessions' edits to `parser.rs`. The commit took the half that could not stand alone. Nothing is lost -- the other half is still in the checkout -- but master has not built since, and every measurement anyone takes in a private worktree at HEAD fails to build rather than answering.\n\nWHY IT WAS NOT CAUGHT. The commit gates run against the working tree, which builds. Nothing in the pipeline builds the tree the commit actually creates.\n\nDONE WHEN a clean worktree at master builds, which needs the four files above committed -- by the session that owns them, since only it knows whether that half is finished. If it is not finished, the alternative is to take the block back out of `parser.rs`. And there is a second question worth answering while someone is here: a gate that built the committed tree rather than the working tree would have caught this in the commit that caused it."
+            }
+        )
+    }
+
+    {
+        id stop-splitting-words-on-a-multibyte-blank
+        title "Stop splitting a word at a multi-byte blank neither reference splits at"
+        kind @fix
+        log (
+            {
+                at 2026-09-03T17:40:02.682333905Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "FOUND 2026-09-03 while closing `decode-a-character-from-the-buffer-the-parser-already-holds`, and it is not that node's doing: binaries built either side of that change answer identically.\n\nAN UNQUOTED MULTI-BYTE BLANK SPLITS A WORD IN NSH AND IN NEITHER REFERENCE. Measured, `LC_ALL=C.UTF-8`, script `printf \"[%s]\" a<U+3000>b; echo`:\n\n    target/release/nsh (ca57b37)          [a][b]\n    target/bash-reference/bash (5.3.15)   [a　b]\n    /usr/bin/dash                         [a b]\n\nU+2000 EN QUAD behaves the same way. So does every character glibc's `iswblank` answers true for.\n\nWHERE. `crates/nsh/src/parser.rs::read_multibyte_character` under `MultibyteMode::FieldBoundary`, which `word_lexer.rs:386` selects while lexing a word when field splitting is on: a decoded character whose wide value satisfies `Locale::wide_is_blank` is reported as `MultibyteInput::FieldBoundary`, and `word_lexer.rs:388` then ends the word there. The blank is being treated as though it were IFS whitespace.\n\nWHY THAT IS WRONG. Field splitting is driven by `IFS`, whose default is space, tab and newline -- three ASCII bytes, and nothing about the locale's notion of blankness. Neither reference consults `iswblank` when deciding where a word ends. `[spec:posix:def:variables.ifs]` is the rule for what separates fields, and a multi-byte blank is a field separator only if `IFS` names it.\n\nCARE. This is `MultibyteMode::FieldBoundary`, not `Literal`; `read`'s POSIX path and `parser/expansion.rs` both use `Literal` and are not affected. Check what depends on the `FieldBoundary` arm before deleting it -- the dash port may have introduced it for a reason that is recorded somewhere, and `MultibyteInput::FieldBoundary` has one other consumer at `builtins/read.rs:78` where it is folded in with `SingleByte`.\n\nDONE WHEN. `printf \"[%s]\" a<U+3000>b` prints `[a　b]` in Bash mode and `[a b]` in POSIX mode, matching each reference; a differential test over the blank characters glibc reports for C.UTF-8 holds it; and `IFS=$'　'` still splits on that character, because that is the case where splitting is correct."
+            }
+        )
+    }
+
+    {
+        id fence-the-half-read-character-with-a-pty
+        title "Fence a half-read multi-byte character with the pty harness, not a pipe"
+        kind @test
+        log (
+            {
+                at 2026-09-03T17:40:20.226092205Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "LEFT BY `decode-a-character-from-the-buffer-the-parser-already-holds`. That node made the parser and `read` settle a multi-byte character from bytes the input frame already holds, falling back to the byte-at-a-time decoder whenever the character is not whole in the buffer. The fallback is what keeps a terminal read returning as soon as one character is complete, and it is the half with no regression test.\n\nTHREE ATTEMPTS, AND WHY EACH FAILED, so the next person does not repeat them. Each was checked by breaking the fallback deliberately and watching the test; a test that still passes then proves nothing.\n\n1. Write a two-byte character's bytes in two `write` calls to the shell's stdin pipe, with a flush between. PASSED WITH THE FALLBACK BROKEN. The shell is blocked in `read(2)`; both writes land in the pipe before the kernel returns, so it sees the character whole and the split never happens. The flush does not help: there is no synchronisation point between the two writes.\n\n2. The same with a `printf 'ready\\n'` sync first, so the shell is known to be blocked before the first write. STILL PASSED WITH THE FALLBACK BROKEN, for the same reason -- the sync establishes where the shell is before the first write, and the race is between the first and second.\n\n3. Leave the half-character inside the shell's own buffer rather than in the pipe: one write of `X` and the first two bytes of a three-byte character, then read `a=X` back to prove the shell consumed the first character out of its buffer, then send the last byte. This reaches the fallback by construction and is the right shape. IT HANGS, against the pinned Bash as well as against nsh, and the cause was not established. The likely one is that a shell's `printf` to a pipe is block-buffered, so the `a=X` the test waits for never arrives and both sides wait.\n\nTHE ANSWER IS A PTY, which is why this is filed rather than abandoned. A pty is line-buffered, so `a=X` arrives as soon as it is written, which is exactly the property attempt 3 needs and the pipe lacks. `crates/nsh-cli/tests/default_history_navigation.rs` already has the harness.\n\nTHE DRAFT IS NOT LOST. The attempt-3 source is at `multibyte_across_a_read_boundary.rs.wip` in the session scratchpad, and its shape -- `WIDE = [0xe2, 0x82, 0xac]`, the one-write opening of `X` plus two bytes, the `a=X` handshake, then the last byte -- is what should be ported onto the pty harness.\n\nDONE WHEN. The test fails when `buffered_character_width`'s `Incomplete` arm is made to answer `Some(1)` instead of `None`, and passes otherwise, on both nsh and the pinned Bash."
             }
         )
     }

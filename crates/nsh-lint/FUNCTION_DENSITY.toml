@@ -99,30 +99,6 @@ stays `pub(super)`, and `conditional_primary` keeps reaching `super::keywords::n
 and `conditional_test` for the `[[ ]]` newline work.
 """
 
-[[file]]
-path = "crates/nsh/src/pattern.rs"
-answer = """
-Split the extended-glob group machinery out to `crates/nsh/src/pattern/extended.rs`. \
-Eleven functions move: `Pattern::ends_within`, which exists only to serve them, and \
-`Matcher`'s `extended_group`, `match_group`, `alternative_ends`, `match_group_once`, \
-`match_group_repeated` and `match_group_excluded`, with the `ExtendedGroup` struct; and \
-the four tests that are about nothing else -- `extended_groups_repeat_and_negate`, \
-`extended_matching_work_is_bounded`, `extended_alternation_costs_a_multiple_of_its_input` \
-and `a_repeated_group_asks_each_offset_once`. That leaves 38 here and 11 there. \
-NOTHING CHANGES VISIBILITY, which is the whole reason this seam and not another: a child \
-module sees its parent's private items, so `pattern::extended` reads `Matcher`'s fields, \
-calls `Matcher::matches_from` and `subject_end`, and uses `Pattern::slice`, `active` and \
-`match_cost` exactly as the code does today. The move is a `mod extended;`, a `use \
-super::...` and no signature. WHAT STAYS AND IS NAMED IN WHAT MOVES: \
-`EXTENDED_MATCH_BUDGET` stays, because `Pattern::budget` reads it for every pattern and \
-not only for the extended ones -- the new module takes it from `super`. \
-`Matcher::ends` and the collecting mode stay too: they are the plain matcher's, used by \
-prefix trimming through `Trial::ends_from`, and the group code is one caller of them \
-rather than their owner. Counted with `density.rs`'s counter on 2026-09-02, the day the \
-file reached 49 by gaining `Trial` -- `trial`, `budget`, `match_star`, `matches_from`, \
-`ends_from`, `ask` and one fence test -- for `bound-what-a-prefix-or-suffix-trim-costs`.
-"""
-
 
 [[file]]
 path = "crates/nsh-platform/src/locale.rs"
