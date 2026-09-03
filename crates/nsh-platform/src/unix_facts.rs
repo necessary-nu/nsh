@@ -123,7 +123,6 @@ pub fn wait_for_input(fd: &impl AsDescriptor, timeout: Option<f64>) -> std::io::
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

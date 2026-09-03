@@ -37,11 +37,7 @@ unsafe extern "C" {
     fn mbrlen(bytes: *const core::ffi::c_char, len: usize, state: *mut MbState) -> usize;
     fn iswblank(wc: core::ffi::c_uint) -> core::ffi::c_int;
     fn iswspace(wc: core::ffi::c_uint) -> core::ffi::c_int;
-    fn wcrtomb(
-        bytes: *mut core::ffi::c_char,
-        wide: i32,
-        state: *mut MbState,
-    ) -> usize;
+    fn wcrtomb(bytes: *mut core::ffi::c_char, wide: i32, state: *mut MbState) -> usize;
     fn nl_langinfo(item: libc::nl_item) -> *const core::ffi::c_char;
 }
 
@@ -185,8 +181,7 @@ impl Locale {
         let base = explicit_name(base)?;
         // SAFETY: the name is live and terminated, the mask is supplied by
         // libc, and a null base requests a new independently owned object.
-        let mut raw =
-            unsafe { libc::newlocale(LC_ALL_MASK, base.as_ptr(), std::ptr::null_mut()) };
+        let mut raw = unsafe { libc::newlocale(LC_ALL_MASK, base.as_ptr(), std::ptr::null_mut()) };
         if raw.is_null() {
             return Err(std::io::Error::last_os_error());
         }
@@ -710,9 +705,10 @@ mod tests {
          * two-byte start. */
         let bytes = [b'a', 0xc3, 0x8c, 0x8c, b'z', 0xc3];
         let utf8 = utf8();
-        assert_eq!(utf8.character_widths(&bytes, bytes.len()), [
-            1, 2, 1, 1, 1, 1
-        ]);
+        assert_eq!(
+            utf8.character_widths(&bytes, bytes.len()),
+            [1, 2, 1, 1, 1, 1]
+        );
         assert_eq!(utf8.character_widths(&bytes, 0), []);
         assert_eq!(utf8.character_widths(&bytes, 2), [1, 2]);
         assert_eq!(utf8.character_widths(&bytes, 99), [1, 2, 1, 1, 1, 1]);

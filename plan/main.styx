@@ -9257,6 +9257,13 @@ children (
                                                 kind @note
                                                 text "Found 2026-09-02 while writing the attribute-letter table for `spell-a-valueless-name-back`, which had to stop using a non-numeric value because of it. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\nThe integer attribute reshapes a scalar assignment and does not reach a compound one:\n\n    declare -ai v=(Q);   declare -p v   bash: declare -ai v=([0]=\"0\")    nsh: ([0]=\"Q\")\n    declare -Ai v=(1);   declare -p v   bash: declare -Ai v=([1]=\"0\")    nsh: ([1]=\"\")\n    declare -i  v=Q;     declare -p v   bash: declare -i v=\"0\"           nsh: declare -i v=\"0\"\n\nThe scalar row is the control and it already agrees, so this is not the arithmetic conversion being wrong -- it is the conversion not being run on the path a compound assignment takes. `nameref::declared_value` is where a declaration attribute reshapes a value before it is stored, and `builtins/declare/compound.rs` does not go through it.\n\nThe second row is worth reading twice: `declare -Ai v=(1)` is Bash 5.1's key/value form, so `1` is a *key* with an empty value, and the empty value is what `-i` turns into `0`. The key is untouched by `-i` in both shells, which is the boundary.\n\nDONE WHEN. An element stored by a compound assignment on an `-i` name is the arithmetic value of its text, the key of an associative element is not, and a differential table holds the indexed and associative forms with numeric and non-numeric values."
                                             }
+
+                                            {
+                                                at 2026-09-03T16:10:07.645022165Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -9278,6 +9285,7 @@ children (
                                         id keep-allexport-off-a-compound-readonly-operand
                                         title "Keep `set -a` off `readonly -a name=(...)`"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T13:00:29.50885768Z
@@ -9291,6 +9299,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:09:53.595977453Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -9397,6 +9412,7 @@ children (
                                         id take-the-array-letter-for-a-plain-operand
                                         title "Make `readonly -a name=value` declare an array"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T14:17:06.374756457Z
@@ -9410,6 +9426,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:09:52.09429014Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -11421,6 +11444,28 @@ children (
         id a-bracket-test-reads-the-current-directory
         title "Stop scanning the directory for every `[ ... ]` the shell runs"
         kind @perf
+        children (
+            {
+                id an-empty-bracket-class-matches-where-bash-matches-nothing
+                title "Decide what `[[::]]` means, because this shell and Bash read it differently"
+                kind @fix
+                log (
+                    {
+                        at 2026-09-03T16:10:50.507535814Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "FOUND WHILE CLOSING `a-bracket-test-reads-the-current-directory`, AND NOT CAUSED BY IT -- the same answer comes back from the binary built at `d0ffd39` and from the one with that node's change.\n\n`[[::]]` NAMES NO CHARACTER CLASS, AND THE TWO SHELLS DISAGREE ABOUT WHAT IS LEFT. Measured 2026-09-03 against the pinned Bash 5.3.15, in a directory holding files named `a`, `ab`, `[abc`, `[ABC`, `a[b`, `a]b`, `[a]` and directories `sub` and `x`:\n\n    printf '<%s>' [[::]]                 nsh <[]>            bash <[[::]]>\n    shopt -s nullglob; ... [[::]]        nsh <[]>            bash <>\n    shopt -s failglob; ... [[::]]        nsh <[]>            bash: no match\n    shopt -s nocaseglob; ... [[::]]      nsh <[]>            bash <[[::]]>\n    shopt -s dotglob; ... [[::]]         nsh <[]>            bash <[[::]]>\n\nThose are the only five rows of a 245-row sweep (49 words x 5 glob options) on which nsh and the pinned Bash still disagree after that node's change; before it there were 18.\n\nWHERE IT COMES FROM. `Matcher::nested_member` refuses a `[:...:]` member with an empty body, so `crates/nsh/src/pattern.rs` reads `[[::]]` as an ordinary list whose members are `[`, `:` and `:`, closing at the first `]` -- a pattern that matches any one of those three characters, which is why the file named `[]` is not produced but the file named `[` would be. Wait: what it actually produces here is `<[]>`, the two-character name, so the list is closed later than that; either way it is a list that matches. Bash reads the whole thing as a pattern that matches nothing at all, which is what `nullglob` dropping it and `failglob` refusing it both say.\n\nWHAT HAS TO BE DECIDED. Whether an empty class body makes the `[` ordinary (this shell) or makes the enclosing bracket expression unsatisfiable (Bash). POSIX does not say: XBD 9.3.5 gives no meaning to `[::]` with an empty class name, so this is the `[dec:nsh:we-own-the-defects]` question, and whichever answer is taken belongs in docs/divergences.md beside the `[^]]` entry that was settled the same way.\n\nDONE WHEN. The five rows above agree with the pinned Bash, or the divergence is registered in docs/divergences.md with the reading it takes and why; and `[[.a.]` and `[[=a=]`, which are the same shape with the other two delimiters, are checked at the same time."
+                    }
+
+                    {
+                        at 2026-09-03T16:11:28.277779264Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "CORRECTION TO \"WHERE IT COMES FROM\" IN THE NOTE ABOVE, 2026-09-03. That paragraph was written before the reading was checked and thinks aloud in the middle of itself. The original is left as it stands, as this repository's practice for a correction; this is the measured reading.\n\n`Matcher::nested_member` refuses a `[:...:]` member whose body is empty, so `[[::]]` is read as an ordinary bracket list `[[::]` whose members are `[`, `:` and `:`, closing at the first `]`, followed by a literal `]`. The pattern is therefore \"one of `[` or `:`, then `]`\", and it matches a two-character subject. Checked with `case`, so no directory is involved:\n\n    case X in [[::]] )        subject  [   :   ]   []   ::\n      nsh                              n   n   n   Y    n\n      pinned bash 5.3.15               n   n   n   n    n\n\nThe pathname expansion produced `<[]>` because the fixture held a file of that name; it is not the `[` alone that matched.\n\n`[[==]]` behaves identically in both shells to `[[::]]`. `[[.-.]]` does not: its body is not empty, so both shells read it as a collating symbol and both answer `<[[.-.]]>`. So the question is exactly what an empty class, collating-symbol or equivalence-class body means, and it has to be answered once for all three delimiters.\n\nBash matches nothing at all for either empty-bodied spelling, which is what `nullglob` dropping the word and `failglob` refusing it both say."
+                    }
+                )
+            }
+        )
         log (
             {
                 at 2026-09-02T18:20:09.73633471Z

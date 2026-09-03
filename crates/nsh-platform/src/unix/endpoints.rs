@@ -11,10 +11,10 @@
 use std::collections::BTreeSet;
 use std::collections::hash_map::RandomState;
 use std::ffi::{CString, OsStr, OsString};
-use std::os::unix::ffi::OsStringExt;
 use std::hash::BuildHasher as _;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 

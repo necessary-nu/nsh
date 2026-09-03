@@ -34,9 +34,7 @@ impl TerminalSettings {
     #[must_use]
     pub fn without_echo(&self) -> Self {
         let mut quiet = self.0.clone();
-        quiet
-            .local_modes
-            .remove(rustix::termios::LocalModes::ECHO);
+        quiet.local_modes.remove(rustix::termios::LocalModes::ECHO);
         Self(quiet)
     }
 

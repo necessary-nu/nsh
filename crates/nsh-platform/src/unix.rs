@@ -92,7 +92,9 @@ pub use signals::{
 };
 #[path = "unix/text.rs"]
 mod text;
-pub use text::{NativeStrExt, ShellBytesExt, input_newline_width, trim_command_substitution_output};
+pub use text::{
+    NativeStrExt, ShellBytesExt, input_newline_width, trim_command_substitution_output,
+};
 
 fn raw_process_id(process: ProcessId) -> std::io::Result<i32> {
     i32::try_from(process.get()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
@@ -219,12 +221,37 @@ mod tests {
 
     #[test]
     fn descriptor_transaction_validates_targets() {
-        assert!(ProcessDescriptorTransaction::new([(-1, None)]).is_err());
-        assert!(ProcessDescriptorTransaction::new([(4, None), (4, None)]).is_err());
-        let (_, write) = pipe().unwrap();
-        let number = write.number();
+        assert_eq!(
+            invalid_transaction([(-1, None)]),
+            std::io::ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            invalid_transaction([(4, None), (4, None)]),
+            std::io::ErrorKind::InvalidInput
+        );
 
-        assert!(ProcessDescriptorTransaction::new([(-1, Some(write))]).is_err());
-        assert!(snapshot_process_fd(number, 10).unwrap().is_none());
+        /* A refused transaction owns the sources it was handed, so
+         * returning drops them: the pipe's only write end is gone and
+         * the read end is at end of input. Asking the process whether
+         * the freed *number* is free answers the same question about a
+         * table libtest's sibling threads allocate from, and the kernel
+         * hands out the lowest free number -- that assertion failed 25
+         * times in 3,000 runs at `--test-threads 32`. */
+        let (read, write) = pipe().unwrap();
+        assert_eq!(
+            invalid_transaction([(-1, Some(write))]),
+            std::io::ErrorKind::InvalidInput
+        );
+
+        let mut byte = [0];
+        assert_eq!(read_once(&read, &mut byte).unwrap(), 0);
+    }
+
+    fn invalid_transaction(
+        changes: impl IntoIterator<Item = (i32, Option<Descriptor>)>,
+    ) -> std::io::ErrorKind {
+        ProcessDescriptorTransaction::new(changes)
+            .expect_err("a transaction with an invalid target must be refused")
+            .kind()
     }
 }

@@ -1456,11 +1456,12 @@ assertions (
     {id a-bracket-test-reads-the-current-directory, kind @doing, author "brendan@necessary.nu", at 2026-09-03T13:14:49.80525796Z}
     {id refuse-a-survey-run-whose-shell-the-boundary-hides, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:00:51.501788611Z}
     {id stop-a-required-register-entry-firing-test-footprint, kind @complete, author "brendan@necessary.nu", at 2026-09-03T15:57:42.863891053Z}
-    {id take-the-array-letter-for-a-plain-operand, kind @doing, author "brendan@necessary.nu", at 2026-09-03T13:28:35.875548737Z}
-    {id keep-allexport-off-a-compound-readonly-operand, kind @doing, author "brendan@necessary.nu", at 2026-09-03T15:57:06.351458772Z}
+    {id take-the-array-letter-for-a-plain-operand, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:09:52.09429014Z}
+    {id keep-allexport-off-a-compound-readonly-operand, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:09:53.595977453Z}
     {id stop-a-freed-descriptor-number-racing-its-test, kind @doing, author "brendan@necessary.nu", at 2026-09-03T15:59:04.177435764Z}
     {id judge-a-shell-whose-target-is-a-link, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:07:18.351158587Z}
     {id give-the-differential-wrapper-a-kill-after, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:07:24.684224374Z}
+    {id give-a-compound-assignment-the-integer-attribute, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:10:07.645022165Z}
 )
 
 impl_evidence (
