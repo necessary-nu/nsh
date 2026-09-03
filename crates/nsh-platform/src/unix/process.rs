@@ -552,7 +552,16 @@ pub fn run_in_child(body: impl FnOnce()) -> std::io::Result<i32> {
 mod tests {
     use super::*;
 
-    /// Reporting the file-creation mask must not write it. The report
+    /// The environment name that tells this check it is the copy of
+    /// itself running in a process of its own, and the name it re-enters
+    /// itself by.
+    const OWNED_PROCESS: &str = "NSH_CREATION_MASK_OWNS_THE_PROCESS";
+    /// Named without its module path, which the filter does not need
+    /// and which moves when the file does; `1 passed` below is what
+    /// makes a filter that matched nothing a failure rather than a pass.
+    const THIS_CHECK: &str = "reporting_the_creation_mask_never_unmasks_the_process";
+
+    /// Reporting the file-creation mask must not install one. The report
     /// POSIX forces -- install zero, put back what came out -- leaves
     /// the whole process unmasked for the width of two syscalls, and
     /// anything a sibling thread creates in that window is created with
@@ -561,52 +570,125 @@ mod tests {
     /// in 2,000 runs of a completion test that only wanted a temporary
     /// directory.
     ///
-    /// So one thread samples the mask the kernel publishes while
-    /// another reports it, and a report that installed zero is caught
-    /// as a sample of zero. Nothing here writes the mask: what it reads
-    /// is whatever the process already had, which is also why a process
-    /// already at zero has nothing to tell apart and is a host this
-    /// cannot be measured on.
+    /// Watching for it takes a mask worth removing and a thread making
+    /// files while another reports it, and installing a mask is a write
+    /// to state every test in this binary shares. So the check re-enters
+    /// itself in a process of its own and does it there, where the mask,
+    /// the files and the answer are nobody else's. Every host has a mask
+    /// and every host can be given one, so there is no host this cannot
+    /// be measured on -- only two answers, one for a kernel that
+    /// publishes the mask and one for a kernel that does not.
     #[test]
     fn reporting_the_creation_mask_never_unmasks_the_process() {
+        if std::env::var_os(OWNED_PROCESS).is_some() {
+            watch_a_report_from_inside_this_process();
+        } else {
+            let binary = std::env::current_exe().expect("the check knows its own binary");
+            let run = std::process::Command::new(binary)
+                .args([THIS_CHECK, "--test-threads", "1"])
+                .env(OWNED_PROCESS, "1")
+                .output()
+                .expect("a process of this check's own");
+            let transcript = String::from_utf8_lossy(&run.stdout).into_owned()
+                + &String::from_utf8_lossy(&run.stderr);
+            assert!(run.status.success(), "{transcript}");
+            assert!(
+                transcript.contains("1 passed"),
+                "the check took a process of its own and ran nothing in it: {transcript}"
+            );
+        }
+    }
+
+    /// The watch, which only a process that owns its own mask may run.
+    /// One thread creates files asking for every permission bit while
+    /// another reports the mask, and a report that installed zero is
+    /// caught as a file carrying bits the mask should have taken off.
+    fn watch_a_report_from_inside_this_process() {
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
         use std::sync::atomic::{AtomicBool, AtomicU64};
 
-        let Some(ambient) = published_creation_mask() else {
-            /* Nothing to ask, so the dance is the only report there is
-             * and its window is the price of having one. */
-            return;
-        };
-        assert_ne!(
-            ambient, 0,
-            "a process whose mask is already zero cannot show the window"
-        );
+        /// Wide enough that a file made under it and one made under
+        /// nothing cannot be confused.
+        const WATCHED: u32 = 0o077;
+        /// Files to see created before the answer is called in. Bounding
+        /// the watch by what it witnessed rather than by how many
+        /// reports it made is what keeps a starved thread from turning
+        /// into a pass.
+        const WITNESSES: u64 = 200;
+        /// A stop for a host where the files cannot be made at all, so
+        /// the failure is the count below rather than a hang.
+        const REPORT_LIMIT: u64 = 1_000_000;
+
+        replace_creation_mask(WATCHED);
 
         let stop = AtomicBool::new(false);
         let unmasked = AtomicU64::new(0);
-        let samples = AtomicU64::new(0);
+        let created = AtomicU64::new(0);
         std::thread::scope(|scope| {
             scope.spawn(|| {
+                let directory = std::env::temp_dir();
+                let mut serial = 0_u64;
                 while !stop.load(AtomicOrdering::Relaxed) {
-                    samples.fetch_add(1, AtomicOrdering::Relaxed);
-                    if published_creation_mask() == Some(0) {
+                    serial += 1;
+                    let path = directory.join(format!(
+                        "nsh-creation-mask-watch-{}-{serial}",
+                        std::process::id()
+                    ));
+                    let Ok(file) = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o666)
+                        .open(&path)
+                    else {
+                        continue;
+                    };
+                    let mode = file
+                        .metadata()
+                        .expect("a file just created has a mode")
+                        .permissions()
+                        .mode();
+                    drop(file);
+                    let _ = std::fs::remove_file(&path);
+                    created.fetch_add(1, AtomicOrdering::Relaxed);
+                    if mode & WATCHED != 0 {
                         unmasked.fetch_add(1, AtomicOrdering::Relaxed);
                     }
                 }
             });
-            for _ in 0..20_000 {
-                assert_eq!(creation_mask(), ambient);
+            let mut reports = 0_u64;
+            while created.load(AtomicOrdering::Relaxed) < WITNESSES && reports < REPORT_LIMIT {
+                assert_eq!(creation_mask(), WATCHED);
+                reports += 1;
             }
             stop.store(true, AtomicOrdering::Relaxed);
         });
 
-        assert_eq!(
-            unmasked.load(AtomicOrdering::Relaxed),
-            0,
-            "the process was seen unmasked in {} of {} samples taken while \
-             the mask was being reported",
-            unmasked.load(AtomicOrdering::Relaxed),
-            samples.load(AtomicOrdering::Relaxed),
+        let created = created.load(AtomicOrdering::Relaxed);
+        let unmasked = unmasked.load(AtomicOrdering::Relaxed);
+        assert!(
+            created >= WITNESSES,
+            "only {created} files could be made to watch the mask with"
         );
+        match published_creation_mask() {
+            /* The kernel publishes it, so the report is a read and there
+             * is no moment at which the mask is other than the one this
+             * process installed. */
+            Some(_) => assert_eq!(
+                unmasked, 0,
+                "{unmasked} of {created} files made while the mask was being \
+                 reported carried bits 0o{WATCHED:o} should have taken off"
+            ),
+            /* Nothing to ask, so the report is the POSIX dance and the
+             * window is what it costs. Saying so is what this check has
+             * to say on such a host: one that quietly gained a way to
+             * read the mask would otherwise go on reporting the price of
+             * not having one. */
+            None => assert!(
+                unmasked > 0,
+                "this host reports the mask by installing zero, yet none of \
+                 the {created} files made while it did saw the process unmasked"
+            ),
+        }
     }
 
     /// The published field is octal, and a mask installed is the mask

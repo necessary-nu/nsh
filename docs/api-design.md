@@ -785,10 +785,14 @@ There are further process-wide facts the API has to be honest about:
   whether *this* host produced the line, settled on the first call and
   remembered. On that host the paragraph above stands unchanged.
 
-  Measured 2026-09-04 on this host at load 24. A sibling thread sampling
-  the published mask while `creation_mask()` reported it saw the process
-  unmasked in 450 of 774 samples with the dance; the same check failed 49
-  runs in 50 with the dance and 0 in 50 with the read. Reading
+  Measured 2026-09-04 on this host at load 22–39. The check that guards
+  this installs a mask of 0o077 in a process of its own and has one
+  thread create files asking for 0o666 while another reports the mask:
+  with the dance, 87 of 201 files came back carrying bits the mask
+  should have taken off, and with the read, none, over 200 runs of the
+  whole binary. An earlier form of the same check sampled the published
+  mask instead and put the window at 450 of 774 samples, failing 49 runs
+  in 50 with the dance and 0 in 50 with the read. Reading
   `/proc/self/status` costs 11.4 µs against the pair's 0.3 µs — 37× the
   syscalls it replaces, paid once per `umask` a script runs, which is
   what makes it affordable rather than what makes it cheap.
