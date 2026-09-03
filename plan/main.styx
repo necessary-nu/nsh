@@ -10008,6 +10008,12 @@ children (
                                     }
                                 )
                             }
+
+                            {
+                                id repin-the-editor-crates-for-aarch64
+                                title "Repin the editor crates so aarch64 Linux builds"
+                                kind @build
+                            }
                         )
                     }
                 )
@@ -11797,6 +11803,7 @@ children (
                 id make-a-substitution-linear-in-its-value
                 title "Ask for the furthest end once per state, not once per offset a substitution starts from"
                 kind @perf
+                sealed true
                 log (
                     {
                         at 2026-09-02T19:18:35.866288535Z
@@ -11810,6 +11817,13 @@ children (
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-09-03T17:43:53.155641929Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
