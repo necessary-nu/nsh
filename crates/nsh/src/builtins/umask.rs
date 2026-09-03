@@ -7,6 +7,16 @@
 //!
 //! The mask is the process's, not the shell's: there is nothing to keep
 //! here, so the builtin reads it from the kernel and writes it back.
+//!
+//! Reading it is the part with a history. `umask(2)` installs and
+//! reports in one call, so the only portable report is to install zero
+//! and put back what came out, which leaves the whole process unmasked
+//! in between; interrupts are deferred across it here so a signal
+//! cannot strand the zero, and that is all the deferral buys. On a
+//! host whose kernel publishes the mask `nsh_platform::creation_mask`
+//! answers from the kernel and installs nothing, and the deferral below
+//! guards a pair of syscalls that do not run. See
+//! `docs/api-design.md` §6.
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -175,9 +185,8 @@ mod tests {
 
     use crate::test_support::lock;
 
-    /// The umask is the process's, so a test has to put back what it
-    /// found -- and reading it is itself a write, which is why the
-    /// builtin sets zero and then restores.
+    /// The umask is the process's, so a test that sets one holds the
+    /// lock for as long as it is set and puts back what it found.
     fn with_mask<T>(body: impl FnOnce() -> T) -> T {
         let _guard = lock();
         let saved = nsh_platform::creation_mask();

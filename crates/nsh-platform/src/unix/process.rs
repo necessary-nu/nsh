@@ -16,7 +16,7 @@ use std::ffi::{CString, OsString};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::ExitStatusExt as _;
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering as AtomicOrdering};
 
 use super::*;
 
@@ -255,12 +255,76 @@ pub fn replace_creation_mask(mask: u32) -> u32 {
     unsafe { libc::umask(mask as libc::mode_t) as u32 }
 }
 
-/// Read the process file-creation mask, restoring it before returning.
+/// Read the process file-creation mask.
+///
+/// POSIX gives no way to ask: `umask(2)` installs and reports in one
+/// call, so the portable answer is to install zero and put back what
+/// came out -- and between those two syscalls every thread in the
+/// process creates files with nothing masked off. Deferring interrupts
+/// across the pair, which `builtins::umask` does, stops a signal
+/// stranding the zero; it does not stop a sibling thread.
+///
+/// Linux 4.7 and later publish the mask on the `Umask:` line of
+/// `/proc/self/status`, which is a read and leaves nothing behind, so
+/// that is asked first. The dance is what answers when the line is not
+/// there, and which of the two runs is decided by whether this host
+/// produced the line -- not by the target it was built for, since a
+/// Linux kernel older than 4.7 and a host with no `/proc` mounted both
+/// compile as Linux and neither can be asked.
 pub fn creation_mask() -> u32 {
+    if let Some(published) = published_creation_mask() {
+        return published;
+    }
     let mask = replace_creation_mask(0);
     replace_creation_mask(mask);
     mask
 }
+
+/// The mask as the kernel publishes it, or `None` on a host that does
+/// not publish it.
+///
+/// A host either carries the line or never will, so a host that does
+/// not is remembered: rediscovering it would pay, on every call, the
+/// open the fallback exists to avoid.
+fn published_creation_mask() -> Option<u32> {
+    const UNKNOWN: u8 = 0;
+    const PUBLISHED: u8 = 1;
+    const ABSENT: u8 = 2;
+    static KERNEL_PUBLISHES_MASK: AtomicU8 = AtomicU8::new(UNKNOWN);
+
+    if KERNEL_PUBLISHES_MASK.load(AtomicOrdering::Relaxed) == ABSENT {
+        return None;
+    }
+    let published = std::fs::read(PROCESS_STATUS_PATH)
+        .ok()
+        .and_then(|status| published_mask_field(&status));
+    KERNEL_PUBLISHES_MASK.store(
+        if published.is_some() {
+            PUBLISHED
+        } else {
+            ABSENT
+        },
+        AtomicOrdering::Relaxed,
+    );
+    published
+}
+
+/// The `Umask:` field of a `/proc/<pid>/status` body. The value is
+/// octal, and reading it as anything else agrees with the kernel only
+/// for the masks whose digits happen to be below 8.
+fn published_mask_field(status: &[u8]) -> Option<u32> {
+    let field = status
+        .split(|byte| *byte == b'\n')
+        .find_map(|line| line.strip_prefix(b"Umask:".as_slice()))?
+        .trim_ascii();
+    if field.is_empty() || !field.iter().all(|byte| (b'0'..=b'7').contains(byte)) {
+        return None;
+    }
+    u32::from_str_radix(std::str::from_utf8(field).ok()?, 8).ok()
+}
+
+/// Where the kernel publishes what it knows about this process.
+const PROCESS_STATUS_PATH: &str = "/proc/self/status";
 
 /// CPU time consumed by this process and by waited-for children, in seconds.
 #[derive(Clone, Copy, Debug)]
@@ -481,5 +545,93 @@ pub fn run_in_child(body: impl FnOnce()) -> std::io::Result<i32> {
                 ChildStatus::Continued => 0,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reporting the file-creation mask must not write it. The report
+    /// POSIX forces -- install zero, put back what came out -- leaves
+    /// the whole process unmasked for the width of two syscalls, and
+    /// anything a sibling thread creates in that window is created with
+    /// nothing taken off: 0o666 for a redirection that meant 0o644,
+    /// 0o777 for a directory. The bill for it was 201 EACCES failures
+    /// in 2,000 runs of a completion test that only wanted a temporary
+    /// directory.
+    ///
+    /// So one thread samples the mask the kernel publishes while
+    /// another reports it, and a report that installed zero is caught
+    /// as a sample of zero. Nothing here writes the mask: what it reads
+    /// is whatever the process already had, which is also why a process
+    /// already at zero has nothing to tell apart and is a host this
+    /// cannot be measured on.
+    #[test]
+    fn reporting_the_creation_mask_never_unmasks_the_process() {
+        use std::sync::atomic::{AtomicBool, AtomicU64};
+
+        let Some(ambient) = published_creation_mask() else {
+            /* Nothing to ask, so the dance is the only report there is
+             * and its window is the price of having one. */
+            return;
+        };
+        assert_ne!(
+            ambient, 0,
+            "a process whose mask is already zero cannot show the window"
+        );
+
+        let stop = AtomicBool::new(false);
+        let unmasked = AtomicU64::new(0);
+        let samples = AtomicU64::new(0);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !stop.load(AtomicOrdering::Relaxed) {
+                    samples.fetch_add(1, AtomicOrdering::Relaxed);
+                    if published_creation_mask() == Some(0) {
+                        unmasked.fetch_add(1, AtomicOrdering::Relaxed);
+                    }
+                }
+            });
+            for _ in 0..20_000 {
+                assert_eq!(creation_mask(), ambient);
+            }
+            stop.store(true, AtomicOrdering::Relaxed);
+        });
+
+        assert_eq!(
+            unmasked.load(AtomicOrdering::Relaxed),
+            0,
+            "the process was seen unmasked in {} of {} samples taken while \
+             the mask was being reported",
+            unmasked.load(AtomicOrdering::Relaxed),
+            samples.load(AtomicOrdering::Relaxed),
+        );
+    }
+
+    /// The published field is octal, and a mask installed is the mask
+    /// read back. Installing one is a write to state every test in this
+    /// binary shares, so the check takes a process of its own to do it
+    /// in rather than putting the old value back and hoping no sibling
+    /// looked in between.
+    #[test]
+    fn an_installed_creation_mask_is_reported_back_whole() {
+        let status = run_in_child(|| {
+            /* 0o123 is 83; the same digits read as decimal are 123, so
+             * a report that misreads the base cannot pass this. */
+            replace_creation_mask(0o123);
+            if creation_mask() != 0o123 {
+                exit_immediately(2);
+            }
+            if creation_mask() != 0o123 {
+                exit_immediately(3);
+            }
+            if replace_creation_mask(0o022) != 0o123 {
+                exit_immediately(4);
+            }
+        })
+        .unwrap();
+
+        assert_eq!(status, 0);
     }
 }

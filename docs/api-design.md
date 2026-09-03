@@ -763,13 +763,35 @@ There are further process-wide facts the API has to be honest about:
   exists. Two `Shell`s cannot hold different masks, and one running
   `umask 077` changes what the other's `>` creates.
 
-  **Reading it is a write, which is the sharper half.** POSIX offers no
-  way to read the mask, so `creation_mask()` is `umask(0)` followed by
-  `umask(saved)`: a shell asking what the mask *is* leaves it at zero for
-  the width of two syscalls, and anything another thread creates in that
-  window is created unmasked. `umask.rs` defers interrupts across the
-  pair, which stops a signal stranding the zero; nothing stops a second
-  `Shell`.
+  **Reading it was a write. Corrected 2026-09-04; on a host that can be
+  asked it no longer is.** It read: *POSIX offers no way to read the
+  mask, so `creation_mask()` is `umask(0)` followed by `umask(saved)`: a
+  shell asking what the mask* is *leaves it at zero for the width of two
+  syscalls, and anything another thread creates in that window is
+  created unmasked. `umask.rs` defers interrupts across the pair, which
+  stops a signal stranding the zero; nothing stops a second `Shell`.*
+  Every word of that is still true of POSIX and still true of the
+  fallback below. It stopped being true of this crate: Linux 4.7 and
+  later publish the mask on the `Umask:` line of `/proc/self/status`, and
+  `creation_mask()` reads it there. The window is gone from both paths —
+  `umask` with no operand, and `umask MODE`, which reads the mask before
+  writing the one the script named and so left zero standing on the way
+  to a value that was never zero.
+
+  Where it still applies is a host that does not publish the line: a
+  kernel older than 4.7, a `/proc` that is not mounted, and every
+  non-Linux POSIX host, all of which compile as this file and none of
+  which can be told apart by the target. So the fallback is selected by
+  whether *this* host produced the line, settled on the first call and
+  remembered. On that host the paragraph above stands unchanged.
+
+  Measured 2026-09-04 on this host at load 24. A sibling thread sampling
+  the published mask while `creation_mask()` reported it saw the process
+  unmasked in 450 of 774 samples with the dance; the same check failed 49
+  runs in 50 with the dance and 0 in 50 with the read. Reading
+  `/proc/self/status` costs 11.4 µs against the pair's 0.3 µs — 37× the
+  syscalls it replaces, paid once per `umask` a script runs, which is
+  what makes it affordable rather than what makes it cheap.
 
   The cost of its absence here was a test.
   `editor::completion::tests::completion_marks_files_and_directories`
