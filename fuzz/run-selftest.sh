@@ -344,3 +344,75 @@ fi
 if "$corpus_sh" seed "$archive" >/dev/null 2>&1; then
     fail 'fuzz/corpus.sh accepted seed with one argument'
 fi
+
+# ---------------------------------------------------------------------------
+# fuzz/corpus.sh: what the derivation was made against, and how long ago.
+#
+# `.archived` says which inputs a derivation ran and nothing about when or
+# against what, so `seeding from 2659 campaign inputs standing for 21305
+# archived` reads the same whether the archive was last run against this
+# build or against the tree of a fortnight ago -- and the archive is the
+# regression set. `[spec:nsh:req:oracle.recording-carries-its-age]`
+#
+# A checkout of its own, because the answer is a fact about a repository and
+# a fabricated tree under TMPDIR is in none. Both halves are checked here:
+# the one that has a commit to name, and the one that has to say it cannot.
+
+# The derivation records its age even where there is no repository to ask,
+# and `seed` reports the record without a commit rather than not at all.
+report=$("$corpus_sh" seed "$archive" "$campaign" 2>&1 >/dev/null)
+expect_contains "$report" 'the archive was last run against unknown'
+expect_contains "$report" 'not a commit this checkout has'
+
+aged=$work/checkout
+mkdir -p "$aged"
+git -C "$aged" init -q
+printf 'archive/\ncampaign*\nartifacts/\n' >"$aged/.gitignore"
+cp "$work/merges" "$aged/merges"
+chmod +x "$aged/merges"
+git -C "$aged" add .gitignore merges
+git -C "$aged" -c user.email=selftest@example.invalid -c user.name=selftest \
+    commit -qm 'the derivation runs against this'
+first=$(git -C "$aged" rev-parse --short HEAD)
+
+mkdir -p "$aged/archive" "$aged/artifacts"
+for i in $(seq 0 9); do printf 'input %d\n' "$i" >"$aged/archive/input-$i"; done
+"$corpus_sh" derive "$aged/merges" "$aged/archive" "$aged/campaign" "$aged/artifacts" \
+    >/dev/null 2>&1 || fail 'a derivation in a checkout reported failure'
+[[ -f $aged/campaign.provenance ]] || fail 'the derivation recorded no provenance'
+grep -qx "build=$first" "$aged/campaign.provenance" \
+    || fail "the provenance does not name the build: $(cat "$aged/campaign.provenance")"
+grep -qxE 'epoch=[0-9]+' "$aged/campaign.provenance" || fail 'the provenance does not say when'
+# A bare sorted listing is what `comm` compares, so the record must not have
+# been written into it.
+grep -q '=' "$aged/campaign.archived" && fail 'the provenance leaked into the listing'
+
+report=$("$corpus_sh" seed "$aged/archive" "$aged/campaign" 2>&1 >/dev/null)
+expect_contains "$report" "last run against $first"
+expect_contains "$report" '0 commit(s) since'
+
+# The distance is the point: wall-clock age says nothing when nothing has
+# changed, and a commit to the shell says a great deal.
+printf 'a change\n' >"$aged/second"
+git -C "$aged" add second
+git -C "$aged" -c user.email=selftest@example.invalid -c user.name=selftest \
+    commit -qm 'the tree moves under the derivation'
+report=$("$corpus_sh" seed "$aged/archive" "$aged/campaign" 2>&1 >/dev/null)
+expect_contains "$report" '1 commit(s) since'
+
+# A campaign's own finds grow the set the derivation bounded, so the
+# start-up it bounds creeps back up between derivations. Same record, same
+# sentence.
+printf 'found by a campaign\n' >"$aged/campaign/found"
+report=$("$corpus_sh" seed "$aged/archive" "$aged/campaign" 2>&1 >/dev/null)
+expect_contains "$report" 'inputs at the derivation and is'
+
+# A tree carrying uncommitted work built a shell no commit explains, and the
+# record says so rather than naming a commit that is not what ran.
+printf 'uncommitted\n' >"$aged/third"
+"$corpus_sh" derive "$aged/merges" "$aged/archive" "$aged/campaign" "$aged/artifacts" \
+    >/dev/null 2>&1 || fail 'a derivation in a dirty checkout reported failure'
+grep -qxE 'build=[0-9a-f]+\+dirty' "$aged/campaign.provenance" \
+    || fail "a dirty derivation was recorded as a clean commit: $(cat "$aged/campaign.provenance")"
+report=$("$corpus_sh" seed "$aged/archive" "$aged/campaign" 2>&1 >/dev/null)
+expect_contains "$report" '0 commit(s) since'

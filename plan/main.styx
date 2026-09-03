@@ -12341,6 +12341,7 @@ children (
                         title "Stop a forked child holding a sibling test's pipe open"
                         kind @fix
                         constrained_by ([spec:nsh:req:oracle.checks-do-not-share-state])
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T16:08:58.473992418Z
@@ -12362,6 +12363,13 @@ children (
                                 kind @note
                                 text "single-flight overridden: started while bash.divergences.publish-names.withhold-prompts had uncommitted WIP"
                             }
+
+                            {
+                                at 2026-09-03T23:33:47.26285143Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
+                            }
                         )
                     }
 
@@ -12376,6 +12384,20 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "LEFT BY `decode-a-character-from-the-buffer-the-parser-already-holds`. That node made the parser and `read` settle a multi-byte character from bytes the input frame already holds, falling back to the byte-at-a-time decoder whenever the character is not whole in the buffer. The fallback is what keeps a terminal read returning as soon as one character is complete, and it is the half with no regression test.\n\nTHREE ATTEMPTS, AND WHY EACH FAILED, so the next person does not repeat them. Each was checked by breaking the fallback deliberately and watching the test; a test that still passes then proves nothing.\n\n1. Write a two-byte character's bytes in two `write` calls to the shell's stdin pipe, with a flush between. PASSED WITH THE FALLBACK BROKEN. The shell is blocked in `read(2)`; both writes land in the pipe before the kernel returns, so it sees the character whole and the split never happens. The flush does not help: there is no synchronisation point between the two writes.\n\n2. The same with a `printf 'ready\\n'` sync first, so the shell is known to be blocked before the first write. STILL PASSED WITH THE FALLBACK BROKEN, for the same reason -- the sync establishes where the shell is before the first write, and the race is between the first and second.\n\n3. Leave the half-character inside the shell's own buffer rather than in the pipe: one write of `X` and the first two bytes of a three-byte character, then read `a=X` back to prove the shell consumed the first character out of its buffer, then send the last byte. This reaches the fallback by construction and is the right shape. IT HANGS, against the pinned Bash as well as against nsh, and the cause was not established. The likely one is that a shell's `printf` to a pipe is block-buffered, so the `a=X` the test waits for never arrives and both sides wait.\n\nTHE ANSWER IS A PTY, which is why this is filed rather than abandoned. A pty is line-buffered, so `a=X` arrives as soon as it is written, which is exactly the property attempt 3 needs and the pipe lacks. `crates/nsh-cli/tests/default_history_navigation.rs` already has the harness.\n\nTHE DRAFT IS NOT LOST. The attempt-3 source is at `multibyte_across_a_read_boundary.rs.wip` in the session scratchpad, and its shape -- `WIDE = [0xe2, 0x82, 0xac]`, the one-write opening of `X` plus two bytes, the `a=X` handshake, then the last byte -- is what should be ported onto the pty harness.\n\nDONE WHEN. The test fails when `buffered_character_width`'s `Incomplete` arm is made to answer `Some(1)` instead of `None`, and passes otherwise, on both nsh and the pinned Bash."
+                            }
+
+                            {
+                                at 2026-09-03T23:34:17.343329031Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-03T23:34:17.343329031Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "single-flight overridden: started while harness.derived-corpus-age had uncommitted WIP"
                             }
                         )
                     }
@@ -12407,6 +12429,20 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
+
+                    {
+                        id drain-a-pipe-no-sibling-can-hold-open
+                        title "Stop a blocking drain waiting on a sibling test's child"
+                        kind @fix
+                        log (
+                            {
+                                at 2026-09-03T23:34:09.931922023Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "FOUND 2026-09-04 WHILE CLOSING `stop-a-forked-child-holding-a-sibling-test-s-pipe-open`, IN THE SAME BINARY AND THE SAME FAMILY. It is the third instance of one shape and the first that does not fail: it hangs instead, which is why nobody has seen it.\n\n`crates/nsh-platform/src/unix.rs`, `descriptor_transaction_validates_targets`, last three lines:\n\n    let (read, write) = pipe().unwrap();\n    assert_eq!(invalid_transaction([(-1, Some(write))]), ErrorKind::InvalidInput);\n    let mut byte = [0];\n    assert_eq!(read_once(&read, &mut byte).unwrap(), 0);\n\nThe refused transaction owns `write` and drops it, and the read then expects end of input. That is exactly the exposure just fixed in `end_of_input_counts_as_available`: a sibling test's child forked between the `pipe()` and the drop holds a duplicate write end, so the pipe is not at end of input. The difference is that `read_once` BLOCKS where `wait_for_input` answered. The read waits until the last write end anywhere closes, which is when the child exits, and then correctly reports 0. So the assertion cannot be wrong -- only late.\n\nWHY IT IS STILL WORTH A NODE. Its runtime, and in the limit whether it returns at all, depend on what an unrelated test's child is doing. A child that blocks -- on a full pipe, on a wait, on a terminal -- makes this a hang with no diagnostic, in a test that names none of it. `[spec:nsh:req:oracle.checks-do-not-share-state]` names \"a pipe inherited by a forked child\" as shared process state a check must not depend on, and this depends on it.\n\nMEASURED 2026-09-04, 32 cores. The same window in the sibling was worth 299 failures in 20,000 runs of that pair at `--test-threads 32`, load 30-39, so the fork does land inside it at about 1.5% in that configuration. This test takes the same 1.5% as a stall rather than a failure, and the binary now has four forking checks (`descriptor_transaction_installs_slots`, two in `descriptor_name.rs`, and the new one in `unix_facts.rs`) rather than one.\n\nWHAT THE ANSWER PROBABLY IS. The same as the sibling's: build the pipe in a process of its own, or -- since what this test is really asserting is that a refused transaction drops the sources it was handed -- assert that from the transaction's own error and the descriptor it was given, without a pipe whose end of input a stranger can hold. `stop-a-freed-descriptor-number-racing-its-test` already made the first half of this test local that way; this is the half it left.\n\nNOT MEASURED, and worth doing before fixing: whether the same shape is live in `crates/nsh/tests/`. `streams_embed.rs`, `glob_buffer.rs`, `expansion_buffer.rs`, `smoosh_errors.rs` and `errors_are_values.rs` all build capture pipes and read them to end of input, and at least `smoosh_errors.rs` and `errors_are_values.rs` fork in the same binary. Those forks are deliberate and happen after their own pipes, but whether any of them can land inside a sibling's window has not been checked.\n\nDONE WHEN the assertion does not depend on whether another test's child is alive, and the pair runs clean at `--test-threads 32` at a count that would have shown the stall -- 20,000 is what the sibling needed."
                             }
                         )
                     }

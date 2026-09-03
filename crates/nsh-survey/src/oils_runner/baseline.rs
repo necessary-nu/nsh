@@ -70,6 +70,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
+use std::time::SystemTime;
 
 use super::{Result, RunReport};
 use crate::control::{Control, contended_cases};
@@ -124,6 +125,13 @@ fn header(group: &str, expectation_shell: &str, path: &Path) -> String {
 # `--update-baseline-from-dirty-tree` records the list anyway and names every
 # such path in `uncommitted`. `ee98cec` had no way to do that and attributed
 # two entries it removed to a commit that did not remove them.
+#
+# `recorded_at` is the other half of that: the commit says which build, and
+# this says whether anything has run one since. A comparison prints both,
+# with how many commits the tree has moved and how many of those are under
+# `crates/`, because a list nothing has run against the current tree is not
+# a regression set and its count reads exactly the same either way. It is a
+# fact and not a threshold: no age refuses a comparison.
 
 "
     )
@@ -149,6 +157,14 @@ pub(super) struct Baseline {
     shell_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     nsh_commit: Option<String>,
+    /// When the refresh that wrote this ran, in UTC.
+    ///
+    /// The commit says which build; this says whether anyone has run one
+    /// since. Optional so a file recorded before it was tracked reads
+    /// rather than being refused -- an old recording is exactly the thing
+    /// this is for, and refusing to read one would hide it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recorded_at: Option<String>,
     /// Everything in that checkout that no commit accounts for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     uncommitted: Vec<String>,
@@ -172,6 +188,7 @@ impl Baseline {
             oils_commit: report.source_commit.clone(),
             shell_sha256: Some(report.shell_sha256.clone()),
             nsh_commit: Some(taken_in.commit.clone()),
+            recorded_at: Some(crate::provenance::timestamp(SystemTime::now())),
             uncommitted: taken_in.uncommitted.clone(),
             failing,
         }
@@ -184,7 +201,7 @@ impl Baseline {
     /// file recorded before this was tracked says so rather than
     /// pretending to a clean tree.
     fn taken_in(&self) -> String {
-        match (&self.nsh_commit, self.uncommitted.len()) {
+        let attribution = match (&self.nsh_commit, self.uncommitted.len()) {
             (None, _) => "recorded before the runner tracked which checkout it measured; \
                  the shell behind it cannot be attributed to a commit"
                 .to_owned(),
@@ -195,6 +212,43 @@ impl Baseline {
                 "recorded at {commit} over {count} uncommitted path(s), whose effects are \
                  in this list and in no commit: {}",
                 self.uncommitted.join(", ")
+            ),
+        };
+        format!("{attribution}\n{}", self.age())
+    }
+
+    /// How old this list is, in the two units that answer the question.
+    ///
+    /// A list nothing has run against the current tree is not a
+    /// regression set, and it does not announce itself: the count it
+    /// prints is the same either way, so the comparison has to say the
+    /// age whether or not it likes it
+    /// (`[spec:nsh:req:oracle.recording-carries-its-age]`). The commit
+    /// distance is the half that decides -- a fortnight in which nothing
+    /// under `crates/` changed says nothing at all, and one commit there
+    /// can move the list.
+    ///
+    /// Deliberately no threshold. What age, if any, should refuse a
+    /// comparison is a separate argument, and a check that started
+    /// failing on a date would be answered by re-recording, which is the
+    /// one response that must stay deliberate.
+    // [spec:nsh:req:oracle.recording-carries-its-age]
+    fn age(&self) -> String {
+        let when = match &self.recorded_at {
+            Some(at) => format!("recorded on {at}"),
+            None => "this file does not say when it was recorded".to_owned(),
+        };
+        match self
+            .nsh_commit
+            .as_deref()
+            .and_then(crate::provenance::commits_since)
+        {
+            Some((all, sources)) => {
+                format!("{when}; {all} commit(s) since, {sources} of them in crates/")
+            }
+            None => format!(
+                "{when}; this checkout does not have that commit, so how far the tree \
+                 has moved since cannot be said"
             ),
         }
     }
@@ -857,6 +911,50 @@ mod tests {
             older.taken_in().contains("cannot be attributed"),
             "{}",
             older.taken_in()
+        );
+    }
+
+    /// A recorded list says when it was made, and a comparison says it
+    /// back with the distance the tree has moved since.
+    ///
+    /// The count a stale list prints is the same count a current one
+    /// prints, so nothing but this sentence distinguishes a regression
+    /// set from a file nobody has run
+    /// (`[spec:nsh:req:oracle.recording-carries-its-age]`). A file
+    /// written before the field existed is read rather than refused, and
+    /// says which of the two it is.
+    // [spec:nsh:req:oracle.recording-carries-its-age/test]
+    #[test]
+    fn a_recorded_list_says_its_age() {
+        let run = report(&["case_.test.sh:1"], &[]);
+        let scratch = ScratchTree::new().unwrap();
+        let path = scratch.path().join("BASELINE.toml");
+        baseline_of(&run).write(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("recorded_at = \"20"), "{text}");
+
+        let attribution = Baseline::read(&path).unwrap().taken_in();
+        assert!(attribution.contains("recorded on 20"), "{attribution}");
+        /* Either branch is a pass. `taken_in` names b028f47, which this
+         * checkout has and a shallow clone of it would not, and the whole
+         * point of the second branch is that a distance it cannot compute
+         * is said rather than reported as zero. */
+        assert!(
+            attribution.contains("commit(s) since") || attribution.contains("cannot be said"),
+            "the comparison said nothing about the age: {attribution}",
+        );
+
+        let undated: Baseline = toml::from_str(
+            "schema = 1\ngroup = \"g\"\nexpectation_shell = \"bash\"\nposix = false\n\
+             timeout_ms = 5000\noils_commit = \"15de8fd\"\nfailing = []\n",
+        )
+        .unwrap();
+        assert!(
+            undated
+                .taken_in()
+                .contains("does not say when it was recorded"),
+            "{}",
+            undated.taken_in()
         );
     }
 

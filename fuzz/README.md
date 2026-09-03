@@ -130,13 +130,26 @@ is a build that was not on any clock either way; the campaign itself is 26s.
 the two counts is the ratio of the two replays, which is what you would
 expect of a replay.
 
-Three things make it more than a one-liner, and all three are in
+Four things make it more than a one-liner, and all four are in
 `fuzz/corpus.sh`:
 
 * **Staleness.** The derivation records the archive listing it was derived
   from. A campaign seeds from the campaign corpus *and* from whatever has
   reached the archive since, so a derivation going stale costs start-up and
   never costs coverage.
+* **Age.** That listing says which inputs and not when or against what, so
+  `seeding from 2659 campaign inputs standing for 21305 archived` reads the
+  same whether the archive was last run against this build or against the
+  tree of a fortnight ago -- and the archive is the regression set. The
+  derivation writes `fuzz/campaign/TARGET.provenance` beside the listing,
+  naming the commit it ran against, whether that tree was dirty, and the
+  time; a campaign prints it, how many commits the tree has moved since,
+  and how far the campaign corpus has grown past what the derivation
+  bounded. Measured 2026-09-04 at `d27cf47`, before any of this existed:
+  `parse` had last been derived on 2026-09-02 against `04582ce`, 73 commits
+  and 51 `crates/` commits back, and nothing anywhere said so. That is a
+  fact and not a threshold -- no campaign is refused for an old derivation
+  (`[spec:nsh:req:oracle.recording-carries-its-age]`).
 * **Copy-back.** libFuzzer writes what it finds into the first corpus
   directory it is given, which is now the campaign corpus. Every new input
   goes back into the archive when the campaign ends, whatever the campaign's

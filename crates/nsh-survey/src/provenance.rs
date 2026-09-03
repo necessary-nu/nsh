@@ -41,6 +41,7 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -250,6 +251,88 @@ pub(crate) fn checkout_root() -> Result<PathBuf> {
     ))
 }
 
+/// The moment `now` as an RFC 3339 instant in UTC.
+///
+/// Hand-rolled because this workspace carries no date dependency and one
+/// register wants one. An epoch count would serve the arithmetic and not
+/// the file: these registers are read by people, and `1788477319` is not
+/// a date.
+pub(crate) fn timestamp(now: SystemTime) -> String {
+    let seconds = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let (days, time) = (seconds / 86_400, seconds % 86_400);
+    let (year, month, day) = civil_from_days(i64::try_from(days).unwrap_or(0));
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        time / 3_600,
+        (time / 60) % 60,
+        time % 60,
+    )
+}
+
+/// Days since 1970-01-01 as a year, month and day.
+///
+/// Hinnant's `civil_from_days`, which counts in 400-year eras so that
+/// leap years and the century rules come out of the arithmetic rather
+/// than out of a table of cases. Shifting the year to start in March is
+/// what puts the leap day last and makes the month lengths a single
+/// linear formula.
+fn civil_from_days(days: i64) -> (i64, u64, u64) {
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = if month <= 2 { year + 1 } else { year };
+    (
+        year,
+        u64::try_from(month).unwrap_or(0),
+        u64::try_from(day).unwrap_or(0),
+    )
+}
+
+/// How far this checkout has moved since `commit`: every commit, and
+/// those touching `crates/`.
+///
+/// `None` when the question cannot be put -- no git, or a commit this
+/// checkout does not have, which is what a rebase, a shallow clone or a
+/// recording taken over uncommitted work all produce. A caller says it
+/// could not ask rather than printing a distance of nothing.
+///
+/// The second figure is the one that decides whether an old recording
+/// matters. Wall-clock age says nothing when nothing has changed, and a
+/// single commit under `crates/` can move the whole list.
+pub(crate) fn commits_since(commit: &str) -> Option<(usize, usize)> {
+    let root = checkout_root().ok()?;
+    let range = format!("{commit}..HEAD");
+    let count = |arguments: &[&str]| -> Option<usize> {
+        String::from_utf8(git_output(&root, arguments).ok()?)
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    };
+    git_output(
+        &root,
+        &["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
+    )
+    .ok()?;
+    Some((
+        count(&["rev-list", "--count", &range])?,
+        count(&["rev-list", "--count", &range, "--", "crates"])?,
+    ))
+}
+
 /// How much of the difference is worth printing before it stops being
 /// read.
 ///
@@ -354,6 +437,56 @@ mod tests {
             "git {arguments:?}: {}",
             String::from_utf8_lossy(&status.stderr)
         );
+    }
+
+    /// The calendar is arithmetic and is checked against dates whose
+    /// answers are known independently.
+    ///
+    /// Every case here is one the era arithmetic has to get right for a
+    /// reason: the epoch itself, a leap day in an ordinary leap year, the
+    /// 29th of February in a year divisible by 400, the day after the
+    /// 28th of February in a century that is not a leap year (2000 is one
+    /// and 2100 is not, which is the pair a table of month lengths gets
+    /// wrong), the last second of a year, and a moment past 2038 that a
+    /// 32-bit count could not name at all. Every expected value was taken
+    /// from `date -u -d @SECONDS` rather than worked out here; the first
+    /// spelling of this test had 1972-02-29 against a number that is
+    /// 1972-03-01, and the formatter was right.
+    // [spec:nsh:req:oracle.recording-carries-its-age/test]
+    #[test]
+    fn the_stamp_is_a_date_anyone_can_read() {
+        for (seconds, expected) in [
+            (0_u64, "1970-01-01T00:00:00Z"),
+            (68_169_600, "1972-02-29T00:00:00Z"),
+            (951_782_400, "2000-02-29T00:00:00Z"),
+            (4_107_456_000, "2100-02-28T00:00:00Z"),
+            (4_107_542_400, "2100-03-01T00:00:00Z"),
+            (1_609_459_199, "2020-12-31T23:59:59Z"),
+            (2_147_483_648, "2038-01-19T03:14:08Z"),
+            (1_788_477_319, "2026-09-03T23:15:19Z"),
+        ] {
+            assert_eq!(
+                timestamp(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(seconds)),
+                expected,
+            );
+        }
+    }
+
+    /// A commit this checkout does not have is answered with "cannot
+    /// say" rather than with a distance of nothing.
+    ///
+    /// A zero would read as "the recording is current", which is the one
+    /// wrong answer: a rebase, a shallow clone and a recording taken over
+    /// uncommitted work all reach this branch.
+    // [spec:nsh:req:oracle.recording-carries-its-age/test]
+    #[test]
+    fn an_absent_commit_has_no_distance() {
+        assert!(commits_since("0000000000000000000000000000000000000000").is_none());
+        let head = String::from_utf8(
+            git_output(&checkout_root().unwrap(), &["rev-parse", "HEAD"]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(commits_since(head.trim()), Some((0, 0)));
     }
 
     /// The parse is the part that can silently lose a path.
