@@ -7154,6 +7154,14 @@ children (
                                         kind @status
                                         text "Doing → Done (nplan complete)"
                                     }
+
+                                    {
+                                        at 2026-09-03T16:05:56.07991695Z
+                                        author "brendan@necessary.nu"
+                                        kind @errata
+                                        text "THE RULE THIS NODE RECORDED IS HALF WRONG, AND THREE LATER NODES QUOTED IT. Corrected 2026-09-03 while closing `take-the-array-letter-for-a-plain-operand`; measured against the pinned Bash 5.3.15 on `d0ffd39`.\n\n`76d09d9` recorded that Bash consults `-a` and `-A` only for a *compound* operand. The boundary is a **value**, not a parenthesis:\n\n    readonly -a q=1   bash: declare -ar q=([0]=\"1\")   (was: declare -r q=\"1\")\n    export   -a e=1   bash: declare -ax e=([0]=\"1\")\n    readonly -A k=v   bash: declare -Ar k=([0]=\"v\" )\n    readonly -a q+=1  bash: declare -ar q=([0]=\"1\")\n\nWhat the node got right is the operand with no value at all: `readonly -A m` is `declare -r m` and `set -a; readonly -a z` is `declare -rx z` in both shells, and those rows are now pinned in `crates/nsh-cli/tests/bash_array_letter_with_a_value.rs` alongside the corrected ones.\n\nThe difference is data and not spelling: `q` is an indexed array there and was a scalar here, so `q[1]=x`, `${q[@]}` and `${#q[@]}` all answered differently afterwards.\n\n`bash_associative_assignment.rs`'s `DECLARING_BUILTINS` table is unmoved by the correction -- every row in it is either a compound operand or an operand with no value."
+                                        after_done true
+                                    }
                                 )
                             }
 
@@ -8964,6 +8972,7 @@ children (
                                 id refuse-a-survey-run-whose-shell-the-boundary-hides
                                 title "Refuse a survey run whose own binary the containment hides"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T12:55:15.348043117Z
@@ -8977,6 +8986,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T16:00:51.501788611Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -9113,6 +9129,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Found 2026-09-02 while closing five nodes from a private measurement worktree. Measured on `7265a96`.\n\n`crates/nsh-survey/src/shell.rs`'s `a_shell_older_than_its_sources_is_named` fails when the checkout's `target` is a symbolic link:\n\n    cargo test -p nsh-survey --bin nsh-survey\n      /home/brendan/work/dash          82 passed\n      /home/brendan/work/dash-spellback (target -> /data/...)  81 passed, 1 failed\n        a shell from 1971 was accepted as built from today's tree\n\nThe test writes a scratch shell under `target/` -- \"so it is judged\", its own comment says -- gives it a 1971 mtime and expects `built_before_its_sources` to complain. With `target` a link, the scratch path resolves outside the checkout root, the shell is treated as one from somewhere else, and the staleness check declines to judge it. Nothing else in the workspace notices; the release binaries, the sandbox and the Oils survey all work through the link.\n\nWHY IT IS NOT AN EXOTIC SETUP. This machine's root filesystem reached 100% on 2026-09-02 and the response, for two sessions, was to put a private worktree's build tree on `/data` and link `target` to it -- 3.8G off `/` at the cost of one symlink. Every house rule here points agents at private worktrees, so the next one to run out of disk will do the same and will see a red test that is nothing to do with their change. That is the cost: not a broken check, a misleading one.\n\nWHAT TO DO. `provenance::checkout_root` and the \"is this shell ours\" test disagree about whether to resolve symlinks, and the fix is to make them agree -- canonicalize both sides, or neither. The test itself could also say what it assumes: it depends on `target/` being a real directory inside the root, which is worth an assertion with a message rather than a failure that reads as a staleness bug.\n\nDONE WHEN. The check judges a shell under a linked `target` as it judges one under a real directory, or says plainly that it cannot; and the test passes in a worktree whose `target` is a link."
+                                    }
+
+                                    {
+                                        at 2026-09-03T16:00:57.803138143Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
                                     }
                                 )
                             }

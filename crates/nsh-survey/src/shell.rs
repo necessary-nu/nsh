@@ -159,24 +159,44 @@ fn newest_source_change(root: &Path) -> Result<Option<(PathBuf, SystemTime)>> {
 const LAG: Duration = Duration::from_secs(60);
 
 /// What is wrong with measuring this shell, if it predates its sources.
+pub(crate) fn built_before_its_sources(shell: &Path) -> Result<Option<String>> {
+    judged_against(&crate::provenance::checkout_root()?, shell)
+}
+
+/// The judgement itself, against a named checkout so it can be asked of
+/// one built for the question.
 ///
-/// Only a shell under this checkout's `target/` is judged, because only
+/// Only a shell under that checkout's `target/` is judged, because only
 /// those claim to have been built here. `target/bash-reference/` is
 /// exempt: it holds GNU Bash built from Bash's own sources by
 /// `build-bash-reference`, its provenance is `BASH_REFERENCE.toml` and a
 /// build receipt, and it is older than every Rust file here by design.
-pub(crate) fn built_before_its_sources(shell: &Path) -> Result<Option<String>> {
-    let root = crate::provenance::checkout_root()?;
+///
+/// BOTH SIDES OF THAT COMPARISON ARE RESOLVED, and the reason is a bug it
+/// had. `target` is a symbolic link in any checkout whose build tree was
+/// moved to another filesystem -- which is what a full root disk drives
+/// people to, and the house rules point every session at a private
+/// worktree -- and a shell reached through the link canonicalizes outside
+/// the unresolved prefix. `starts_with` then said the binary belonged to
+/// somebody else and the staleness check declined to judge it, silently,
+/// because "not ours" is a legitimate answer for `/bin/sh`.
+fn judged_against(root: &Path, shell: &Path) -> Result<Option<String>> {
     let Ok(shell) = fs::canonicalize(shell) else {
         return Ok(None);
     };
-    if !shell.starts_with(root.join("target"))
-        || shell.starts_with(root.join("target/bash-reference"))
+    let Ok(builds) = fs::canonicalize(root.join("target")) else {
+        return Ok(None);
+    };
+    if !shell.starts_with(&builds) {
+        return Ok(None);
+    }
+    if fs::canonicalize(builds.join("bash-reference"))
+        .is_ok_and(|reference| shell.starts_with(reference))
     {
         return Ok(None);
     }
     let built = fs::metadata(&shell)?.modified()?;
-    let Some((source, changed)) = newest_source_change(&root)? else {
+    let Some((source, changed)) = newest_source_change(root)? else {
         return Ok(None);
     };
     let Ok(lag) = changed.duration_since(built) else {
@@ -293,5 +313,57 @@ mod tests {
             complaint.contains(&newest.display().to_string()),
             "the complaint did not name the source it lost to: {complaint}",
         );
+    }
+
+    /// A checkout built for the question, whose `target` is a directory
+    /// or a link to one, holding a shell written at `built`.
+    fn judge_a_scratch_checkout(root: &Path, link: bool, built: SystemTime) -> Option<String> {
+        fs::create_dir_all(root.join("crates/nsh/src")).unwrap();
+        fs::write(root.join("crates/nsh/src/main.rs"), b"fn main() {}").unwrap();
+        let builds = if link {
+            let elsewhere = root.join("build-tree");
+            fs::create_dir(&elsewhere).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, root.join("target")).unwrap();
+            elsewhere
+        } else {
+            let here = root.join("target");
+            fs::create_dir(&here).unwrap();
+            here
+        };
+        let shell = builds.join("nsh");
+        fs::write(&shell, b"shell").unwrap();
+        fs::File::open(&shell)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(built))
+            .unwrap();
+        judged_against(root, &root.join("target/nsh")).unwrap()
+    }
+
+    /// A shell is judged the same through a linked `target` as through a
+    /// real one, in both directions.
+    ///
+    /// A checkout whose build tree was moved to another filesystem reaches
+    /// it through a symbolic link, which is what a full root disk drives
+    /// people to and what two sessions did on 2026-09-02. Resolving the
+    /// shell and not the prefix it is compared against made every shell in
+    /// such a checkout "not ours", so nothing was ever judged -- and "not
+    /// ours" is a legitimate answer for `/bin/sh`, so it said nothing.
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
+    #[test]
+    fn a_linked_target_is_judged_like_a_directory() {
+        let scratch = ScratchTree::new().unwrap();
+        let ancient = SystemTime::UNIX_EPOCH + Duration::from_secs(60 * 60 * 24 * 365);
+        for (name, link) in [("plain", false), ("linked", true)] {
+            let stale = scratch.path().join(format!("{name}-stale"));
+            assert!(
+                judge_a_scratch_checkout(&stale, link, ancient).is_some(),
+                "a shell from 1971 under a {name} target was accepted as built from today's tree",
+            );
+            let current = scratch.path().join(format!("{name}-current"));
+            assert!(
+                judge_a_scratch_checkout(&current, link, SystemTime::now()).is_none(),
+                "a shell built now under a {name} target was called stale",
+            );
+        }
     }
 }
