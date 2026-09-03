@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-29T12:05:39.737829999Z
+last_sync_at 2026-09-03T22:17:55.056597249Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -599,9 +599,14 @@ rule_versions (
     {id compat.bash.builtins-special-variables, version 0}
     {id compat.bash.conditionals-arithmetic, version 0}
     {id compat.bash.default-isolation, version 0}
+    {id compat.bash.error-boundary, version 0}
     {id compat.bash.expansion-globbing, version 0}
     {id compat.bash.functions-scoping, version 0}
     {id compat.bash.mode, version 0}
+    {id compat.bash.names.call-stack, version 0}
+    {id compat.bash.names.environment-facts, version 0}
+    {id compat.bash.names.only-what-the-reference-has, version 0}
+    {id compat.bash.names.ordinary-state, version 0}
     {id compat.bash.options-builtins-dispatch, version 0}
     {id compat.bash.parse-boundary, version 0}
     {id compat.bash.parser-ast, version 0}
@@ -622,6 +627,10 @@ rule_versions (
     {id compat.smoosh.nonlexical-control, version 0}
     {id compat.smoosh.source-builtin, version 0}
     {id compat.smoosh.trap-status, version 0}
+    {id cost.asserted-as-work, version 0}
+    {id cost.locale-selected-per-operation, version 0}
+    {id cost.only-the-work-the-command-needs, version 0}
+    {id cost.proportional-to-the-input, version 0}
     {id edit.append-last-bigword, version 0}
     {id edit.block-mode-terminals, version 0}
     {id edit.change-motion, version 0}
@@ -679,6 +688,7 @@ rule_versions (
     {id edit.yank-motion, version 0}
     {id embedding-safety.process-environment-is-read-only, version 0}
     {id embedding-safety.process-locale-is-unchanged, version 0}
+    {id embedding-safety.reading-without-running, version 0}
     {id exit.command-status, version 0}
     {id exit.expansion-error, version 0}
     {id exit.interactive-abandons-command, version 0}
@@ -793,6 +803,7 @@ rule_versions (
     {id idiom.builtin-registry, version 0}
     {id idiom.command-dispatch, version 0}
     {id idiom.conformance-closure, version 0}
+    {id idiom.declared-module-tree, version 0}
     {id idiom.descriptor-materialization, version 0}
     {id idiom.evaluator-control-flow, version 0}
     {id idiom.exec-boundary, version 0}
@@ -818,6 +829,7 @@ rule_versions (
     {id idiom.owned-lifecycle, version 0}
     {id idiom.parser-control-flow, version 0}
     {id idiom.platform-errors, version 0}
+    {id idiom.platform-surface-parity, version 0}
     {id idiom.port-provenance, version 1}
     {id idiom.printable-ast, version 2}
     {id idiom.process-group-zero-state, version 0}
@@ -859,6 +871,9 @@ rule_versions (
     {id jobctl.suspend-on-sigstop, version 0}
     {id jobctl.suspended-job-message, version 0}
     {id oracle.cannot-measure-is-a-failure, version 0}
+    {id oracle.checks-do-not-share-state, version 0}
+    {id oracle.recording-carries-its-age, version 0}
+    {id oracle.refuses-a-mismeasurement, version 0}
     {id param.byte-values, version 0}
     {id param.denotation, version 0}
     {id param.env, version 0}
@@ -996,6 +1011,7 @@ rule_versions (
     {id redir.output-truncate, version 0}
     {id redir.purpose, version 0}
     {id redir.quoting-suppresses-recognition, version 0}
+    {id redir.redirect-fn, version 0}
     {id redir.word-expansion, version 0}
     {id redir.word-pathname-expansion, version 0}
     {id sh.command-language-interpreter, version 0}
@@ -1173,20 +1189,64 @@ rule_versions (
 )
 
 derived_priorities (
+    {id accept-newlines-inside-a-conditional, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id an-embedder-cannot-read-a-script-without-running-it, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id apply-a-declaring-builtin-through-the-reference, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash-array-assignment-gaps, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bash-expansion-gaps, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bash-introspection-gaps, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bash-mode-error-boundary, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bash-named-descriptor-redirection, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bash-select-and-time-grammar, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
+    {id bash.divergences.allexport-after-unset, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.allexport-compound-readonly, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.array-letter-plain-operand, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.compound-integer-attribute, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.empty-bracket-class, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.export-minus-n, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.local-after-unset, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.local-dash, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.multibyte-blank-split, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.procsub-in-bang, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.publish-names.call-stack-arrays, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.publish-names.environment-facts, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.publish-names.interactive-surface, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.publish-names.ordinary-state, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.publish-names.withhold-prompts, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.re-entered-parse, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.reference-to-a-non-name, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.refused-integer-abandons-list, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.reserved-name-listing, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.seconds-on-read, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.set-listing-quoting, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.shell-fact-attributes, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.substitution-in-subscript, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.take-back-readonly, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.unclosed-extglob, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.unset-every-operand, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.unset-readonly-contract, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.wait-for-procsubs, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bound-recursive-evaluation, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
+    {id bound-repeated-evaluation-work, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bound-the-cost-of-matching-a-pattern, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bound-total-parse-work, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bound-what-a-campaign-pays-to-replay-its-corpus, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bound-word-parsing-cost, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id break-up-the-545-line-command-body, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id build-the-survey-baseline-from-what-is-committed, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id builtins-modules, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id calibrate-bash-5-3-oracle, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id canonicalize-word-parts, priority 2, derived_at 2026-08-27T23:19:04.80080471Z}
     {id carry-tokens-into-the-tree, priority 2, derived_at 2026-08-28T00:05:37.955830881Z}
+    {id catch-a-test-whose-input-is-not-its-name, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id check-that-a-cited-decision-is-live, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id close-associative-assignment-diagnostics, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id close-the-pattern-replacement-divergence, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id close-untargeted-fuzz-divergences, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
+    {id contain-the-workspace-tests-that-run-cases, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id decide-tree-canonicity, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id define-oils-survey-manifests, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id deliver-a-prompt-interrupt-without-eating-the-next-line, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id enable-default-history-navigation, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id enforce-bash-safe-core, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id enforce-oracles-cannot-pass-unmeasured, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
@@ -1272,6 +1332,17 @@ derived_priorities (
     {id fix-xcu-exit-status-listed-values-binding, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fuzz-the-shell, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id gate-bash-builtins-options, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id give-a-null-commands-failed-redirection-dashs-status, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id give-each-gate-run-its-own-shell, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id give-the-failing-case-baseline-the-gates-control, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id guard-the-process-file-creation-mask, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.derived-corpus-age, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.differential-kill-after, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.group-run-wrong-dialect, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.noclobber-append-flake, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.shell-the-boundary-hides, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.target-is-a-link, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.work-directory-link, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id implement-bash-arrays-declarations, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id implement-bash-builtins-special-vars, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id implement-bash-conditionals-arithmetic, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
@@ -1284,34 +1355,118 @@ derived_priorities (
     {id import-oils-osh-corpus, priority 1, derived_at 2026-08-19T15:35:34.038807321Z}
     {id integrate-smoosh-posix, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id introduce-bash-value-model, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id keep-allexport-off-an-array, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id kill-a-survey-case-the-harness-abandoned, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id let-the-sweep-see-a-slow-unit, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id list-readonly-names-as-bash-lists-them, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id list-the-names-that-only-carry-attributes, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id logical-descriptor-table, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id make-fuzz-runner-containment-aware, priority 1, derived_at 2026-08-27T23:19:04.80080471Z}
     {id make-printing-reversible, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id make-the-bash-gate-able-to-fail, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
+    {id match-bash-dot-names-and-literal-paths, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id measure-tree-canonicity, priority 1, derived_at 2026-08-27T23:19:04.80080471Z}
+    {id move-the-inline-test-modules-out, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id move-the-special-variable-readers, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id native-oils-spec-runner, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id optional-line-editor, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id owned-words, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id perf.locale.decode-from-the-buffer, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.locale.ifs-separator-table, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.locale.one-character-end, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.locale.per-byte-elsewhere, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.locale.per-byte-of-a-name, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.locale.split-the-character-half, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.locale.unreachable-positions, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.pattern.bracket-test-scan, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.pattern.corpus-cost-outliers, priority 2, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.pattern.substitution-linear, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id perf.pattern.trim-cost, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id pin-oils-spec-corpus, priority 0, derived_at 2026-08-19T15:35:34.038807321Z}
     {id pin-the-fuzz-differential-oracle, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
+    {id posix.nonconformance.dot-prints-a-newline, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id preserve-zero-process-group-state, priority 0, derived_at 2026-08-20T07:44:24.867126181Z}
     {id print-by-emitting-tokens, priority 3, derived_at 2026-08-28T00:05:37.955830881Z}
     {id printf-builtin, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id printf-errata, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id prove-byte-exact-round-trip, priority 3, derived_at 2026-08-28T00:05:37.955830881Z}
+    {id quote-a-subscript-the-way-bash-quotes-one, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id read-a-key-that-spells-an-assignment, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id read-a-module-not-a-file-in-the-lints, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id reap-only-the-children-this-shell-forked, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id record-bash-oracle-baseline, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id record-the-line-a-compound-command-ends-on, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id refresh-project-readmes, priority 0, derived_at 2026-08-20T07:44:24.867126181Z}
+    {id refuse-to-destroy-an-array-kind, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id refuse-to-regenerate-a-file-another-session-changed, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id register-a-file-nearing-the-density-cap, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id register-posix-dash-divergences, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
     {id reject-what-bash-rejects, priority 0, derived_at 2026-08-28T00:05:37.955830881Z}
     {id respect-the-locale-in-escape-output, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id retain-the-token-stream, priority 1, derived_at 2026-08-28T00:05:37.955830881Z}
+    {id run-the-fuzz-oracle-against-this-tree, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id settle-whether-the-workspace-unwinds, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id shell-construction-costs-more-than-the-command, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id shrink-the-parsed-representation, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id spec-default-history-navigation, priority 1, derived_at 2026-08-19T15:35:34.038807321Z}
     {id specify-bash-compatibility-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id specify-smoosh-failure-contracts, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id spell-a-valueless-name-back, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id spell-an-unassigned-array-back, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id spend-the-wrappers-budget-inside-the-boundary, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-input-reading-from-the-stack, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-jobs-by-subject, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-parameter-expansion-out, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-arithmetic-lexer, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-editor-bindings, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-evaluator-by-form, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-parser-by-layer, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-platform-modules-by-subject, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-printer-by-node-family, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-printf-conversions, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-printf-operand-scanner, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id split-the-survey-spec-parser, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id stop-an-interactive-shell-exiting-on-sigchld, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id stop-selecting-the-locale-per-character, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id stop-the-closure-gate-flaking, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id stop-the-corpus-eating-the-fuzzing-budget, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id stop-the-forking-tests-from-flaking, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id stop-the-fuzz-budget-paying-for-the-build, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id stop-the-locale-tests-passing-vacuously, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
+    {id struct.conditional-sub-grammar, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id struct.differential-helper-crate, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id struct.platform-children-module, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id struct.printers-unread-locale, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id struct.script-module-port, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id struct.substitution-quoted-flag, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id struct.windows-locale-export, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id test-fc-histfile-reload-format, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
+    {id tooling.disk.keep-headroom, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.disk.name-the-full-disk, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.disk.reach-every-build, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.disk.worktrees-on-tmpfs, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.integrate-remote-master, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.commit-a-pathspec, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.data-is-not-production, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.head-took-half-a-file, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.install-the-pathspec, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.lint-crate-footprint, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.register-entry-footprint, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.restore-the-head, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.nplan.seal-through-merge, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.plan-shape, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.repin-editor-crates, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.tests, priority 2, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.tests.forked-child-holds-pipe, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.tests.freed-descriptor-race, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.tests.half-read-character-pty, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.tests.read-the-umask, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id unsplice-the-input-frame-doc-comment, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id verify-bash-compatibility-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id verify-smoosh-zero-failures, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id wait-for-a-process-substitution-to-finish, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id walk-a-flat-list-without-the-stack, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id widen-the-survey-failure-list-extraction, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
 )
 
 assertions (
@@ -1498,6 +1653,7 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.status-flow-signal, version 0}
     )}
+    {id an-embedder-cannot-read-a-script-without-running-it}
     {id audit-bug-for-bug-behavior, covered_rules (
         idiom.specified-defects
     ), covered_claims (
@@ -1561,6 +1717,8 @@ impl_evidence (
         oracle.cannot-measure-is-a-failure
     ), covered_claims (
         {impl_name nsh-library, rule oracle.cannot-measure-is-a-failure}
+    ), rule_versions_seen (
+        {id oracle.cannot-measure-is-a-failure, version 0}
     )}
     {id enforce-zero-cism-gates, covered_rules (
         idiom.regression-gates

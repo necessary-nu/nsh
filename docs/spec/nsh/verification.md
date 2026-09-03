@@ -118,6 +118,57 @@ characters is refused, an unknown code is refused, and a suppression that
 suppresses nothing is reported, so they cannot outlive their reason.
 There are none in the tree today.
 
+## Three other ways a check goes wrong
+
+The rule above is about a check that cannot reach its reference. Three
+neighbouring shapes were found afterwards, and none of them is that: each
+obtains everything it needs and still cannot say what it claims to.
+
+> [spec:nsh:req:oracle.refuses-a-mismeasurement]
+> A check MUST refuse to run when its own configuration means it would measure
+> something other than what it names, and MUST say which configuration it
+> refused on. Scoring the Bash-comparison group with the dialect disabled,
+> running a survey against a shell the containment boundary cannot see, judging
+> a build under a `target` that is a symbolic link, and binding a work
+> directory reached through one are each such a configuration.
+>
+> `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` covers a check that
+> cannot obtain its reference. This covers a check that obtains one and
+> compares it against the wrong thing, which produces a number rather than an
+> absence and is therefore the harder of the two to notice: the run is green,
+> the count is plausible, and nothing says the shell under test was a stub, or
+> the same shell twice, or the dialect the profile is not about.
+
+> [spec:nsh:req:oracle.recording-carries-its-age]
+> A checked-in recording of a reference's answers MUST carry which build of
+> this shell it was made against and when. A run that reads one MUST report
+> that provenance alongside its verdict, so a recording older than the code it
+> is scoring is visible without anyone going to look.
+>
+> A regression set nothing has run against the current tree is not a regression
+> set, and it does not announce itself: the count it prints is the same either
+> way. Reporting the age is a fact and is required; what threshold, if any,
+> should turn an old recording into a failure is a separate argument and this
+> rule does not settle it.
+
+> [spec:nsh:req:oracle.checks-do-not-share-state]
+> A check MUST NOT depend on, and MUST NOT leave behind, process state it
+> shares with the checks running beside it. Descriptor numbers, the
+> file-creation mask, the controlling terminal, the working directory, and a
+> pipe inherited by a forked child are shared by every test in one binary,
+> which the harness runs in threads of one process.
+>
+> A check that reads a shared setting MUST read it without changing it; where
+> the only way to observe something is to change it, the check MUST take the
+> process to itself -- a child, or a pseudo-terminal of its own -- rather than
+> restore it afterwards and hope no sibling looked in between. A check needing
+> a specific descriptor number MUST NOT assume a number it closed stays free.
+>
+> These fail as flakes attributed to the shell, which is why they are worth a
+> rule: the failure appears in a sibling that did nothing wrong, at a rate that
+> depends on scheduling, and the natural reading of a rare failure in a
+> concurrency test is that the concurrency is at fault.
+
 ## What the enforcement does not reach
 
 Two of the five instances sit outside the lint's corpus, so the rule's

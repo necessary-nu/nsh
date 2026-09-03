@@ -95,6 +95,19 @@ undefined behavior.
 > values. The core MUST NOT decode signal numbers, wait-status words, stopped
 > states, or core-dump bits with raw integer tests.
 
+> [spec:nsh:req:idiom.platform-surface-parity]
+> Every host implementation of `nsh-platform` MUST present the same public
+> surface. A platform name the core uses without a `cfg` MUST resolve on every
+> supported host, and something in the repository MUST fail when the hosts'
+> surfaces drift apart.
+>
+> `[dec:nsh:platform-boundary]` keeps `cfg(target_os …)` out of the shell, so
+> the shell names platform items unconditionally and a host that is short one
+> of them does not fail where it is short -- it fails in the shell, on a build
+> nobody local runs. A missing re-export is then indistinguishable from a
+> missing feature until someone cross-builds. The parity is the thing to check,
+> not the individual name.
+
 > [spec:nsh:req:idiom.filesystem-account-bytes]
 > Filesystem and account lookup APIs MUST accept and return owned byte-preserving
 > or operating-system string values. C-string construction, passwd pointers,
@@ -252,6 +265,24 @@ undefined behavior.
 > defined -- and `[dec:nsh:shell-as-library]` makes it an embedder's concern
 > rather than a shell's, since a host calling `Shell::run` on text it did not
 > write must get an `Err` it can handle.
+
+> [spec:nsh:req:idiom.declared-module-tree]
+> The module tree MUST be declared by `mod` items in the file that owns each
+> module, so that a module's path in the source is its path in the tree.
+> `include!` MUST NOT be used to place a file's items into another module, and
+> `#[path]` MUST NOT be used to repair where that leaves a module's children.
+>
+> This is not a style preference about one attribute. A file textually pasted
+> into the crate root is not a module, so the ordinary `foo.rs` + `foo/`
+> convention cannot resolve inside it and every child must be told by hand
+> where it lives; the workaround then propagates to each new split. It also
+> takes the tree away from the tools that walk it -- `rustfmt` given a module
+> root reformats the modules it declares, which is a surprise on a shared
+> checkout, and is a different surprise when what it declares is a lie.
+>
+> Wanting a host implementation's items directly in the crate root, without a
+> wall of `pub use`, is a real thing to want; a re-export list is how a module
+> tree says it.
 
 > [spec:nsh:req:idiom.no-mystring]
 > There MUST NOT be a generic `mystring` compatibility module. Byte parsing,

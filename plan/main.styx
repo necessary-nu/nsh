@@ -337,6 +337,7 @@ children (
                         id give-a-null-commands-failed-redirection-dashs-status
                         title "Give a null command's failed redirection dash's status"
                         kind @fix
+                        constrained_by ([spec:dash:sem:redir.redirect-fn] [spec:nsh:sem:idiom.specified-defects+1])
                         log (
                             {
                                 at 2026-09-03T16:40:26.193858085Z
@@ -3514,6 +3515,7 @@ children (
                         id posix.nonconformance.dot-prints-a-newline
                         title "Stop `.` printing a blank line at an interactive prompt"
                         kind @fix
+                        constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
                         log (
                             {
                                 at 2026-09-02T14:42:35.109969337Z
@@ -9141,6 +9143,9 @@ children (
                                                 id bash.divergences.publish-names.call-stack-arrays
                                                 title "Publish `FUNCNAME`, `BASH_SOURCE`, `BASH_LINENO`, `BASH_ARGC` and `BASH_ARGV` at rest"
                                                 kind @feat
+                                                implements {
+                                                    nsh-library ([spec:nsh:req:compat.bash.names.call-stack])
+                                                }
                                                 log (
                                                     {
                                                         at 2026-09-03T17:22:58.207055437Z
@@ -9155,6 +9160,9 @@ children (
                                                 id bash.divergences.publish-names.environment-facts
                                                 title "Publish `TERM` and `SHELL` with the defaults Bash gives them"
                                                 kind @feat
+                                                implements {
+                                                    nsh-library ([spec:nsh:req:compat.bash.names.environment-facts])
+                                                }
                                                 log (
                                                     {
                                                         at 2026-09-03T17:25:15.820198614Z
@@ -9169,6 +9177,9 @@ children (
                                                 id bash.divergences.publish-names.ordinary-state
                                                 title "Publish the six names that are ordinary state this shell keeps elsewhere"
                                                 kind @feat
+                                                implements {
+                                                    nsh-library ([spec:nsh:req:compat.bash.names.ordinary-state])
+                                                }
                                                 log (
                                                     {
                                                         at 2026-09-03T17:25:31.761581886Z
@@ -9183,6 +9194,7 @@ children (
                                                 id bash.divergences.publish-names.interactive-surface
                                                 title "Decide what to publish for the four names that belong to a surface this shell has not got"
                                                 kind @feat
+                                                constrained_by ([spec:nsh:req:compat.bash.names.only-what-the-reference-has])
                                                 log (
                                                     {
                                                         at 2026-09-03T17:25:41.988808188Z
@@ -9197,6 +9209,9 @@ children (
                                                 id bash.divergences.publish-names.withhold-prompts
                                                 title "Stop publishing `PS1` and `PS2` where a non-interactive Bash has neither"
                                                 kind @fix
+                                                implements {
+                                                    nsh-library ([spec:nsh:req:compat.bash.names.only-what-the-reference-has])
+                                                }
                                                 log (
                                                     {
                                                         at 2026-09-03T17:25:55.911581714Z
@@ -9447,6 +9462,7 @@ children (
                                         id bash.divergences.refused-integer-abandons-list
                                         title "Abandon the command list when `declare -i` cannot read its value"
                                         kind @fix
+                                        constrained_by ([spec:nsh:req:compat.bash.error-boundary])
                                         log (
                                             {
                                                 at 2026-09-03T16:15:51.055247114Z
@@ -9461,6 +9477,7 @@ children (
                                         id bash.divergences.unset-readonly-contract
                                         title "Decide which oracle `unset` on a read-only name answers to in the POSIX dialect"
                                         kind @fix
+                                        constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
                                         log (
                                             {
                                                 at 2026-09-03T16:28:25.749565419Z
@@ -9475,6 +9492,7 @@ children (
                                         id bash.divergences.re-entered-parse
                                         title "Decide whether the POSIX dialect keeps dash's lost prompt substitution"
                                         kind @fix
+                                        constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
                                         log (
                                             {
                                                 at 2026-09-03T16:55:28.367272346Z
@@ -9489,6 +9507,7 @@ children (
                                         id bash.divergences.procsub-in-bang
                                         title "Set `$!` to a process substitution's pid, as Bash does"
                                         kind @fix
+                                        constrained_by ([spec:nsh:req:compat.bash.process-substitution] [spec:nsh:req:compat.bash.builtins-special-variables])
                                         log (
                                             {
                                                 at 2026-09-03T17:10:59.273572518Z
@@ -9503,6 +9522,7 @@ children (
                                         id bash.divergences.empty-bracket-class
                                         title "Decide what `[[::]]` means, because this shell and Bash read it differently"
                                         kind @fix
+                                        constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
                                         log (
                                             {
                                                 at 2026-09-03T16:10:50.507535814Z
@@ -9524,6 +9544,7 @@ children (
                                         id bash.divergences.unclosed-extglob
                                         title "Decide what an unclosed `@(` means when `extglob` is on"
                                         kind @fix
+                                        constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
                                         log (
                                             {
                                                 at 2026-09-03T16:27:19.369362906Z
@@ -9538,6 +9559,7 @@ children (
                                         id bash.divergences.multibyte-blank-split
                                         title "Stop splitting a word at a multi-byte blank neither reference splits at"
                                         kind @fix
+                                        constrained_by ([spec:posix:req:expand.field-splitting-algorithm] [spec:posix:def:expand.ifs-white-space])
                                         log (
                                             {
                                                 at 2026-09-03T17:40:02.682333905Z
@@ -9781,6 +9803,9 @@ children (
                         id harness.group-run-wrong-dialect
                         title "Refuse a bash-comparison run scored in the POSIX dialect"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:oracle.refuses-a-mismeasurement])
+                        }
                         log (
                             {
                                 at 2026-09-03T15:57:19.839097568Z
@@ -9795,6 +9820,7 @@ children (
                         id harness.work-directory-link
                         title "Bind a work directory reached through a symbolic link"
                         kind @fix
+                        constrained_by ([spec:nsh:req:oracle.cannot-measure-is-a-failure])
                         deps (harness.target-is-a-link)
                         log (
                             {
@@ -9810,6 +9836,9 @@ children (
                         id harness.derived-corpus-age
                         title "Say when the archive was last run against the build"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:oracle.recording-carries-its-age])
+                        }
                         log (
                             {
                                 at 2026-09-02T11:50:15.941890913Z
@@ -11518,6 +11547,7 @@ children (
                         id struct.differential-helper-crate
                         title "Share the differential helper as a crate, not by file path"
                         kind @refactor
+                        constrained_by ([spec:nsh:req:idiom.module-boundaries])
                         deps (tooling.nplan.data-is-not-production)
                         log (
                             {
@@ -11533,6 +11563,9 @@ children (
                         id struct.platform-children-module
                         title "Stop include! forcing a path attribute on every platform child"
                         kind @refactor
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.declared-module-tree])
+                        }
                         log (
                             {
                                 at 2026-09-03T16:40:24.637523471Z
@@ -11547,6 +11580,7 @@ children (
                         id struct.conditional-sub-grammar
                         title "Split `[[ ]]`'s sub-grammar out of the Bash parser file"
                         kind @refactor
+                        constrained_by ([spec:nsh:req:idiom.module-boundaries])
                         log (
                             {
                                 at 2026-09-02T12:54:57.353266838Z
@@ -11561,6 +11595,7 @@ children (
                         id struct.printers-unread-locale
                         title "Take the locale off the printer, which has not read it since the word was canonicalized"
                         kind @refactor
+                        constrained_by ([spec:nsh:req:idiom.printable-ast+2])
                         deps (struct.script-module-port)
                         log (
                             {
@@ -11576,6 +11611,7 @@ children (
                         id struct.substitution-quoted-flag
                         title "Tell an embedder whether a substitution was quoted, which the tree now knows"
                         kind @feat
+                        constrained_by ([spec:nsh:req:embedding-safety.reading-without-running])
                         deps (struct.script-module-port)
                         log (
                             {
@@ -11591,6 +11627,9 @@ children (
                         id struct.windows-locale-export
                         title "Re-export LocaleCharacter from the Windows platform, which the shell names unconditionally"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.platform-surface-parity])
+                        }
                         log (
                             {
                                 at 2026-09-03T19:09:29.733331498Z
@@ -11605,6 +11644,7 @@ children (
                         id struct.script-module-port
                         title "Port the script module onto the canonical word"
                         kind @refactor
+                        constrained_by ([spec:nsh:req:embedding-safety.reading-without-running] [spec:nsh:req:idiom.canonical-tree+1])
                         sealed true
                         log (
                             {
@@ -11704,6 +11744,9 @@ children (
         id an-embedder-cannot-read-a-script-without-running-it
         title "Expose a script as the shell reads it, for an embedder that reasons about one without running it"
         kind @feat
+        implements {
+            nsh-library ([spec:nsh:req:embedding-safety.reading-without-running])
+        }
         log (
             {
                 at 2026-09-03T12:19:00.375084237Z
@@ -11997,6 +12040,7 @@ children (
                         id tooling.disk.reach-every-build
                         title "Reach the build that never types the wrapper"
                         kind @build
+                        constrained_by ([spec:nsh:req:idiom.conformance-closure])
                         deps (tooling.disk.name-the-full-disk tooling.disk.keep-headroom)
                         log (
                             {
@@ -12028,6 +12072,9 @@ children (
                 id tooling.tests
                 title "Stop a test answering about something other than its subject"
                 kind @test
+                implements {
+                    nsh-library ([spec:nsh:req:oracle.checks-do-not-share-state])
+                }
                 children (
                     {
                         id tooling.tests.freed-descriptor-race
@@ -12062,6 +12109,7 @@ children (
                         id tooling.tests.forked-child-holds-pipe
                         title "Stop a forked child holding a sibling test's pipe open"
                         kind @fix
+                        constrained_by ([spec:nsh:req:oracle.checks-do-not-share-state])
                         log (
                             {
                                 at 2026-09-03T16:08:58.473992418Z
@@ -12076,6 +12124,7 @@ children (
                         id tooling.tests.half-read-character-pty
                         title "Fence a half-read multi-byte character with the pty harness, not a pipe"
                         kind @test
+                        constrained_by ([spec:nsh:req:oracle.checks-do-not-share-state])
                         log (
                             {
                                 at 2026-09-03T17:40:20.226092205Z
@@ -12090,6 +12139,7 @@ children (
                         id tooling.tests.read-the-umask
                         title "Read the file-creation mask without setting it to zero first"
                         kind @fix
+                        constrained_by ([spec:nsh:req:oracle.checks-do-not-share-state])
                         deps (guard-the-process-file-creation-mask)
                         log (
                             {
@@ -12158,6 +12208,14 @@ children (
                         author "brendan@necessary.nu"
                         kind @errata
                         text "THE RESHAPE SILENTLY UNDID 36 COMPLETIONS. Corrected 2026-09-04.\n\n`04b92a8` renamed 74 node ids and rewrote the `deps (...)` lists that pointed at them. It did not rewrite `plan/.state.styx`'s `assertions` block, which addresses nodes by id too. Every completion recorded under an old id was left addressing a node that no longer exists:\n\n    assertions: 173      orphaned by the rename: 36\n\nSo 36 finished nodes went back to reading as todo, and `nplan ready` answered 63 where the true figure was 31. Nothing was `sealed` back open and no log entry was lost -- each node's own log still carried its `Doing -> Done (nplan complete)` line, which is how the discrepancy was found: a node listed as ready whose own log said it had been completed the previous afternoon.\n\nWHY THE CHECKS DID NOT SEE IT. `nplan lint` was clean before the rename and clean after it. It validates the plan's own invariants -- dangling deps, id uniqueness, priority monotonicity -- and an assertion naming a node that does not exist is not among them; the reconciler simply finds nothing to apply it to. That is worth reporting upstream, because an orphaned assertion is exactly as dangling as an orphaned dep and the second is a violation.\n\nTHE REPAIR. Old ids were mapped to new by title, which is sound here because `04b92a8` changed no titles and all 407 titles are unique. All 36 mapped and none was ambiguous. Only the `assertions` block referenced old ids -- `derived_priorities` and `impl_evidence` did not -- and the block was re-sorted afterwards to keep it diffable.\n\nWHAT IT MEANS FOR RENAMING. `nplan mv` moves a node and keeps its id; a rename is a different operation and this tool has none for it. Renaming 74 ids by editing one file was therefore an edit to a two-file structure made as though it were one. Anything that addresses a node by id has to move with it: assertions, deps, and the `nplan-id:` trailers in the commits already made -- and those last cannot be repaired, which was known and accepted when the rename was made."
+                        after_done true
+                    }
+
+                    {
+                        at 2026-09-03T22:18:54.611968784Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "LAYER 4 ANSWERED: WHICH OPEN NODES DESERVE A SPEC RULE, AND WHY THE REST DO NOT. Decided 2026-09-04.\n\nThe test I applied to each node: **does closing it leave behind a promise about a shipped artifact that something in this repository can measure?** Three answers, and the field each one goes in.\n\n**A promise nothing states yet -> a new rule, and the node `implements` it.** Fourteen. A new rule is uncovered until an annotation lands, so the node is measurable from the moment it is filed -- which is the whole mechanism, and is why a new rule is the right answer where an old one would be wrong.\n\n**A promise already stated -> `constrained_by`, not `implements`.** Twenty-one. This distinction is the one I had been getting wrong. Every nsh rule was already at 100% coverage before today, so pointing a node's `implements` at an existing rule would have derived it Done on the day it was filed. It is also why *amending* a broad rule to cover a narrow finding is refused here: annotations carry the rule version, so a bump to `compat.bash.builtins-special-variables` restamps 40 files and buries the one-line finding that provoked it. New narrow rules cost nothing and land where the work does.\n\n**No promise about this artifact -> no rule.** Six: the three nplan defects (a different repository), two machine-state nodes, and `tooling.integrate-remote-master`. A one-time repair leaves nothing to measure afterwards, and `nplan_complete` on a rule-less leaf is exactly the case the derived/asserted split is for. Recording these as rule-bearing would have been the same error in the other direction.\n\nWHAT THE THREE SORTS COST ME TO SEE. All three specs read 100% covered while thirty-one open nodes described things the shell gets wrong. Coverage is not correctness -- it says every rule has an annotation, not that every promise has a rule -- and the gap was not a handful of missing annotations but four families the specification was silent about:\n\n* **Cost.** `docs/spec/nsh/cost.md`, new, four rules. Nothing in the specification said what running a script may spend. Four defects of one family were fixed in a week -- a quadratic trim, a `[` that read the directory, 482,532 locale selections for one match, 2,102,274 units of matcher work for one substitution -- and not one of them left anything behind that would notice its return, because the fast shell and the slow shell print the same bytes and no differential corpus can tell them apart.\n* **The names Bash publishes.** Four rules. `compat.bash.builtins-special-variables` requires published values to be real rather than fabricated, and says nothing about which names exist; five divergences were found in that gap in one afternoon.\n* **Checks that measure the wrong thing.** Three rules. `oracle.cannot-measure-is-a-failure` covers a check that cannot reach its reference. It does not cover one that reaches a reference and compares it against the wrong thing, or reads a recording of unknown age, or fails because a sibling test in the same process moved shared state under it.\n* **Reading a script without running it.** One rule, and the reason Ronin's module exists.\n\nTWO THINGS I DID NOT DO, ON PURPOSE.\n\nNo rule for the four `Decide ...` nodes. A rule cannot state a reading nobody has chosen. What is already stated, and what those four are `constrained_by`, is `idiom.specified-defects` -- observable behaviour follows POSIX, an explicit compatibility rule, or a documented divergence, in that order -- and a construct where this shell does a third thing both references do not is exactly what that forbids. Their deliverable is the decision plus the rule it justifies, and the rule gets written when the decision is made.\n\nNo new dep edges. `nplan critical` reports all 28 remaining nodes floating, which looks like the depless plan `04b92a8` set out to fix. It is not the same thing: the 13 edges that commit authored were real and are now behind completed work. What is left is genuinely parallel -- independently found divergences that do not gate each other -- and inventing a chain to make the graph look like a spine is the failure this node was opened for, run backwards.\n\nONE SHAPE STILL WRONG, LEFT ALONE DELIBERATELY. `tooling.tests.*` now owns `oracle.checks-do-not-share-state`, so those nodes are verification nodes living under `tooling`. The id says the wrong thing. Renaming is what orphaned 36 assertions this morning, so it waits for a tool that renames both files at once."
                         after_done true
                     }
                 )
@@ -12272,6 +12330,9 @@ children (
                         id perf.locale.per-byte-of-a-name
                         title "Stop taking a thread-locale selection per byte of every variable name"
                         kind @perf
+                        implements {
+                            nsh-library ([spec:nsh:req:cost.locale-selected-per-operation])
+                        }
                         log (
                             {
                                 at 2026-09-02T18:20:45.460349597Z
@@ -12293,6 +12354,10 @@ children (
                         id perf.locale.ifs-separator-table
                         title "Stop rebuilding the IFS separator table on every field split"
                         kind @perf
+                        implements {
+                            nsh-library ([spec:nsh:req:cost.asserted-as-work])
+                        }
+                        constrained_by ([spec:nsh:req:cost.only-the-work-the-command-needs])
                         deps (perf.locale.per-byte-elsewhere)
                         log (
                             {
@@ -12308,6 +12373,9 @@ children (
                         id perf.locale.unreachable-positions
                         title "Stop asking the C library about byte positions no caller can reach"
                         kind @perf
+                        implements {
+                            nsh-library ([spec:nsh:req:cost.only-the-work-the-command-needs])
+                        }
                         deps (perf.locale.per-byte-elsewhere)
                         log (
                             {
@@ -12453,6 +12521,9 @@ children (
                         id perf.pattern.corpus-cost-outliers
                         title "Look for the expensive inputs already sitting in the corpus"
                         kind @test
+                        implements {
+                            nsh-library ([spec:nsh:req:cost.proportional-to-the-input])
+                        }
                         deps (perf.pattern.substitution-linear)
                         log (
                             {

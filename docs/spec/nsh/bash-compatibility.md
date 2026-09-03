@@ -173,6 +173,59 @@ implementation source is not an implementation input.
 > `Shell` and its children rather than fabricated constants or host-global
 > state. `SHELLOPTS` and `BASHOPTS` MUST agree with the effective option sets.
 
+### The names the shell publishes
+
+Bash's variable set is part of its script surface. A script reads `BASH_SOURCE`
+to find out where it is, `FUNCNAME` to find out who called it, and
+`${PS1+set}` to find out whether anyone is watching. Answering those wrongly
+is not a formatting difference.
+
+`[spec:nsh:req:compat.bash.builtins-special-variables]` requires the values
+this shell publishes to be derived from the shell rather than fabricated. It
+says nothing about *which names exist*, and five separate divergences were
+found in that gap on one afternoon -- names absent where the reference has
+them, names present where it has none, and names whose meaning needs a
+facility this shell does not provide.
+
+> [spec:nsh:req:compat.bash.names.call-stack]
+> In Bash mode `FUNCNAME`, `BASH_SOURCE`, `BASH_LINENO`, `BASH_ARGC` and
+> `BASH_ARGV` MUST exist wherever the reference has them, including at rest
+> with no function running, where the reference publishes them empty rather
+> than absent. A name the reference declares without assigning MUST be
+> declared without a value here too, because the difference is observable:
+> `set -u` diagnoses a declared-but-unassigned name and is silent about an
+> assigned empty one. Each MUST be an indexed array value per
+> `[spec:nsh:req:compat.bash.value-model]`, not a scalar spelled to resemble
+> one, and MUST hold the frames of the call actually in progress.
+
+> [spec:nsh:req:compat.bash.names.environment-facts]
+> `TERM` and `SHELL` MUST carry the reference's defaults when the invoking
+> environment supplies neither, and MUST keep an inherited value untouched when
+> it does. A default MUST be established where the dialect is applied and MUST
+> NOT be added to shared start-up, which would give the POSIX dialect a name
+> dash has not got.
+
+> [spec:nsh:req:compat.bash.names.ordinary-state]
+> A name whose Bash meaning is state this shell already keeps MUST be published
+> from that state rather than as a placeholder. This covers at least `OLDPWD`,
+> `OPTERR`, `HISTCMD`, `_`, `BASH_COMMAND`, `BASH_ARGV0`, `BASH_MONOSECONDS`
+> and `BASH_EXECUTION_STRING`. Publishing one of these as an empty name is
+> specifically refused: it would make a listing agree while making the shell
+> answer a script wrongly, since `${BASH_COMMAND}` reading empty is a different
+> claim from `BASH_COMMAND` being unset.
+
+> [spec:nsh:req:compat.bash.names.only-what-the-reference-has]
+> Bash mode MUST NOT publish a name the reference does not have in the same
+> configuration; a non-interactive shell MUST NOT publish `PS1` or `PS2`. A
+> name whose Bash meaning requires a facility this shell does not provide --
+> programmable completion, loadable built-ins, or a variable that is a live
+> view of an internal table -- MUST be absent and recorded as a sanctioned
+> divergence, or else be genuinely wired to that facility. It MUST NOT hold a
+> value that describes nothing. A script reads these names to discover what it
+> is running under, so a plausible answer is worse than no answer, and an
+> associative array published as empty where the reference's is a live table is
+> a listing that lies to whatever writes into it.
+
 > [spec:nsh:req:compat.bash.error-boundary]
 > Bash mode MUST take Bash's boundary for a failed variable assignment and a
 > failed expansion instead of the POSIX one. A refused assignment to a

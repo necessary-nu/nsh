@@ -72,3 +72,19 @@ while constructing and driving one or more `Shell` values.
 > Alternating them on one thread or driving them concurrently on different
 > threads MUST NOT let either shell change the other's results or the embedding
 > host's selected locale.
+
+## Reading without running
+
+> [spec:nsh:req:embedding-safety.reading-without-running]
+> A safe caller MUST be able to obtain this shell's own reading of script text
+> without executing it, and that reading MUST be the one the shell itself would
+> act on -- the same parse, from the same parser, in the caller's chosen
+> dialect. It MUST carry the distinctions the shell draws when it runs the
+> text, including which parts of a word were quoted and how, so that a caller
+> can tell apart two spellings the shell tells apart.
+>
+> The alternative to offering this is that an embedder composing shell text
+> writes a second grammar of its own and gets a different answer than the shell
+> does on the text it did not anticipate. A reading that silently loses a
+> distinction is worse than no reading, because nothing in this repository
+> consumes it and so nothing here would notice.
