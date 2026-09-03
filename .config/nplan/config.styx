@@ -89,8 +89,46 @@ comment-smells {
     exempt-paths (tests/surveys/oils/spec/** tests/surveys/smoosh/shell/**)
 }
 
+// TWO KINDS OF CHECKED-IN PROSE WERE BEING CHARGED AS UNTESTED PRODUCTION
+// CODE. The footprint gate's production LOC is tokei's, and for a language
+// with no fidelity walker that is the whole of the file's code lines -- so a
+// TOML register and a Styx plan file are billed exactly as a `.rs` file is,
+// against a ratio no test of theirs can ever move.
+//
+// `crates/nsh-lint/FUNCTION_DENSITY.toml` is the register whose own header
+// demands a paragraph per entry: "name the seam to split along", "an answer
+// like 'it is big' is worthless". Registering `pattern.rs` on 2026-09-02 --
+// which `function-density` *required* before it would pass -- added 23
+// counted lines to a crate already at 278 test / 1870 prod, and the two
+// gates then contradicted each other:
+//
+//     test-footprint: crates/nsh-lint: crate test:prod 0.147 < floor 0.200
+//                     (278 test / 1893 prod, scope=crate, pre-image 0.149)
+//
+// No entry length passes. The gate charges growth, so one line refuses as
+// surely as twenty-three, and shortening the answer is what the register
+// explicitly forbids. Exempt, the register leaves 278 / 1851 = 0.150 on both
+// sides of an entry of any length, so writing the answer costs nothing.
+//
+// `plan/**` is the same fact 250 times larger, and it was three days from
+// biting. Every `nplan commit` stages `plan/main.styx`, whose nearest
+// `Cargo.toml` ancestor is the workspace root, so every delivery commit is
+// judged on a rollup of the entire tree -- measured 2026-09-03 at 20,547
+// test / 101,716 prod = 0.2020 against the same 0.200 floor. Two milli of
+// margin, with `plan/main.styx` contributing 10,405 production lines, no
+// test lines, and 420 lines a day over the eight days to 2026-09-03. Exempt,
+// that rollup is 20,547 / 91,211 = 0.2253 and no amount of planning erodes
+// it.
+//
+// Nothing here is a ratio a test could have moved. The crates' own figure,
+// which is the one the floor is about, is 19,699 / 49,283 = 0.400.
 quality {
-    exempt-paths (tests/surveys/oils/spec/** tests/surveys/smoosh/shell/**)
+    exempt-paths (
+        tests/surveys/oils/spec/**
+        tests/surveys/smoosh/shell/**
+        plan/**
+        crates/nsh-lint/FUNCTION_DENSITY.toml
+    )
     test-footprint {
         scope "crate"
     }

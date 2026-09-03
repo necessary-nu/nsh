@@ -1453,6 +1453,11 @@ assertions (
     {id tell-a-full-disk-from-a-compiler-bug, kind @complete, author "brendan@necessary.nu", at 2026-09-02T17:29:43.392437073Z}
     {id stop-the-machine-running-out-of-disk, kind @complete, author "brendan@necessary.nu", at 2026-09-02T18:00:18.807269689Z}
     {id install-the-pathspec-committing-nplan, kind @complete, author "brendan@necessary.nu", at 2026-09-03T12:46:51.810084975Z}
+    {id a-bracket-test-reads-the-current-directory, kind @doing, author "brendan@necessary.nu", at 2026-09-03T13:14:49.80525796Z}
+    {id refuse-a-survey-run-whose-shell-the-boundary-hides, kind @doing, author "brendan@necessary.nu", at 2026-09-03T13:16:18.003283544Z}
+    {id stop-a-required-register-entry-firing-test-footprint, kind @doing, author "brendan@necessary.nu", at 2026-09-03T13:28:33.96955099Z}
+    {id take-the-array-letter-for-a-plain-operand, kind @doing, author "brendan@necessary.nu", at 2026-09-03T13:28:35.875548737Z}
+    {id keep-allexport-off-a-compound-readonly-operand, kind @doing, author "brendan@necessary.nu", at 2026-09-03T15:57:06.351458772Z}
 )
 
 impl_evidence (
