@@ -122,3 +122,28 @@ rather than their owner. Counted with `density.rs`'s counter on 2026-09-02, the 
 file reached 49 by gaining `Trial` -- `trial`, `budget`, `match_star`, `matches_from`, \
 `ends_from`, `ask` and one fence test -- for `bound-what-a-prefix-or-suffix-trim-costs`.
 """
+
+
+[[file]]
+path = "crates/nsh-platform/src/locale.rs"
+answer = """
+Split the character half out to `crates/nsh-platform/src/locale/characters.rs`. Eight \
+functions move -- `decoder`, `decode_byte`, `decode_prefix`, `multibyte_len`, \
+`character_widths`, `decode_exact`, `wide_chars` and `LocaleDecoder::push` -- with the three \
+types that are only theirs, `LocaleDecoder`, `LocaleDecode` and `LocaleCharacter`, and with the \
+`mbrtowc`, `mbrlen` and `wcrtomb` bindings nothing else calls. That leaves 37 functions here \
+and 8 there. ONE THING CROSSES THE SEAM AND STAYS: every mover is a `with_selected` closure \
+around one C call, and `with_selected` and `select` are the handle's, not the encoding's, so \
+they stay in `locale.rs` -- a child module reaches its parent's private items, so the move is \
+imports and no visibility change. The classification and collation functions (`is_alpha` \
+through `collating_bracket_matches`) look like they belong with the movers and do not: they \
+answer about a decoded `wchar_t` or about bytes the caller already framed, and they are what \
+`pattern.rs` reaches for, so moving them would put the matcher one module further from its \
+answers for no reduction the encoding split does not already give. \
+THE FOUR MESSAGE FUNCTIONS ARE THE OTHER CANDIDATE AND ARE THE WRONG ONE: `error_message`, \
+`error_message_code`, `range_error_message` and `signal_description` are a genuinely separate \
+subject -- `strerror_l` and `strsignal` -- but there are only four of them, so the split buys \
+four functions of headroom where the encoding seam buys eight. Take it second, not first. \
+Counted with `density.rs`'s counter on 2026-09-03, the day the file reached 45 by gaining \
+`decode_prefix` for `decode-a-character-from-the-buffer-the-parser-already-holds`.
+"""

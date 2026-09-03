@@ -246,6 +246,39 @@ fn read_record(
     }
 }
 
+/// How wide the character beginning at `first` is, when the source is
+/// already holding the rest of it, or `None` when it is not.
+///
+/// One thread-locale selection settles the whole character, and settling
+/// it before consuming anything is what lets the caller skip the
+/// put-back: a width of one means `first` stands alone, and nothing was
+/// taken to give back.
+///
+/// Only the input stack can answer. `read -u N` names a descriptor the
+/// shell is not parsing from and reads it a byte at a time on purpose --
+/// everything after the record belongs to whoever reads that descriptor
+/// next -- so it has no buffer to look into and keeps the incremental
+/// decoder.
+fn buffered_character_width(shell: &mut Shell, source: &ReadStream, first: u8) -> Option<usize> {
+    const LONGEST: usize = 6;
+    if !matches!(source, ReadStream::Standard) {
+        return None;
+    }
+    let buffered = crate::input::buffered_line_bytes(&mut shell.input);
+    if buffered.is_empty() {
+        return None;
+    }
+    let mut window = [0_u8; LONGEST];
+    window[0] = first;
+    let taken = buffered.len().min(LONGEST - 1);
+    window[1..=taken].copy_from_slice(&buffered[..taken]);
+    match shell.locale.decode_prefix(&window[..=taken]) {
+        nsh_platform::LocaleCharacter::Complete { width, .. } => Some(width),
+        nsh_platform::LocaleCharacter::Invalid => Some(1),
+        nsh_platform::LocaleCharacter::Incomplete => None,
+    }
+}
+
 /// Collect the remaining bytes of a multi-byte character, or put back
 /// what turned out not to be one.
 fn wide_character(
@@ -254,6 +287,21 @@ fn wide_character(
     first: u8,
 ) -> Result<Option<BString>, Error> {
     const LONGEST: usize = 6;
+
+    if let Some(width) = buffered_character_width(shell, source, first) {
+        if width == 1 {
+            return Ok(None);
+        }
+        let mut bytes = BString::default();
+        bytes.push(first);
+        for _ in 1..width {
+            let unit = source.next_unit(shell, true)?;
+            let Some(byte) = unit.byte() else { break };
+            bytes.push(byte);
+        }
+        return Ok(Some(bytes));
+    }
+
     let mut decoder = shell.locale.decoder();
     let mut bytes = BString::default();
     let mut byte = first;
