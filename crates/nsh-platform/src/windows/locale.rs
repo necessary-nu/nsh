@@ -19,6 +19,15 @@ pub enum LocaleDecode {
     Invalid,
 }
 
+/// One character read from the front of a byte string, and what it cost
+/// in bytes. `Incomplete` says the bytes are a valid beginning the string
+/// ends too soon to finish, which is why this is not `Option`.
+pub enum LocaleCharacter {
+    Complete { wide: i32, width: usize },
+    Incomplete,
+    Invalid,
+}
+
 pub struct LocaleDecoder {
     bytes: Vec<u8>,
 }
@@ -118,6 +127,32 @@ impl Locale {
 
     pub fn wide_is_space(&self, wide: i32) -> bool {
         char::from_u32(wide as u32).is_some_and(char::is_whitespace)
+    }
+
+    pub fn decode_prefix(&self, bytes: &[u8]) -> LocaleCharacter {
+        let Some(first) = bytes.first() else {
+            return LocaleCharacter::Incomplete;
+        };
+        let width = match first {
+            0x00..=0x7f => 1,
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => return LocaleCharacter::Invalid,
+        };
+        if bytes.len() < width {
+            return LocaleCharacter::Incomplete;
+        }
+        match std::str::from_utf8(&bytes[..width])
+            .ok()
+            .and_then(|text| text.chars().next())
+        {
+            Some(wide) => LocaleCharacter::Complete {
+                wide: wide as i32,
+                width,
+            },
+            None => LocaleCharacter::Invalid,
+        }
     }
 
     pub fn multibyte_len(&self, bytes: &[u8]) -> Option<usize> {

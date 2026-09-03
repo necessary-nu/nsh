@@ -57,6 +57,19 @@ pub enum LocaleDecode {
     Invalid,
 }
 
+/// One character read from the front of a byte string, and what it cost
+/// in bytes.
+///
+/// `Incomplete` says the bytes are a valid beginning that the string ends
+/// too soon to finish: a caller holding more bytes should ask again with
+/// them, and a caller holding none has found an invalid sequence. That
+/// distinction is why this is not `Option`.
+pub enum LocaleCharacter {
+    Complete { wide: i32, width: usize },
+    Incomplete,
+    Invalid,
+}
+
 /// Incremental decoder for one character.
 pub struct LocaleDecoder {
     state: MbState,
@@ -262,6 +275,42 @@ impl Locale {
                 LocaleDecode::Complete(wide)
             } else {
                 LocaleDecode::Invalid
+            }
+        })
+    }
+
+    /// Decode the character beginning at the start of `bytes` under one
+    /// thread-locale selection.
+    ///
+    /// The same answer the incremental decoder reaches by being fed the
+    /// same bytes one at a time -- `mbstate_t` is what makes those two
+    /// equivalent -- for one selection rather than one per byte. A caller
+    /// that cannot offer the whole character at once, because offering it
+    /// would mean blocking on a read, still wants [`LocaleDecoder`].
+    pub fn decode_prefix(&self, bytes: &[u8]) -> LocaleCharacter {
+        if bytes.is_empty() {
+            return LocaleCharacter::Incomplete;
+        }
+        self.with_selected(|| {
+            let mut wide = 0_i32;
+            // SAFETY: the conversion is bounded by the slice and both the
+            // wide character and the state are initialized local storage;
+            // `mbrtowc` retains no pointer past the call.
+            let consumed = unsafe {
+                let mut state = std::mem::zeroed();
+                mbrtowc(&mut wide, bytes.as_ptr().cast(), bytes.len(), &mut state)
+            };
+            if consumed == usize::MAX - 1 {
+                LocaleCharacter::Incomplete
+            } else if consumed == usize::MAX {
+                LocaleCharacter::Invalid
+            } else {
+                // A null character reports zero bytes consumed and is one
+                // byte wide, which is what a stepping caller has to move.
+                LocaleCharacter::Complete {
+                    wide,
+                    width: consumed.max(1),
+                }
             }
         })
     }

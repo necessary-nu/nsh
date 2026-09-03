@@ -14,7 +14,7 @@
 mod descriptor;
 pub use descriptor::{AsDescriptor, BorrowedDescriptor, Descriptor, move_fd_cloexec};
 mod locale;
-pub use locale::{Locale, LocaleCategory, LocaleDecode, LocaleDecoder};
+pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};
 mod signal_names;
 pub use signal_names::{SIGNAL_COUNT, SIGNAL_NAMES};
 mod terminal;

@@ -410,6 +410,33 @@ pub fn set_remaining_buffer_bytes(input_frame: &mut InputFrame, len: usize) {
     input_frame.buffer_remaining = len;
 }
 
+/// The bytes the current frame will hand over next without reading, in
+/// the order it will hand them over.
+///
+/// What is left of the line already in the buffer, and nothing past it.
+/// A caller looking ahead must not read across the end of that run: the
+/// unit after it may be an alias boundary rather than a byte, or may
+/// come from a `read` that blocks. Two states are refused outright
+/// rather than described, because a caller's fallback is the
+/// byte-at-a-time read it would have done anyway -- an outstanding
+/// `pungetc`, which is served from *before* the cursor, and a frame
+/// whose line is exhausted.
+///
+/// Empty is always a safe answer, so a caller may treat this as a hint
+/// and must not treat a non-empty answer as permission to read further
+/// than it is long.
+pub(crate) fn buffered_line_bytes(input: &mut InputStack) -> &[u8] {
+    let input_frame = current_input_frame(input);
+    if input_frame.unread_count != 0 || input_frame.line_remaining == 0 {
+        return &[];
+    }
+    let position = input_frame.position;
+    let line_remaining = input_frame.line_remaining;
+    let text = text(input_frame);
+    let end = position.saturating_add(line_remaining).min(text.len());
+    text.get(position..end).unwrap_or_default()
+}
+
 impl Shell {
     /// Establish the base input frame for a newly constructed shell.
     pub(crate) fn initialize_input_state(&mut self) {

@@ -9488,6 +9488,7 @@ children (
                                         id mark-seconds-when-it-is-read
                                         title "Give `SECONDS` the integer letter its first read gives it in Bash"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T15:52:02.697415115Z
@@ -9501,6 +9502,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T17:25:06.226390647Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -9528,24 +9536,56 @@ children (
                                                 id publish-the-environment-facts-with-defaults
                                                 title "Publish `TERM` and `SHELL` with the defaults Bash gives them"
                                                 kind @feat
+                                                log (
+                                                    {
+                                                        at 2026-09-03T17:25:15.820198614Z
+                                                        author "brendan@necessary.nu"
+                                                        kind @note
+                                                        text "Split out of `publish-the-names-bash-publishes` on 2026-09-03; measured against the pinned Bash 5.3.15 on `90e8920` with `env -i PATH=/usr/bin:/bin LC_ALL=C`.\n\n    bash: declare -- TERM=\"dumb\"        declare -- SHELL=\"/bin/bash\"\n    nsh:  TERM is a reserved slot holding nothing and is not listed;\n          SHELL does not exist at all\n\nTwo names, and they are the ones where publishing is not a lie: both are ordinary variables with a default once the environment has not supplied one, and both are read by things this shell has -- `TERM` by the editor, `SHELL` by whatever a script hands to `$SHELL -c`.\n\nWHAT HAS TO BE DECIDED. `TERM`'s slot is entered by `initialize_variables`, which is *shared code*: giving it a default there would move the POSIX dialect, where dash has no `TERM` of its own. So the default belongs in `special::publish`, beside `HOSTNAME` and the rest, and has to follow the same `INHERITABLE` rule -- an inherited `TERM` is the environment's and must not be overwritten.\n\n`SHELL` is harder and is why this is not a one-line node. Bash takes it from the password entry's login shell, not from `$0`: it is `/bin/bash` in the measurement above even though the shell was run from `target/bash-reference/bash`. This shell has `nsh_platform` facts for the uid and the host name but nothing that reads a password entry, so either that is added or `SHELL` is derived from something else and the divergence recorded.\n\nDONE WHEN. A start-up listing carries `TERM` with the reference's default and `SHELL` with a defensible one, an inherited value of either is left alone, the POSIX dialect is unmoved, and a differential row covers the inherited and the defaulted case for each."
+                                                    }
+                                                )
                                             }
 
                                             {
                                                 id publish-the-ordinary-shell-state
                                                 title "Publish the six names that are ordinary state this shell keeps elsewhere"
                                                 kind @feat
+                                                log (
+                                                    {
+                                                        at 2026-09-03T17:25:31.761581886Z
+                                                        author "brendan@necessary.nu"
+                                                        kind @note
+                                                        text "Split out of `publish-the-names-bash-publishes` on 2026-09-03; measured against the pinned Bash 5.3.15 on `90e8920`.\n\nEight names that are ordinary shell state -- this shell keeps most of it somewhere already, just not under a name a script can read.\n\n    declare -x OLDPWD                (invisible, exported; `cd -` reads it)\n    declare -- OPTERR=\"1\"            (getopts' own error switch)\n    declare -i HISTCMD               (invisible; \"0\" when asked by name)\n    declare -- _=\"<argv[0]>\"         (the last argument of the last command)\n    declare -- BASH_COMMAND          (invisible; the running command when read)\n    declare -- BASH_ARGV0            (invisible; `$0`, and assignable)\n    declare -- BASH_MONOSECONDS      (invisible clock)\n    declare -- BASH_EXECUTION_STRING (only under `-c`, holding the string)\n\nNONE OF THESE IS A LISTING ENTRY, WHICH IS THE POINT OF THE NODE. `_` and `BASH_COMMAND` change with every command; `BASH_ARGV0` is writable and re-points `$0`; `OPTERR` changes what `getopts` reports; `OLDPWD` is what `cd -` reads. Publishing any of them as an empty name would make `declare -p` agree while making the shell answer a script wrongly -- `${BASH_COMMAND}` would be the empty string where it is now correctly unset -- so each needs its value wired to the thing that already knows it.\n\nThe cheapest three are `BASH_MONOSECONDS` (a clock exactly like `EPOCHSECONDS`, which `special::compute` already answers for), `BASH_EXECUTION_STRING` (the `-c` argument, which `options` holds) and `OLDPWD` (the working-directory code already tracks the previous directory for `cd -`). `_`, `BASH_COMMAND` and `BASH_ARGV0` each need a write on a hot path and should be measured for cost.\n\nDONE WHEN. Each name either answers what the reference answers or is recorded as a deliberate absence, a start-up listing carries the ones that landed, and a differential table holds a read of each after the state it reports has moved."
+                                                    }
+                                                )
                                             }
 
                                             {
                                                 id publish-the-interactive-surface-names
                                                 title "Decide what to publish for the four names that belong to a surface this shell has not got"
                                                 kind @feat
+                                                log (
+                                                    {
+                                                        at 2026-09-03T17:25:41.988808188Z
+                                                        author "brendan@necessary.nu"
+                                                        kind @note
+                                                        text "Split out of `publish-the-names-bash-publishes` on 2026-09-03; measured against the pinned Bash 5.3.15 on `90e8920`.\n\n    declare -A BASH_ALIASES=()\n    declare -A BASH_CMDS=()\n    declare -- COMP_WORDBREAKS       (invisible in a listing;\n                                      $' \\t\\n\"\\'@><=;|&(:' when asked by name)\n    declare -- BASH_LOADABLES_PATH=\"/usr/local/lib/bash:/usr/lib/bash:...\"\n\nTHE DECISION IS WHETHER TO PUBLISH THEM AT ALL, which is why this is a node and not four lines of `publish`.\n\n`BASH_ALIASES` and `BASH_CMDS` are not variables in Bash: they are live views of the alias table and the command hash table, so `BASH_ALIASES[ll]='ls -l'` defines an alias and `unset BASH_CMDS[x]` forgets a hashed path. This shell has both tables (`alias.rs`, `execution`'s hash) but no machinery for a variable that *is* a table, and an empty associative array published under those names would be a listing that lies to a script writing into it.\n\n`COMP_WORDBREAKS` belongs to programmable completion, which this shell has not got, and `BASH_LOADABLES_PATH` to `enable -f`, which it has not got either. Publishing a value for either says the surface exists.\n\nSO THE OPTIONS ARE. Publish them as invisible names with no value, which is what the reference's *listing* shows anyway for `COMP_WORDBREAKS` and gets the set comparison closer for no lie; publish real values and accept that two of them describe nothing; or record all four in `docs/divergences.md` as names this shell deliberately has not got, and have `bash_shell_facts.rs` compare the sets minus a named exclusion list.\n\nThe third is the only one that stays honest without building two subsystems, and it is worth writing down as a decision rather than leaving as an omission.\n\nDONE WHEN. One of the three is chosen and written down, the loser is registered rather than silently absent, and `bash_shell_facts.rs` says which names it excludes and why."
+                                                    }
+                                                )
                                             }
 
                                             {
                                                 id withhold-the-prompts-a-non-interactive-shell-lacks
                                                 title "Stop publishing `PS1` and `PS2` where a non-interactive Bash has neither"
                                                 kind @fix
+                                                log (
+                                                    {
+                                                        at 2026-09-03T17:25:55.911581714Z
+                                                        author "brendan@necessary.nu"
+                                                        kind @note
+                                                        text "Split out of `publish-the-names-bash-publishes` on 2026-09-03; measured against the pinned Bash 5.3.15 on `90e8920`. This is the \"HERE AND NOT IN BASH, two\" half of that node -- the only two names where this shell publishes something the reference does not.\n\n    non-interactive, fed on standard input\n      bash: no PS1, no PS2 (PS4=\"+ \" is there)\n      nsh:  declare -- PS1=\"\\$ \"   declare -- PS2=\"> \"\n\nA script walking `declare -p` sees two names that should not be there, and `${PS1+set}` answers differently.\n\nWHY IT IS NOT A DELETION. `initialize_variables` gives both defaults unconditionally and it is *shared code*: dash's `set` listing carries `PS1` and `PS2`, and `tests/corpus` is judged against dash. So the POSIX dialect must keep them.\n\nAND WHY IT IS NOT A ONE-LINE DIALECT TEST EITHER. An *interactive* Bash does have `PS1`, so the condition is the invocation's interactivity and not the dialect alone -- and `special::primary_prompt_value` returns the empty string for a name that is absent, so removing them without care leaves an interactive Bash-mode nsh with no prompt at all. The safe shape is to withhold them only where the shell is both Bash-dialect and non-interactive, and to prove the interactive prompt is unmoved with the pty harness in `crates/nsh-cli/tests/default_history_navigation.rs` rather than by reading the code.\n\nNOT MEASURED YET, and worth measuring first: what an interactive Bash's `declare -p` carries for both names, and whether `PS2` appears there without `PS1`.\n\nDONE WHEN. A non-interactive Bash-mode `declare -p` carries neither name, an interactive one carries what the reference carries and still draws a prompt, the POSIX dialect's `set` listing is unmoved against `/usr/bin/dash`, and a differential row covers each."
+                                                    }
+                                                )
                                             }
                                         )
                                         log (
