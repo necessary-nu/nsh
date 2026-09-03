@@ -42,8 +42,14 @@ expectation_shell = "bash"
 posix = false
 timeout_ms = 5000
 oils_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
-shell_sha256 = "f3ffe2bb082516cc4338664947f0aa22725ef882cbd2db03892afac3ce5501b8"
-nsh_commit = "2fd5b1a6f4fb7d6f4b2ac38ba9b5d3bf05e8a711"
+shell_sha256 = "beba1b9f32c504c8236aff4dcd85ddba36d52508d7c3786b1c1e6f26ef94230e"
+nsh_commit = "59b9f6acd235af8cfe4d8cf910900e520cf9cba6"
+uncommitted = [
+    "crates/nsh-platform/src/locale.rs",
+    "crates/nsh-platform/src/unix.rs",
+    "crates/nsh-platform/src/windows/locale.rs",
+    "crates/nsh/src/input.rs",
+]
 failing = [
     "alias.test.sh:0",
     "alias.test.sh:10",
@@ -326,11 +332,8 @@ failing = [
     "builtin-umask.test.sh:7",
     "builtin-umask.test.sh:8",
     "builtin-umask.test.sh:9",
-    "builtin-vars.test.sh:1",
-    "builtin-vars.test.sh:2",
     "builtin-vars.test.sh:24",
     "builtin-vars.test.sh:26",
-    "builtin-vars.test.sh:3",
     "builtin-vars.test.sh:32",
     "builtin-vars.test.sh:38",
     "case_.test.sh:1",
@@ -443,19 +446,13 @@ failing = [
     "redirect-command.test.sh:9",
     "redirect-multi.test.sh:10",
     "redirect.test.sh:14",
-    "redirect.test.sh:23",
     "redirect.test.sh:24",
     "redirect.test.sh:26",
     "redirect.test.sh:27",
-    "redirect.test.sh:3",
-    "redirect.test.sh:30",
-    "redirect.test.sh:37",
     "redirect.test.sh:8",
     "sh-options-bash.test.sh:7",
     "sh-options.test.sh:0",
     "sh-options.test.sh:1",
-    "sh-options.test.sh:22",
-    "sh-options.test.sh:23",
     "sh-options.test.sh:35",
     "sh-options.test.sh:36",
     "sh-options.test.sh:38",
