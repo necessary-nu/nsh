@@ -9992,6 +9992,7 @@ children (
                                 id port-the-script-module-onto-the-canonical-word
                                 title "Port the script module onto the canonical word"
                                 kind @refactor
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-03T17:38:56.822578251Z
@@ -10026,6 +10027,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "claim stolen: Same session, wrong worktree. The claim was taken with project_root /home/brendan/work/dash before the work moved to the merge worktree /data/dash-merge, where branch merge-origin carries the resolved merge. Nothing is being taken from another worker: the claim names this session and this pid."
+                                    }
+
+                                    {
+                                        at 2026-09-03T18:20:29.9347372Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
