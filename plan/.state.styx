@@ -1472,6 +1472,8 @@ assertions (
     {id decode-a-character-from-the-buffer-the-parser-already-holds, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:34:41.421764672Z}
     {id accept-local-dash-in-the-bash-dialect, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:46:52.909965087Z}
     {id take-an-export-back-with-the-n-letter, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:46:55.729539692Z}
+    {id refuse-to-take-back-the-read-only-attribute, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:47:01.637642619Z}
+    {id refuse-a-reference-to-what-is-not-a-name, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:47:04.209799651Z}
 )
 
 impl_evidence (

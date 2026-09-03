@@ -59,20 +59,26 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     /* `-a` and `-A` are Bash's, and they are not attributes here: they
      * say how a compound operand is to be read, which is why
-     * `readonly -A m` with no value leaves `m` a plain name. The POSIX
-     * dialect has no arrays and keeps refusing both letters. */
+     * `readonly -A m` with no value leaves `m` a plain name. `-n` is
+     * Bash's too and takes an attribute back rather than giving one;
+     * both built-ins accept it and only `export` can act on it. The
+     * POSIX dialect has no arrays, gives `export` no `-n`, and keeps
+     * refusing all three letters. */
     // [spec:nsh:req:compat.bash.arrays-declarations]
+    // [spec:nsh:req:compat.bash.functions-scoping]
     let letters: &[u8] = if shell.options.dialect() == crate::options::Dialect::Bash {
-        b"paA"
+        b"paAn"
     } else {
         b"p"
     };
     let mut option_scan = Options::new(args);
     let mut print = false;
+    let mut remove = false;
     while let Some(letter) = option_scan.next(&mut shell.diagnostics(), letters)? {
         match letter {
             b'a' => shell.evaluation.declared_kind = Some(VariableKind::Indexed),
             b'A' => shell.evaluation.declared_kind = Some(VariableKind::Associative),
+            b'n' => remove = true,
             _ => print = true,
         }
     }
@@ -109,6 +115,15 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         }
                         Some(kind) => store_array_element(shell, name, kind, value, append)?,
                         None if append => arrays::assign_text_target(shell, name, value, true)?,
+                        /* `-n` still assigns -- `export -n x=1` is
+                         * `declare -- x="1"` in the reference -- so the
+                         * value lands with no attribute of its own and
+                         * the take-back below reaches the name after
+                         * it, `set -a` included. */
+                        // [spec:nsh:req:compat.bash.functions-scoping]
+                        None if remove => {
+                            set_bytes(shell, name, Some(value), VariableAttributes::NONE)?;
+                        }
                         None => {
                             set_bytes(shell, name, Some(value), attribute)?;
                             continue;
@@ -116,7 +131,12 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     }
                     match nameref::attributed_name(shell, name) {
                         Ok(target) => {
-                            add_attributes(shell, BStr::new(target.as_slice()), attribute);
+                            let target = BStr::new(target.as_slice());
+                            if remove {
+                                take_back(shell, target, attribute);
+                            } else {
+                                add_attributes(shell, target, attribute);
+                            }
                         }
                         Err(refusal) => report_refusal(shell, name, &refusal),
                     }
@@ -134,6 +154,10 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         }
                     };
                     let target = BStr::new(target.as_slice());
+                    if remove {
+                        take_back(shell, target, attribute);
+                        continue;
+                    }
                     if add_attributes(shell, target, attribute) {
                         continue;
                     }
@@ -197,6 +221,20 @@ fn store_array_element(
         append,
         ReadOnlyGuard::Enforce,
     )
+}
+
+/// Take an attribute back off a name, which is what `-n` asks for.
+///
+/// Only the export attribute can go. A read-only variable's attribute
+/// cannot be removed by any means in either shell -- that is what makes
+/// `readonly` worth anything -- so `readonly -n x` is accepted and does
+/// nothing, which is the reference's answer too. Neither letter brings a
+/// name into being: `export -n zz` leaves `zz` with no entry at all.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn take_back(shell: &mut Shell, name: &BStr, attribute: VariableAttributes) {
+    if attribute.exported {
+        crate::variables::value::clear_exported(shell, name);
+    }
 }
 
 /// Whether the array letter has a compound value coming for this

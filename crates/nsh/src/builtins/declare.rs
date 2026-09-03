@@ -45,7 +45,9 @@ struct Requested {
     uppercase: Option<bool>,
     nameref: Option<bool>,
     trace: Option<bool>,
-    read_only: bool,
+    /// `+r`, which Bash refuses for a name that is already read-only.
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    read_only: Option<bool>,
     exported: Option<bool>,
     global: bool,
     print: bool,
@@ -66,7 +68,7 @@ impl Requested {
             && self.nameref.is_none()
             && self.trace.is_none()
             && self.exported.is_none()
-            && !self.read_only
+            && self.read_only != Some(true)
             && !self.global
             && !self.functions
             && !self.function_names
@@ -110,6 +112,16 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     let mut status = ExitStatus::SUCCESS;
     for operand in operands {
+        /* `local -` names no variable: it saves the option set for the
+         * duration of the function and restores it on return, which is
+         * what `make_local_bytes` already does for the POSIX dialect.
+         * Only `local` spells it -- `typeset -` is `not a valid
+         * identifier` in the reference too. */
+        // [spec:nsh:req:compat.bash.functions-scoping]
+        if forced_local && *operand == "-" {
+            crate::variables::make_local_bytes(shell, operand, VariableAttributes::NONE)?;
+            continue;
+        }
         let name = operand_name(operand);
         if apply(shell, args[0], &requested, operand, scope)?
             && crate::parser::is_valid_name(&shell.locale, name)
@@ -154,7 +166,7 @@ fn parse<'a>(args: &'a [&'a BStr]) -> Result<(Requested, &'a [&'a BStr]), u8> {
                 b'u' => requested.uppercase = Some(enable),
                 b'n' => requested.nameref = Some(enable),
                 b't' => requested.trace = Some(enable),
-                b'r' => requested.read_only = enable,
+                b'r' => requested.read_only = Some(enable),
                 b'x' => requested.exported = Some(enable),
                 b'g' => requested.global = enable,
                 b'p' => requested.print = true,
@@ -200,9 +212,16 @@ fn apply(
 
     // A reference may only be given the name of something to refer to.
     if requested.nameref == Some(true)
-        && let Some(value) = &value
-        && !nameref::is_valid_target(shell, BStr::new(value.as_slice()))
+        && let Some(refusal) =
+            refused_reference(shell, requested, base, value.as_deref().map(BStr::new))
     {
+        if !refusal.is_empty() {
+            let mut message = builtin.to_vec();
+            message.extend_from_slice(b": ");
+            message.extend_from_slice(&refusal);
+            message.push(b'\n');
+            shell.write_output(OutputDestination::Stderr, &message)?;
+        }
         return Ok(false);
     }
 
@@ -237,6 +256,25 @@ fn apply(
         message.extend_from_slice(b": ");
         message.extend_from_slice(written.as_slice());
         message.extend_from_slice(b": cannot destroy array variables in this way\n");
+        shell.write_output(OutputDestination::Stderr, &message)?;
+        return Ok(false);
+    }
+
+    /* A read-only attribute cannot be taken back by any means, in
+     * either shell -- that is what makes `readonly` worth anything --
+     * so only the report and the status are Bash's own. Beside the kind
+     * refusal because it has the same shape: it fires only for a name
+     * that already carries the thing the letter would remove, and it
+     * fires before any other letter of the same command has landed. */
+    // [spec:nsh:req:compat.bash.arrays-declarations]
+    if requested.read_only == Some(false)
+        && crate::variables::variable_attributes(shell, base)
+            .is_some_and(|attributes| attributes.read_only)
+    {
+        let mut message = builtin.to_vec();
+        message.extend_from_slice(b": ");
+        message.extend_from_slice(written.as_slice());
+        message.extend_from_slice(b": readonly variable\n");
         shell.write_output(OutputDestination::Stderr, &message)?;
         return Ok(false);
     }
@@ -301,7 +339,7 @@ fn apply(
     let attributes = VariableAttributes {
         exported: requested.exported == Some(true)
             || exported_by_allexport(shell, requested, base, scope),
-        read_only: requested.read_only,
+        read_only: requested.read_only == Some(true),
         fixed: false,
     };
     if attributes != VariableAttributes::NONE {
@@ -338,6 +376,46 @@ fn exported_by_allexport(shell: &Shell, requested: &Requested, base: &BStr, scop
         && shell
             .options
             .enabled(crate::options::ShellOption::AllExport)
+}
+
+/// Why `-n` may not be given to this operand, as the text Bash reports.
+///
+/// `None` accepts it. An empty refusal is one Bash makes silently: an
+/// integer conversion turns the value into a number, and a number is
+/// never an identifier, so `declare -in r=x5` refuses with nothing
+/// written where `declare -in r=5` reports the `5` it was handed.
+///
+/// With no value written it is the value the name already holds that
+/// would be referred to, which is the case `is_valid_target` alone never
+/// saw: `ref=1; typeset -n ref` leaves `ref` a plain scalar in Bash and
+/// made it a reference here, and every transform over that state was
+/// then an answer about a variable the reference cannot hold.
+// [spec:nsh:req:compat.bash.functions-scoping]
+fn refused_reference(
+    shell: &Shell,
+    requested: &Requested,
+    base: &BStr,
+    value: Option<&BStr>,
+) -> Option<Vec<u8>> {
+    let refusal = |text: &BStr| {
+        let mut message = b"`".to_vec();
+        message.extend_from_slice(text.as_ref());
+        message.extend_from_slice(b"': invalid variable name for name reference");
+        message
+    };
+    if let Some(value) = value {
+        if !nameref::is_valid_target(shell, value) {
+            return Some(refusal(value));
+        }
+        return (requested.integer == Some(true)).then(Vec::new);
+    }
+    if is_array(shell, base) {
+        let mut message = base.to_vec();
+        message.extend_from_slice(b": reference variable cannot be an array");
+        return Some(message);
+    }
+    let held = crate::variables::value::variable_value(shell, base)?.scalar_ref()?;
+    (!nameref::is_valid_target(shell, held)).then(|| refusal(held))
 }
 
 /// Whether `name` holds an array, which decides how `(…)` is read.
@@ -411,7 +489,7 @@ fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result
 fn selected(shell: &Shell, requested: &Requested, name: &BStr) -> bool {
     let attributes = crate::variables::variable_attributes(shell, name).unwrap_or_default();
     let bash = crate::variables::value::bash_attributes(shell, name).unwrap_or_default();
-    if requested.read_only && !attributes.read_only {
+    if requested.read_only == Some(true) && !attributes.read_only {
         return false;
     }
     if requested.exported == Some(true) && !attributes.exported {

@@ -9476,6 +9476,13 @@ children (
                                                 kind @note
                                                 text "Found 2026-09-02 while closing `spell-a-valueless-name-back`. Measured against the pinned Bash 5.3.15 on `848e0ab`; pre-existing.\n\nBash refuses to make a name a reference when what it would refer to is not an identifier; this shell accepts it and carries a reference state Bash cannot have:\n\n    ref=1; typeset -n ref; declare -p ref\n      bash: typeset: `1': invalid variable name for name reference\n            declare -- ref=\"1\"          (still a plain scalar)\n      nsh:  declare -n ref=\"1\"\n\n    declare -in r5=x5\n      bash: declare: r5: not found      (the declaration is refused)\n      nsh:  declare -in r5=\"0\"\n\nWHY IT MATTERS MORE THAN A DIAGNOSTIC. Every transform over that state is an answer about a variable the reference cannot hold, so no differential row can ever pin it: `${ref@A}` is `ref='1'` there and `declare -n ref='1'` here, and the difference is not the transform's. `c727cb3` had to reason about it rather than measure it when it made `declaration_target` decline a reference holding no name.\n\n`variables::nameref::is_valid_target` exists and `builtins/declare.rs` already calls it for `declare -n ref=value`. The path that is missing the check is the one that turns an *existing* value into a reference -- `typeset -n ref` with no `=`, where the value was already there.\n\nDONE WHEN. `declare -n` on a name whose value is not a valid identifier is refused as the reference refuses it, the name is left as it was, the status matches, and a differential table holds `typeset -n` over an existing non-name value and the `-in` combination."
                                             }
+
+                                            {
+                                                at 2026-09-03T16:47:04.209799651Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -9489,6 +9496,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found 2026-09-02 while closing `refuse-to-destroy-an-array-kind`, which fixed `+a` and `+A` and deliberately left this letter alone: it is a different refusal with a different message and a different reason. Measured against the pinned Bash 5.3.15 on `a81455c`; pre-existing.\n\n    declare -r q=1; declare +r q; declare -p q\n      bash: declare: q: readonly variable   status 1, q unchanged\n      nsh:  accepted silently,              status 0, q unchanged\n\n    q=1; declare +r q; declare -p q\n      both: declare -- q=\"1\", status 0\n\nSo the letter is ordinary on a name that is not read-only, and refused on one that is. The kind refusal `refuse-to-destroy-an-array-kind` added has the same shape -- an attribute a declaration may not take back -- and the same narrowness: it fires only when the name already carries the thing the letter would remove.\n\nThe refusal is POSIX's as much as Bash's: a read-only variable's attribute cannot be removed by any means in either shell, which is what makes `readonly` worth anything. It is only the *report* and the status that are missing here.\n\nWHERE. `builtins::declare::parse` reads `-r`/`+r` into `requested.read_only` as a plain `bool` -- `requested.read_only = enable` -- so `+r` is indistinguishable from the letter never appearing. It has to become an `Option<bool>` as `exported` already is, and the refusal then belongs beside the `destroyed_kind` check in `apply`, which already reports before any other letter of the same command has landed.\n\nWATCH `is_bare`. `declare +r` with no operand is a listing and not a declaration; `Requested::is_bare` currently reads `!self.read_only`, which is true for `+r` today and must stay true after the type changes, or a bare `declare +r` would print the wrong listing.\n\nDONE WHEN. `declare +r`, `typeset +r` and `local +r` on a read-only name report and answer 1 with the variable unchanged, they are silent on a name that is not read-only, the bare `declare +r` listing is unmoved, and a differential row covers each."
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:47:01.637642619Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
                                             }
                                         )
                                     }
