@@ -9690,6 +9690,7 @@ children (
                                         id wait-for-process-substitutions-in-the-wait-builtin
                                         title "Make `wait` with no arguments wait for process substitutions"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T05:40:23.981756235Z
@@ -9703,6 +9704,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T17:13:35.015275991Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

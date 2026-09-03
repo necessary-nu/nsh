@@ -20,10 +20,13 @@
 //!   visible to exactly one image, so the flag is cleared at the process
 //!   terminus in [`publish_before_exec`], after the last fork this process
 //!   will ever make.
-//! * **The child is nobody's job.** Bash does not wait for a process
-//!   substitution and does not set `$!` to it, so there is no job record for
-//!   `jobs` to print or `wait` to block on; the generic reaper collects it
-//!   alongside the here-document writers.
+//! * **The child is nobody's job.** There is no job record for `jobs` to
+//!   print, in either shell. Its pid is still the shell's to keep: `wait`
+//!   with no operands blocks on the most recent substitution, which is why
+//!   [`crate::context::Shell::last_process_substitution`] holds it apart
+//!   from the here-document writers and command substitutions the generic
+//!   reaper collects it beside. Bash also names it in `$!`, which this
+//!   shell does not -- `name-a-process-substitution-in-the-bang-parameter`.
 //!
 //! # The child can outlive the shell, and in a container that loses its output
 //!
