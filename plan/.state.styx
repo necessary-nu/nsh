@@ -1466,7 +1466,7 @@ assertions (
     {id stop-allexport-creating-a-name-unset-removed, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:27:53.519348487Z}
     {id unset-every-name-it-was-given, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:27:55.921955841Z}
     {id fold-pattern-rs-into-the-characters-module, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:34:27.974563803Z}
-    {id stop-the-noclobber-append-case-flaking, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:32:39.331601243Z}
+    {id stop-the-noclobber-append-case-flaking, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:15:39.937015427Z}
     {id keep-a-local-declared-after-unset, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:37:16.333688448Z}
     {id list-a-declaration-of-a-reserved-name, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:38:02.222963589Z}
     {id decode-a-character-from-the-buffer-the-parser-already-holds, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:34:41.421764672Z}
@@ -1477,6 +1477,7 @@ assertions (
     {id make-a-substitution-linear-in-its-value, kind @doing, author "brendan@necessary.nu", at 2026-09-03T16:48:32.594398742Z}
     {id expand-a-command-substitution-in-a-subscript, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:01:17.458720557Z}
     {id wait-for-process-substitutions-in-the-wait-builtin, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:13:35.015275991Z}
+    {id mark-seconds-when-it-is-read, kind @doing, author "brendan@necessary.nu", at 2026-09-03T17:23:09.253467638Z}
 )
 
 impl_evidence (

@@ -224,7 +224,19 @@ fn publish(shell: &mut Shell) {
         b"BASHPID",
         b"BASH_SUBSHELL",
     ] {
-        mark_dynamic(shell, BStr::new(name), VariableAttributes::NONE);
+        let name = BStr::new(name);
+        mark_dynamic(shell, name, VariableAttributes::NONE);
+        /* A clock holds nothing until something reads it. The reference
+         * prints `declare -i BASHPID` in a fresh listing and
+         * `declare -i BASHPID="1868669"` once `$BASHPID` has been read,
+         * so a seeded `0` was not merely early: `declare -p` spelled it
+         * back as though the shell's pid were zero. The two option
+         * listings below keep their seed, because they are facts rather
+         * than clocks and the reference prints them with a value. */
+        // [spec:nsh:req:compat.bash.builtins-special-variables]
+        if let Some(entry) = shell.variables.entries.get_mut(name) {
+            entry.state = VariableState::Declared(VariableKind::Scalar);
+        }
     }
     /* Bash marks the two option listings read-only, and so does this.
      * The mark was withheld until 2026-08-23 because an assignment to a
@@ -495,6 +507,21 @@ fn compute(shell: &mut Shell, name: &BStr) -> Option<BString> {
         b"SRANDOM" => (nsh_platform::facts::entropy_seed() as u32).to_string(),
         b"BASHPID" => nsh_platform::current_process_id().to_string(),
         b"SECONDS" => {
+            /* The read is what gives `SECONDS` the integer attribute, and
+             * it is the only name whose letters a read changes:
+             * `declare -p | grep SECONDS` is `declare -- SECONDS` in a
+             * fresh reference and `declare -i SECONDS` once `$SECONDS`
+             * has been read. `BASHPID`, `RANDOM`, `SRANDOM` and `OPTIND`
+             * carry `-i` from the start and `EPOCHSECONDS`,
+             * `EPOCHREALTIME`, `LINENO` and `BASH_SUBSHELL` never carry
+             * it, read or not. */
+            // [spec:nsh:req:compat.bash.builtins-special-variables]
+            super::value::set_bash_attribute(
+                shell,
+                name,
+                super::value::BashAttribute::Integer,
+                true,
+            );
             let elapsed =
                 nsh_platform::facts::monotonic_seconds() - shell.variables.special.seconds_origin;
             shell

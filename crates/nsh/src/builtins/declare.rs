@@ -290,6 +290,12 @@ fn apply(
     // A declaration records the name even with nothing to store in it,
     // so the attributes below have an entry to live on.
     nameref::ensure_entry(shell, base);
+    /* Declaring a name whose value the read path recomputes is a read of
+     * it: `declare SECONDS` is `declare -i SECONDS="0"` in the
+     * reference, where the same name untouched prints
+     * `declare -- SECONDS` with nothing beside it. */
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    crate::variables::special::refresh(shell, base);
     let was_exported = crate::variables::variable_attributes(shell, base)
         .is_some_and(|attributes| attributes.exported);
 
@@ -467,8 +473,20 @@ fn print(shell: &mut Shell, requested: &Requested, operands: &[&BStr]) -> Result
     };
 
     let mut status = ExitStatus::SUCCESS;
+    let named = !operands.is_empty();
     for name in names {
         let name = BStr::new(name.as_slice());
+        /* Asking for a name by name is a *read*, and asking for the
+         * listing is not: `declare -p SECONDS` is `declare -i
+         * SECONDS="0"` in the reference where `declare -p` in the same
+         * fresh shell prints `declare -- SECONDS` with nothing beside
+         * it. The asymmetry is Bash's, and it is what makes
+         * `declare -p BASHPID` name the running process rather than the
+         * seed the shell published. */
+        // [spec:nsh:req:compat.bash.builtins-special-variables]
+        if named {
+            crate::variables::special::refresh(shell, name);
+        }
         let Some(rendered) = crate::variables::declaration::declaration_line(shell, name) else {
             let mut message = b"declare: ".to_vec();
             message.extend_from_slice(name.as_ref());

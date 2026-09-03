@@ -238,7 +238,7 @@ pub(crate) fn valued_names(shell: &Shell) -> Vec<BString> {
         .variables
         .entries
         .iter()
-        .filter(|(_, var)| matches!(var.state, VariableState::Set(_)))
+        .filter(|(_, var)| var.holds_a_value())
         .map(|(name, _)| name.clone())
         .collect()
 }
@@ -302,6 +302,17 @@ impl Variable {
         matches!(self.state, VariableState::Unset)
             && self.attributes == super::VariableAttributes::FIXED
             && self.bash_attributes == BashAttributes::new()
+    }
+
+    /// Whether a read of this name would find something.
+    ///
+    /// A name the read path recomputes always would, even while it holds
+    /// nothing: `${!BASHP*}` names `BASHPID` in the reference where its
+    /// `declare -p` line has no value beside it, because the value is
+    /// made when it is asked for.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    fn holds_a_value(&self) -> bool {
+        matches!(self.state, VariableState::Set(_)) || self.callback == super::Callback::Special
     }
 
     pub(super) fn scalar(&self) -> Option<&BStr> {
