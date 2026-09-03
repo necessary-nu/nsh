@@ -9325,6 +9325,7 @@ children (
                                         id keep-a-local-declared-after-unset
                                         title "Keep the entry `unset` leaves behind on a name local to the running body"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-02T15:53:30.854017131Z
@@ -9338,6 +9339,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-03T16:37:16.333688448Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

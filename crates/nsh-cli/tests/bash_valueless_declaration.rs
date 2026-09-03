@@ -259,11 +259,11 @@ const A_RESERVED_SLOT_IS_NOT_A_DECLARATION: &[&str] = &[
     "declare -a LC_CTYPE\ndeclare -p LC_CTYPE\ndeclare -p | grep -c ' LC_CTYPE$'\n",
     "declare -l MAIL\ndeclare -p MAIL\n",
     "declare -t MAILPATH\ndeclare -p MAILPATH\n",
-    /* A bare `declare MAIL` is the one that cannot be told from the
-     * slot it found, because it changes nothing about the entry. It is
-     * `list-a-declaration-of-a-reserved-name`, and it is deliberately
-     * not a row here: the table is a check, and a check that is red for
-     * a defect somebody else is going to fix stops being one. */
+    /* A bare `declare MAIL` changes nothing about the entry, so it is
+     * told from the slot it found by the state rather than by any of
+     * the marks above. Its rows live in `bash_invisible_declaration.rs`
+     * beside the other declaration that carries nothing. */
+    "declare MAIL\ndeclare -p MAIL\ndeclare -p | grep -c ' MAIL$'\n",
 ];
 
 /// Every combination of attributes a name can carry at once, through
