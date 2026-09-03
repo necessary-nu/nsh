@@ -116,6 +116,56 @@ impl Containment {
         "sandbox-pid-net-ro-root"
     }
 
+    /// Refuse to score a program the boundary cannot reach.
+    ///
+    /// Every case runs inside a sandbox that replaces `/tmp` with an empty
+    /// tmpfs, so an executable living under `/tmp` is absent once the
+    /// boundary is up. Each case then fails to start it, and one ordinary
+    /// failure per case is indistinguishable in the report from a real
+    /// measurement of a very bad shell.
+    ///
+    /// The question is therefore asked once, inside the same boundary the
+    /// cases use. It deliberately asks only whether the file is there and
+    /// executable: a shell that starts and then behaves badly must still be
+    /// *measured* badly rather than refused, which is what keeps a stub
+    /// distinguishable from Bash.
+    // [spec:nsh:req:compat.bash.survey-closure]
+    // [spec:nsh:req:compat.smoosh.ifs-launch]
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure]
+    pub(crate) fn verify_reaches(
+        &self,
+        directory: &Path,
+        subject: &str,
+        program: &Path,
+        remedy: &str,
+    ) -> Result<()> {
+        let arguments = [
+            OsString::from("-c"),
+            OsString::from("test -x \"$1\""),
+            OsString::from("nsh-survey-reach-probe"),
+            program.as_os_str().to_owned(),
+        ];
+        let output = run(&Request {
+            containment: self,
+            program: Path::new("/bin/sh"),
+            arguments: &arguments,
+            directory,
+            environment: &[],
+            input: b"",
+            timeout: Duration::from_secs(5),
+        })?;
+        if !output.status.success() {
+            return Err(format!(
+                "{subject} is not executable inside the survey containment: {}. \
+                 The boundary mounts an empty tmpfs over /tmp, so nothing kept \
+                 there is visible to a case; {remedy}",
+                program.display()
+            )
+            .into());
+        }
+        Ok(())
+    }
+
     fn verify_namespaces(&self) -> Result<()> {
         let host_pid = std::process::id().to_string();
         let host_pid_namespace = fs::read_link("/proc/self/ns/pid")?.into_os_string();
@@ -539,5 +589,62 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("escapes writable root"));
+    }
+
+    /// A shell the containment cannot reach is refused, not scored.
+    ///
+    /// This is the defect that made two independent measurements of the same
+    /// gate disagree. The boundary mounts an empty tmpfs over `/tmp`, so a
+    /// shell kept there is absent once it is up; every case then failed to
+    /// start it and the run reported one ordinary failure per case. That
+    /// number looked exactly like a measurement of a very bad shell, and a
+    /// real Bash scored identically to a stub that only exits 7 -- which is
+    /// how a gate certifies compatibility without measuring anything.
+    ///
+    /// The probe asks only whether the file is there and executable, so a
+    /// shell that starts and then misbehaves is still measured rather than
+    /// refused. That is what keeps a stub distinguishable from Bash.
+    // [spec:nsh:req:compat.bash.survey-closure/test]
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
+    #[test]
+    fn a_shell_the_containment_cannot_reach_is_refused() {
+        let scratch = ScratchTree::new().unwrap();
+        let containment = Containment::verified(scratch.path()).unwrap();
+
+        // `/bin/sh` is outside the masked path and is reachable.
+        assert!(
+            containment
+                .verify_reaches(
+                    scratch.path(),
+                    "the shell under test",
+                    Path::new("/bin/sh"),
+                    "give a path outside /tmp.",
+                )
+                .is_ok(),
+            "a shell on the read-only root should be reachable",
+        );
+
+        // The same bytes under `/tmp` are not, however executable on the host.
+        let hidden =
+            std::env::temp_dir().join(format!("nsh-survey-unreachable-{}", std::process::id()));
+        fs::copy("/bin/sh", &hidden).unwrap();
+        let mut permissions = fs::metadata(&hidden).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+        fs::set_permissions(&hidden, permissions).unwrap();
+        assert!(
+            hidden.is_file(),
+            "the probe shell must exist on the host for the test to mean anything",
+        );
+        let refused = containment.verify_reaches(
+            scratch.path(),
+            "the shell under test",
+            &hidden,
+            "give a path outside /tmp.",
+        );
+        drop(fs::remove_file(&hidden));
+        assert!(
+            refused.is_err(),
+            "a shell under the masked /tmp was scored rather than refused",
+        );
     }
 }

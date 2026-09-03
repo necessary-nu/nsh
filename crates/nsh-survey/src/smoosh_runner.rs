@@ -187,7 +187,20 @@ fn run_manifest(options: &Options, manifest: &crate::smoosh::Manifest) -> Result
         .unwrap_or_else(|| Duration::from_millis(manifest.timeouts.known_hang_ms));
     let scratch = ScratchTree::new()?;
     let containment = Containment::verified(scratch.path())?;
+    containment.verify_reaches(
+        scratch.path(),
+        "the shell under test",
+        &options.shell,
+        "give a path outside /tmp.",
+    )?;
     let fixture = Fixture::install(scratch.path())?;
+    containment.verify_reaches(
+        scratch.path(),
+        "the survey's own wrapper, which every case launches as $TEST_SHELL,",
+        &fixture.shell,
+        "the survey copies itself into its scratch tree, so this means the \
+         scratch tree itself is unreachable.",
+    )?;
     let flags_json = serde_json::to_string(&options.shell_flags)?;
     let inherited_path = env::var_os("PATH").unwrap_or_default();
     let logname = env::var_os("LOGNAME")
@@ -308,11 +321,18 @@ impl Fixture {
         let home = root.join("home");
         fs::create_dir_all(&util)?;
         fs::create_dir(&home)?;
+        // A copy, not a link. Every case runs inside a boundary that mounts
+        // an empty tmpfs over `/tmp`, so a link to a survey binary built
+        // under `/tmp` -- which is what a full root filesystem forces --
+        // dangles once that mount is up. The scratch is bound back in by
+        // construction, so a copy there is reachable wherever the survey
+        // itself was built. The four utilities link to the copy, not to the
+        // binary, for the same reason.
         let executable = env::current_exe()?;
         let shell = root.join("smoosh-shell");
-        symlink(&executable, &shell)?;
+        fs::copy(&executable, &shell)?;
         for name in ["argv", "fds", "getenv", "readdir"] {
-            symlink(&executable, util.join(name))?;
+            symlink(&shell, util.join(name))?;
         }
         // Every case starts exactly two levels below `scratch`. Keep
         // TEST_SHELL independent of the generated scratch component, whose
