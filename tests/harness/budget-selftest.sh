@@ -1,5 +1,6 @@
 #!/bin/bash
-# Self-tests for where scripts/sandboxed spends a command's budget.
+# Self-tests for where the sandbox wrappers spend a command's budget:
+# scripts/sandboxed, and tests/harness/sandboxed.sh's ds_sandboxed.
 #
 # The budget used to be spent from outside: `timeout "$TIMEOUT" sandbox ...`,
 # which stops a command by signalling the sandbox process. That is only
@@ -112,6 +113,35 @@ status=$?
 elapsed=$((SECONDS - started))
 report "a command that ignores TERM is stopped" \
     "$([[ $status -ne 0 && $elapsed -lt 15 ]] && echo y)" \
+    "status=$status elapsed=${elapsed}s"
+
+# The differential harness is the third wrapper with this shape, and its
+# inner budget had no KILL behind it: a case that ignored TERM outlived the
+# inner deadline and was stopped by the outer one, five seconds later, by a
+# signal aimed at the sandbox from outside the boundary. Measured at load
+# 21.1 with a 2-second budget, 5 runs each: 7.00s and status 124 without the
+# KILL, 3.01s and status 137 with it. Five seconds is the mark between them.
+#
+# All three of status, floor and ceiling are asserted. 137 is the inner
+# `timeout`'s KILL, which is the mechanism being claimed; the floor is what
+# says the case ran its budget rather than failing to start, and an earlier
+# spelling without it reported `ok status=1 elapsed=0s` for a sandbox that
+# never came up.
+#
+# `sandboxed.sh` sets ROOT itself, from DASH_ROOT when that is exported, so
+# it is put back afterwards rather than trusted to agree.
+budget_selftest_root=$ROOT
+. "$ROOT/tests/harness/sandboxed.sh"
+ROOT=$budget_selftest_root
+differential=$WORK/differential
+mkdir -p "$differential"
+started=$SECONDS
+DS_TIMEOUT=2 ds_sandboxed "$differential" /bin/sh -c \
+    'trap "" TERM; while :; do sleep 0.2; done' >/dev/null 2>&1
+status=$?
+elapsed=$((SECONDS - started))
+report "the differential wrapper stops a TERM-ignoring case" \
+    "$([[ $status -eq 137 && $elapsed -ge 2 && $elapsed -lt 5 ]] && echo y)" \
     "status=$status elapsed=${elapsed}s"
 
 # A command that finishes inside its budget still reports its own status,

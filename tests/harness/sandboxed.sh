@@ -34,6 +34,19 @@ DS_SANDBOX=${DS_SANDBOX:-sandbox}
 # The inner timeout runs inside the namespace so it is contained with
 # everything else; the outer one guards against the sandbox itself
 # wedging during setup.
+#
+# `--kill-after` on the inner one is what keeps the outer one a guard
+# rather than the thing that actually stops cases. A case that ignores
+# SIGTERM outlives the inner budget, and without a KILL behind it nothing
+# else inside the namespace ever stops it: the outer deadline fires five
+# seconds later and signals the sandbox from outside the boundary. That is
+# the shape `3bebb72` removed from scripts/sandboxed, where a signal
+# landing in the sandbox's 5-20 ms setup window reaped the process this
+# side held and left the tree inside it running -- 17 of 20 runs at 5 ms,
+# 0 of 20 at 30 ms and beyond. DS_TIMEOUT is a knob, so the gap that makes
+# it unreachable here is a coincidence rather than a boundary.
+# `crates/nsh-survey/src/process.rs` and `scripts/sandboxed` both spend
+# the budget this way; this was the third wrapper.
 DS_TIMEOUT=${DS_TIMEOUT:-10}
 
 # `env --default-signal` is not decoration. Signal *dispositions* are
@@ -93,7 +106,7 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 		--limit nproc=64 \
 		${DS_COVDIR:+--bind "$DS_COVDIR:$DS_COVDIR"} \
 		${DS_COVDIR:+--setenv LLVM_PROFILE_FILE "$DS_COVDIR/dash-%8m.profraw"} \
-		-- timeout "$DS_TIMEOUT" env --default-signal -- "$@"
+		-- timeout --signal=TERM --kill-after=1 "$DS_TIMEOUT" env --default-signal -- "$@"
 }
 
 # `locale -a` only reports the system archive.  A locale generated with

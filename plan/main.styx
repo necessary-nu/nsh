@@ -8078,6 +8078,7 @@ children (
                                 id guard-the-process-file-creation-mask
                                 title "Guard the file-creation mask as the process-global it is"
                                 kind @fix
+                                sealed true
                                 log (
                                     {
                                         at 2026-09-02T04:45:49.826427022Z
@@ -8091,6 +8092,21 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @status
                                         text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T16:29:15.351327971Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
+                                    }
+
+                                    {
+                                        at 2026-09-03T16:29:24.906441169Z
+                                        author "brendan@necessary.nu"
+                                        kind @errata
+                                        text "ERRATUM ON THIS COMMIT'S OWN TRAILERS, 2026-09-03. `53efe57` carries `nplan-violation: check-failed` naming `crates/nsh/src/characters.rs` as an unformatted sibling file. That was true of the two attempts before it -- `cargo fmt --all --check` failed on that file from 18:08 to at least 18:25, and the same bypass was needed and used on `5469c91` -- but by the time this call ran a sibling session had formatted it, and the commit's own `checks` array records `fmt: ok`. The bypass was therefore recorded against a check that passed. Nothing was skipped and nothing is wrong in the tree; the trailer simply overstates. Left rather than amended, since amending a landed commit to remove an unused bypass is a worse trade than a note saying so."
+                                        after_done true
                                     }
                                 )
                             }
