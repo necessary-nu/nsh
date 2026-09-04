@@ -12771,6 +12771,13 @@ children (
                                 kind @note
                                 text "`crates/nsh/src/expand/typed/split.rs::separators` REBUILDS THE IFS CHARACTER TABLE FOR EVERY FIELD SPLIT, and each entry costs a `decode_exact` and a `wide_is_space` -- two thread-locale selections -- for a value that changes only when `IFS` is assigned.\n\nMEASURED, release, `LC_ALL=C.UTF-8`, 20,000 iterations of `n=${#s}` in a `while test ...` loop, after `stop-selecting-the-locale-per-byte-everywhere-else`:\n\n    decode_exact    240,018    12 per iteration\n    wide_is_space   240,018    12\n    multibyte_len   240,018    12\n\nTwelve of each, for a default `IFS` of three characters, in a loop whose body expands no field at all -- the arguments of `test` and the arithmetic each take a split, and each split rebuilds the same three-entry table. The benchmark's actual subject, the 300-character value, cost two selections.\n\nTHE PRECEDENT IS ALREADY THERE. `crates/nsh/src/expand.rs::update_ifs_cache` does exactly this for the byte-oriented split the `read` builtin uses: `shell.ifs` holds `bytes`, `wide_characters` and an `ascii_membership` table, refreshed when the variable is assigned. `split.rs` is the typed expansion's own split and does not use it; it recomputes from `effective_ifs(shell)` each time.\n\nWHAT THE ANSWER PROBABLY IS. Either `split.rs` reads the existing cache, or the cache grows the `IfsCharacter` vector `separators` builds. The second is likelier to be right: `IfsCharacter` carries the character's bytes and whether it is whitespace, which is what the typed split needs and what the byte cache does not hold in that shape. Invalidation is already solved -- `update_ifs_cache` is called where `IFS` is assigned.\n\nCARE. `effective_ifs` distinguishes unset `IFS` (default) from empty `IFS` (no splitting), and a cache has to keep that distinction. `an_empty_locale_assignment_is_not_an_unset` is the shape of test that catches getting it wrong.\n\nDONE WHEN. A loop that splits n times with an unchanged `IFS` builds the table once, the counts above fall to O(1) per assignment rather than O(1) per split, and field splitting still follows an `IFS` assigned in the middle of a script."
                             }
+
+                            {
+                                at 2026-09-04T02:45:27.298173091Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 

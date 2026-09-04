@@ -5849,4 +5849,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule cost.only-the-work-the-command-needs}
     )}
+    {id perf.locale.ifs-separator-table, covered_rules (
+        cost.asserted-as-work
+    ), covered_claims (
+        {impl_name nsh-library, rule cost.asserted-as-work}
+    )}
 )

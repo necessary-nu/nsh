@@ -108,6 +108,16 @@ impl Default for ExpandState {
     }
 }
 
+/// One character of `IFS`, and the one thing a split asks about it.
+///
+/// Both halves are read out of `IFS` and the locale, so neither can
+/// change until one of those is assigned. That is what makes this
+/// per-assignment state rather than per-split state.
+pub(crate) struct IfsCharacter {
+    pub(crate) bytes: BString,
+    pub(crate) whitespace: bool,
+}
+
 /// Per-shell `IFS` data in byte, first-character, and wide-character forms.
 pub struct IfsCache {
     /// The single-byte members, as a lookup table.
@@ -116,6 +126,15 @@ pub struct IfsCache {
     bytes: BString,
     /// Length of the first multibyte character, or 0.
     first_character_length: usize,
+    /// `IFS` as characters, for the typed expansion's split.
+    ///
+    /// The byte and wide-character forms above answer the questions the
+    /// `read` builtin's split asks; this one answers the questions the
+    /// typed split asks, which are where a character ends and whether
+    /// the locale calls it a space. Kept beside them rather than derived
+    /// again, because deriving it costs three thread-locale selections
+    /// per character of `IFS`.
+    pub(crate) separators: Vec<IfsCharacter>,
     /// The wide-character form of `IFS`, built by `changeifs`.
     wide_characters: Vec<i32>,
 }
@@ -126,6 +145,7 @@ impl IfsCache {
             ascii_membership: [false; 128],
             bytes: BString::new(Vec::new()),
             first_character_length: 0,
+            separators: Vec::new(),
             wide_characters: Vec::new(),
         }
     }
@@ -521,6 +541,33 @@ pub fn update_ifs_cache(shell: &mut crate::context::Shell, ifs: &BStr) {
         shell.ifs.first_character_length = first_character_length;
         wide_characters
     };
+
+    let separators = ifs_separators(&shell.locale, ifs);
+    shell.ifs.separators = separators;
+}
+
+/// Every character `IFS` names, and whether the locale calls it a space.
+///
+/// The walk is by characters rather than bytes because a separator is a
+/// character: a two-byte one has to be compared whole, and the split
+/// compares the bytes this records. Reading one entry costs a
+/// `multibyte_len`, a `decode_exact` and a `wide_is_space`, which is
+/// three thread-locale selections, so the whole table is three per
+/// character of `IFS` and is read here -- once per assignment of `IFS`
+/// or of the locale -- rather than once per field split.
+fn ifs_separators(locale: &nsh_platform::Locale, ifs: &BStr) -> Vec<IfsCharacter> {
+    let mut separators = Vec::new();
+    let mut at = 0;
+    while at < ifs.len() {
+        let end = at + crate::characters::width(locale, &ifs[at..]);
+        let bytes = BString::from(&ifs[at..end]);
+        let whitespace = locale
+            .decode_exact(&bytes, bytes.len())
+            .is_some_and(|wide| locale.wide_is_space(wide));
+        separators.push(IfsCharacter { bytes, whitespace });
+        at = end;
+    }
+    separators
 }
 
 /// Expand a `[[ ... ]]` operand that is used as a shell pattern.

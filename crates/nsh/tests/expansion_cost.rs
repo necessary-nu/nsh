@@ -6,6 +6,7 @@
 //! machine is a verdict about whatever else is running, and the same
 //! artifact in this repository read 1.16 s on a quiet machine and 25.27 s
 //! an hour later under load.
+// [spec:nsh:req:cost.asserted-as-work/test]
 
 use nsh::{Shell, Streams};
 use nsh_platform::LocaleWork;
@@ -102,4 +103,63 @@ fn bytes_that_begin_nothing_cost_one_question_each() {
     let invalid: Vec<u8> = std::iter::repeat_n(0x8c_u8, 100).collect();
     let work = one_more_run(&mut shell_holding(invalid), b"n=${#S}");
     assert_eq!(work.character_queries, 100);
+}
+
+/// A shell holding `x y z`, with `IFS` assigned and the split proved to
+/// work before anything is counted.
+///
+/// The proof matters: two shells that both split into nothing would cost
+/// the same too, and the check below would pass on a shell that had
+/// stopped splitting.
+fn splitting_three_fields(assignment: &[u8]) -> Shell {
+    let mut shell = shell_holding(b"x y z".to_vec());
+    shell.run(assignment).unwrap();
+    shell.run(b"set -- $S; echo $#").unwrap();
+    let said = shell.take_captured_stdout().unwrap();
+    assert_eq!(said.trim_ascii_end(), b"3", "the split has to have split");
+    shell
+}
+
+/// Splitting a field does not read `IFS` again.
+///
+/// Two shells differing only in the length of `IFS`, splitting the same
+/// value into the same three fields. What `IFS` names -- where each of
+/// its characters ends, and whether the locale calls it a space -- is
+/// derived from `IFS` and the locale and can change only when one of
+/// them is assigned, so a split that derived it again would cost three
+/// thread-locale selections per character of `IFS` on every field it
+/// touched.
+///
+/// The second half is the other side of the same claim, and it is what
+/// stops the first half being satisfied by a shell that has simply
+/// stopped asking: reading `IFS` still costs what it always did, at the
+/// assignment, where it is paid once.
+///
+/// Measured before the table moved to the assignment, `LC_ALL=C.UTF-8`,
+/// load average 17.3/25.0/26.4 on 32 cores: one `set -- $s` over a
+/// 360-byte value cost 34 thread-locale selections against 7 after, and
+/// a `while test ...` loop of 20,000 iterations cost 760,037 against
+/// 40,001.
+// [spec:nsh:req:cost.asserted-as-work/test]
+#[test]
+fn a_split_does_not_rebuild_what_ifs_says() {
+    /* Nine characters that do not occur in the value, so both shells
+     * split it into the same three fields and the only difference
+     * between them is how much of `IFS` there is to read. */
+    const SHORT: &[u8] = b"IFS=' \t\n'";
+    const LONG: &[u8] = b"IFS=' \t\n:;,.!?+=-'";
+
+    let short = one_more_run(&mut splitting_three_fields(SHORT), b"set -- $S");
+    let long = one_more_run(&mut splitting_three_fields(LONG), b"set -- $S");
+    assert_eq!(
+        short, long,
+        "a split must cost the same whatever length IFS is"
+    );
+
+    let assigning_short = one_more_run(&mut shell_holding(b"x y z".to_vec()), SHORT);
+    let assigning_long = one_more_run(&mut shell_holding(b"x y z".to_vec()), LONG);
+    assert!(
+        assigning_long.selections > assigning_short.selections,
+        "assigning IFS is where its characters are read: {assigning_long:?} against {assigning_short:?}"
+    );
 }

@@ -3,39 +3,21 @@
 //! Split eligibility lives beside each byte, so truncating a parallel linked
 //! list of regions is no longer an operation the implementation can forget.
 
-use bstr::BString;
-
-use super::{Field, effective_ifs};
-use crate::characters::{Characters, width};
+use super::Field;
+use crate::characters::Characters;
 use crate::context::Shell;
+use crate::expand::IfsCharacter;
 
 // [spec:dash:sem:expand.removerecordregions-fn]
 pub(super) fn fields(shell: &Shell, fields: Vec<Field>) -> Vec<Field> {
-    let separators = separators(&shell.locale, effective_ifs(shell));
+    /* Read rather than derived: what `IFS` names changes when `IFS` or
+     * the locale is assigned, and `update_ifs_cache` is where both of
+     * those arrive. */
+    let separators = &shell.ifs.separators;
     fields
         .into_iter()
-        .flat_map(|field| field_into_fields(&shell.locale, field, &separators))
+        .flat_map(|field| field_into_fields(&shell.locale, field, separators))
         .collect()
-}
-
-struct IfsCharacter {
-    bytes: BString,
-    whitespace: bool,
-}
-
-fn separators(locale: &nsh_platform::Locale, ifs: &[u8]) -> Vec<IfsCharacter> {
-    let mut result = Vec::new();
-    let mut at = 0;
-    while at < ifs.len() {
-        let end = at + width(locale, &ifs[at..]);
-        let bytes = BString::from(&ifs[at..end]);
-        let whitespace = locale
-            .decode_exact(&bytes, bytes.len())
-            .is_some_and(|wide| locale.wide_is_space(wide));
-        result.push(IfsCharacter { bytes, whitespace });
-        at = end;
-    }
-    result
 }
 
 fn separator_at<'a>(
