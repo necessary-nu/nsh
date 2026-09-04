@@ -691,6 +691,41 @@ dsnorm_unset_readonly_diagnostic() {
 	ds_record_divergence unset_readonly_diagnostic
 }
 
+# A command substitution in a prompt is expanded, where dash replays the outer
+# parse's pushed-back token into the re-entered parse. `parser::expand_string`
+# starts a fresh parse of the prompt's text on top of whatever the caller was
+# reading; with a string-fed shell the outer parse has already pushed `Eof`
+# back, so dash's `$( )` reaches end of file at once and its backquote form
+# expands to nothing without saying so. `[spec:posix:req:param.ps4]` leaves
+# substitution in `PS4` unspecified, so *declining* to expand would conform --
+# but a parse diagnostic for text that parses is a stale token rather than a
+# choice, which is why the port is the right side here.
+#
+# Four complete result pairs, one per generated witness. Every byte of both
+# sides is pinned, including where in the script dash's outer parse happens to
+# have reached: in the `xtrace nested PS4` case its first traced command
+# expands correctly and only the last one does not.
+dsdiv_re_entered_prompt_substitution() {
+	[ "$3" = 0 ] && [ "$4" = 0 ] || return 1
+	local syntax='SH: 1: Syntax error: end of file unexpected (expecting ")")'
+
+	ds_case_contains "$5" "PS4='[\$(echo sub)] '" &&
+		ds_exact_pair "$1" "$2" \
+		"$syntax"$'\n[$(echo sub)] echo hi\nhi' \
+		$'[sub] echo hi\nhi' && return 0
+	ds_case_contains "$5" "PS4='[\`echo bq\`] '" &&
+		ds_exact_pair "$1" "$2" $'[] echo hi\nhi' $'[bq] echo hi\nhi' && return 0
+	ds_case_contains "$5" "PS4='\$(exit 3)x '" &&
+		ds_exact_pair "$1" "$2" \
+		"$syntax"$'\n$(exit 3)x echo hi\nhi\nx echo rc=0\nrc=0' \
+		$'x echo hi\nhi\nx echo rc=0\nrc=0' && return 0
+	ds_case_contains "$5" "PS4='\$(echo PS) '" &&
+		ds_exact_pair "$1" "$2" \
+		$'PS echo hi\nhi\n'"$syntax"$'\n$(echo PS) set +x' \
+		$'PS echo hi\nhi\nPS set +x' && return 0
+	return 1
+}
+
 # ds_harness_alive PORT REF -- both shells still exist and are runnable.
 #
 # The other half of making the tally mean something. A case whose port
@@ -819,6 +854,7 @@ DS_DIVERGENCES=(
 	c_locale_multibyte_ifs
 	parameter_operand_quote_preservation
 	empty_quote_field_anchors
+	re_entered_prompt_substitution
 	"${DS_NORMALIZERS[@]}"
 )
 

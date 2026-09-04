@@ -306,7 +306,7 @@ name refusal, and an unsorted nsh permutation.
 ### POSIX corrections retained over dash
 
 **Status:** implemented in the Rust; dash unchanged. Category 3. Every ID
-below is registered in `tests/harness/divergences.sh`. Its 225 focused checks
+below is registered in `tests/harness/divergences.sh`. Its 238 focused checks
 exercise the intended matches and adversarial content, status and scope
 boundaries.
 
@@ -544,6 +544,70 @@ this entry cannot excuse and only the code change fixes.
 `PASS=40 FAIL=0 XFAIL=3`, `aud_state_flags.txt` `34/1/1` to `35/0/2`,
 `aud_exec_struct.txt` `64/7/2` to `65/6/3`, and `salvage.txt` `6913/50/18` to
 `6914/49/19`.
+
+### `re_entered_prompt_substitution`
+
+**Status:** implemented in the Rust; dash unchanged. Category 3.
+`crates/nsh/src/parser.rs::expand_string`.
+
+A prompt's text is re-parsed at expansion time, and `expand_string` used to
+start that parse on top of whatever the caller was reading. A pushed-back
+token belongs to the caller's source, so with a string-fed shell -- where the
+outer parse has already pushed `Eof` back -- a `$( )` in the prompt reached
+end of file at once:
+
+```
+$ dash -c "PS4='\$(echo P)+ '; set -x; echo hi"
+dash: 1: Syntax error: end of file unexpected (expecting ")")
+$(echo P)+ echo hi
+hi
+$ dash -c "PS4='\`echo P\`+ '; set -x; echo hi"
++ echo hi                    # the backquote form, expanded to nothing
+hi
+```
+
+The backquote row is the sharper one: no diagnostic, and a prompt that
+silently became empty. Measured 2026-09-04 against dash 0.5.12-12, eight
+`$( )` spellings and one backquote spelling diverge; `$(( ))` and `${ }` in
+the same position never did, and the same scripts on standard input are
+correct in both shells, because the outer parse has not reached its end
+there.
+
+`[spec:posix:req:param.ps4]` makes command substitution in `PS4`
+explicitly unspecified, so *declining* to expand would conform and this
+would be nobody's bug. Emitting a parse diagnostic for text that parses does
+not: that is a stale token replayed, not a choice, and
+`[dec:nsh:we-own-the-defects]` makes the question which shell is right
+rather than which is the C.
+
+**Both dialects, and that is the point.** `expand_string` has five callers --
+`PS4` (`evaluation/command.rs`), the interactive prompt (`parser.rs`), an
+array subscript (`variables/arrays.rs`), `(( ))`
+(`evaluation/bash_arithmetic.rs`) and the profile/`ENV` file name
+(`runtime.rs`). The subscript one was
+repaired first, gated on Bash mode, which left one shared function answering
+two ways for a reason neither dialect names. The other three were measured
+under `bash.divergences.re-entered-parse` before the gate came off: the
+profile name is expanded during startup, before any command has been parsed,
+so no token is pushed back and `ENV='$(echo FILE)'` already worked; the
+prompt is rendered only from a terminal-fed source, and `PS1='[$(echo s)] '`
+already resolved to `[s] ` through a pty in dash and in both dialects; and
+`(( ))` is Bash grammar the default dialect never reaches. So `PS4` was the
+whole of the observable defect, and the repair belongs to the function
+rather than to a dialect.
+
+The entry pins four complete result pairs, one per generated witness, both
+sides byte for byte -- including where in the script dash's outer parse
+happens to have reached. In `xtrace nested PS4` its *first* traced command
+expands correctly and only the last one does not, and in `ps4 error in
+cmdsub` it recovers on its second prompt because the first failed expansion
+consumed the stale token. Neither is something a looser entry could describe.
+
+Costs four cases, unchanged in number before and after: `aud_parser_ps4`
+holds `ps4 with cmdsub`, `ps4 with backquote` and `ps4 error in cmdsub`, and
+`aud_exec_edge` holds `xtrace nested PS4`. Both corpora returned to their
+prior tallies -- `PASS=43 FAIL=0` and `PASS=90 FAIL=2` -- with the four
+reported as `XFAIL(re_entered_prompt_substitution)`.
 
 ## POSIX survey improvements outside the differential register
 

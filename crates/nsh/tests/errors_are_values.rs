@@ -227,13 +227,28 @@ fn unexpandable_prompt_is_used_raw() {
 /// its expansion — `readtoken1` reaching an unterminated command
 /// substitution. Both bridges inside that frame's closure are on this
 /// path, so both are pinned.
+///
+/// **The pair is the assertion.** `PS4='$(exit 7)+ '` is well formed and
+/// must reach neither bridge: it expands, and `exit 7` contributes nothing
+/// to the prefix. `PS4='$(exit 7+ '` is the unterminated one, and it is
+/// what the swallowing arm exists for — the diagnostic goes out, the raw
+/// text becomes the prefix, and the traced command still runs. Asserting
+/// only one of them cannot fail for the reason this test exists, which is
+/// how its predecessor `unparsable_prompt_is_swallowed` came to pin the
+/// well-formed input while its own comment described the other: dash
+/// answers the same diagnostic for both, and did so because of a stale
+/// pushed-back token rather than the prompt's syntax.
 #[test]
-fn unparsable_prompt_is_swallowed() {
+fn only_an_unparsable_prompt_is_swallowed() {
     let (out, status) = run("PS4='$(exit 7)+ '; set -x; echo hi");
+    assert_eq!(out, "+ echo hi\nhi\n");
+    assert_eq!(status, 0);
+
+    let (out, status) = run("PS4='$(exit 7+ '; set -x; echo hi");
     assert_eq!(
         out,
         "sh: 1: Syntax error: end of file unexpected (expecting \")\")\n\
-         $(exit 7)+ echo hi\nhi\n"
+         $(exit 7+ echo hi\nhi\n"
     );
     assert_eq!(status, 0);
 }

@@ -1309,15 +1309,17 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
      * silently expanded to nothing. Both work from a file, where the
      * outer parse has not reached its end.
      *
-     * THE DIALECT DECIDES, because dash has the same defect and this is
-     * a port of dash: `dash -c 'PS4="$(echo P)+ "; set -x; echo hi'`
-     * reports the same syntax error and traces with the unexpanded
-     * text, and `tests/corpus` and `errors_are_values.rs` are written
-     * against that. Bash expands it, and Bash mode is what a subscript
-     * needs. `state-a-re-entered-parse-starts-clean` holds the POSIX
-     * half. */
+     * NEITHER DIALECT KEEPS IT, and the reason it is not a dialect
+     * question is that the state being replayed belongs to the *caller's*
+     * source rather than to either shell's grammar. dash has the same
+     * defect -- `dash -c "PS4='\$(echo P)+ '; set -x; echo hi"` reports
+     * the syntax error and traces with the unexpanded text -- and
+     * `[spec:posix:req:param.ps4]` leaves substitution in `PS4`
+     * unspecified, so declining to expand would conform. Emitting a parse
+     * diagnostic for text that parses does not: that is a stale token, not
+     * a choice. Registered as `re_entered_prompt_substitution` in
+     * `docs/divergences.md`. */
     // [spec:nsh:def:idiom.token-stream]
-    let re_entering = shell.options.dialect() == crate::options::Dialect::Bash;
     let saved_pushed_back = shell.input.token_pushed_back;
     let saved_last_token = shell.input.last_token;
     /* `result = ps` — the C seeds the answer with the string it was given
@@ -1335,9 +1337,7 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
         set_input_string(shell, source);
         shell.input.prompt_before_read = false;
         shell.input.prompt_needed = false;
-        if re_entering {
-            shell.input.token_pushed_back = false;
-        }
+        shell.input.token_pushed_back = false;
         /* Parse and expand inside one fallible operation so a failure leaves
          * the seeded result unchanged. */
         let caught = (|| -> Result<(), crate::error::Error> {
@@ -1396,10 +1396,8 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
 
     shell.input.prompt_before_read = saved_prompt_state;
     shell.input.pending_here_documents = saved_here_documents;
-    if re_entering {
-        shell.input.token_pushed_back = saved_pushed_back;
-        shell.input.last_token = saved_last_token;
-    }
+    shell.input.token_pushed_back = saved_pushed_back;
+    shell.input.last_token = saved_last_token;
 
     match caught {
         Some(e) if e.is_interrupt() => Err(e),
