@@ -49,9 +49,9 @@ expectation_shell = "bash"
 posix = false
 timeout_ms = 5000
 oils_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
-shell_sha256 = "8cac7b8dd50e6a62c3e4d6acc6b78022ba35f139b23810c93e3b70edf6ef5eec"
-nsh_commit = "f6f7f66be4da3d3d4120285c479330f5202a82fe"
-recorded_at = "2026-09-04T14:33:01Z"
+shell_sha256 = "0dd3f69698d0cfc3290fc2ef95af3545c8299e3b8c89af03031c5e2c6fed429a"
+nsh_commit = "c3936a235afdda4c09bd7efcbf5e94f3b576b044"
+recorded_at = "2026-09-04T16:24:32Z"
 failing = [
     "alias.test.sh:0",
     "alias.test.sh:10",
@@ -294,7 +294,6 @@ failing = [
     "builtin-process.test.sh:16",
     "builtin-process.test.sh:21",
     "builtin-process.test.sh:24",
-    "builtin-process.test.sh:5",
     "builtin-process.test.sh:8",
     "builtin-read.test.sh:48",
     "builtin-read.test.sh:63",
