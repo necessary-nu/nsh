@@ -1215,18 +1215,24 @@ pub(crate) mod tests {
     /// program, so the parser now refuses it too and the speller is no
     /// longer asked to spell a tree that should not have been built.
     ///
-    /// THE CLASSES, so a fix can be aimed rather than searched for. An
-    /// operand inside `${...}` is spelled with quotes that a
-    /// here-document body reads as bytes. A literal `$` before an inert
-    /// run spells as `$'...'`, which reads back as one ANSI-C quote
-    /// rather than two parts. A NUL byte is dropped. An empty arithmetic
-    /// expansion spells its empty word as `''`. `$[...]` is respelled
-    /// `$((...))`, and an array subscript can be truncated.
+    /// THE CLASSES, so a fix can be aimed rather than searched for. A
+    /// byte held inert by where it sits in a `${...}` operand -- the `=`
+    /// of `${f-=}`, the `:` of `${y+:}` -- has no spelling inside a
+    /// here-document body: written bare it stays inert only where the
+    /// operator already protects it, and written with a backslash it
+    /// becomes an escape the tree does not hold. An empty inert run next
+    /// to a quote loses it. A NUL byte is dropped. An empty arithmetic
+    /// expansion spells its empty word as `''`. A bare `for` spells the
+    /// `"$@"` the parser built for it, which is a list where the tree has
+    /// none. `<<""` spells an invented delimiter, `$[...]` is respelled
+    /// `$((...))`, a reserved word reached as a command word is quoted,
+    /// and an array subscript can be truncated.
     ///
     /// THIS IS ALSO THE PROPERTY'S NON-VACUITY. The test above would pass
     /// just as happily against a comparison that returned `OneTree` for
-    /// everything; these 52 are the evidence that it does not.
+    /// everything; these 36 are the evidence that it does not.
     // [spec:nsh:req:idiom.canonical-tree+1/test]
+    // [spec:nsh:req:idiom.printable-ast+2/test]
     #[test]
     fn the_fallback_speller_is_not_yet_total() {
         let mut shell = shell();
@@ -1241,11 +1247,53 @@ pub(crate) mod tests {
             .count();
         assert_eq!(
             failures,
-            52,
-            "the fallback speller writes a different program for {failures} of {} shapes, not 52 -- \
+            36,
+            "the fallback speller writes a different program for {failures} of {} shapes, not 36 -- \
              if that is fewer, lower the number and say which class went; if more, something regressed",
             ROUNDTRIP_CORPUS.len()
         );
+    }
+
+    /// A respelling must not reach for a quote the context reads as
+    /// something else.
+    ///
+    /// [`spec:nsh:req:idiom.printable-ast+2`]'s clause for a node
+    /// carrying no tokens, held to the two shapes where the speller's
+    /// one rule -- an inert run goes in single quotes -- wrote a program
+    /// that runs differently from the one it was spelling. Both were
+    /// measured against the pinned Bash, which agrees with this shell on
+    /// each pair: `''$\T` runs as `$T` while the `''$'T'` it was spelled
+    /// as runs as `T`, and in a here-document body `${y+:}` produces `:`
+    /// while the `${y+':'}` it was spelled as produces `':'`.
+    ///
+    /// The count above cannot say which class it is counting, so a
+    /// regression here would move that number without naming what moved.
+    /// These are the shapes, by name.
+    // [spec:nsh:req:idiom.printable-ast+2/test]
+    #[test]
+    fn a_respelling_keeps_off_quotes_its_context_reads() {
+        let mut shell = shell();
+        for source in [
+            /* A data `$` in front of an inert run: `'` after it opens an
+             * ANSI-C string rather than quoting the run. */
+            &b"''$\\T"[..],
+            b"$\\[",
+            b"\"\"$\\S",
+            b"case $\\H in h)esac",
+            /* An inert run in an operand inside a here-document body,
+             * where a quote is a byte of body. */
+            b"<<E\n${x/\\)}",
+            b"<<F\n${##\\2}",
+            b"<<s\n${v/\\f}",
+            b"<<F\n${e-\"\\\"\\\"\"}",
+        ] {
+            assert_eq!(
+                builds_one_tree_per_program(&mut shell, BStr::new(source)),
+                Canonicity::OneTree,
+                "{:?} was respelled into a different program",
+                BStr::new(source),
+            );
+        }
     }
 
     #[test]

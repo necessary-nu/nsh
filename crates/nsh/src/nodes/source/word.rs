@@ -35,7 +35,7 @@ impl<'a> Printer<'a> {
         for part in word.parts() {
             if let WordPart::Text { bytes, quoted } = part {
                 if *quoted {
-                    push_single_quoted(&mut self.out, bytes);
+                    self.push_inert(bytes);
                 } else {
                     self.out.extend_from_slice(bytes);
                 }
@@ -62,6 +62,46 @@ impl<'a> Printer<'a> {
         }
     }
 
+    /// Write an inert run, in single quotes only where a single quote
+    /// reads as a quote.
+    ///
+    /// Two contexts read it as something else. A `'` directly after a
+    /// data `$` opens an ANSI-C string, so `$` and an inert `T` written
+    /// as `$'T'` is a word running as `T` rather than as `$T`. Inside a
+    /// here-document body a quote is a byte of body, so an inert `:`
+    /// written as `${y+':'}` produces `':'` rather than `:`. Either is a
+    /// spelling that runs differently from the program it spells.
+    ///
+    /// A backslash is inert in both, so escaping is what is left. After
+    /// a `$` only the first byte needs it, because a backslash there
+    /// already breaks the `$'`; a body has no quoting at all and needs
+    /// every byte. A newline is the one byte a backslash cannot make
+    /// inert -- `\` before one is a line continuation and both bytes go
+    /// -- so it is written as itself and left for the property to find.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    fn push_inert(&mut self, bytes: &[u8]) {
+        if self.in_body {
+            for byte in bytes {
+                if *byte != b'\n' {
+                    self.out.push(b'\\');
+                }
+                self.out.push(*byte);
+            }
+            return;
+        }
+        let captured = self.out.last() == Some(&b'$');
+        match bytes.split_first() {
+            Some((first, rest)) if captured && *first != b'\n' => {
+                self.out.push(b'\\');
+                self.out.push(*first);
+                if !rest.is_empty() {
+                    push_single_quoted(&mut self.out, rest);
+                }
+            }
+            _ => push_single_quoted(&mut self.out, bytes),
+        }
+    }
+
     /// Spell a word as the body of a here-document.
     ///
     /// A body is not a shell word and cannot be spelled as one. Nothing
@@ -77,6 +117,7 @@ impl<'a> Printer<'a> {
     /// three bytes that would otherwise start one.
     // [spec:nsh:req:idiom.canonical-tree+1]
     pub(super) fn spelled_body(&mut self, word: &ParsedWord, expand: bool, indent: usize) {
+        let outer_body = core::mem::replace(&mut self.in_body, true);
         for part in word.parts() {
             match part {
                 WordPart::Text { bytes, .. } => {
@@ -102,6 +143,7 @@ impl<'a> Printer<'a> {
                 }
             }
         }
+        self.in_body = outer_body;
     }
 
     /// Spell an expansion from its fields, for a word nothing read.
@@ -142,6 +184,10 @@ impl<'a> Printer<'a> {
             return;
         }
         let outer_pending = core::mem::take(&mut self.pending);
+        /* A substitution inside a here-document body is shell text
+         * again: what suspends quoting is the body, and `$(` ends it. */
+        // [spec:nsh:req:idiom.printable-ast+2]
+        let outer_body = core::mem::replace(&mut self.in_body, false);
         let start = self.out.len();
         self.out.extend_from_slice(b"$(");
         if let Some(node) = node {
@@ -157,5 +203,6 @@ impl<'a> Printer<'a> {
         }
         self.out.push(b')');
         self.pending = outer_pending;
+        self.in_body = outer_body;
     }
 }

@@ -154,6 +154,10 @@ struct Printer<'a> {
     /// program without a second thing that knows how to spell.
     // [spec:nsh:req:idiom.canonical-tree+1]
     ignore_runs: bool,
+    /// Writing inside a here-document body, where a quote is a byte of
+    /// body rather than a quote.
+    // [spec:nsh:req:idiom.printable-ast+2]
+    in_body: bool,
 }
 
 impl<'a> Printer<'a> {
@@ -163,6 +167,7 @@ impl<'a> Printer<'a> {
             out: BString::new(Vec::new()),
             pending: Vec::new(),
             ignore_runs: false,
+            in_body: false,
         }
     }
 

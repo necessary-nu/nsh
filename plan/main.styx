@@ -12485,6 +12485,20 @@ children (
                                 kind @note
                                 text "FILED 2026-09-02 WHEN `crates/nsh/src/parser/bash.rs` REACHED THE DENSITY MARK, while closing `accept-newlines-inside-a-conditional`, which took it from 44 functions to 46 by adding `conditional_chain` and `conditional_test`. The mark is 45 and the cap is 50, so the file is registered in `crates/nsh-lint/FUNCTION_DENSITY.toml` rather than split, and this node is the split the register's entry names. Registering was the deliberate choice: the register's own preamble says its purpose is that \"the decision gets made with five functions of headroom instead of none\", and a 250-line move inside a shared checkout, at the end of an unrelated parser fix, is how a fix acquires a second failure mode.\n\nTHE SEAM, verified against the code rather than predicted from it, because the register records that the first five entries written here were each wrong about what crossed the boundary.\n\nEleven functions move to `crates/nsh/src/parser/bash/conditional.rs`: `conditional`, `conditional_expression`, `conditional_chain`, `conditional_or`, `conditional_and`, `conditional_primary`, `conditional_test`, `closes_conditional`, `unary_operator`, `binary_operator` and `matches_a_pattern`, together with the `ConditionalExpression` struct they pass between them. That leaves 35 in `bash.rs` and 11 in the new file, both counted with `density.rs`'s counter and not by eye.\n\nTWO THINGS CROSS AND MUST STAY. `take_word` and the `ConditionalWord` it returns are not the conditional's alone: `compound_array` calls `take_word` for one element of `name=( ... )`. They stay in `bash.rs` and the new module takes both from `super`. Nothing else does: `unary_operator`, `binary_operator`, `closes_conditional` and `matches_a_pattern` have no caller outside the cluster, and `conditional` is reached only from `command_prefix`, which keeps calling it and so keeps it `pub(super)`.\n\n`conditional_primary` also reaches `super::keywords::nested` for its two recursive descents and `super::tokens::mark` for its word marks; both are already `pub(super)` and neither needs a signature change. So the move is imports and nothing else.\n\nWATCH THE MODULE LAYOUT. This crate spells a module as `foo.rs` beside a `foo/` directory -- `parser.rs` + `parser/`, `nodes.rs` + `nodes/` -- and `clippy::self_named_module_files` is in the warn set with `-D warnings`, so `bash/mod.rs` is not the spelling to use. Note also that `nsh-lint`'s other checks read a module as its file plus the directory beside it, while the density check's unit is one file, because the gate's unit is the staged file; the split therefore lands where the density check looks and changes nothing for the rest.\n\nDONE WHEN `bash.rs` is below the mark, the register entry for it is deleted (the register is symmetric and fails on a stale entry), and `cargo test --workspace` plus `gate-bash` are unchanged -- this moves no behaviour, so any movement in either is a mistake in the move."
                             }
+
+                            {
+                                at 2026-09-04T20:50:33.462062169Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T20:50:33.462062169Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "single-flight overridden: started while an-embedder-cannot-read-a-script-without-running-it had uncommitted WIP"
+                            }
                         )
                     }
 
