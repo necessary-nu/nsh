@@ -225,6 +225,9 @@ pub use descriptor_name::{
     descriptor_name, descriptor_name_directory, publish_descriptor_across_exec,
 };
 
+mod work;
+pub use work::{LocaleWork, locale_work};
+
 #[cfg(unix)]
 include!("unix.rs");
 

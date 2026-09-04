@@ -1653,7 +1653,6 @@ assertions (
     {id walk-a-flat-list-without-the-stack, kind @complete, author "brendan@necessary.nu", at 2026-08-31T18:14:34.330877958Z}
     {id widen-the-survey-failure-list-extraction, kind @complete, author "brendan@necessary.nu", at 2026-09-02T04:39:21.797323296Z}
     {id tooling.tests.read-the-umask, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:04:16.527250808Z}
-    {id perf.locale.unreachable-positions, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:48.355714681Z}
     {id tooling.tests.forked-child-holds-pipe, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:33:47.26285143Z}
     {id struct.platform-children-module, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:18:17.05984823Z}
     {id bash.divergences.publish-names.environment-facts, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:28:38.994782265Z}
@@ -5844,5 +5843,10 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
+    )}
+    {id perf.locale.unreachable-positions, covered_rules (
+        cost.only-the-work-the-command-needs
+    ), covered_claims (
+        {impl_name nsh-library, rule cost.only-the-work-the-command-needs}
     )}
 )

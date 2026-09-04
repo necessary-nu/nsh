@@ -248,6 +248,7 @@ impl Locale {
     }
 
     fn select(&self) -> LocaleGuard<'_> {
+        crate::work::record_selection();
         // SAFETY: the Arc-backed handle is live for the returned guard.  A
         // null return is the error sentinel; a valid previous selection may
         // be `LC_GLOBAL_LOCALE`, which is non-null.

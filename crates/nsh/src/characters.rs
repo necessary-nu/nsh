@@ -18,8 +18,6 @@
 //!   wants [`width`], which asks about exactly that character.
 //!
 //! Giving all three the memo would be worse than giving none of them it:
-//! a table answers for every byte position, so a walk that steps by
-//! whole characters pays for the interior bytes it never asks about, and
 //! a table built for one question is a heap allocation spent to save one
 //! locale selection.
 //!
@@ -77,6 +75,12 @@ pub(crate) struct Characters<'a> {
     pub(crate) bytes: &'a [u8],
     /// One entry per byte position, learned in blocks: how wide the
     /// character beginning there is, or one where none begins.
+    ///
+    /// Its length is always a character boundary, because a block runs
+    /// on to the end of the character straddling its end. That is what
+    /// makes the next block's start a position a character begins at,
+    /// which is what [`nsh_platform::Locale::character_widths`] requires
+    /// of the slice it is handed.
     widths: Vec<u8>,
 }
 
@@ -137,6 +141,11 @@ impl<'a> Characters<'a> {
     /// character does not pay for the rest of the string. That second
     /// half is what the doubling is for: a search restarted at every
     /// offset of a long subject abandons most attempts at once.
+    ///
+    /// A block may come back longer than it was asked for, and the
+    /// arithmetic below has to allow that: what it asks for is a
+    /// position, and what it gets is every position up to the end of the
+    /// character containing it.
     fn learn(&mut self, at: usize) {
         if at < self.widths.len() {
             return;

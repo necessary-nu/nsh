@@ -122,10 +122,12 @@ impl Locale {
     }
 
     pub fn wide_is_blank(&self, wide: i32) -> bool {
+        crate::work::record_character_queries(1);
         char::from_u32(wide as u32).is_some_and(|value| matches!(value, ' ' | '\t'))
     }
 
     pub fn wide_is_space(&self, wide: i32) -> bool {
+        crate::work::record_character_queries(1);
         char::from_u32(wide as u32).is_some_and(char::is_whitespace)
     }
 
@@ -156,6 +158,7 @@ impl Locale {
     }
 
     pub fn multibyte_len(&self, bytes: &[u8]) -> Option<usize> {
+        crate::work::record_character_queries(1);
         let first = *bytes.first()?;
         let length = match first {
             0x00..=0x7f => 1,
@@ -167,18 +170,30 @@ impl Locale {
         (bytes.len() >= length && std::str::from_utf8(&bytes[..length]).is_ok()).then_some(length)
     }
 
+    /// See the POSIX host's `character_widths` for the contract: `bytes`
+    /// begins a character, positions the walk steps over are one byte,
+    /// and the run stops only where a character does.
+    // [spec:nsh:req:cost.only-the-work-the-command-needs]
     pub fn character_widths(&self, bytes: &[u8], offsets: usize) -> Vec<u8> {
-        (0..offsets.min(bytes.len()))
-            .map(|at| {
-                self.multibyte_len(&bytes[at..])
-                    .and_then(|width| u8::try_from(width).ok())
-                    .filter(|width| *width > 0)
-                    .unwrap_or(1)
-            })
-            .collect()
+        let offsets = offsets.min(bytes.len());
+        let mut widths: Vec<u8> = Vec::with_capacity(offsets);
+        while widths.len() < offsets {
+            let at = widths.len();
+            let width = self
+                .multibyte_len(&bytes[at..])
+                .and_then(|width| u8::try_from(width).ok())
+                .filter(|width| *width > 0)
+                .unwrap_or(1);
+            widths.push(width);
+            /* A length is never more than the bytes it was read from,
+             * so the interior never runs past the string. */
+            widths.resize(at + usize::from(width), 1);
+        }
+        widths
     }
 
     pub fn decode_exact(&self, bytes: &[u8], expected_len: usize) -> Option<i32> {
+        crate::work::record_character_queries(1);
         let value = std::str::from_utf8(bytes.get(..expected_len)?).ok()?;
         let mut chars = value.chars();
         let first = chars.next()?;

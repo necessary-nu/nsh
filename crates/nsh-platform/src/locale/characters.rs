@@ -99,6 +99,7 @@ impl Locale {
 
     pub(crate) fn decode_byte(&self, state: &mut MbState, byte: u8) -> LocaleDecode {
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             let mut wide = 0_i32;
             // SAFETY: the byte and conversion records are live for the call;
             // `mbrtowc` retains no pointers.
@@ -126,6 +127,7 @@ impl Locale {
             return LocaleCharacter::Incomplete;
         }
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             let mut wide = 0_i32;
             // SAFETY: the conversion is bounded by the slice and both the
             // wide character and the state are initialized local storage;
@@ -151,6 +153,7 @@ impl Locale {
 
     pub fn wide_is_blank(&self, wide: i32) -> bool {
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             // SAFETY: every value is accepted as `wint_t`; invalid values do
             // not match.
             unsafe { iswblank(wide as core::ffi::c_uint) != 0 }
@@ -159,6 +162,7 @@ impl Locale {
 
     pub fn wide_is_space(&self, wide: i32) -> bool {
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             // SAFETY: every value is accepted as `wint_t`; invalid values do
             // not match.
             unsafe { iswspace(wide as core::ffi::c_uint) != 0 }
@@ -203,6 +207,7 @@ impl Locale {
     pub(crate) fn encode_character(&self, value: u32) -> Option<Vec<u8>> {
         let wide = i32::try_from(value).ok()?;
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             let mut encoded = [0_u8; ENCODED_CHARACTER_MAX];
             // SAFETY: the destination is `MB_LEN_MAX` bytes or more of live
             // local storage, which is the whole of `wcrtomb`'s contract for
@@ -218,6 +223,7 @@ impl Locale {
 
     pub fn multibyte_len(&self, bytes: &[u8]) -> Option<usize> {
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             // SAFETY: the conversion is bounded by the input slice and uses
             // initialized local state.
             let mut state = unsafe { std::mem::zeroed() };
@@ -233,35 +239,57 @@ impl Locale {
     /// How wide the character beginning at each of the first `offsets`
     /// byte positions of `bytes` is, in bytes.
     ///
-    /// One entry per byte position rather than per character, because a
-    /// caller stepping through a string does not know where the next
-    /// character starts until it has asked.  A position where no
-    /// character begins -- an invalid sequence, one the string ends too
-    /// soon to complete, or the null character -- is one byte wide, which
-    /// is what such a caller has to step over to make progress.
+    /// One entry per byte position, because `pattern.rs` and `regex.rs`
+    /// index the answer by byte position.  A position where no character
+    /// begins -- the interior of a wider one, an invalid sequence, one
+    /// the string ends too soon to complete, or the null character -- is
+    /// one byte wide, which is what a caller has to step over to make
+    /// progress.
+    ///
+    /// **`bytes` must begin a character.** The C library is asked only
+    /// about positions the walk reaches by stepping from position zero;
+    /// the interior positions it steps over are filled in without
+    /// asking, because a walk cannot arrive at one and no caller in this
+    /// tree indexes the table anywhere else.  Asking about them cost one
+    /// `mbrlen` per byte of a value rather than one per character.
+    /// `[spec:nsh:req:cost.only-the-work-the-command-needs]` is that
+    /// difference.
+    ///
+    /// The answer therefore runs on past `offsets` to the end of the
+    /// character straddling it, never stopping mid-character: the
+    /// vector's length is itself a boundary, which is what lets a caller
+    /// learning a long string in blocks hand the next block a start that
+    /// begins a character.
     ///
     /// A run of positions is answered together because `mbrlen` has no
     /// locale-taking form: every answer needs the thread locale selected
     /// and restored, and one selection covers the whole run.
+    // [spec:nsh:req:cost.only-the-work-the-command-needs]
     // [spec:nsh:req:embedding-safety.process-locale-is-unchanged]
     // [spec:nsh:req:shell-locale.operation-binding]
     pub fn character_widths(&self, bytes: &[u8], offsets: usize) -> Vec<u8> {
         let offsets = offsets.min(bytes.len());
         self.with_selected(|| {
-            (0..offsets)
-                .map(|at| {
-                    // SAFETY: each conversion is bounded by the bytes that
-                    // remain after `at` and uses initialized local state.
-                    let width = unsafe {
-                        let mut state = std::mem::zeroed();
-                        mbrlen(bytes[at..].as_ptr().cast(), bytes.len() - at, &mut state)
-                    };
-                    u8::try_from(width)
-                        .ok()
-                        .filter(|width| *width > 0)
-                        .unwrap_or(1)
-                })
-                .collect()
+            let mut widths: Vec<u8> = Vec::with_capacity(offsets);
+            while widths.len() < offsets {
+                let at = widths.len();
+                crate::work::record_character_queries(1);
+                // SAFETY: each conversion is bounded by the bytes that
+                // remain after `at` and uses initialized local state.
+                let width = unsafe {
+                    let mut state = std::mem::zeroed();
+                    mbrlen(bytes[at..].as_ptr().cast(), bytes.len() - at, &mut state)
+                };
+                let width = u8::try_from(width)
+                    .ok()
+                    .filter(|width| *width > 0)
+                    .unwrap_or(1);
+                widths.push(width);
+                /* `mbrlen` never reports more bytes than it was given,
+                 * so the interior never runs past the string. */
+                widths.resize(at + usize::from(width), 1);
+            }
+            widths
         })
     }
 
@@ -270,6 +298,7 @@ impl Locale {
             return None;
         }
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             // SAFETY: the byte count is bounded by the slice and both output
             // records are initialized local storage.
             let mut state = unsafe { std::mem::zeroed() };
@@ -288,6 +317,7 @@ impl Locale {
     ) -> Option<bool> {
         let name = CString::new(name).ok()?;
         self.with_selected(|| {
+            crate::work::record_character_queries(1);
             // SAFETY: all pointers name initialized, bounded storage and the
             // class name is terminated.
             unsafe {
@@ -316,6 +346,7 @@ impl Locale {
             // SAFETY: every conversion is bounded by the remaining slice and
             // writes only initialized local storage.
             unsafe {
+                crate::work::record_character_queries(1);
                 let mut first_state = std::mem::zeroed();
                 let mut first = 0_i32;
                 let first_len = mbrtowc(
@@ -335,6 +366,7 @@ impl Locale {
                 let mut offset = 0;
                 let mut output = 0;
                 while offset < bytes.len() {
+                    crate::work::record_character_queries(1);
                     let mut wide = 0_i32;
                     let count = mbrtowc(
                         &mut wide,
@@ -523,7 +555,7 @@ mod tests {
     }
 
     /// One entry per byte position, one byte wherever no character
-    /// begins, and only for the run of positions asked about.
+    /// begins, and a run that stops only on a boundary.
     ///
     /// The three ways a position can hold no character are each here,
     /// because a caller reading this table steps by what it says and
@@ -532,14 +564,15 @@ mod tests {
     /// the string ends too soon to complete. All three answer one, which
     /// is what stepping over them costs.
     ///
-    /// The short run is the same test rather than a second one: a caller
-    /// learning widths in blocks asks about a prefix of the positions
-    /// while passing the bytes that follow them, so that a character at
-    /// the last position it asks about is measured whole, and the answer
-    /// has to be the one it would have got asking about all of them.
+    /// The short run is the same test rather than a second one, and it
+    /// is where the two-byte character straddles the end of what was
+    /// asked about: a caller learning widths in blocks hands the next
+    /// block a start, so a run that stopped at the two positions asked
+    /// for would hand it the interior of a character. Three entries,
+    /// agreeing with the full table, is the answer that cannot.
     // [spec:nsh:req:shell-locale.operation-binding/test]
     #[test]
-    fn character_widths_answer_every_byte_position() {
+    fn character_widths_stop_only_where_a_character_does() {
         /* U+00CC, then a lone continuation byte, then a truncated
          * two-byte start. */
         let bytes = [b'a', 0xc3, 0x8c, 0x8c, b'z', 0xc3];
@@ -549,7 +582,7 @@ mod tests {
             [1, 2, 1, 1, 1, 1]
         );
         assert_eq!(utf8.character_widths(&bytes, 0), []);
-        assert_eq!(utf8.character_widths(&bytes, 2), [1, 2]);
+        assert_eq!(utf8.character_widths(&bytes, 2), [1, 2, 1]);
         assert_eq!(utf8.character_widths(&bytes, 99), [1, 2, 1, 1, 1, 1]);
         assert_eq!(utf8.character_widths(&[], 4), []);
 
