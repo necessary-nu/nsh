@@ -338,6 +338,7 @@ children (
                         title "Give a null command's failed redirection dash's status"
                         kind @fix
                         constrained_by ([spec:dash:sem:redir.redirect-fn] [spec:nsh:sem:idiom.specified-defects+1])
+                        deps (harness.oils-baseline-is-behind)
                         log (
                             {
                                 at 2026-09-03T16:40:26.193858085Z
@@ -3516,6 +3517,7 @@ children (
                         title "Stop `.` printing a blank line at an interactive prompt"
                         kind @fix
                         constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
+                        deps (harness.oils-baseline-is-behind)
                         log (
                             {
                                 at 2026-09-02T14:42:35.109969337Z
@@ -9533,6 +9535,7 @@ children (
                                         title "Abandon the command list when `declare -i` cannot read its value"
                                         kind @fix
                                         constrained_by ([spec:nsh:req:compat.bash.error-boundary])
+                                        deps (harness.oils-baseline-is-behind bash.divergences.error-boundary-status-collisions)
                                         log (
                                             {
                                                 at 2026-09-03T16:15:51.055247114Z
@@ -9620,6 +9623,7 @@ children (
                                         title "Set `$!` to a process substitution's pid, as Bash does"
                                         kind @fix
                                         constrained_by ([spec:nsh:req:compat.bash.process-substitution] [spec:nsh:req:compat.bash.builtins-special-variables])
+                                        deps (harness.oils-baseline-is-behind)
                                         log (
                                             {
                                                 at 2026-09-03T17:10:59.273572518Z
@@ -9635,6 +9639,7 @@ children (
                                         title "Decide what `[[::]]` means, because this shell and Bash read it differently"
                                         kind @fix
                                         constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-03T16:10:50.507535814Z
@@ -9655,6 +9660,20 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "ALREADY CLOSED BY `700d7ac`, THE COMMIT THIS NODE WAS FILED ALONGSIDE. Measured 2026-09-04; no code change needed.\n\nThe node says the divergence survived `a-bracket-test-reads-the-current-directory` -- \"the same answer comes back from the binary built at `d0ffd39` and from the one with that node's change\". That was true of the working tree it was written against and is not true of what landed. Built at `700d7ac` itself, in a private worktree with its own `CARGO_TARGET_DIR`, all five rows agree with the pinned Bash 5.3.15:\n\n    printf '<%s>' [[::]]                 nsh <[[::]]>   bash <[[::]]>\n    shopt -s nullglob; ...               nsh <>         bash <>\n    shopt -s failglob; ...               nsh no match   bash no match\n    shopt -s nocaseglob; ...             nsh <[[::]]>   bash <[[::]]>\n    shopt -s dotglob; ...                nsh <[[::]]>   bash <[[::]]>\n\nand so do five more probes this node did not ask for, on an attributable build of `6d9bd67`: `[[::]]zz` comes back as itself in both; `case`, `[[ ]]` and `${s//[[::]]/z}` all decline to match in both.\n\nWHY IT WORKS WITHOUT THE CODE CHANGE THE NODE PROPOSED. `nested_member` still refuses an empty class body -- `if body.is_empty() { return None; }` is at `pattern.rs:822` today -- so `[[::]]` is still read as an ordinary list, exactly as the node describes. What changed is what that costs: the list is `[`, `:`, `:` closing at the first `]`, so the pattern needs a two-character name ending in `]`, and the directory has none. No match, and `700d7ac` made an unmatched pattern come back as the original word rather than as something else. The node recorded nsh printing `<[]>` -- a word that is neither a filename nor the input -- and that, not the reading, was the defect.\n\nSO THE DECISION THE NODE ASKED FOR DOES NOT HAVE TO BE MADE. Both shells reach \"matches nothing\" and print the word unchanged; they get there by different routes (Bash treats the bracket expression as unsatisfiable, this shell as a list nothing satisfies) and no measurement distinguishes them. A `docs/divergences.md` entry would be recording a difference that cannot be observed.\n\nWORTH KEEPING IF THE ROUTES EVER SEPARATE. They would if a file named `[]` or `:]` existed -- this shell would match it, Bash would not. That is the one probe that would tell them apart, and it is cheap to hold: the differential test `700d7ac` added in `unclosed_bracket_is_not_a_glob.rs` is where it belongs."
+                                            }
+
+                                            {
+                                                at 2026-09-04T12:46:13.294185303Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T12:46:13.453314052Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -9693,6 +9712,7 @@ children (
                                         title "Stop splitting a word at a multi-byte blank neither reference splits at"
                                         kind @fix
                                         constrained_by ([spec:posix:req:expand.field-splitting-algorithm] [spec:posix:def:expand.ifs-white-space])
+                                        deps (harness.oils-baseline-is-behind)
                                         log (
                                             {
                                                 at 2026-09-03T17:40:02.682333905Z
@@ -9772,6 +9792,7 @@ children (
                                         id bash.divergences.read-count-waits-for-the-line
                                         title "Return from `read -n` when the count is reached, not when the line is"
                                         kind @fix
+                                        deps (harness.oils-baseline-is-behind)
                                         log (
                                             {
                                                 at 2026-09-04T00:00:07.838743046Z
@@ -9800,6 +9821,7 @@ children (
                                         id bash.divergences.call-argument-frames
                                         title "Push a call's own arguments onto `BASH_ARGC` and `BASH_ARGV`"
                                         kind @feat
+                                        deps (harness.oils-baseline-is-behind)
                                         log (
                                             {
                                                 at 2026-09-04T11:17:41.361705396Z
@@ -9814,26 +9836,13 @@ children (
                                         id bash.divergences.exec-argument-zero
                                         title "Take `exec -a name`, which names the process something other than its path"
                                         kind @feat
+                                        deps (harness.oils-baseline-is-behind)
                                         log (
                                             {
                                                 at 2026-09-04T11:18:05.102791682Z
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found while measuring `bash.divergences.publish-names.call-stack-arrays` on 2026-09-04, against the pinned Bash 5.3.15 at `69d2a45`. Not that node's task and not fixed there.\\n\\n    printf 'exec -a MYNAME <pinned bash> -c \"echo 0=\\\\$0\"\\\\n' | nsh -o bash\\n      nsh:  exec: -a: not found\\n      bash: 0=MYNAME\\n\\n`exec -a name` runs the program with `argv[0]` set to `name` rather than to the program's path. This shell's `exec` takes no options at all, so the `-a` is read as the program to run and the line fails with 127.\\n\\nWHY IT IS WORTH MORE THAN ITS SIZE. It is the only way a script can hand a child a different `argv[0]`, and in this repository `argv[0]` is what selects the dialect: `exec -a bash \"$0\"` is how a Bash-mode script re-enters itself, and it is the trick a differential test would use to ask a question about the *invocation* rather than about the script -- an inherited `TERM`, an inherited `PS1`, a shell started under another name. `crates/nsh-cli/tests/bash_shell_facts.rs` needed exactly that and could not use it, so `pinned_bash::answer_with_env` was added to start the child from outside instead. Both are worth having; the one that is missing is the one a script can reach.\\n\\nIt is also what proves a measurement about `$0`: `BASH_SOURCE[0]` and `$BASH_ARGV0` were both settled by running the reference through `exec -a totallyother` and watching the answer follow the name rather than the path.\\n\\nScope note: `exec` in this shell is `crates/nsh/src/builtins/exec.rs`, and the option would have to reach `nsh_platform::execute_program`, whose `argv` the caller assembles. `[dec:nsh:host-owns-the-process]` governs `exec` and should be read before changing it -- replacing the host's process image is granted rather than assumed, and a different `argv[0]` is a change to what is granted."
-                                            }
-                                        )
-                                    }
-
-                                    {
-                                        id harness.bash-comparison-baseline-is-stale
-                                        title "Re-record the bash-comparison baseline from a clean tree and say what moved"
-                                        kind @test
-                                        log (
-                                            {
-                                                at 2026-09-04T11:18:28.182706923Z
-                                                author "brendan@necessary.nu"
-                                                kind @note
-                                                text "Found while closing the four `publish-names` nodes on 2026-09-04. `tests/surveys/oils/BASH_COMPARISON_FAILURES.toml` says of itself:\\n\\n    recorded at 59b9f6acd235af8cfe4d8cf910900e520cf9cba6 over 4 uncommitted\\n    path(s), whose effects are in this list and in no commit:\\n    crates/nsh-platform/src/locale.rs, crates/nsh-platform/src/unix.rs,\\n    crates/nsh-platform/src/windows/locale.rs, crates/nsh/src/input.rs\\n    this file does not say when it was recorded; 30 commit(s) since\\n\\nSo the list records a tree nobody can reconstruct, and the header's own rule -- \"read the difference the refresh prints before you keep it\" -- cannot be applied to it, because part of the difference belongs to four files that were never committed.\\n\\nWHAT THE LIST IS WRONG ABOUT NOW, measured at `69d2a45` with the shell named `bash`, on a machine at load 7-11:\\n\\n    recorded 454 failing cases, this run has 446\\n    9 in the baseline that no longer fail:\\n      vars-bash.test.sh:0        ($SHELL is set to what is in /etc/passwd)\\n      vars-special.test.sh:31,32,33,35,36,37,38,39   (eight $_ cases)\\n    1 failing that is not in the baseline:\\n      assign-extended.test.sh:4\\n\\nThe ten are all accounted for and none of them is a defect. The nine are what `publish-names.environment-facts` and `publish-names.ordinary-state` fixed. The one is the reverse: `BASH_REFERENCE_CASES.json` already carries `assign-extended.test.sh:4` as `disposition: \"version-inapplicable\"`, `reference_outcome: \"fail\"`, and pointing the runner at `target/bash-reference/bash` reproduces this shell's output byte for byte -- the Oils expectation `add 7 main` is an older Bash's answer, and both shells now say the shell's own `$0`. That case was passing only while this shell answered `main`.\\n\\nWHY IT WAS NOT REFRESHED IN PASSING. A refresh from a working tree stamps the provenance line with whatever is uncommitted, which is exactly how the current line came to name four files. Doing it right means recording from a tree with nothing uncommitted in it, at a named commit, on a quiet machine -- and saying in the message which ten ids moved and why, because a silent re-record is how a real regression gets waved through.\\n\\nA SECOND THING TO FIX WHILE THERE. `process-sub.test.sh:2` (\"Process sub from shell to stdin\") is order-dependent, not fixed: it passes inside a full group run and fails five times out of five when run alone with `--spec process-sub --case`. It is in the baseline. The header already records that this case had to be measured by hand once before, on 2026-09-01. Whatever the refresh decides about it should be written down beside it rather than left to the next run's luck.\\n\\nAND A THIRD. Machine load decides how much of the run means anything: the same binary and the same baseline gave \"1 newly failing, 365 undecided\" at load 17 and \"7 newly failing, 365 undecided\" at load 43, the extra six being cases the *reference* could not reproduce its own recorded answer on. Six of those seven were reproducible with a HEAD binary, so they measured the machine. A refresh taken on a loaded machine would bake that in."
                                             }
                                         )
                                     }
@@ -10091,12 +10100,20 @@ children (
                         id harness.oils-baseline-is-behind
                         title "Re-record the bash-comparison baseline so it carries its own age"
                         kind @test
+                        deps (harness.oracle-outside-the-worktree tooling.disk.reach-every-build)
                         log (
                             {
                                 at 2026-09-03T23:26:31.524920887Z
                                 author "brendan@necessary.nu"
                                 kind @blocker
                                 text "FOUND 2026-09-04 WHILE CLOSING `harness.derived-corpus-age`, AND NOT PART OF IT. It is the first thing that node's own reporting turned up, which is the point of it.\n\n`tests/surveys/oils/BASH_COMPARISON_FAILURES.toml` now prints its age beside its verdict, and the age is:\n\n    recorded at 59b9f6acd235af8cfe4d8cf910900e520cf9cba6 over 4 uncommitted path(s) ...\n    this file does not say when it was recorded; 25 commit(s) since, 17 of them in crates/\n\nMeasured at 74f31fc, load 21. The comparison still matched on all 454 failing cases, so nothing is wrong with the list -- but it was recorded over four uncommitted paths belonging to another session (`crates/nsh-platform/src/locale.rs`, `.../unix.rs`, `.../windows/locale.rs`, `crates/nsh/src/input.rs`), all of which have since been committed or superseded, and it carries no `recorded_at` because the field did not exist when it was written.\n\nDONE WHEN the list is re-recorded from a checkout that can vouch for the shell -- `run-oils --expect-shell bash --group bash-comparison --baseline tests/surveys/oils/BASH_COMPARISON_FAILURES.toml --update-baseline`, which refuses a dirty tree -- so that `nsh_commit` names a commit whose tree explains the list, `uncommitted` is empty, and `recorded_at` is there. Read the difference the refresh prints before keeping it; the refresh takes the run's failing set as the new list, and a lucky run silently deletes a known-flaky entry.\n\nNOT DONE IN PASSING, deliberately. A shared checkout is almost never clean here -- it had thirteen other sessions' modified files at the moment this was found -- so the refusal is doing its job and the re-record has to wait for a quiet tree. It is also a generated tracked file, and one session overwrote another's re-record of this exact file on 2026-09-02."
+                            }
+
+                            {
+                                at 2026-09-04T12:42:36.510171346Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "`harness.bash-comparison-baseline-is-stale` IS THIS NODE, FILED TWICE. Merged here 2026-09-04 and the other removed.\n\nTwo agents found the same thing within the hour, from opposite ends: this one while closing `harness.derived-corpus-age`, whose new provenance reporting printed the age; the other while closing the four `publish-names` nodes, when the comparison it had to run said the same thing about itself. Both quote the same header:\n\n    recorded at 59b9f6acd235af8cfe4d8cf910900e520cf9cba6 over 4 uncommitted\n    path(s), whose effects are in this list and in no commit:\n    crates/nsh-platform/src/locale.rs, crates/nsh-platform/src/unix.rs,\n    crates/nsh-platform/src/windows/locale.rs, crates/nsh/src/input.rs\n\nThey differ only in the distance they measured: 25 commits since at `74f31fc`, 30 by the time the second looked. That the two counts disagree is itself the finding working.\n\nWHAT THE OTHER NODE ADDED, kept here: the header carries its own rule -- \"read the difference the refresh prints before you keep it\" -- and that rule cannot be applied to this file, because part of the difference belongs to a tree nobody can reconstruct. So the list is not merely old; it is unauditable by its own standard, which is a stronger reason to re-record than age alone.\n\nThe duplicate is evidence for `[spec:nsh:req:oracle.recording-carries-its-age]` rather than an accident: the age was invisible this morning and two independent readers tripped over it within an hour of it becoming visible."
                             }
                         )
                     }
@@ -11925,6 +11942,7 @@ children (
                         title "Split `[[ ]]`'s sub-grammar out of the Bash parser file"
                         kind @refactor
                         constrained_by ([spec:nsh:req:idiom.module-boundaries])
+                        deps (harness.oils-baseline-is-behind)
                         log (
                             {
                                 at 2026-09-02T12:54:57.353266838Z
@@ -12081,6 +12099,7 @@ children (
                         id struct.editor-absent-path-attribute
                         title "Name the feature-off editor module by its own file, not a path attribute"
                         kind @refactor
+                        deps (struct.posix-children-under-unix)
                         log (
                             {
                                 at 2026-09-03T23:25:38.316816896Z
@@ -12095,6 +12114,7 @@ children (
                         id tooling.oracle-sweep-red-on-master
                         title "Give the creation-mask race check the early-return reason the oracle sweep demands"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T23:42:05.696975042Z
@@ -12108,6 +12128,27 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "ALREADY FIXED WHEN THIS WAS FILED. Measured 2026-09-04; no work needed.\n\nThe node names `crates/nsh-platform/src/unix/process.rs:577`, the early `return` `7bd762f` left in `reporting_the_creation_mask_never_unmasks_the_process`. `62d3bac` -- \"Give the creation-mask check a mask of its own to watch\" -- removed it, roughly ten minutes before this was filed. `grep -n 'return;'` on that file finds nothing today, and the whole-workspace run that the same agent reported in its own verification section, 81 binaries and 931 tests with 0 failures, is the same tree it called red here.\n\nSo this is a stale observation rather than a wrong one: the defect was real, was reported by two agents independently, and one of them had already had it fixed by a third. A second agent filed the identical node minutes earlier as `oracle.creation-mask-check-measures-nothing` and withdrew it on noticing `62d3bac`; this one did not.\n\nWORTH KEEPING FROM IT, because the node's last clause is the part that is still true: `cargo test --workspace` is the only thing that runs `oracle_measurement.rs`, and no commit gate runs it. `nplan check` witnesses fmt, idiom and lint; the oracle sweep is a test, so a commit can land an early return and only a full workspace run will say so. `7bd762f` did exactly that. That is a gap in what the commit gate covers rather than a defect in the tree, and it belongs on its own node with that framing."
+                            }
+
+                            {
+                                at 2026-09-04T12:46:12.175076973Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "THE PREMISE IS GONE; NOTHING TO SUPPRESS. Measured 2026-09-04.\n\nThis node was retitled to ask for a recorded `// oracle-violation: early-return=<reason>` on the creation-mask race check. That grammar exists for a check whose early return is ordinary code and cannot be removed. This one's was removed: `62d3bac` gave the check a mask of its own to watch instead of returning when it found none, and forced through all three states it now proves 87 of 201 files carry bits `0o077` should have taken off when the old dance is put back.\n\n    grep -n 'return;' crates/nsh-platform/src/unix/process.rs   -> nothing\n    cargo test -p nsh --test oracle_measurement                 -> 2 passed, 0 failed\n\nThere are still no suppressions anywhere in the tree, which is the state this repository has kept since the lint was written, and adding the first one here would record a reason for a shape that is not present.\n\nWHAT WAS REAL AND IS FILED ELSEWHERE: `oracle_measurement.rs` runs only under `cargo test --workspace`, and no commit gate runs it. `nplan check` witnesses fmt, idiom and lint; the oracle sweep is a test. So a commit can land an early return and only a full workspace run will say so, which is exactly what `7bd762f` did and why this node existed at all. That is a gap in the gate's coverage rather than a defect in the tree."
+                            }
+
+                            {
+                                at 2026-09-04T12:46:12.835767766Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T12:46:12.990115892Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -12168,6 +12209,7 @@ children (
         implements {
             nsh-library ([spec:nsh:req:embedding-safety.reading-without-running])
         }
+        deps (make-printing-reversible)
         log (
             {
                 at 2026-09-03T12:19:00.375084237Z
@@ -12381,6 +12423,7 @@ children (
                         id tooling.nplan.wip-counts-workers-as-sprawl
                         title "Tell one worker sprawling across six nodes from six workers on one node each"
                         kind @fix
+                        deps (harness.oracle-outside-the-worktree)
                         log (
                             {
                                 at 2026-09-03T23:30:08.0787342Z
@@ -12643,6 +12686,26 @@ children (
                     }
 
                     {
+                        id tooling.tests.shared-state-lint
+                        title "Find a check that reads or writes state its siblings share"
+                        kind @test
+                        deps (
+                            tooling.tests.forked-child-holds-pipe
+                            tooling.tests.half-read-character-pty
+                            tooling.tests.read-the-umask
+                            drain-a-pipe-no-sibling-can-hold-open
+                        )
+                        log (
+                            {
+                                at 2026-09-04T00:05:35.575633157Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "THE THIRD INSTANCE IS WHAT OPENS THIS NODE, AND THE ARGUMENT IS THE ONE `verification.md` ALREADY MAKES.\n\nThree checks were found by hand in one sitting sharing process state with the checks running beside them, and all three are now fixed:\n\n    the file-creation mask   `umask(0)` then `umask(saved)` -- 49 of 50 runs failed\n                             a sibling, 0 of 50 after\n    an inherited pipe        a forked child held a sibling's write end open, so\n                             end-of-input never arrived -- 299 of 20,000, 0 after\n    a half-read character    fenced with a pipe, which cannot produce the case\n\nOnly the first left behind a check that would catch its own return: `reporting_the_creation_mask_never_unmasks_the_process` fails with the dance forced (87 of 201 files carried bits `0o077` should have removed) and passes without it. The other two are true by construction -- a process of their own, no shared state touched -- and are measured only as the absence of a flake.\n\nA RULE WHOSE EVIDENCE IS THAT NOTHING HAS FLAKED YET IS THE SHAPE THIS FILE EXISTS TO REFUSE. `[spec:nsh:req:oracle.checks-do-not-share-state]` is a claim about every check in the workspace, not about three of them. Nothing fires when the next test forks with a pipe open, or reads the umask to see what it is, or picks a descriptor number it closed a moment ago. `nplan spec uncovered` agrees: the rule has zero annotation sites in `crates/`.\n\nTHE PRECEDENT IS EXACT. `oracle.cannot-measure-is-a-failure` was written from five instances found in one sitting, and what made it a rule rather than five fixes was `crates/nsh/tests/oracle_measurement.rs` -- a check that reads every `#[test]` under `crates/` and reports two structural shapes, with a recorded opt-out for the case it cannot judge. Three instances here, found the same way, in the same week.\n\nWHAT THE CHECK CAN SEE, AND WHAT IT CANNOT. The reachable shapes are syntactic: a `#[test]` that calls `umask`, `chdir`, `dup2`, `close` on a number, or `setenv`/`remove_var`; a `Command`/fork whose descriptors are not closed on the child side; a test that both writes and restores a process-global. What it cannot see is the same thing `verification.md` already says no lint here reaches -- a check whose *input* is not what its name says. The half-read-character node is exactly that case: it was fenced with a pipe, which cannot produce a half-read character at all, and no textual shape distinguishes that from a correct fence.\n\nSo the honest scope is the two-thirds that is syntactic, and the node should say in its own commit which shapes it does not reach, as `oracle_measurement.rs` does.\n\nDONE WHEN a check reads every `#[test]` under `crates/` and reports a test that touches process state shared with its siblings; it is seen to fail on each of the three instances above, restored from git rather than described; the opt-out is the same `<code>=<reason>` grammar `oracle-violation` already uses; and the rule carries an impl and a `/test` annotation, which is what would let `tooling.tests` derive done."
+                            }
+                        )
+                    }
+
+                    {
                         id drain-a-pipe-no-sibling-can-hold-open
                         title "Stop a blocking drain waiting on a sibling test's child"
                         kind @fix
@@ -12652,21 +12715,6 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 WHILE CLOSING `stop-a-forked-child-holding-a-sibling-test-s-pipe-open`, IN THE SAME BINARY AND THE SAME FAMILY. It is the third instance of one shape and the first that does not fail: it hangs instead, which is why nobody has seen it.\n\n`crates/nsh-platform/src/unix.rs`, `descriptor_transaction_validates_targets`, last three lines:\n\n    let (read, write) = pipe().unwrap();\n    assert_eq!(invalid_transaction([(-1, Some(write))]), ErrorKind::InvalidInput);\n    let mut byte = [0];\n    assert_eq!(read_once(&read, &mut byte).unwrap(), 0);\n\nThe refused transaction owns `write` and drops it, and the read then expects end of input. That is exactly the exposure just fixed in `end_of_input_counts_as_available`: a sibling test's child forked between the `pipe()` and the drop holds a duplicate write end, so the pipe is not at end of input. The difference is that `read_once` BLOCKS where `wait_for_input` answered. The read waits until the last write end anywhere closes, which is when the child exits, and then correctly reports 0. So the assertion cannot be wrong -- only late.\n\nWHY IT IS STILL WORTH A NODE. Its runtime, and in the limit whether it returns at all, depend on what an unrelated test's child is doing. A child that blocks -- on a full pipe, on a wait, on a terminal -- makes this a hang with no diagnostic, in a test that names none of it. `[spec:nsh:req:oracle.checks-do-not-share-state]` names \"a pipe inherited by a forked child\" as shared process state a check must not depend on, and this depends on it.\n\nMEASURED 2026-09-04, 32 cores. The same window in the sibling was worth 299 failures in 20,000 runs of that pair at `--test-threads 32`, load 30-39, so the fork does land inside it at about 1.5% in that configuration. This test takes the same 1.5% as a stall rather than a failure, and the binary now has four forking checks (`descriptor_transaction_installs_slots`, two in `descriptor_name.rs`, and the new one in `unix_facts.rs`) rather than one.\n\nWHAT THE ANSWER PROBABLY IS. The same as the sibling's: build the pipe in a process of its own, or -- since what this test is really asserting is that a refused transaction drops the sources it was handed -- assert that from the transaction's own error and the descriptor it was given, without a pipe whose end of input a stranger can hold. `stop-a-freed-descriptor-number-racing-its-test` already made the first half of this test local that way; this is the half it left.\n\nNOT MEASURED, and worth doing before fixing: whether the same shape is live in `crates/nsh/tests/`. `streams_embed.rs`, `glob_buffer.rs`, `expansion_buffer.rs`, `smoosh_errors.rs` and `errors_are_values.rs` all build capture pipes and read them to end of input, and at least `smoosh_errors.rs` and `errors_are_values.rs` fork in the same binary. Those forks are deliberate and happen after their own pipes, but whether any of them can land inside a sibling's window has not been checked.\n\nDONE WHEN the assertion does not depend on whether another test's child is alive, and the pair runs clean at `--test-threads 32` at a count that would have shown the stall -- 20,000 is what the sibling needed."
-                            }
-                        )
-                    }
-
-                    {
-                        id tooling.tests.shared-state-lint
-                        title "Find a check that reads or writes state its siblings share"
-                        kind @test
-                        deps (tooling.tests.forked-child-holds-pipe tooling.tests.half-read-character-pty tooling.tests.read-the-umask)
-                        log (
-                            {
-                                at 2026-09-04T00:05:35.575633157Z
-                                author "brendan@necessary.nu"
-                                kind @note
-                                text "THE THIRD INSTANCE IS WHAT OPENS THIS NODE, AND THE ARGUMENT IS THE ONE `verification.md` ALREADY MAKES.\n\nThree checks were found by hand in one sitting sharing process state with the checks running beside them, and all three are now fixed:\n\n    the file-creation mask   `umask(0)` then `umask(saved)` -- 49 of 50 runs failed\n                             a sibling, 0 of 50 after\n    an inherited pipe        a forked child held a sibling's write end open, so\n                             end-of-input never arrived -- 299 of 20,000, 0 after\n    a half-read character    fenced with a pipe, which cannot produce the case\n\nOnly the first left behind a check that would catch its own return: `reporting_the_creation_mask_never_unmasks_the_process` fails with the dance forced (87 of 201 files carried bits `0o077` should have removed) and passes without it. The other two are true by construction -- a process of their own, no shared state touched -- and are measured only as the absence of a flake.\n\nA RULE WHOSE EVIDENCE IS THAT NOTHING HAS FLAKED YET IS THE SHAPE THIS FILE EXISTS TO REFUSE. `[spec:nsh:req:oracle.checks-do-not-share-state]` is a claim about every check in the workspace, not about three of them. Nothing fires when the next test forks with a pipe open, or reads the umask to see what it is, or picks a descriptor number it closed a moment ago. `nplan spec uncovered` agrees: the rule has zero annotation sites in `crates/`.\n\nTHE PRECEDENT IS EXACT. `oracle.cannot-measure-is-a-failure` was written from five instances found in one sitting, and what made it a rule rather than five fixes was `crates/nsh/tests/oracle_measurement.rs` -- a check that reads every `#[test]` under `crates/` and reports two structural shapes, with a recorded opt-out for the case it cannot judge. Three instances here, found the same way, in the same week.\n\nWHAT THE CHECK CAN SEE, AND WHAT IT CANNOT. The reachable shapes are syntactic: a `#[test]` that calls `umask`, `chdir`, `dup2`, `close` on a number, or `setenv`/`remove_var`; a `Command`/fork whose descriptors are not closed on the child side; a test that both writes and restores a process-global. What it cannot see is the same thing `verification.md` already says no lint here reaches -- a check whose *input* is not what its name says. The half-read-character node is exactly that case: it was fenced with a pipe, which cannot produce a half-read character at all, and no textual shape distinguishes that from a correct fence.\n\nSo the honest scope is the two-thirds that is syntactic, and the node should say in its own commit which shapes it does not reach, as `oracle_measurement.rs` does.\n\nDONE WHEN a check reads every `#[test]` under `crates/` and reports a test that touches process state shared with its siblings; it is seen to fail on each of the three instances above, restored from git rather than described; the opt-out is the same `<code>=<reason>` grammar `oracle-violation` already uses; and the rule carries an impl and a `/test` annotation, which is what would let `tooling.tests` derive done."
                             }
                         )
                     }
@@ -12744,6 +12792,14 @@ children (
                         author "brendan@necessary.nu"
                         kind @decision
                         text "LAYER 4 ANSWERED: WHICH OPEN NODES DESERVE A SPEC RULE, AND WHY THE REST DO NOT. Decided 2026-09-04.\n\nThe test I applied to each node: **does closing it leave behind a promise about a shipped artifact that something in this repository can measure?** Three answers, and the field each one goes in.\n\n**A promise nothing states yet -> a new rule, and the node `implements` it.** Fourteen. A new rule is uncovered until an annotation lands, so the node is measurable from the moment it is filed -- which is the whole mechanism, and is why a new rule is the right answer where an old one would be wrong.\n\n**A promise already stated -> `constrained_by`, not `implements`.** Twenty-one. This distinction is the one I had been getting wrong. Every nsh rule was already at 100% coverage before today, so pointing a node's `implements` at an existing rule would have derived it Done on the day it was filed. It is also why *amending* a broad rule to cover a narrow finding is refused here: annotations carry the rule version, so a bump to `compat.bash.builtins-special-variables` restamps 40 files and buries the one-line finding that provoked it. New narrow rules cost nothing and land where the work does.\n\n**No promise about this artifact -> no rule.** Six: the three nplan defects (a different repository), two machine-state nodes, and `tooling.integrate-remote-master`. A one-time repair leaves nothing to measure afterwards, and `nplan_complete` on a rule-less leaf is exactly the case the derived/asserted split is for. Recording these as rule-bearing would have been the same error in the other direction.\n\nWHAT THE THREE SORTS COST ME TO SEE. All three specs read 100% covered while thirty-one open nodes described things the shell gets wrong. Coverage is not correctness -- it says every rule has an annotation, not that every promise has a rule -- and the gap was not a handful of missing annotations but four families the specification was silent about:\n\n* **Cost.** `docs/spec/nsh/cost.md`, new, four rules. Nothing in the specification said what running a script may spend. Four defects of one family were fixed in a week -- a quadratic trim, a `[` that read the directory, 482,532 locale selections for one match, 2,102,274 units of matcher work for one substitution -- and not one of them left anything behind that would notice its return, because the fast shell and the slow shell print the same bytes and no differential corpus can tell them apart.\n* **The names Bash publishes.** Four rules. `compat.bash.builtins-special-variables` requires published values to be real rather than fabricated, and says nothing about which names exist; five divergences were found in that gap in one afternoon.\n* **Checks that measure the wrong thing.** Three rules. `oracle.cannot-measure-is-a-failure` covers a check that cannot reach its reference. It does not cover one that reaches a reference and compares it against the wrong thing, or reads a recording of unknown age, or fails because a sibling test in the same process moved shared state under it.\n* **Reading a script without running it.** One rule, and the reason Ronin's module exists.\n\nTWO THINGS I DID NOT DO, ON PURPOSE.\n\nNo rule for the four `Decide ...` nodes. A rule cannot state a reading nobody has chosen. What is already stated, and what those four are `constrained_by`, is `idiom.specified-defects` -- observable behaviour follows POSIX, an explicit compatibility rule, or a documented divergence, in that order -- and a construct where this shell does a third thing both references do not is exactly what that forbids. Their deliverable is the decision plus the rule it justifies, and the rule gets written when the decision is made.\n\nNo new dep edges. `nplan critical` reports all 28 remaining nodes floating, which looks like the depless plan `04b92a8` set out to fix. It is not the same thing: the 13 edges that commit authored were real and are now behind completed work. What is left is genuinely parallel -- independently found divergences that do not gate each other -- and inventing a chain to make the graph look like a spine is the failure this node was opened for, run backwards.\n\nONE SHAPE STILL WRONG, LEFT ALONE DELIBERATELY. `tooling.tests.*` now owns `oracle.checks-do-not-share-state`, so those nodes are verification nodes living under `tooling`. The id says the wrong thing. Renaming is what orphaned 36 assertions this morning, so it waits for a tool that renames both files at once."
+                        after_done true
+                    }
+
+                    {
+                        at 2026-09-04T12:47:11.165330032Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "THE GRAPH NOW HAS A SPINE, AND THE PRINCIPLE BEHIND IT IS ONE SENTENCE: NOTHING WHOSE VERDICT COMES FROM A MEASUREMENT MAY START BEFORE THE MEASUREMENT IS HONEST. Authored 2026-09-04, 15 edges.\n\nTHE SPINE, in the order the tool now computes:\n\n    harness.oracle-outside-the-worktree\n      -> harness.oils-baseline-is-behind\n        -> the seven divergences whose DoD is \"the survey matched\"\n           and struct.conditional-sub-grammar, whose DoD is \"the survey did not move\"\n\nTwo roots feed it. `harness.oracle-outside-the-worktree`: a fresh worktree has no `target/`, so `pinned_bash::path()` finds no oracle and every differential test fails at once -- and the WIP budget pushes every concurrent worker into a worktree, so this is not an edge case, it is the normal path. `tooling.disk.reach-every-build`: the free-space precondition only fires when somebody types `scripts/sandboxed`, and the documented build command does not, so builds die at 100% with a linker signal that reads like a compiler bug. Both were hit repeatedly on 2026-09-04.\n\n`tooling.nplan.wip-counts-workers-as-sprawl` deps on the first for a reason worth stating: fixing the budget pushes MORE work into worktrees, and a worktree that cannot find the oracle is a worse place to be sent. Repair the destination before widening the road to it.\n\nWHY THE BASELINE IS THE HINGE. `BASH_COMPARISON_FAILURES.toml` records itself as made at `59b9f6a` over four uncommitted paths belonging to another session, whose effects are in the list and in no commit. So the list is not merely old; it is unauditable by its own header's rule, and a node that closes with \"the survey matched\" is asserting nothing against it. That is why seven divergence nodes and one refactor hang off it rather than off nothing.\n\nWHAT IS DELIBERATELY NOT ON THE SPINE, and why that is not a gap. Nine nodes are genuinely parallel and would be lied about by an edge:\n\n  * three decisions -- `error-boundary-status-collisions`, `publish-names.interactive-surface`, `harness.spec-cannot-see-the-shell-harness` -- which need measurement against the references, not against the register. The first gates `refused-integer-abandons-list`, which is the one implementation in its family.\n  * `tooling.nplan.*` and `tooling.disk.worktrees-on-tmpfs`, which are defects in another repository and in this machine. They touch no shell behaviour, so no survey verdict depends on them.\n  * `struct.dead-decision-citations-in-spec`, which extends a lint over `docs/` and cannot move the shell.\n  * `perf.locale.per-byte-of-a-name` and `struct.script-module-port`, each of which already has dependents and is a root rather than a floater -- they read as floating only because `nplan critical` draws P0 chains and their dependents sit in a later pass.\n\nTHE ORDER I WOULD TAKE, given that: the two roots first, because every hour spent elsewhere is spent with broken instruments; then the baseline; then the three decisions in parallel with the divergence work they do not gate; then the structural moves. The four `tooling.nplan.*` items can go at any point and are the right thing to hand to a spare worker.\n\nONE DUPLICATE WAS REMOVED RATHER THAN ORDERED. `harness.bash-comparison-baseline-is-stale` was `harness.oils-baseline-is-behind` filed twice within an hour by two agents who found it from opposite ends. Its distinct content is folded into the survivor."
                         after_done true
                     }
                 )
@@ -13073,7 +13129,7 @@ children (
                         implements {
                             nsh-library ([spec:nsh:req:cost.proportional-to-the-input])
                         }
-                        deps (perf.pattern.substitution-linear)
+                        deps (perf.locale.per-byte-of-a-name)
                         log (
                             {
                                 at 2026-09-02T11:21:20.29612281Z
