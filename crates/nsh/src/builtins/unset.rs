@@ -56,7 +56,16 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     status = ExitStatus::FAILURE;
                     continue;
                 }
-                return Err(shell.diagnostics().builtin_error_value(1, &message));
+                /* Status 2, not the 1 the imported Smoosh bytes
+                 * record. XCU 2.8.1 makes the refusal fatal and leaves
+                 * the status unspecified, so dash's 2 and Bash's POSIX
+                 * mode's 1 both conform; this dialect is dash's port and
+                 * `[spec:nsh:req:compat.bash.error-boundary]` writes 2
+                 * down. The Smoosh contract loses on provenance and is
+                 * registered in `docs/divergences.md`. */
+                return Err(shell
+                    .diagnostics()
+                    .builtin_error_value(ExitStatus::ERROR, &message));
             }
             /* Bash lets one `unset` reach either table: a name with no
              * variable behind it unsets the function of that name.

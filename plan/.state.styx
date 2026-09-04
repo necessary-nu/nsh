@@ -1648,6 +1648,7 @@ assertions (
     {id struct.windows-locale-export, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:25.604961066Z}
     {id tooling.tests.read-the-umask, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:36.984941764Z}
     {id perf.locale.unreachable-positions, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:48.355714681Z}
+    {id bash.divergences.unset-readonly-contract, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:59:27.793877106Z}
 )
 
 impl_evidence (

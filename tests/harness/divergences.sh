@@ -75,6 +75,7 @@ DS_NORMALIZERS=(
 	missing_command_file_status
 	logical_fd_introspection
 	ulimit_default_soft_report
+	unset_readonly_diagnostic
 )
 
 # Set by ds_sanctioned to the id that matched, for the report.
@@ -658,6 +659,36 @@ dsnorm_ulimit_default_soft_report() {
 			return 0
 		fi
 	done
+}
+
+# `unset` refusing a read-only name. Both shells end a non-interactive shell
+# with status 2, so the whole of the difference is the diagnostic: dash
+# writes it through its `$0: line: ` spine, and the port keeps the
+# prefix-less `unset: NAME is read-only` that
+# `[spec:nsh:req:compat.smoosh.error-contracts]` fixes. Rewrite only that one
+# complete line, only in a case that both makes a name read-only and unsets
+# one, and carry the name across so a diagnostic about a different variable
+# is not excused. The statuses and the rest of the output stay compared byte
+# for byte, which is what holds the fatality here: a port that ran on to the
+# next command would differ in a line this cannot reach.
+dsnorm_unset_readonly_diagnostic() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)readonly[[:space:]]' || return 0
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)unset[[:space:]]' || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" |
+		sed -E 's#^(([$>] )*)(SH|\./script\.sh): [0-9]+: unset: ([A-Za-z_][A-Za-z0-9_]*): is read only$#\1unset: \4 is read-only#')
+	# Two corpus cases route the diagnostic through `sed 's|^[^:]*: ||'`,
+	# which strips one colon field from each side: dash keeps its line number
+	# and the port loses its `unset: `. Rewrite that shape only for a case
+	# that contains that exact filter, so an unfiltered diagnostic missing
+	# its command name is still a difference.
+	if ds_case_contains "$DS_CASE" "sed 's|^[^:]*: ||'"; then
+		normalized=$(printf '%s\n' "$normalized" |
+			sed -E 's#^[0-9]+: unset: ([A-Za-z_][A-Za-z0-9_]*): is read only$#\1 is read-only#')
+	fi
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence unset_readonly_diagnostic
 }
 
 # ds_harness_alive PORT REF -- both shells still exist and are runnable.

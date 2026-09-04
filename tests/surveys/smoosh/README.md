@@ -82,3 +82,11 @@ are killed when the case ends. The survey aborts if containment is unavailable.
 group, including the release binary SHA-256, both timeout classes, totals, and
 all non-passing scripts. The current baseline is 186 passes across 186
 scripts, with no failures, timeouts, or harness errors.
+
+Corrected 2026-09-04, original kept verbatim above: it had already stopped
+being true before this correction was written. `RESULTS.toml` recorded 181
+passes and five failures from the EXIT-trap divergence, and now records 180
+and six. Every one is a *sanctioned* divergence with an entry in
+`docs/divergences.md`, which is what `nonpassing` is for; read the recorded
+totals rather than this sentence, and update `RESULTS.toml` with
+`run-smoosh --summary` when one moves.

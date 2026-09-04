@@ -760,6 +760,48 @@ printf '%s\n' 'trap '\''echo inner; exit 2'\'' EXIT' > "$case_file"
 check "exit_trap_final_status: another action is outside" 1 \
 	$'inner\n2' $'inner\n0' 0 0 "$case_file"
 
+printf '%s\n' 'readonly R=1; unset R; echo "rc=$?"; echo "$R"' > "$case_file"
+UNSET_RO_REF='SH: 1: unset: R: is read only'
+UNSET_RO_PORT='unset: R is read-only'
+check "unset_readonly_diagnostic: only the diagnostic spelling differs" 0 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 2 "$case_file"
+[ "$DS_DIVERGENCE" = unset_readonly_diagnostic ] || no \
+	"unset_readonly_diagnostic: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "unset_readonly_diagnostic: a diagnostic about another name is not excused" 1 \
+	"$UNSET_RO_REF" 'unset: Q is read-only' 2 2 "$case_file"
+check "unset_readonly_diagnostic: the old status 1 is not excused" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 1 "$case_file"
+check "unset_readonly_diagnostic: a shell that carried on is not excused" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT"$'\nrc=2\n1' 2 2 "$case_file"
+check "unset_readonly_diagnostic: a dropped diagnostic is not excused" 1 \
+	"$UNSET_RO_REF" '' 2 2 "$case_file"
+check "unset_readonly_diagnostic: a refusal dash never made is not excused" 1 \
+	'' "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly R=1; unset R' > "$case_file"
+check "unset_readonly_diagnostic: the file-mode program name is normalised too" 0 \
+	'./script.sh: 1: unset: R: is read only' "$UNSET_RO_PORT" 2 2 "$case_file"
+check "unset_readonly_diagnostic: another program name is not excused" 1 \
+	'other.sh: 1: unset: R: is read only' "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly r=1; unset r 2>&1 | sed '"'"'s|^[^:]*: ||'"'"'; echo rc=$?' > "$case_file"
+check "unset_readonly_diagnostic: the filtered spelling both cases use" 0 \
+	$'1: unset: r: is read only\nrc=0' $'r is read-only\nrc=0' 0 0 "$case_file"
+check "unset_readonly_diagnostic: a filtered diagnostic about another name is not excused" 1 \
+	$'1: unset: r: is read only\nrc=0' $'q is read-only\nrc=0' 0 0 "$case_file"
+check "unset_readonly_diagnostic: a changed filtered status record is not excused" 1 \
+	$'1: unset: r: is read only\nrc=0' $'r is read-only\nrc=1' 0 0 "$case_file"
+printf '%s\n' 'readonly r=1; unset r 2>&1; echo rc=$?' > "$case_file"
+check "unset_readonly_diagnostic: an unfiltered case does not get the filtered rewrite" 1 \
+	$'1: unset: r: is read only\nrc=0' $'r is read-only\nrc=0' 0 0 "$case_file"
+printf '%s\n' 'unset R; echo "rc=$?"' > "$case_file"
+check "unset_readonly_diagnostic: a case with no readonly is outside the entry" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly R=1; echo "rc=$?"' > "$case_file"
+check "unset_readonly_diagnostic: a case that never unsets is outside the entry" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly R=1; R=2; echo "rc=$?"' > "$case_file"
+check "unset_readonly_diagnostic: the assignment refusal is not excused" 1 \
+	'SH: 1: R: is read only' 'R: is read-only' 2 2 "$case_file"
+
 # ---- the dead-harness guard --------------------------------------
 #
 # A shell that stopped existing is not a shell that behaved differently.
