@@ -385,7 +385,24 @@ pub(crate) fn declared_value(
         return Ok(None);
     };
     if declared.contains(BashAttribute::Integer) {
-        let number = crate::arithmetic::evaluate(shell, value)?;
+        /* The one arithmetic failure a declaration utility unwinds
+         * through instead of returning from, so it is marked here rather
+         * than at the frame that catches it: by then `declare -i x=1+`
+         * and `declare -r r=1; declare r=2` are the same variant, and
+         * Bash abandons the record for the first and runs the next
+         * command of the list after the second. */
+        // [spec:nsh:req:compat.bash.error-boundary]
+        let number = crate::arithmetic::evaluate(shell, value).map_err(|error| match error {
+            Error::Abandoned { line, message, .. } => Error::Abandoned {
+                line,
+                message,
+                from_assignment: true,
+            },
+            /* The POSIX dialect builds no abandonment: there the same
+             * arithmetic failure is a fatal `shell_error`, and marking it
+             * would claim a boundary that dialect does not have. */
+            fatal => fatal,
+        })?;
         return Ok(Some(BString::from(number.to_string())));
     }
     // Case conversion follows the C locale, as it does in Bash for every

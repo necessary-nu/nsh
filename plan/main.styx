@@ -9570,6 +9570,7 @@ children (
                                         kind @fix
                                         constrained_by ([spec:nsh:req:compat.bash.error-boundary])
                                         deps (harness.oils-baseline-is-behind bash.divergences.error-boundary-status-collisions)
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-03T16:15:51.055247114Z
@@ -9590,6 +9591,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T21:06:47.813269634Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

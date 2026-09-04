@@ -641,6 +641,24 @@ fn repeat_debug_trap(shell: &mut Shell, line: i32) -> Result<Flow, Error> {
 /// and a bad option to any of them are all ordinary command failures under
 /// Bash, and the next command of the same list runs.
 ///
+/// One abandonment is not withdrawn, and it is not a special-built-in
+/// question at all: a declaration utility that cannot evaluate the value it
+/// was handed. Bash separates the two by mechanism -- `declare -i x=1+`
+/// unwinds out of the utility, while `declare -r r=1; declare r=2` returns
+/// a status from inside it -- so `declare -i x=1+; echo next` prints
+/// nothing in the reference while `declare -r r=1; declare r=2; echo next`
+/// prints `next`. Both are [`Error::Abandoned`] here, so the one that
+/// unwinds carries `from_assignment`, set where the arithmetic of an
+/// integer-attributed assignment fails. `true` for it does not end the
+/// shell: [`evaluate_record`] is still the frame that catches it, and the
+/// *record* is what goes.
+///
+/// This file runs no reference, so the division above is a claim it cannot
+/// check. `crates/nsh-cli/tests/bash_declaration_assignment_boundary.rs`
+/// is what checks it: every case runs in both shells and holds no expected
+/// value of its own, so a reference that changes its mind is reported
+/// there rather than silently agreed with here.
+///
 /// Three things are not that and stay fatal in Bash mode too. An expansion
 /// error only crossed this frame on its way out of `eval` or `.` --
 /// `eval ': ${x:?boom}'` ends both shells -- and the shell's own input
@@ -658,8 +676,11 @@ fn builtin_error_is_fatal(
     special_builtin: bool,
     error: &Error,
 ) -> bool {
-    if error.is_abandoned() {
-        return false;
+    if let Error::Abandoned {
+        from_assignment, ..
+    } = error
+    {
+        return *from_assignment;
     }
     if error.is_interrupt() {
         return true;

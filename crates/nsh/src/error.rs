@@ -354,6 +354,22 @@ pub enum Error {
         /// The diagnostic, already written, or empty where the site that
         /// found the fault wrote its own.
         message: BString,
+        /// Whether the failure was computing the value an assignment was
+        /// about to store, which decides what a built-in frame does with
+        /// it. Bash reaches those two outcomes by two mechanisms rather
+        /// than one: a declaration utility that cannot evaluate the value
+        /// it was handed calls `jump_to_top_level(DISCARD)` from inside
+        /// itself, so the record goes with it, while a utility that
+        /// merely *refuses* an operand -- a read-only name, a bad
+        /// identifier, an option it does not have -- returns
+        /// `EXECUTION_FAILURE` and the list runs on. Both are this
+        /// variant here, so the frame that catches a built-in's failure
+        /// needs the distinction carried to it rather than inferred from
+        /// the variant or the built-in's identity, neither of which
+        /// separates `declare -i x=1+` from `local x=1` outside a
+        /// function.
+        // [spec:nsh:req:compat.bash.error-boundary]
+        from_assignment: bool,
     },
     /// A diagnostic with no more specific variant.
     Other {
@@ -421,6 +437,7 @@ impl Error {
         Error::Abandoned {
             line,
             message: BString::default(),
+            from_assignment: false,
         }
     }
 
@@ -653,6 +670,7 @@ impl Diagnostics<'_> {
         let error = Error::Abandoned {
             line: self.line,
             message: BString::from(msg),
+            from_assignment: false,
         };
         self.report(error)
     }
@@ -684,6 +702,7 @@ impl Diagnostics<'_> {
         Error::Abandoned {
             line: self.line,
             message: BString::new(Vec::new()),
+            from_assignment: false,
         }
     }
 

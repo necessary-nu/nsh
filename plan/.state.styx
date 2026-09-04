@@ -1708,7 +1708,7 @@ assertions (
     {id bash.divergences.publish-names.table-views, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:58:29.522603092Z}
     {id bash.divergences.expansion-error-status-in-bash-mode, kind @complete, author "brendan@necessary.nu", at 2026-09-04T17:28:35.146963335Z}
     {id bash.divergences.multibyte-blank-split, kind @doing, author "brendan@necessary.nu", at 2026-09-04T16:45:29.313482936Z}
-    {id bash.divergences.refused-integer-abandons-list, kind @doing, author "brendan@necessary.nu", at 2026-09-04T20:29:06.355570437Z}
+    {id bash.divergences.refused-integer-abandons-list, kind @complete, author "brendan@necessary.nu", at 2026-09-04T21:06:47.813269634Z}
     {id struct.dead-decision-citations-in-spec, kind @complete, author "brendan@necessary.nu", at 2026-09-04T20:46:27.398524355Z}
     {id struct.conditional-sub-grammar, kind @complete, author "brendan@necessary.nu", at 2026-09-04T21:00:45.478489631Z}
 )
