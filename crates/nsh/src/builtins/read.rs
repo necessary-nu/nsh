@@ -41,7 +41,15 @@ fn read_input_line(
     raw: bool,
     prompt_for_continuation: bool,
 ) -> Result<(ReadLine, ExitStatus), Error> {
-    crate::resource::with_resources(shell, |shell, _resources| {
+    /* `-d` moves the record's terminator off the newline, and the input
+     * stack delivers whole lines; a source still being written to has no
+     * newline in it yet, so waiting for one is waiting for something the
+     * record does not need. Put back rather than cleared: a trap action
+     * taken at a polling boundary inside this read may run a `read` of
+     * its own. */
+    // [spec:posix:req:builtin.read.option-d]
+    let saved_delivery = shell.input.set_partial_line_delivery(delimiter != b'\n');
+    let read = crate::resource::with_resources(shell, |shell, _resources| {
         crate::input::push_standard_input(shell);
         let mut line = ReadLine {
             bytes: BString::default(),
@@ -98,7 +106,9 @@ fn read_input_line(
             }
         }
         Ok::<_, Error>((line, status))
-    })
+    });
+    shell.input.set_partial_line_delivery(saved_delivery);
+    read
 }
 
 // ---------------------------------------------------------------------

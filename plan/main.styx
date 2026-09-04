@@ -9856,6 +9856,7 @@ children (
                                         title "Return from `read -n` when the count is reached, not when the line is"
                                         kind @fix
                                         deps (harness.oils-baseline-is-behind)
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-04T00:00:07.838743046Z
@@ -9869,6 +9870,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T16:42:56.566285051Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -10024,6 +10032,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "FOUND 2026-09-04 WHILE MEASURING `bash.divergences.error-boundary-status-collisions`. That node moved the POSIX dialect's expansion-error status to dash's 2; this is the Bash dialect's half of the same measurement and it was not that node's task.\n\nMeasured against the pinned Bash 5.3.15 at `target/bash-reference/bash` and an attributable release build of the collisions branch, load 18-54, `-c` and file operand alike:\n\n    unset x; echo ${x?z}; echo R          bash 127, no R   bash --posix 127, no R   nsh -o bash 1, no R\n    unset x; echo ${x:?boom}; echo R      bash 127         bash --posix 127         nsh -o bash 1\n    unset x; : ${x?z}; echo R             bash 127         bash --posix 127         nsh -o bash 1\n    unset x; eval \"echo \\${x?z}\"; echo R  bash 127         bash --posix 127         nsh -o bash 1\n    set -u; unset x; echo $x; echo R      bash 127         bash --posix 127         nsh -o bash 1\n\nTHE BOUNDARY IS ALREADY RIGHT -- both shells end the non-interactive shell and neither prints `R` -- and the diagnostic is unaffected. It is the number, and 127 is the same in Bash's own POSIX mode, so this is not a mode question.\n\nTHIS CORRECTS AN ASSUMPTION IN THE COLLISIONS NODE, worth recording because it was the one thing that node asked to be measured first. It guessed that all five members of its class were the shell \"accidentally reproducing GNU Bash's POSIX mode\", which held for the other four -- `bash --posix` answers 1 for a missing dot file, an `export` to a read-only name and a redirection error on a special built-in -- and is false here: bash answers 127 in both modes, so the 1 was never Bash's.\n\n`[spec:nsh:req:compat.bash.error-boundary]` says Bash mode takes \"status 1\" for a failed expansion and abandons the record. That is right for the failures Bash *recovers* from -- a bad substitution, a subscript that will not evaluate, an arithmetic error, all measured at 1 -- and wrong for the one it does not recover from, so the rule's sentence does not distinguish two cases Bash distinguishes. Closing this needs the rule text corrected as well as the code, and an annotation carries the rule's version, so read `[spec:nsh:req:compat.bash.error-boundary]`'s 87 impl sites before bumping it.\n\nWHERE THE WORK GOES. `crates/nsh/src/error.rs`'s `Diagnostics::expansion_error_value` now stamps `Error::Expansion { status }` from `Dialect::refusal_status()`, which answers 2 for the POSIX dialect and 1 for Bash. A third answer for the Bash dialect belongs there, but only for the terminal refusals: `Error::Expansion` is raised *and caught* by the expander to decide `${x+word}` under `set -u`, `${!z:=foo}` and slice arithmetic, so a status widened across all of them would be visible in cases that recover.\n\nNot covered by any survey: the Oils bash-comparison group does not read `$?` after an expansion error, and no Smoosh case observes the Bash dialect at all."
+                                            }
+
+                                            {
+                                                at 2026-09-04T16:43:23.785920849Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
                                             }
                                         )
                                     }

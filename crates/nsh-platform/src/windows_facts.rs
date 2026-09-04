@@ -7,6 +7,11 @@ use super::{AsDescriptor, TerminalSettings};
 /// `ENABLE_ECHO_INPUT`, which `read -s` clears.
 const ENABLE_ECHO_INPUT: u32 = 0x0004;
 
+/// `ENABLE_LINE_INPUT`, which `read -n` clears. It is the console's
+/// spelling of `ICANON`: with it set the console returns nothing until
+/// Enter.
+const ENABLE_LINE_INPUT: u32 = 0x0002;
+
 /// The first descriptor number the process cannot use.
 ///
 /// The CRT's descriptor table is what a shell redirection names here, and
@@ -85,5 +90,11 @@ impl TerminalSettings {
     #[must_use]
     pub fn without_echo(&self) -> Self {
         Self(self.0 & !ENABLE_ECHO_INPUT)
+    }
+
+    /// The same settings out of line-input mode, for `read -n`.
+    #[must_use]
+    pub fn without_canonical_input(&self) -> Self {
+        Self(self.0 & !ENABLE_LINE_INPUT)
     }
 }

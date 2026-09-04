@@ -89,6 +89,16 @@ impl Requested {
             (None, limit) => limit,
         }
     }
+
+    /// Whether this record can be complete before its line is.
+    ///
+    /// A count is complete at its last character, and `-d` moves the
+    /// terminator off the newline altogether; either way the shell must
+    /// not sit on bytes it has already been given waiting for a newline
+    /// that a source still being written to has not sent.
+    const fn record_may_end_early(&self) -> bool {
+        self.character_limit().is_some() || self.delimiter != b'\n'
+    }
 }
 
 /// The bytes one record held, and which of them a backslash protected
@@ -147,18 +157,24 @@ pub(super) fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done(ExitStatus::from_code(128 + 14)));
     }
 
-    let echo = requested
-        .silent
-        .then(|| silence(shell, &requested))
-        .flatten();
+    let saved_terminal = prepare_terminal(shell, &requested);
+    /* A record that can end before the line does has to be handed the
+     * bytes that have arrived rather than the bytes up to the next
+     * newline, and the input stack delivers whole lines to everything
+     * else. Put back rather than cleared: a trap action taken at a
+     * polling boundary inside this read may run a `read` of its own. */
+    let saved_delivery = shell
+        .input
+        .set_partial_line_delivery(requested.record_may_end_early());
     let outcome = crate::resource::with_resources(shell, |shell, _resources| {
         let mut source = ReadStream::open(shell, requested.descriptor)?;
         let outcome = read_record(shell, &mut source, &requested);
         source.close(shell);
         outcome
     });
-    if let Some(echo) = &echo {
-        restore(shell, &requested, echo);
+    shell.input.set_partial_line_delivery(saved_delivery);
+    if let Some(saved) = &saved_terminal {
+        restore(shell, &requested, saved);
     }
     /* Bash reports a descriptor it could not read -- a directory, most
      * often -- as a plain failure of `read`, where the shell's own input
@@ -415,23 +431,48 @@ fn input_is_available(
     Ok(nsh_platform::wait_for_input(&source, Some(seconds)).unwrap_or(true))
 }
 
-/// Turn terminal echo off for `-s`, returning what to put back.
+/// Put the terminal into the mode this read needs, returning what to
+/// put back.
 ///
-/// A descriptor that is not a terminal has no echo to turn off, and a
-/// read from a pipe is silent already.
-fn silence(shell: &mut Shell, requested: &Requested) -> Option<nsh_platform::TerminalSettings> {
+/// Two requests reach the terminal and either alone needs the snapshot.
+/// `-s` turns echo off. A character count takes it out of canonical
+/// mode, because a line-buffered terminal hands over nothing at all
+/// until Enter -- so without this `read -n1` waits for exactly the key
+/// it exists to avoid, and no amount of reading earlier helps.
+///
+/// A descriptor that is not a terminal has neither: a pipe is silent
+/// and unbuffered already.
+fn prepare_terminal(
+    shell: &mut Shell,
+    requested: &Requested,
+) -> Option<nsh_platform::TerminalSettings> {
+    let counted = requested.character_limit().is_some();
+    if !requested.silent && !counted {
+        return None;
+    }
     let source = descriptor_of(requested).and_then(|d| shell.descriptors.get(d))?;
     if !nsh_platform::is_terminal(&source) {
         return None;
     }
     let saved = nsh_platform::TerminalSettings::capture(&source).ok()?;
-    saved.without_echo().apply(&source).ok()?;
+    let wanted = match (requested.silent, counted) {
+        (true, true) => saved.without_echo().without_canonical_input(),
+        (true, false) => saved.without_echo(),
+        (false, _) => saved.without_canonical_input(),
+    };
+    wanted.apply(&source).ok()?;
+    if counted && requested.descriptor.is_none() {
+        crate::input::forget_standard_input_mode(shell);
+    }
     Some(saved)
 }
 
 fn restore(shell: &mut Shell, requested: &Requested, saved: &nsh_platform::TerminalSettings) {
     if let Some(source) = descriptor_of(requested).and_then(|d| shell.descriptors.get(d)) {
         drop(saved.apply(&source));
+    }
+    if requested.character_limit().is_some() && requested.descriptor.is_none() {
+        crate::input::forget_standard_input_mode(shell);
     }
 }
 

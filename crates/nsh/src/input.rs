@@ -29,11 +29,13 @@ mod read;
 
 pub use overlay::push_string_input;
 use overlay::{InputOverlay, clear_input_overlays, release_input_overlays};
+pub(crate) use read::{
+    forget_standard_input_mode, read_input_unit_preserving_nul, rearm_stdin_after_eof,
+};
 pub use read::{
     initialize_input, read_input_unit, read_input_unit_or_alias_end, reset_input,
     unread_input_unit, unread_input_units,
 };
-pub(crate) use read::{read_input_unit_preserving_nul, rearm_stdin_after_eof};
 
 /// `MB_LEN_MAX > 16 ? MB_LEN_MAX : 16` — 16 on glibc.
 pub const MAX_UNREAD_UNITS: usize = 16;
@@ -236,6 +238,26 @@ pub struct InputStack {
     pub(crate) prompt: Option<PromptKind>,
     /// Whether standard input is a terminal, once queried.
     pub(crate) standard_input_is_terminal: Option<bool>,
+    /// Whether the read in progress may be handed a line that has not
+    /// ended yet.
+    ///
+    /// A parser needs whole lines and everything under
+    /// [`read_input_unit`] is built to produce them: a refill keeps
+    /// reading until a newline arrives, because a token cannot be
+    /// decided from half of one. `read -n1` is the opposite command --
+    /// it has to answer on the first character, and a source somebody
+    /// is still typing into has no newline in it yet. The bytes already
+    /// arrive one at a time from a pipe and from a terminal out of
+    /// canonical mode, so it is only the handover that waits; this is
+    /// the bit that stops it waiting.
+    ///
+    /// Set for the duration of one `read` whose record can end before
+    /// the line does -- a character count, or a delimiter that is not
+    /// the newline -- and put back afterwards rather than cleared,
+    /// because a trap action taken at a polling boundary inside that
+    /// read may run a `read` of its own.
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    partial_line_delivery: bool,
     /// Set when `popstring` finishes an alias whose text ended in a blank.
     ///
     /// dash spells this `checkkwd |= CHKALIAS` — the input layer reaching
@@ -287,6 +309,7 @@ impl InputStack {
             },
             prompt: None,
             standard_input_is_terminal: None,
+            partial_line_delivery: false,
             alias_boundary: false,
             tokens: crate::parser::TokenLog::new(),
         }
@@ -340,6 +363,21 @@ impl InputStack {
     #[inline]
     pub(crate) fn set_floor(&mut self, to: usize) {
         self.floor_index = to;
+    }
+
+    /// Whether a refill may stop short of the newline.
+    #[inline]
+    pub(crate) const fn partial_line_delivery(&self) -> bool {
+        self.partial_line_delivery
+    }
+
+    /// Ask for partial lines, and answer with the setting replaced.
+    ///
+    /// The caller owns putting that answer back, which is why this
+    /// returns it rather than offering a clear: reads nest.
+    #[inline]
+    pub(crate) fn set_partial_line_delivery(&mut self, deliver: bool) -> bool {
+        core::mem::replace(&mut self.partial_line_delivery, deliver)
     }
 
     /// Take the alias-expansion boundary flag and clear it.

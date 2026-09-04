@@ -1678,7 +1678,7 @@ assertions (
     {id harness.oils-baseline-is-behind, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:37:15.700222525Z}
     {id bash.divergences.publish-names.interactive-surface, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:25:22.073811443Z}
     {id tooling.disk.wrapper-drops-a-hyphenated-cargo-variable, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:41:31.388199538Z}
-    {id bash.divergences.read-count-waits-for-the-line, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:26:46.48065553Z}
+    {id bash.divergences.read-count-waits-for-the-line, kind @complete, author "brendan@necessary.nu", at 2026-09-04T16:42:56.566285051Z}
     {id bash.divergences.procsub-in-bang, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:52:13.819430962Z}
     {id bash.divergences.call-argument-frames, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:54:22.326555689Z}
     {id tooling.moved-only-cannot-see-a-rename, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:30:58.889527107Z}
@@ -1687,6 +1687,7 @@ assertions (
     {id tooling.disk.worktrees-on-tmpfs, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:44:15.37194993Z}
     {id bash.divergences.exec-argument-zero, kind @complete, author "brendan@necessary.nu", at 2026-09-04T16:12:51.422269599Z}
     {id bash.divergences.publish-names.table-views, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:58:29.522603092Z}
+    {id bash.divergences.expansion-error-status-in-bash-mode, kind @doing, author "brendan@necessary.nu", at 2026-09-04T16:43:23.785920849Z}
 )
 
 impl_evidence (

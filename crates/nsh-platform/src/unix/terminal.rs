@@ -38,6 +38,27 @@ impl TerminalSettings {
         Self(quiet)
     }
 
+    /// The same settings out of canonical input mode, for `read -n`.
+    ///
+    /// A terminal in canonical mode holds every character until the line
+    /// is complete, and the wait belongs to the kernel rather than to
+    /// the reader -- so a `read` bounded by a character count cannot get
+    /// its first character by reading harder. `VMIN` of one with no
+    /// timer is the mode that hands over as soon as a character is
+    /// there. Echo is left alone: `-s` is a separate request, and a
+    /// terminal that stops showing what is typed for every `read -n1` is
+    /// not what the reference does.
+    #[must_use]
+    pub fn without_canonical_input(&self) -> Self {
+        let mut immediate = self.0.clone();
+        immediate
+            .local_modes
+            .remove(rustix::termios::LocalModes::ICANON);
+        immediate.special_codes[rustix::termios::SpecialCodeIndex::VMIN] = 1;
+        immediate.special_codes[rustix::termios::SpecialCodeIndex::VTIME] = 0;
+        Self(immediate)
+    }
+
     /// Apply this snapshot to `fd` immediately.
     pub fn apply(&self, fd: &impl AsDescriptor) -> std::io::Result<()> {
         let fd = fd.as_platform_descriptor().0;

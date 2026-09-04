@@ -69,6 +69,21 @@ pub fn initialize_input(shell: &mut Shell) {
     }
 }
 
+/// Forget what mode standard input was in, so the next refill asks the
+/// descriptor again.
+///
+/// Whether the shell may read a buffer's worth ahead is decided by one
+/// question -- is the terminal line-buffered -- and the answer is cached
+/// because a refill would otherwise ask it every time. A `read` bounded
+/// by a character count takes the terminal out of that mode for the
+/// length of the read, which makes the cached answer wrong in the
+/// direction that loses bytes: read-ahead from a terminal cannot be
+/// given back, because a terminal cannot be seeked. Both ends of such a
+/// read say so here.
+pub(crate) fn forget_standard_input_mode(shell: &mut Shell) {
+    shell.input.standard_input_is_terminal = None;
+}
+
 // [spec:dash:sem:input.stdin-bufferable-fn]
 fn standard_input_is_bufferable(shell: &mut Shell) -> bool {
     if shell.input.standard_input_is_terminal.is_none() {
@@ -499,11 +514,14 @@ fn refill_once(
     }
     shell.flush_output()?;
 
+    let partial_delivery = shell.input.partial_line_delivery();
+
     let buffered = crate::error::with_interrupts_deferred(shell, |shell| {
         let mut line_end = current_input_frame(&mut shell.input).position;
         let mut has_content = !first;
         let mut remaining = remaining_buffer_bytes(current_input_frame(&mut shell.input));
         let mut preserve_buffer = false;
+        let mut ended_early = false;
 
         'outer: loop {
             if remaining == 0 {
@@ -572,6 +590,17 @@ fn refill_once(
 
                 /* check: */
                 if remaining == 0 {
+                    /* Everything the source had is in the buffer and none
+                     * of it was the newline. Going round reads again,
+                     * which is right for a parser and is the wait
+                     * `read -n1` exists to avoid, so a caller that can
+                     * finish its record early gets what has arrived. */
+                    // [spec:nsh:req:compat.bash.builtins-special-variables]
+                    if partial_delivery && line_end > current_input_frame(&mut shell.input).position
+                    {
+                        ended_early = true;
+                        break 'outer;
+                    }
                     continue 'outer;
                 }
             }
@@ -597,7 +626,11 @@ fn refill_once(
         // [spec:nsh:req:compat.smoosh.history-builtin]
         let top_level_history_input = current_input_frame(&mut shell.input).uses_stdin
             || shell.input.current == shell.input.floor_index;
+        /* A run of bytes that stopped short of its newline is a fragment
+         * of a line rather than a line, and half a command recalled from
+         * the history is worse than none. */
         if top_level_history_input
+            && !ended_early
             && crate::editor::history_active(shell)
             && !shell.options.enabled(ShellOption::NoLog)
             && has_content
