@@ -20,13 +20,22 @@
 //!   visible to exactly one image, so the flag is cleared at the process
 //!   terminus in [`publish_before_exec`], after the last fork this process
 //!   will ever make.
-//! * **The child is nobody's job.** There is no job record for `jobs` to
-//!   print, in either shell. Its pid is still the shell's to keep: `wait`
-//!   with no operands blocks on the most recent substitution, which is why
+//! * **The child is nobody's job, and is still named twice.** There is no
+//!   job record for `jobs` to print, in either shell. Its pid is the
+//!   shell's to keep all the same, and two names want it for different
+//!   reasons. `wait` with no operands blocks on the most recent
+//!   substitution, which is why
 //!   [`crate::context::Shell::last_process_substitution`] holds it apart
 //!   from the here-document writers and command substitutions the generic
-//!   reaper collects it beside. Bash also names it in `$!`, which this
-//!   shell does not -- `name-a-process-substitution-in-the-bang-parameter`.
+//!   reaper collects it beside. `$!` names it too -- measured against the
+//!   pinned Bash 5.3.15, `echo hi > >(sleep 0.2; cat); echo "[$!]"`
+//!   answers with the substitution's own pid, and it *overwrites* a
+//!   background job's pid rather than filling in a blank -- which is why
+//!   [`crate::context::Shell::background_process`] is written here as
+//!   well. The two are not one field: a background job started afterwards
+//!   takes `$!` back while `wait` keeps blocking on the substitution, and
+//!   a forked child drops the substitution it must not reap while keeping
+//!   the `$!` its parent had -- measured, a subshell reads the same pid.
 //!
 //! # The child can outlive the shell, and in a container that loses its output
 //!
@@ -153,12 +162,14 @@ pub(crate) fn substitute(
 
         /* No job: the shell must not hold a job record that `jobs` would
          * print. The pid is kept all the same, because `wait` with no
-         * operands does block on the most recent one, and the job table
-         * is exactly where it cannot be kept. */
+         * operands does block on the most recent one and `$!` names it,
+         * and the job table is exactly where it cannot be kept. */
         // [spec:nsh:req:compat.bash.process-substitution]
+        // [spec:nsh:req:compat.bash.builtins-special-variables]
         let forked = crate::jobs::fork_shell(shell, None, None, crate::jobs::ForkMode::WithoutJob)?;
         if let nsh_platform::ForkResult::Parent(child) = forked {
             shell.last_process_substitution = Some(child);
+            shell.background_process = Some(child);
         }
         if matches!(forked, nsh_platform::ForkResult::Child) {
             crate::error::clear_interrupt_deferral(&mut shell.interrupt_deferral);

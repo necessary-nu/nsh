@@ -5,14 +5,15 @@
 //! With no operand it waits for every job, and the loop that does so is
 //! the one place the shell blocks with no job in mind; with operands it
 //! waits per job, and a pid that names no job is not an error -- the
-//! status for it is 127.
+//! status for it is 127, unless it is the process substitution `$!`
+//! names, which is this shell's child and no job's process.
 
 use crate::context::Shell;
 use crate::error::Error;
 use crate::evaluation::Flow;
 use crate::jobs::{
     JobId, WaitMode, job_exit_status, reap_children, remove_waited_job, resolve_job,
-    wait_for_process_substitution,
+    wait_for_process_substitution, wait_for_this_process_substitution,
 };
 use bstr::BStr;
 
@@ -106,6 +107,29 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         }
                     }
                     if job_id.is_none() {
+                        /* A process substitution is nobody's job, and
+                         * `$!` names it, so its pid arrives here as an
+                         * operand no job table can answer for. The
+                         * reference blocks on it and reports what it
+                         * exited with -- `echo x > >(sleep 0.2; exit 7);
+                         * wait $!` answers 7 -- which is a pid that is
+                         * this shell's child without being any job's
+                         * process. */
+                        // [spec:nsh:req:compat.bash.process-substitution]
+                        if let Some(target) = process
+                            && Some(target) == shell.last_process_substitution
+                        {
+                            match wait_for_this_process_substitution(shell, target)? {
+                                Some(reported) => status = reported,
+                                None => {
+                                    status = crate::signal_inbox::signals()
+                                        .pending_signal()
+                                        .expect("an interrupted wait records its signal")
+                                        .as_status();
+                                    break 'wait_complete;
+                                }
+                            }
+                        }
                         break 'operand_complete;
                     }
                 } else {

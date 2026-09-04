@@ -431,6 +431,53 @@ pub(crate) fn wait_for_process_substitution(
     Ok(true)
 }
 
+/// Block until the process substitution named by `target` has reported,
+/// and answer with the status it reported.
+///
+/// `Ok(None)` reports a signal that arrived first, which is the answer
+/// the job loop gives for the same interruption.
+///
+/// Only the substitution [`crate::context::Shell::last_process_substitution`]
+/// is holding can be waited for by pid: this shell keeps one, where the
+/// reference keeps every substitution it has forked and the status each
+/// one reported. `wait-by-pid-for-an-older-process-substitution` is the
+/// difference, measured -- given two, the reference answers 4 and then 5
+/// for their two pids and this shell answers 127 for the older.
+///
+/// A pid that reported to somebody else's reaper takes 0 rather than a
+/// status nothing recorded, which is what a job with no completed
+/// process answers for the same reason.
+// [spec:nsh:req:compat.bash.process-substitution]
+pub(crate) fn wait_for_this_process_substitution(
+    shell: &mut crate::context::Shell,
+    target: ProcessId,
+) -> Result<Option<crate::status::ExitStatus>, Error> {
+    loop {
+        let scan = block_for_child(shell, target, false);
+        if let ChildScan::SignalArrived = scan {
+            if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
+                return Err(error);
+            }
+            if crate::signal_inbox::signals().pending_signal().is_some() {
+                return Ok(None);
+            }
+            continue;
+        }
+        shell.last_process_substitution = None;
+        return Ok(Some(match scan {
+            ChildScan::Reaped {
+                status: ChildStatus::Exited(code),
+                ..
+            } => crate::status::ExitStatus::from(code),
+            ChildScan::Reaped {
+                status: ChildStatus::Signaled { signal, .. },
+                ..
+            } => crate::status::ExitStatus::from_code(signal.number() + 128),
+            _ => crate::status::ExitStatus::SUCCESS,
+        }));
+    }
+}
+
 // [spec:dash:sem:jobs.waitproc-fn]
 // [spec:nsh:req:embedding-safety.host-children-are-not-reaped]
 fn wait_for_process(

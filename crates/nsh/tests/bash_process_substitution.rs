@@ -181,21 +181,30 @@ fn quoting_and_the_default_mode_withhold_it() {
     assert!(!String::from_utf8_lossy(&stdout).contains("/fd/"));
 }
 
-/// The child is nobody's job: it is not waited for, not reported, and not
-/// what `$!` names.
+/// The child is nobody's job and `$!` names it anyway, which is the pair
+/// of facts the reference holds together.
 // [spec:nsh:req:compat.bash.process-substitution/test]
 #[test]
 fn the_child_is_not_a_job() {
     assert_eq!(
-        output(true, b"read line < <(echo hi); jobs; echo \"[${!-unset}]\""),
-        "[unset]\n"
+        output(
+            true,
+            b"read line < <(echo hi); jobs; echo \"[${!:+named}]\""
+        ),
+        "[named]\n"
     );
-    // A background job still sets `$!`, and a substitution beside it does
-    // not take the name away. Nothing here waits: these tests share one
-    // process with the rest of the suite, so a `wait` would be a wait on
-    // whichever shell happened to reap the child first.
-    let mixed = output(true, b"true & read line < <(echo hi); echo \"${!:+set}\"");
-    assert_eq!(mixed, "set\n");
+    // A substitution takes the name away from a background job started
+    // before it, which is what says `$!` is not merely being filled in
+    // where a job would have left it blank. Nothing here waits: these
+    // tests share one process with the rest of the suite, so a `wait`
+    // would be a wait on whichever shell happened to reap the child
+    // first.
+    let mixed = output(
+        true,
+        b"true & first=$!; read line < <(echo hi); \
+          [ \"$first\" = \"$!\" ] && echo same || echo different",
+    );
+    assert_eq!(mixed, "different\n");
 }
 
 /// A substitution's own child disowns its parent's other names.

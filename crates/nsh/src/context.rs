@@ -94,13 +94,16 @@ pub struct Shell {
     // [spec:nsh:req:compat.bash.process-substitution]
     pub(crate) last_process_substitution: Option<nsh_platform::ProcessId>,
     /// `$!` — the process id of the last command the shell put in the
-    /// background.
+    /// background, or of the last process substitution it forked.
     ///
     /// The rest of `jobs.rs`'s table has not moved. This member could go
     /// on its own because it is not part of it in any way that matters:
-    /// one function writes it (`jobs::forkparent`) and one reads it
-    /// (`expand::varvalue`, for `$!`), and neither reaches the job table
-    /// to do so.
+    /// two functions write it (`jobs::fork::record_forked_child` for a
+    /// background job, `evaluation::bash_process_substitution::substitute`
+    /// for a `<(list)` or `>(list)`) and one reads it
+    /// (`expand::varvalue`, for `$!`), and none of them reaches the job
+    /// table to do so. The second writer is Bash's, and is why `$!` can
+    /// name a process `jobs` will never print.
     pub(crate) background_process: Option<nsh_platform::ProcessId>,
     /// PID of the process that created this shell instance.
     pub(crate) root_pid: nsh_platform::ProcessId,
