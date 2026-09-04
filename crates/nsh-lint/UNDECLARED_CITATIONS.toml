@@ -1,0 +1,110 @@
+# Undeclared-citation register: the ids this repository's prose cites that
+# nothing in the repository declares.
+#
+# `cited_decisions_are_live` has read every file under `crates/` since
+# 2026-09-02 and reported a citation of a decision the corpus no longer
+# holds in force. It read one tree, and said so in a constant. Prose under
+# `docs/` and `plan/` was not swept at all, so a spec rule could give a
+# decision as its reason for a decision that had never been written, and
+# the only thing that would report it was a person writing code against
+# that rule and copying the sentence across. That is exactly how
+# `platform-boundary` below was found -- six weeks late, by an agent who
+# then added a third citation of it before the second was resolved.
+#
+# `cited_ids_are_declared` sweeps `crates/`, `docs/` and `plan/` and asks
+# the weaker of the two questions: is the id DECLARED?
+# Not: is it still in force. The distinction is the point and it is why
+# this register is short. A comment beside code is read as the reason that
+# code exists *now*, so a decision that has been obsolesced under it is a
+# lie about the present. A spec rule and a dated plan log entry are
+# records of what was reasoned *then*, and a later obsolescence does not
+# falsify one -- `plan/main.styx` cites `no-format-interpreters` in a log
+# entry written while it was in force, and rewriting that would destroy
+# the record rather than repair it. A name that resolves to NOTHING is
+# wrong whenever it was written, because it sends every reader to a
+# document that is not there.
+#
+# AN ENTRY IS A CORRECTION, NOT A PERMISSION. It says what is true instead
+# of what the citing text claims, in the form this repository already uses
+# for a stale record: keep the original verbatim, and date the correction
+# beside it. An entry that says only "known" is worthless; the next person
+# to meet one of these sites reads this file to find out what the sentence
+# they are standing in front of should have said.
+#
+# THE REGISTER IS SYMMETRIC, exactly as `FUNCTION_DENSITY.toml` and
+# `BASH_DISPOSITIONS.toml` are. An entry for an id something now declares
+# fails until it is deleted, and an entry nothing cites any more fails the
+# same way. Without that half a register is a place to hide, and an entry
+# outlives the sentence it was written about.
+#
+# `sites` IS THE HALF THAT CATCHES THE MISTAKE THIS FILE EXISTS FOR. An
+# entry exempts an id rather than a line, because line numbers churn under
+# every edit and a dead name is dead at all of its sites for one reason.
+# So the count is recorded -- across all three swept trees, not just the
+# prose -- and a citation ADDED to a registered id is
+# reported -- which is the defect that produced this register: the third
+# citation of `platform-boundary` was written by somebody who had seen the
+# second, checked for the file, found none, and reasoned that an id the
+# tree already carried must resolve somewhere they had not looked.
+#
+# If you are here because a run reported a count, do not just correct the
+# number. You have either cited a name that resolves to nothing -- in
+# which case write the id you meant -- or removed the last reason this
+# entry existed, in which case delete it.
+#
+# THIS FILE IS THE ONE FILE NEITHER SWEEP READS. Its subject is undeclared
+# ids, so it necessarily spells them out; swept, every entry would report
+# itself. Nothing else under `crates/` is exempt, and this file's own
+# entries are checked by the register halves above rather than by the
+# sweep. The same trap is
+# why nothing written into `plan/main.styx` should spell a registered id
+# in brackets: a log entry that does raises the count and turns
+# `nsh-lint` red for whoever commits Rust next.
+
+schema = 1
+
+[[citation]]
+id = "[dec:nsh:platform-boundary]"
+sites = 4
+answer = """
+THE DECISION IS REAL AND HAS NEVER BEEN WRITTEN. `ls plan/decisions/` holds 21 files on \
+2026-09-04 and none is `platform-boundary.md`; no file in the corpus declares this id, and \
+`[dec:nsh:host-owns-the-process]` and `[dec:nsh:public-surface]`, the nearest live things, say \
+neither of the two sentences below. Four sites cite it: \
+`docs/spec/nsh/idiomatic-core.md:104`, in the body of \
+`[spec:nsh:req:idiom.platform-surface-parity]`, for why parity needs a repository check rather \
+than a cross build; `docs/spec/nsh/verification.md:93`, for why the permitted static skip is \
+spelled as a `pub const fn … -> bool` in `nsh-platform`; and twice in `plan/main.styx`, in the \
+two log entries of `struct.dead-decision-citations-in-spec` that are about this id. \
+THE PROPERTY THE THREE RULES LEAN ON IS TRUE TODAY AND CHECKABLE: `grep -rc 'cfg(target_os' \
+crates/nsh/src` is 0, so a host fact reaches the shell as a constant function in `nsh-platform` \
+rather than as a conditional in the shell. Rules leaning on an unwritten decision is evidence \
+that the decision is real and was never recorded, not that the citations are wrong -- which is \
+why the repair is to write the file and not to delete four sentences that are each correct. \
+DO NOT SYNTHESISE IT FROM THESE SITES. A decision file is an executive record with a state, a \
+context and a set of consequences somebody accepted; assembling one backwards out of the prose \
+that leans on it would produce a document nobody decided, in the one part of this repository \
+whose whole value is that its contents were decided. It is the operator's to author. When \
+`plan/decisions/platform-boundary.md` exists, both sweeps resolve this id on their own and this \
+entry fails until it is deleted.
+"""
+
+[[citation]]
+id = "[dec:nsh:calibrate-bash-5-3-oracle]"
+sites = 1
+answer = """
+THIS NAMES A WBS NODE, NOT A DECISION, AND THE CITING SENTENCE IS OTHERWISE RIGHT. \
+`plan/main.styx:6013` declares `id calibrate-bash-5-3-oracle` as a plan node -- the work of \
+pinning the 5.3 reference build -- and the one citation, in a log entry under \
+`escape-what-the-reference-escapes`, dresses that node id in `[dec:nsh:…]` form to say that \
+`support.rs` calls `Command::new("bash")` and gets whatever is on `PATH` while the pinned \
+oracle is 5.3. The observation is correct and is what `target/bash-reference/bash` exists for; \
+only the citation form is wrong, and it sends a reader to `plan/decisions/` for a file that was \
+never going to be there. \
+WHY IT IS CORRECTED HERE RATHER THAN AT THE SITE. The site is a dated log entry in an \
+append-only record. This repository's practice for a record that has gone wrong is to keep the \
+original verbatim and date the correction beside it, so editing the entry to spell the node id \
+plainly would be the one repair that destroys evidence -- of an agent reaching for a citation \
+form it had seen elsewhere for something that was not a decision, which is the same reflex that \
+produced the entry above. Delete this entry only if that log entry itself is ever rewritten.
+"""

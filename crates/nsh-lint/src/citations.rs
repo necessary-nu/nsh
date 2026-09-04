@@ -37,21 +37,69 @@
 //! read is reported rather than skipped: a schema change makes the check
 //! go red, not quiet.
 //!
+//! THE SECOND CHECK HERE ASKS THE WEAKER QUESTION, AND THE LINE BETWEEN
+//! THE TWO IS THE POINT. The one above reads a single tree, so a citation
+//! in `docs/spec/` is invisible to the check whose entire purpose is
+//! finding dead citations: `platform-boundary`, which no file in the
+//! corpus declares, sat in two spec rules for six weeks and then gained a
+//! third citation from somebody who had seen the second, checked for the
+//! file, found none, and reasoned that an id the tree already carried must
+//! resolve somewhere they had not looked.
+//!
+//! [`cited_ids_are_declared`] sweeps [`SWEPT`] and asks whether each id is
+//! DECLARED, not whether it is still in force. A comment beside code is
+//! read as the reason that code exists *now*, so citing a decision that
+//! has since been obsolesced is a claim about the present that is false. A
+//! spec rule and a dated plan log entry are records of what was reasoned
+//! *then*, and a later obsolescence does not falsify one: `plan/main.styx`
+//! cites `no-format-interpreters` in an entry written while it was in
+//! force, and rewriting that would destroy the record rather than repair
+//! it. A name that resolves to *nothing* is wrong whenever it was written,
+//! because every reader of it is sent to a document that is not there.
+//!
 //! No citation is spelled out in full anywhere in this file, and that is
-//! deliberate rather than shy -- the sweep below reads every file under
-//! `crates/`, its own included, so a citation written here would be a
-//! citation like any other and would be reported like one.
+//! deliberate rather than shy -- both sweeps read every file under
+//! `crates/`, this one included, so a citation written here would be a
+//! citation like any other and would be reported like one. The one
+//! exception either sweep makes is [`REGISTER`], whose subject is
+//! undeclared ids and which therefore has to spell them; it is checked by
+//! its own two symmetry halves instead.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 
 use crate::{relative_to_workspace, workspace_root};
 
 /// Where the decision corpus lives, relative to the workspace root.
 const CORPUS: &str = "plan/decisions";
 
-/// The tree whose citations are checked.
+/// Where the architecture register lives, relative to the workspace root.
+///
+/// It declares the `arch` ids the same way the corpus declares the `dec`
+/// ones, and both kinds are cited in the same sentences, so a sweep that
+/// resolved one and not the other would leave somewhere to put a name
+/// nothing answers.
+const ARCHITECTURE: &str = "plan/architecture.styx";
+
+/// Where the undeclared-citation register lives, relative to the
+/// workspace root.
+const REGISTER: &str = "crates/nsh-lint/UNDECLARED_CITATIONS.toml";
+
+/// The tree whose citations are checked for a live decision.
 const TREE: &str = "crates";
+
+/// The trees whose citations are checked for a declared id.
+///
+/// `docs/` is the spec and the design prose; `plan/` is the corpus, the
+/// architecture register and the whole WBS with its logs. `crates/` is
+/// here too, so that the register below answers a name nothing declares
+/// wherever it is written: a dead name in a doc comment and the same one
+/// in a spec rule want the same correction, and a check that offered the
+/// register to one and not the other would have no answer for whoever
+/// moved the citation between them.
+const SWEPT: &[&str] = &["crates", "docs", "plan"];
 
 /// The states in which a decision is still standing, and so may be cited
 /// as a reason.
@@ -104,6 +152,12 @@ struct Citation {
 /// thinking about what it says. This checks that the correction is
 /// *present*, not that it is *right*.
 ///
+/// An id the corpus does not declare at all is skipped rather than
+/// reported, and [`cited_ids_are_declared`] owns it: one subject per
+/// check, so a run that reports both says which of the two questions each
+/// finding answers. That check reads this tree as well, so nothing is
+/// dropped by the split.
+///
 /// Deliberately unannotated, for the reason `density.rs` gives: the
 /// property it enforces is about the plan's own records rather than about
 /// a rule `docs/spec/nsh` states, and claiming coverage of one from here
@@ -112,9 +166,8 @@ pub(crate) fn cited_decisions_are_live() -> Vec<String> {
     let workspace = workspace_root();
     let (decisions, mut reported) = corpus(&workspace);
     if decisions.is_empty() {
-        /* Without this the sweep below would resolve nothing, report
-         * every citation as unknown, and -- if the tree ever held no
-         * citations at all -- pass while reading an empty corpus. */
+        /* Without this the sweep below would resolve nothing, skip every
+         * citation, and pass while reading an empty corpus. */
         reported.push(format!(
             "no decisions were read from {CORPUS}/; this check cannot resolve \
              anything and its silence would mean nothing"
@@ -123,38 +176,17 @@ pub(crate) fn cited_decisions_are_live() -> Vec<String> {
     }
 
     let mut seen = 0_usize;
-    for path in files_in(&workspace, TREE) {
-        /* Lossy rather than `read_to_string`, so a file that is not UTF-8
-         * is still swept. Replacement characters cannot invent a citation
-         * and cannot hide one, whereas skipping the file would do the
-         * second. */
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                reported.push(format!(
-                    "{} is not readable: {error}",
-                    relative_to_workspace(&path, &workspace)
-                ));
-                continue;
-            }
-        };
-        let source = String::from_utf8_lossy(&bytes);
+    for (name, source) in text_in(&workspace, TREE, &mut reported) {
         let found = citations(&source);
         seen += found.len();
         let beside: BTreeSet<(usize, &str)> = found
             .iter()
             .map(|citation| (citation.block, citation.id.as_str()))
             .collect();
-        let name = relative_to_workspace(&path, &workspace);
 
         for citation in &found {
             let Citation { line, block, id } = citation;
             let Some(decision) = decisions.get(id.as_str()) else {
-                reported.push(format!(
-                    "{name}:{line} cites {id}, which no file in {CORPUS}/ declares; \
-                     the id is misspelt, or it names a decision this repository \
-                     does not keep"
-                ));
                 continue;
             };
             if LIVE.contains(&decision.state.as_str()) {
@@ -197,6 +229,235 @@ pub(crate) fn cited_decisions_are_live() -> Vec<String> {
         ));
     }
     reported
+}
+
+/// Every plan id cited anywhere under [`SWEPT`] is one the repository
+/// declares, reported as findings.
+///
+/// Liveness is not asked here and [the header](self) says why: a document
+/// and a dated log entry are records of what was reasoned then, so a
+/// decision obsolesced since does not make one of them false, while a name
+/// that resolves to nothing sends every reader to a document that is not
+/// there whenever it was written.
+///
+/// An id in [`REGISTER`] is exempt from the finding and subject to two
+/// halves instead: an entry for an id something now declares fails, and so
+/// does an entry whose site count has moved. The count is what keeps the
+/// register from being a place to hide -- an exemption that also forgave
+/// the next citation would answer a fresh dead name with silence, and
+/// silence is what somebody who has checked for the file and found none
+/// reads as the id resolving somewhere they had not looked.
+///
+/// Deliberately unannotated, for the reason [`cited_decisions_are_live`]
+/// gives.
+pub(crate) fn cited_ids_are_declared() -> Vec<String> {
+    let workspace = workspace_root();
+    let (decisions, mut reported) = corpus(&workspace);
+    let (elements, element_findings) = elements(&workspace);
+    reported.extend(element_findings);
+    if decisions.is_empty() || elements.is_empty() {
+        /* Resolving against an empty set reports every citation in the
+         * trees below, which is a way of failing that hides the reason.
+         * The reason is already in `reported`, from whichever reader came
+         * back empty. */
+        return reported;
+    }
+    let (registered, register_findings) = register(&workspace);
+    reported.extend(register_findings);
+
+    let mut seen = 0_usize;
+    let mut counted: BTreeMap<&str, usize> = registered.keys().map(|id| (id.as_str(), 0)).collect();
+    for tree in SWEPT {
+        for (name, source) in text_in(&workspace, tree, &mut reported) {
+            for Citation { line, id, .. } in citations(&source) {
+                seen += 1;
+                if let Some(count) = counted.get_mut(id.as_str()) {
+                    *count += 1;
+                    continue;
+                }
+                let held = match id.starts_with("[arch:") {
+                    true => (elements.contains(id.as_str()), ARCHITECTURE),
+                    false => (decisions.contains_key(id.as_str()), CORPUS),
+                };
+                if !held.0 {
+                    reported.push(undeclared(&name, line, &id, held.1));
+                }
+            }
+        }
+    }
+
+    for (id, entry) in &registered {
+        if decisions.contains_key(id.as_str()) || elements.contains(id.as_str()) {
+            reported.push(format!(
+                "{REGISTER} registers {id} as undeclared and the repository now \
+                 declares it; delete the entry, which says: {}",
+                entry.answer.trim()
+            ));
+            continue;
+        }
+        let count = counted.get(id.as_str()).copied().unwrap_or_default();
+        if count == 0 {
+            reported.push(format!(
+                "{REGISTER} registers {id} and nothing in {} cites it; the entry \
+                 has outlived the sentence it was written about, so delete it",
+                swept()
+            ));
+        } else if count != entry.sites {
+            reported.push(format!(
+                "{REGISTER} records {id} at {} sites and {count} were found in {}; \
+                 a site was added, in which case you have cited a name that \
+                 resolves to nothing and want the id you meant instead, or one \
+                 was removed, in which case correct the count",
+                entry.sites,
+                swept()
+            ));
+        }
+    }
+
+    if seen == 0 {
+        reported.push(format!(
+            "no plan citations were found in {}; either the repository stopped \
+             citing the plan or this check stopped reading it, and neither \
+             should pass quietly",
+            swept()
+        ));
+    }
+    reported
+}
+
+/// The swept trees as a message says them.
+fn swept() -> String {
+    SWEPT
+        .iter()
+        .map(|tree| format!("{tree}/"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// What to say about an id nothing answers to, in either sweep.
+fn undeclared(name: &str, line: usize, id: &str, declared_in: &str) -> String {
+    format!(
+        "{name}:{line} cites {id}, which nothing in {declared_in} declares; the \
+         id is misspelt, or it names something this repository has never \
+         written down -- and if it is the second and that record is not yours \
+         to author, register the id in {REGISTER} with what is true instead"
+    )
+}
+
+/// The architecture register's element ids, and whatever could not be read
+/// of it.
+///
+/// An id is declared by an `id [arch:...]` field and by nothing else: the
+/// same file names elements in `depends_on` and decisions in `decisions`,
+/// and reading those as declarations would let a register that names an
+/// element it never declares resolve its own dangling reference.
+fn elements(workspace: &Path) -> (BTreeSet<String>, Vec<String>) {
+    let mut ids = BTreeSet::new();
+    let text = match std::fs::read_to_string(workspace.join(ARCHITECTURE)) {
+        Ok(text) => text,
+        Err(error) => {
+            return (
+                ids,
+                vec![format!("{ARCHITECTURE} is not readable: {error}")],
+            );
+        }
+    };
+    let mut reported = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("id ") else {
+            continue;
+        };
+        match citation_at(rest.trim().as_bytes(), 0) {
+            Some(id) if id.starts_with("[arch:") => {
+                if !ids.insert(id.clone()) {
+                    reported.push(format!("{ARCHITECTURE} declares {id} twice"));
+                }
+            }
+            _ => reported.push(format!(
+                "{ARCHITECTURE} has an `id` field reading {rest:?}, which is not \
+                 an element id"
+            )),
+        }
+    }
+    if ids.is_empty() {
+        reported.push(format!(
+            "no elements were read from {ARCHITECTURE}; every element citation \
+             would resolve against nothing"
+        ));
+    }
+    (ids, reported)
+}
+
+/// The undeclared-citation register, as it is written.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Register {
+    schema: u32,
+    #[serde(default)]
+    citation: Vec<Entry>,
+}
+
+/// One registered id.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Entry {
+    id: String,
+    /// How many sites cite it across [`PROSE`], so that a new citation of
+    /// an id nothing declares is reported rather than forgiven.
+    sites: usize,
+    /// What is true instead of what the citing text claims, and who owns
+    /// writing it down.
+    answer: String,
+}
+
+/// The register keyed by id, and whatever could not be read of it.
+fn register(workspace: &Path) -> (BTreeMap<String, Entry>, Vec<String>) {
+    let mut registered = BTreeMap::new();
+    let text = match std::fs::read_to_string(workspace.join(REGISTER)) {
+        Ok(text) => text,
+        Err(error) => {
+            return (
+                registered,
+                vec![format!("{REGISTER} is not readable: {error}")],
+            );
+        }
+    };
+    let register: Register = match toml::from_str(&text) {
+        Ok(register) => register,
+        Err(error) => {
+            return (
+                registered,
+                vec![format!("{REGISTER} does not parse: {error}")],
+            );
+        }
+    };
+    let mut reported = Vec::new();
+    if register.schema != 1 {
+        reported.push(format!(
+            "{REGISTER} states schema {}, which this check does not know",
+            register.schema
+        ));
+    }
+    for entry in register.citation {
+        if entry.answer.trim().is_empty() {
+            reported.push(format!(
+                "{} is registered with no answer; say what is true instead of \
+                 what the citing text claims, and who owns writing it down",
+                entry.id
+            ));
+        }
+        if citation_at(entry.id.as_bytes(), 0).as_deref() != Some(entry.id.as_str()) {
+            reported.push(format!(
+                "{REGISTER} registers {:?}, which is not a plan id",
+                entry.id
+            ));
+            continue;
+        }
+        if registered.insert(entry.id.clone(), entry).is_some() {
+            reported.push(format!("{REGISTER} registers an id twice"));
+        }
+    }
+    (registered, reported)
 }
 
 /// The corpus, and whatever could not be read of it.
@@ -289,7 +550,9 @@ fn decision_in(text: &str) -> Result<(String, String, Vec<String>), String> {
             state = Some(rest.trim().to_owned());
         }
     }
-    let id = id.ok_or("has no top-level `id [dec:...]` field in its frontmatter")?;
+    let id = id
+        .filter(|id| id.starts_with("[dec:"))
+        .ok_or("has no top-level `id [dec:...]` field in its frontmatter")?;
     let state = state.ok_or("has no top-level `state @...` field in its frontmatter")?;
     if !state.starts_with('@') {
         return Err(format!("states {state:?}, which is not an `@` state name"));
@@ -321,8 +584,12 @@ fn superseded_ids(frontmatter: &str) -> Vec<String> {
         depth -= trimmed.matches(')').count().min(depth);
         let bytes = trimmed.as_bytes();
         for at in 0..bytes.len() {
-            if let Some(id) = citation_at(bytes, at) {
-                ids.push(id);
+            /* A decision is superseded by a decision. An element id in
+             * the same balanced walk would otherwise be recorded as a
+             * successor nothing in the corpus could ever answer. */
+            match citation_at(bytes, at) {
+                Some(id) if id.starts_with("[dec:") => ids.push(id),
+                _ => {}
             }
         }
         if depth == 0 {
@@ -372,6 +639,12 @@ fn citations(source: &str) -> Vec<Citation> {
     found
 }
 
+/// The two kinds of plan id a sentence may cite as its reason.
+///
+/// Both are declared in `plan/`, both appear in the same sentences, and
+/// both are dead in the same way when the thing they name is not there.
+const KINDS: &[&str] = &["dec:", "arch:"];
+
 /// The citation beginning at `at`, in canonical form.
 ///
 /// Two spellings are in use and neither is the odd one out: the bare
@@ -391,7 +664,10 @@ fn citation_at(bytes: &[u8], at: usize) -> Option<String> {
     if backticked {
         cursor += 1;
     }
-    if !bytes[cursor..].starts_with(b"dec:") {
+    if !KINDS
+        .iter()
+        .any(|kind| bytes[cursor..].starts_with(kind.as_bytes()))
+    {
         return None;
     }
     let start = cursor;
@@ -410,10 +686,41 @@ fn citation_at(bytes: &[u8], at: usize) -> Option<String> {
     if bytes.get(cursor) != Some(&b']') {
         return None;
     }
-    /* `dec`, a corpus prefix, and a name: anything else is a bracketed
-     * word that begins with the same four bytes rather than an id. */
+    /* A kind, a corpus prefix, and a name: anything else is a bracketed
+     * word that begins with the same bytes rather than an id. Each part
+     * has to carry a letter or a digit, which is what separates a name
+     * from the ellipsis prose writes when it means "any of them" -- two
+     * such stand in `plan/main.styx` today, quoting this file's own
+     * header, and a sweep that read them as citations would report the
+     * sentence describing the check as a defect the check had found. */
     let parts: Vec<&str> = id.split(':').collect();
-    (parts.len() == 3 && parts.iter().all(|part| !part.is_empty())).then(|| format!("[{id}]"))
+    let named = |part: &&str| part.bytes().any(|byte| byte.is_ascii_alphanumeric());
+    (parts.len() == 3 && parts.iter().all(named)).then(|| format!("[{id}]"))
+}
+
+/// Every file under `tree` as text, named relative to the workspace, with
+/// whatever could not be read of it pushed onto `reported`.
+///
+/// The read is lossy rather than `read_to_string`, so a file that is not
+/// UTF-8 is still swept: replacement characters cannot invent a citation
+/// and cannot hide one, whereas skipping the file would do the second.
+///
+/// [`REGISTER`] is the one file both sweeps leave out. Its subject is ids
+/// nothing declares, so it has to spell them; swept, every entry in it
+/// would report itself.
+fn text_in(workspace: &Path, tree: &str, reported: &mut Vec<String>) -> Vec<(String, String)> {
+    let mut read = Vec::new();
+    for path in files_in(workspace, tree) {
+        let name = relative_to_workspace(&path, workspace);
+        if name == REGISTER {
+            continue;
+        }
+        match std::fs::read(&path) {
+            Ok(bytes) => read.push((name, String::from_utf8_lossy(&bytes).into_owned())),
+            Err(error) => reported.push(format!("{name} is not readable: {error}")),
+        }
+    }
+    read
 }
 
 /// Every file under `tree`, whatever its extension.
@@ -448,6 +755,9 @@ mod tests {
     /// test in this file spells a citation the sweep would then find in
     /// the checker's own source.
     const OPEN: &str = "[dec";
+
+    /// The same, for the other kind of id.
+    const ELEMENT: &str = "[arch";
 
     /// Both spellings are citations, and neither the brackets nor the
     /// backticks reach the answer.
@@ -502,6 +812,66 @@ mod tests {
         assert_eq!(blocks[2], blocks[3], "one block comment is one block");
         assert_ne!(blocks[1], blocks[2], "a blank line ends a block");
         assert_ne!(blocks[3], blocks[4], "a line of code is its own block");
+    }
+
+    /// An element id is a citation, and its ellipsis is not.
+    ///
+    /// `plan/main.styx` carries two sentences that write a kind, a corpus
+    /// and three dots to mean "any of them" -- both quoting this file's
+    /// own header -- so a sweep without the second half of this test
+    /// reports the prose describing the check as a defect the check found.
+    #[test]
+    fn element_ids_are_cited_and_ellipses_are_not() {
+        let ids = |text: &str| {
+            citations(text)
+                .into_iter()
+                .map(|citation| citation.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(&format!("//! under {ELEMENT}:nsh:a-name], which")),
+            vec![format!("{ELEMENT}:nsh:a-name]")]
+        );
+        for text in [
+            format!("//! any {OPEN}:nsh:...]"),
+            format!("//! any {ELEMENT}:nsh:...]"),
+            format!("//! any {OPEN}:...:a-name]"),
+        ] {
+            assert!(citations(&text).is_empty(), "{text} was read as a citation");
+        }
+    }
+
+    /// The architecture register this repository keeps is read, which is
+    /// the property that would break silently if its shape changed under
+    /// the reader above -- and every element citation in the tree would
+    /// then resolve against nothing.
+    #[test]
+    fn the_architecture_register_reads() {
+        let (ids, reported) = elements(&workspace_root());
+        assert!(reported.is_empty(), "{reported:?}");
+        assert!(
+            ids.len() >= 4,
+            "{} elements read, which is fewer than the register holds",
+            ids.len()
+        );
+    }
+
+    /// The undeclared-citation register parses, and every entry carries
+    /// the two things an entry is for: a plan id, and an answer saying
+    /// what is true instead.
+    ///
+    /// A `sites` of zero would be an entry about nothing, which the check
+    /// reports at run time; asserted here as well because a register that
+    /// silently admitted one would make the count half of the symmetry
+    /// vacuous for that id.
+    #[test]
+    fn the_undeclared_register_reads() {
+        let (registered, reported) = register(&workspace_root());
+        assert!(reported.is_empty(), "{reported:?}");
+        for (id, entry) in &registered {
+            assert!(!entry.answer.trim().is_empty(), "{id} has no answer");
+            assert!(entry.sites > 0, "{id} is registered at no sites");
+        }
     }
 
     /// The corpus this repository keeps is read, states and all -- the

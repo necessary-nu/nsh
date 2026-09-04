@@ -1769,6 +1769,7 @@ fn main() {
             "cited_decisions_are_live",
             citations::cited_decisions_are_live,
         ),
+        ("cited_ids_are_declared", citations::cited_ids_are_declared),
         (
             "hosts_publish_the_same_surface",
             platform_surface::hosts_publish_the_same_surface,
