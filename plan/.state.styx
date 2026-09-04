@@ -1684,7 +1684,7 @@ assertions (
     {id tooling.moved-only-cannot-see-a-rename, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:30:58.889527107Z}
     {id tooling.disk.headroom-cannot-see-the-fuzz-build-tree, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:39:17.020293253Z}
     {id bash.divergences.redirection-status-without-a-command, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:35:38.421860902Z}
-    {id tooling.disk.worktrees-on-tmpfs, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:39:18.959951703Z}
+    {id tooling.disk.worktrees-on-tmpfs, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:44:15.37194993Z}
 )
 
 impl_evidence (
