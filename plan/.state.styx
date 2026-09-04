@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-04T11:16:54.762948801Z
+last_sync_at 2026-09-04T12:38:02.706421474Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -1201,9 +1201,11 @@ derived_priorities (
     {id bash.divergences.allexport-after-unset, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.allexport-compound-readonly, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.array-letter-plain-operand, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.call-argument-frames, priority 0, derived_at 2026-09-04T12:38:02.706421474Z}
     {id bash.divergences.compound-integer-attribute, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.empty-bracket-class, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.error-boundary-status-collisions, priority 0, derived_at 2026-09-04T11:10:16.847978444Z}
+    {id bash.divergences.exec-argument-zero, priority 0, derived_at 2026-09-04T12:38:02.706421474Z}
     {id bash.divergences.export-minus-n, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.local-after-unset, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.local-dash, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1339,6 +1341,7 @@ derived_priorities (
     {id give-each-gate-run-its-own-shell, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id give-the-failing-case-baseline-the-gates-control, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id guard-the-process-file-creation-mask, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.bash-comparison-baseline-is-stale, priority 0, derived_at 2026-09-04T12:38:02.706421474Z}
     {id harness.creation-mask-check-returns-early, priority 0, derived_at 2026-09-03T23:34:33.427780551Z}
     {id harness.derived-corpus-age, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id harness.differential-kill-after, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -2464,6 +2467,7 @@ impl_evidence (
     ), rule_versions_seen (
         {id cost.asserted-as-work, version 0}
     )}
+    {id perf.locale.per-byte-of-a-name}
     {id perf.locale.unreachable-positions, covered_rules (
         cost.only-the-work-the-command-needs
     ), covered_claims (
