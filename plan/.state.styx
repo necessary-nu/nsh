@@ -1686,6 +1686,7 @@ assertions (
     {id bash.divergences.redirection-status-without-a-command, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:35:38.421860902Z}
     {id tooling.disk.worktrees-on-tmpfs, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:44:15.37194993Z}
     {id bash.divergences.exec-argument-zero, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:54:20.458304431Z}
+    {id bash.divergences.publish-names.table-views, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:58:29.522603092Z}
 )
 
 impl_evidence (
