@@ -9267,6 +9267,13 @@ children (
                                                         kind @note
                                                         text "THE OTHER THREE SIBLINGS HAVE LANDED, and this node is now the whole of what is left. Measured at `69d2a45` the way the parent node measured it (pinned Bash 5.3.15, `env -i PATH=/usr/bin:/bin LC_ALL=C`, `declare -p` on standard input):\\n\\n    when the parent was filed:  bash 48, nsh 31, 29 shared, 19 missing, 2 extra\\n    after withhold-prompts:                          0 extra\\n    after call-stack-arrays:              34 shared, 13 missing\\n    after ordinary-state:                 41 shared,  6 missing\\n    after environment-facts:              43 shared,  4 missing\\n\\nand the four are exactly this node's:\\n\\n    BASH_ALIASES  BASH_CMDS  BASH_LOADABLES_PATH  COMP_WORDBREAKS\\n\\nSo the parent's `DONE WHEN` -- \"the start-up `declare -p` sets can be compared whole rather than name by name\" -- is now one decision away, and the decision is this one. The third option this node lists (register the four in `docs/divergences.md` and have `bash_shell_facts.rs` compare the sets minus a named exclusion list) has become much cheaper than it was when the node was filed: the exclusion list is these four names and nothing else, and the comparison it enables is \"the reference's set, less four, equals ours\", with no per-name enumeration left. `every_shared_name` currently enumerates 42 names and its doc says why; that whole function is what the third option deletes.\\n\\nONE THING THAT CHANGED UNDER THE FIRST OPTION. `declare -p NAME` IS a read in this shell now (`builtins/declare.rs`, `if named { special::refresh(...) }`), and so are `test -v NAME` and a subscripted read, as of `call-stack-arrays`. So \"publish them as invisible names with no value\" is not automatically inert: a name carrying `Callback::Special` will be computed by any of those three, and a name without the mark will answer nothing at all to a named `declare -p` -- which is what the reference does for `COMP_WORDBREAKS` in a listing but not what it does when asked by name."
                                                     }
+
+                                                    {
+                                                        at 2026-09-04T14:14:27.209313022Z
+                                                        author "brendan@necessary.nu"
+                                                        kind @status
+                                                        text "Todo → Doing (nplan start)"
+                                                    }
                                                 )
                                             }
 
@@ -9290,6 +9297,20 @@ children (
                                                         author "brendan@necessary.nu"
                                                         kind @status
                                                         text "Todo → Doing (nplan start)"
+                                                    }
+                                                )
+                                            }
+
+                                            {
+                                                id bash.divergences.publish-names.table-views
+                                                title "Make a variable that is a live view of the alias and hash tables"
+                                                kind @feat
+                                                log (
+                                                    {
+                                                        at 2026-09-04T14:18:34.11747602Z
+                                                        author "brendan@necessary.nu"
+                                                        kind @note
+                                                        text "THE OPEN HALF OF `bash.divergences.publish-names.interactive-surface`, filed 2026-09-04 when that node decided the other half. `[spec:nsh:req:compat.bash.names.only-what-the-reference-has]` allows such a name two endings -- absent and recorded, or genuinely wired -- and that node took absence for all four it held, recording it in `docs/divergences.md`. Two of the four could still be wired; this is that work, and nothing depends on it.\n\nMEASURED against the pinned Bash 5.3.15, `env -i PATH=/usr/bin:/bin LC_ALL=C`, load 25:\n\n    alias zz=\"echo z\"; declare -p BASH_ALIASES\n      declare -A BASH_ALIASES=([zz]=\"echo z\" )\n    BASH_ALIASES[ll]='ls -l'; alias\n      alias ll='ls -l'\n    hash -p /bin/true tt; declare -p BASH_CMDS\n      declare -A BASH_CMDS=([tt]=\"/bin/true\" )\n    BASH_CMDS[qq]=/bin/echo; hash -t qq\n      /bin/echo\n    alias zz=\"echo z\"; echo \"${!BASH_ALIASES[@]}\"\n      zz\n\nSo a read walks the table, a write mutates it, and `${!name[@]}` enumerates it. Two further facts the shape has to account for: `test -v BASH_ALIASES` answers **1** even though `declare -p` lists the name, and `unset BASH_ALIASES` destroys the view for the life of the shell -- a later `alias zz=1` does not bring it back and `declare -p BASH_ALIASES` then says `not found`. Neither is what an ordinary associative array does.\n\nWHY IT IS NOT A PUBLISH. A special name in this shell computes a *scalar* through `Callback::Special` in `variables/special.rs`; there is nothing that makes a name resolve, element by element, into another subsystem's storage. The tables themselves exist -- `builtins/alias.rs` and the command hash `builtins/hash.rs` reaches -- so the work is the indirection and not the data.\n\nWHAT TO SETTLE FIRST, and it is the whole design question: whether the view is materialised on read (cheap, and wrong for a write, which then has to be intercepted separately) or whether `VariableValue` grows a variant whose associative operations dispatch to a table. The second is the honest shape and it reaches `variables/value.rs`, every `declare -p` printer, `${!a[@]}`, `${#a[@]}`, subscripted read and assignment, `unset a[k]` and the `-A` attribute report. Read `[dec:nsh:no-ambient-state]` before starting: a view is a borrow of shell state held under a name, which is the thing that decision is about.\n\nWHY IT MIGHT BE WORTH IT ANYWAY. `BASH_ALIASES[x]=y` is how bash-completion and several dotfile idioms define an alias from inside a function, and `BASH_CMDS[c]=/path` is how a script pins a command's path without `hash -p`. Both are script-visible rather than interactive, so `[dec:nsh:bash-compatibility-is-scripts]` does not put them outside the contract the way it puts `COMP_WORDBREAKS` there.\n\nDONE WHEN the five measured rows above answer identically in both shells, `test -v` and the destroying `unset` answer as the reference does, `bash_shell_facts.rs`'s exclusion list loses these two names, and `docs/divergences.md`'s entry is cut down to the two that remain."
                                                     }
                                                 )
                                             }
@@ -9807,6 +9828,7 @@ children (
                                         id bash.divergences.error-boundary-status-collisions
                                         title "Decide the other four places where the Smoosh status and the dialect boundary collide"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-03T23:37:20.316714721Z
@@ -9820,6 +9842,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T14:14:08.865771282Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

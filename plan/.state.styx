@@ -1669,13 +1669,14 @@ assertions (
     {id tooling.oracle-sweep-red-on-master, kind @complete, author "brendan@necessary.nu", at 2026-09-04T12:46:12.990115892Z}
     {id bash.divergences.empty-bracket-class, kind @complete, author "brendan@necessary.nu", at 2026-09-04T12:46:13.453314052Z}
     {id harness.oracle-outside-the-worktree, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:42:59.128374229Z}
-    {id bash.divergences.error-boundary-status-collisions, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:08.743673125Z}
+    {id bash.divergences.error-boundary-status-collisions, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:14:08.865771282Z}
     {id harness.spec-cannot-see-the-shell-harness, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:19:21.941213258Z}
     {id tooling.nplan.data-is-not-production, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:52.642186067Z}
     {id struct.posix-children-under-unix, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:16:37.240687246Z}
     {id struct.editor-absent-path-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:20:09.293190743Z}
     {id tooling.disk.reach-every-build, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:59:02.815360504Z}
     {id harness.oils-baseline-is-behind, kind @doing, author "brendan@necessary.nu", at 2026-09-04T14:01:26.999826924Z}
+    {id bash.divergences.publish-names.interactive-surface, kind @doing, author "brendan@necessary.nu", at 2026-09-04T14:14:27.209313022Z}
 )
 
 impl_evidence (

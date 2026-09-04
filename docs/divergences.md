@@ -1274,3 +1274,82 @@ Everything else `time` does matches, measured against the pinned Bash
 once.
 
 Costs no survey case; no corpus exercises `TIMEFORMAT`.
+
+## Bash-compatibility divergences taken under `[dec:nsh:bash-compatibility-is-scripts]`
+
+### Four names for surfaces this shell has not got
+
+**Status:** deliberate. `crates/nsh/src/variables/special.rs`, by absence.
+
+Started 2026-09-04 from a whole-set diff of the two shells' start-up
+`declare -p`, `env -i PATH=/usr/bin:/bin LC_ALL=C`, fed on standard input:
+the reference publishes 47 names, this shell 43, the 43 are a strict subset
+of the 47, and the four that are missing are
+
+    BASH_ALIASES  BASH_CMDS  BASH_LOADABLES_PATH  COMP_WORDBREAKS
+
+`[spec:nsh:req:compat.bash.names.only-what-the-reference-has]` allows a
+name of this kind exactly two endings -- absent and recorded here, or
+genuinely wired to the facility -- and forbids a third, "a value that
+describes nothing". All four take the first, and the reason is different
+for each pair.
+
+**`BASH_ALIASES` and `BASH_CMDS` are not variables.** They are live views
+of the alias table and the command hash table, measured against the pinned
+Bash 5.3.15:
+
+```
+$ alias zz="echo z"; declare -p BASH_ALIASES
+declare -A BASH_ALIASES=([zz]="echo z" )
+$ BASH_ALIASES[ll]='ls -l'; alias
+alias ll='ls -l'
+$ BASH_CMDS[qq]=/bin/echo; hash -t qq
+/bin/echo
+```
+
+A write defines an alias; a read walks the table; `unset BASH_ALIASES`
+destroys the view for the life of the shell and a later `alias` does not
+bring it back. This shell has both tables -- `builtins/alias.rs` and the
+command hash -- and no machinery for a variable that *is* one: a special
+name here computes a scalar through `Callback::Special`, which is a value
+and not a table. So the honest choices were absence or a subsystem, and
+publishing `declare -A BASH_ALIASES=()` was never among them: it is the
+listing the rule's last sentence names, one that agrees with the reference
+until a script writes into it and then silently stores an array element
+where an alias was meant. `bash.divergences.publish-names.table-views`
+holds the wiring if it is ever wanted.
+
+**`COMP_WORDBREAKS` and `BASH_LOADABLES_PATH` name facilities that are not
+here, and one of them is not here on purpose.** `COMP_WORDBREAKS` is
+Readline's completer word-break set, and
+`[dec:nsh:bash-compatibility-is-scripts]` retired the interactive profile
+rather than reimplement a library this shell does not link. The subtler
+half is that this shell *does* complete: `editor/completion.rs` answers
+filename candidates. It still cannot own this name, because its own doc
+says nshedit "asks for the candidates that extend a stem and has no
+opinion" about how the line was split -- the break characters live in the
+editor, so a published `COMP_WORDBREAKS` could be read and assigned and
+would change nothing. `BASH_LOADABLES_PATH` is where `enable -f` looks for
+a shared object, and `builtins/enable.rs` refuses that option outright with
+`enable: -f: loading built-ins from a file is not supported`. A path list
+naming six directories a loader will never open is the same false report.
+
+The neighbouring decision was already made the same way and is the
+precedent: `progcomp` and `hostcomplete` are recognised by `shopt` but
+start *off*, unlike the reference, because "reporting them on would
+advertise a facility that is not there" -- and because bash-completion
+reads them as a licence to load itself.
+
+What the absence buys is a comparison rather than an enumeration.
+`crates/nsh-cli/tests/bash_shell_facts.rs` used to list 42 shared names by
+hand; it now takes both shells' whole published sets and asserts that the
+reference's, less exactly these four, is ours -- so a name that appears on
+either side without being decided is a failure rather than something
+nobody wrote down. The exclusion list is these four names and nothing
+else.
+
+No survey case sees any of the four, and not because they were excluded:
+grepped 2026-09-04, the name appears nowhere in `tests/surveys/oils/`,
+`tests/surveys/smoosh/shell/` or `tests/corpus/`. The comparison in
+`bash_shell_facts.rs` is the only thing that observes them, which is why
+it had to become a whole-set claim to be worth anything.

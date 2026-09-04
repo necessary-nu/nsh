@@ -17,8 +17,11 @@
 //! what a read-only listing shows; a `declare -p` diff of the two
 //! shells' whole start-up sets found eight, because `BASHPID`,
 //! `OPTIND`, `RANDOM` and `SRANDOM` carry `-i` and appear in no
-//! read-only listing at all. [`every_shared_name`] is that diff as a
-//! test.
+//! read-only listing at all. [`published_names`] is that diff as a test:
+//! the reference's whole published set, less the four names of
+//! [`A_SURFACE_THIS_SHELL_HAS_NOT_GOT`], is this shell's. Nothing here
+//! enumerates the shared names, so a name that appears on either side
+//! without being decided is a failure rather than an omission.
 //!
 //! A VALUE IS NOT COMPARED HERE and a name is. Two shells started side
 //! by side disagree about `PPID`, `BASHPID`, `RANDOM`, `SECONDS` and
@@ -271,71 +274,61 @@ const A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL: &[&str] = &[
     "PS1=mine\nunset PS1\necho \"status=$? [${PS1-unset}]\"\n",
 ];
 
-/// Every name both shells publish, through `declare -p`, with the value
-/// cut off.
+/// The names of a surface this shell has not got, which the reference
+/// publishes and this one does not.
 ///
-/// This is the diff the node asked to start from, kept as a check: the
-/// letters and the name have to agree for all of them, and the two
-/// shells' start-up sets are still not comparable whole -- the reference
-/// has the four names of an interactive surface this shell has not got,
-/// four of the nineteen it started with. `PS1` and `PS2` are not shared either, and the reference is
-/// the one without them:
-/// [`A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL`] is where those two are asked.
+/// `[spec:nsh:req:compat.bash.names.only-what-the-reference-has]` allows
+/// such a name two endings -- absent and recorded as a sanctioned
+/// divergence, or genuinely wired to the facility -- and forbids a value
+/// that describes nothing. All four take the first;
+/// `docs/divergences.md` carries the argument for each and
+/// `bash.divergences.publish-names.table-views` holds the wiring for the
+/// two that could still have it.
 ///
-/// `SECONDS` is the one shared name left out, and it is out because it
-/// is measured rather than because it was missed: in the reference it
+/// This list is the *whole* of the difference between the two published
+/// sets, which is what makes [`the_published_set_is_the_references_less_four`]
+/// a claim rather than an enumeration: a name that appears on either side
+/// without being decided fails that test.
+const A_SURFACE_THIS_SHELL_HAS_NOT_GOT: &[&str] = &[
+    "BASH_ALIASES",
+    "BASH_CMDS",
+    "BASH_LOADABLES_PATH",
+    "COMP_WORDBREAKS",
+];
+
+/// `SECONDS` is asked about nowhere here, and it is out because it is
+/// measured rather than because it was missed: in the reference it
 /// carries no letter until something *reads* it, and `-i` afterwards --
 /// a fresh `declare -p` lists `declare -- SECONDS` and
-/// `: $SECONDS; declare -p` lists `declare -i SECONDS`. A row here would
-/// read it and so could not see the difference at all;
+/// `: $SECONDS; declare -p` lists `declare -i SECONDS`. A row asking for
+/// its letters would read it and so could not see the difference at all;
 /// `mark-seconds-when-it-is-read` holds that half.
-fn every_shared_name() -> Vec<String> {
-    const SHARED: &[&str] = &[
-        "BASH",
-        "BASHOPTS",
-        "BASHPID",
-        "BASH_ARGC",
-        "BASH_ARGV",
-        "BASH_LINENO",
-        "BASH_SOURCE",
-        "BASH_SUBSHELL",
-        "BASH_VERSINFO",
-        "BASH_VERSION",
-        "DIRSTACK",
-        "EPOCHREALTIME",
-        "EPOCHSECONDS",
-        "BASH_ARGV0",
-        "BASH_COMMAND",
-        "BASH_MONOSECONDS",
-        "EUID",
-        "FUNCNAME",
-        "GROUPS",
-        "HISTCMD",
-        "HOSTNAME",
-        "HOSTTYPE",
-        "IFS",
-        "LC_ALL",
-        "LINENO",
-        "MACHTYPE",
-        "OLDPWD",
-        "OPTERR",
-        "OPTIND",
-        "OSTYPE",
-        "PATH",
-        "PPID",
-        "PS4",
-        "PWD",
-        "RANDOM",
-        "SHELL",
-        "SHELLOPTS",
-        "SHLVL",
-        "SRANDOM",
-        "TERM",
-        "UID",
-    ];
-    SHARED
-        .iter()
-        .map(|name| format!("declare -p {name} | sed -E 's/=.*//'\n"))
+const MEASURED_BY_READING_IT: &str = "SECONDS";
+
+/// The names in one shell's start-up `declare -p`, in the order it wrote
+/// them.
+///
+/// Only the name is taken. Two shells started side by side disagree about
+/// `PPID`, `BASHPID`, `RANDOM`, `SECONDS` and `PWD` by construction, so a
+/// whole-set comparison that kept the values could only ever fail.
+fn published_names(listing: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(listing)
+        .lines()
+        .filter_map(|line| line.strip_prefix("declare -"))
+        .filter_map(|rest| rest.split_once(' '))
+        .map(|(_letters, named)| {
+            named
+                .split(['=', '[', ' '])
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .filter(|name| {
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        })
         .collect()
 }
 
@@ -439,12 +432,55 @@ fn a_prompt_is_only_for_a_watched_shell() {
     );
 }
 
+/// The reference's published set, less the four names of a surface this
+/// shell has not got, is this shell's published set.
+///
+/// An enumeration of shared names can only say "these agree". This says
+/// "and nothing else is there", which is the half that catches a name
+/// published by accident, and it is the whole reason the exclusion list
+/// has to stay exactly four long.
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
+#[test]
+fn the_published_set_is_the_references_less_four() {
+    let (ours, theirs) = both(&[], "declare -p\n");
+    let mine = published_names(&ours.0);
+    let expected: Vec<String> = published_names(&theirs.0)
+        .into_iter()
+        .filter(|name| !A_SURFACE_THIS_SHELL_HAS_NOT_GOT.contains(&name.as_str()))
+        .collect();
+
+    /* A listing neither shell could produce would make every assertion
+     * below vacuously true, and the failure would read as a pass. */
+    assert!(
+        expected.len() > 40,
+        "the reference published {} names, which is not a start-up listing",
+        expected.len()
+    );
+    assert_eq!(mine, expected);
+}
+
 /// Every name both shells publish carries the reference's letters.
+///
+/// The set is taken from the run rather than written down, so a name that
+/// appears later is asked about without anyone remembering to add it.
 // [spec:nsh:req:compat.bash.builtins-special-variables/test]
 // [spec:nsh:req:compat.bash.arrays-declarations/test]
 #[test]
 fn the_shared_names_carry_the_same_letters() {
-    let cases = every_shared_name();
+    let (_, theirs) = both(&[], "declare -p\n");
+    let cases: Vec<String> = published_names(&theirs.0)
+        .into_iter()
+        .filter(|name| {
+            !A_SURFACE_THIS_SHELL_HAS_NOT_GOT.contains(&name.as_str())
+                && name != MEASURED_BY_READING_IT
+        })
+        .map(|name| format!("declare -p {name} | sed -E 's/=.*//'\n"))
+        .collect();
+    assert!(
+        cases.len() > 40,
+        "only {} shared names to ask about",
+        cases.len()
+    );
     let borrowed: Vec<&str> = cases.iter().map(String::as_str).collect();
     agrees(&[], &borrowed);
 }
