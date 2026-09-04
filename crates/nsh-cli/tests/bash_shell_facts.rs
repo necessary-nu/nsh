@@ -89,6 +89,33 @@ const AN_INTEGER_FACT_IS_ARITHMETIC: &[&str] = &[
     "echo $(( EUID - EUID ))\n",
 ];
 
+/// The two names that describe the session rather than the shell.
+///
+/// Measured on the pinned 5.3.15. With nothing supplied the reference
+/// answers `declare -- TERM="dumb"` and `declare -- SHELL="/bin/bash"`,
+/// neither exported; with either inherited it keeps the value and the
+/// `-x` the import gave it, and an inherited empty string counts as an
+/// answer rather than as nothing.
+///
+/// `SHELL` IS THE PASSWORD ENTRY'S LOGIN SHELL, which is why the rows can
+/// compare the value and not just the name: both shells read the same
+/// entry, so both say `/bin/bash` on a host whose `getent passwd` does.
+/// It is not `$0` and not the binary's path -- a copy of the pinned Bash
+/// run from another directory still answers `/bin/bash`, and so does the
+/// same binary run through `exec -a totallyother`.
+const THE_SESSION_HAS_TWO_NAMES: &[&str] = &[
+    "declare -p TERM SHELL\n",
+    "echo \"[$TERM][$SHELL]\"\n",
+    "echo \"[${TERM+s}][${SHELL+s}]\"\n",
+    "declare -p | grep -cE ' (TERM|SHELL)='\n",
+    "[ -x \"$SHELL\" ] && echo runnable || echo not-runnable\n",
+    "case $TERM in '') echo empty;; *) echo \"named=$TERM\";; esac\n",
+    /* Whether either name reaches a child is the export mark, and the
+     * mark is the import's rather than the default's. */
+    "env | grep -cE '^(TERM|SHELL)='\n",
+    "export TERM\nenv | grep -c '^TERM='\n",
+];
+
 /// The eight names that are state the shell already kept.
 ///
 /// Measured on the pinned 5.3.15, fed on standard input. Seven are in a
@@ -250,8 +277,8 @@ const A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL: &[&str] = &[
 /// This is the diff the node asked to start from, kept as a check: the
 /// letters and the name have to agree for all of them, and the two
 /// shells' start-up sets are still not comparable whole -- the reference
-/// has `SHELL`, `TERM` and the four names of an interactive surface this
-/// shell has not got, six of the nineteen it started with. `PS1` and `PS2` are not shared either, and the reference is
+/// has the four names of an interactive surface this shell has not got,
+/// four of the nineteen it started with. `PS1` and `PS2` are not shared either, and the reference is
 /// the one without them:
 /// [`A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL`] is where those two are asked.
 ///
@@ -299,9 +326,11 @@ fn every_shared_name() -> Vec<String> {
         "PS4",
         "PWD",
         "RANDOM",
+        "SHELL",
         "SHELLOPTS",
         "SHLVL",
         "SRANDOM",
+        "TERM",
         "UID",
     ];
     SHARED
@@ -361,6 +390,19 @@ fn both_as_command(script: &str) -> ((Vec<u8>, i32), (Vec<u8>, i32)) {
         pinned_bash::answer(nsh, &["-o", "bash", "-c", script], ""),
         pinned_bash::answer(&bash, &["-c", script], ""),
     )
+}
+
+/// `TERM` and `SHELL` carry the reference's defaults, and an inherited
+/// value of either is left exactly as it arrived.
+// [spec:nsh:req:compat.bash.names.environment-facts/test]
+#[test]
+fn the_session_has_two_names() {
+    agrees(&[], THE_SESSION_HAS_TWO_NAMES);
+    agrees(
+        &[("TERM", "xterm-256color"), ("SHELL", "/bin/zsh")],
+        THE_SESSION_HAS_TWO_NAMES,
+    );
+    agrees(&[("TERM", ""), ("SHELL", "")], THE_SESSION_HAS_TWO_NAMES);
 }
 
 /// Every name that is state this shell already kept answers from it.

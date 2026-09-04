@@ -71,7 +71,25 @@ const DIAGNOSE_BAD_OPTIONS: &str = "1";
 
 /// Facts about the host that an inherited environment may already
 /// answer, and which the shell therefore must not overwrite.
-const INHERITABLE: [&[u8]; 4] = [b"HOSTNAME", b"HOSTTYPE", b"MACHTYPE", b"OSTYPE"];
+///
+/// `TERM` and `SHELL` are here for a slightly different reason from the
+/// other four: they are not facts about the host but statements about
+/// the session, and whoever started the shell knows more about both than
+/// the shell does. An inherited empty string counts as an answer --
+/// `TERM= bash -c 'declare -p TERM'` is `declare -x TERM=""` in the
+/// reference, not `dumb`.
+const INHERITABLE: [&[u8]; 6] = [
+    b"HOSTNAME",
+    b"HOSTTYPE",
+    b"MACHTYPE",
+    b"OSTYPE",
+    b"SHELL",
+    b"TERM",
+];
+
+/// What `TERM` says when nothing else does, which is what the reference
+/// says: a terminal with no capabilities at all.
+const UNKNOWN_TERMINAL: &str = "dumb";
 
 /// The highest value `$RANDOM` produces, as Bash documents it.
 const RANDOM_MODULUS: u64 = 32_768;
@@ -181,7 +199,7 @@ fn publish(shell: &mut Shell) {
     let host = nsh_platform::host_name()
         .map(|name| BString::from(name.to_shell_bytes()))
         .unwrap_or_default();
-    let scalars: [(&[u8], BString); 11] = [
+    let scalars: [(&[u8], BString); 13] = [
         (b"BASH", shell_path(shell)),
         (b"BASH_VERSION", BString::from(version.as_str())),
         (b"HOSTNAME", host),
@@ -203,6 +221,8 @@ fn publish(shell: &mut Shell) {
             BString::from(nsh_platform::effective_uid().as_raw().to_string()),
         ),
         (b"SHLVL", BString::from(shell_level(shell).to_string())),
+        (b"TERM", BString::from(UNKNOWN_TERMINAL)),
+        (b"SHELL", login_shell()),
         /* `getopts`' own error switch, and the reference writes `1` over
          * whatever the environment carried: `OPTERR=0 bash -c ...` reads
          * back `declare -x OPTERR="1"`, keeping only the export mark the
@@ -362,6 +382,26 @@ pub(crate) fn opterr_reports(shell: &Shell) -> bool {
         .ok()
         .and_then(|text| text.trim().parse::<i64>().ok())
         != Some(0)
+}
+
+/// `$SHELL`: the shell this account is meant to run.
+///
+/// The password entry's login shell, and not this program. Established
+/// rather than assumed: a copy of the pinned Bash run from a directory
+/// of its own answers `declare -- SHELL="/bin/bash"`, and so does the
+/// same binary run through `exec -a totallyother`, on a host whose
+/// `getent passwd` says `/bin/bash`. So the value follows neither `$0`
+/// nor the path the binary was found at.
+///
+/// The name means "which shell does this user use", which is the
+/// question a script asking `$SHELL -c` and an editor spawning a shell
+/// are both asking. An account whose entry names no shell falls back to
+/// the host's own answer, as the reference does.
+// [spec:nsh:req:compat.bash.names.environment-facts]
+fn login_shell() -> BString {
+    let shell = nsh_platform::login_shell()
+        .unwrap_or_else(|| nsh_platform::fallback_shell().to_os_string());
+    BString::from(shell.to_shell_bytes())
 }
 
 /// `$0` as the shell currently answers it, which `BASH_ARGV0` both

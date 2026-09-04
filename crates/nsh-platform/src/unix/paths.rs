@@ -10,13 +10,62 @@
 //!
 //! `named_user_home` is here for the same reason: `~user` is a question
 //! about where a name points, and the passwd database is this host's
-//! answer to it.
+//! answer to it. `login_shell` asks the same database the other question
+//! a shell has of it: which shell this account is meant to run.
 
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
 use rustix::fs::{AtFlags, CWD, accessat};
+
+/// One field of one `passwd` record, copied out before the buffer
+/// backing it is dropped.
+///
+/// `lookup` performs the `getpw*_r` call and `field` names the member to
+/// take. The two questions this host is asked of the database differ
+/// only in the key; the growing buffer, the `ERANGE` retry, the two null
+/// checks and the copy are the whole of the rest, so they are written
+/// once rather than twice.
+///
+/// A `_r` lookup writes strings *into the caller's buffer*, so nothing
+/// borrowed from `record` may outlive `storage`. That is why the return
+/// is owned and why the copy happens here and not at either call site.
+fn passwd_field(
+    lookup: impl Fn(*mut libc::passwd, *mut u8, usize, *mut *mut libc::passwd) -> i32,
+    field: impl Fn(&libc::passwd) -> *const libc::c_char,
+) -> Option<OsString> {
+    let mut size = 1024_usize;
+    loop {
+        let mut record = std::mem::MaybeUninit::<libc::passwd>::uninit();
+        let mut result = std::ptr::null_mut();
+        let mut storage = vec![0_u8; size];
+        let error = lookup(
+            record.as_mut_ptr(),
+            storage.as_mut_ptr(),
+            storage.len(),
+            &mut result,
+        );
+        if error == libc::ERANGE {
+            size = size.checked_mul(2)?;
+            continue;
+        }
+        if error != 0 || result.is_null() {
+            return None;
+        }
+        // SAFETY: a zero return with a non-null result initialized `record`.
+        let record = unsafe { record.assume_init() };
+        let value = field(&record);
+        if value.is_null() {
+            return None;
+        }
+        // SAFETY: a passwd field is a terminated string inside the live
+        // `storage`, and it is copied before `storage` is dropped.
+        return Some(OsString::from_vec(
+            unsafe { CStr::from_ptr(value) }.to_bytes().to_vec(),
+        ));
+    }
+}
 
 /// Look up the home directory named by a `~user` expansion.
 ///
@@ -25,41 +74,33 @@ use rustix::fs::{AtFlags, CWD, accessat};
 /// this function: the shell expands it from that shell instance's `HOME`.
 pub fn named_user_home(name: &OsStr) -> Option<PathBuf> {
     let name = CString::new(name.as_bytes()).ok()?;
-    let mut size = 1024_usize;
-    loop {
-        let mut record = std::mem::MaybeUninit::<libc::passwd>::uninit();
-        let mut result = std::ptr::null_mut();
-        let mut storage = vec![0_u8; size];
-        // SAFETY: the name is terminated; `record`, `result`, and `storage`
-        // are writable for the call. Any returned strings point into
-        // `storage` and are copied before it is dropped.
-        let error = unsafe {
-            libc::getpwnam_r(
-                name.as_ptr(),
-                record.as_mut_ptr(),
-                storage.as_mut_ptr().cast(),
-                storage.len(),
-                &mut result,
-            )
-        };
-        if error == libc::ERANGE {
-            size = size.checked_mul(2)?;
-            continue;
-        }
-        if error != 0 || result.is_null() {
-            return None;
-        }
-        // SAFETY: success initialized `record`; `pw_dir` is either NULL or
-        // a terminated string within live `storage`.
-        let directory = unsafe { record.assume_init().pw_dir };
-        if directory.is_null() {
-            return None;
-        }
-        // SAFETY: `pw_dir` is a terminated passwd field and is copied now.
-        return Some(PathBuf::from(OsString::from_vec(
-            unsafe { CStr::from_ptr(directory) }.to_bytes().to_vec(),
-        )));
-    }
+    passwd_field(
+        |record, storage, length, result| {
+            // SAFETY: the name is terminated, and `record`, `storage` and
+            // `result` are writable for the length passed with them.
+            unsafe { libc::getpwnam_r(name.as_ptr(), record, storage.cast(), length, result) }
+        },
+        |record| record.pw_dir.cast_const(),
+    )
+    .map(PathBuf::from)
+}
+
+/// The shell this account is meant to run, as the passwd database has it.
+///
+/// It is not this program: `$SHELL` answers "which shell does this user
+/// use", which a script hands to `$SHELL -c` and an editor spawns, and
+/// the reference reads it out of the login entry rather than out of
+/// `argv[0]`. An account whose entry names no shell has none to report.
+pub fn login_shell() -> Option<OsString> {
+    passwd_field(
+        |record, storage, length, result| {
+            // SAFETY: `record`, `storage` and `result` are writable for
+            // the length passed with them, and the uid is a plain value.
+            unsafe { libc::getpwuid_r(libc::getuid(), record, storage.cast(), length, result) }
+        },
+        |record| record.pw_shell.cast_const(),
+    )
+    .filter(|shell| !shell.is_empty())
 }
 
 pub fn default_search_path() -> OsString {

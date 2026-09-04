@@ -42,6 +42,17 @@ pub fn named_user_home(name: &OsStr) -> Option<PathBuf> {
     }
 }
 
+/// The shell this account is meant to run.
+///
+/// Nothing on this host records one. An account here has a command
+/// processor, which is a different claim -- `COMSPEC` names whatever
+/// starts a batch file and is not a login shell -- so the honest answer
+/// is that the question has none, and the caller decides what to do
+/// about that.
+pub fn login_shell() -> Option<OsString> {
+    None
+}
+
 pub(super) fn with_shell_path_separators(value: OsString) -> OsString {
     OsString::from_wide(
         &value

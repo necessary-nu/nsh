@@ -46,12 +46,12 @@ mod paths;
 pub use paths::{
     AccessMode, DirectoryEntry, FileKind, FileMetadata, absolute_path,
     can_unlink_current_directory, controlling_terminal_path, current_directory,
-    default_search_path, effective_access, fallback_shell, logical_path, named_user_home,
-    null_device_path, open_history_file, path_exists, path_is_directory, path_is_file,
-    path_is_same_file, path_metadata, read_directory, read_path, remove_file, resolve_command_path,
-    run_editor, search_path_separator, set_current_directory, shell_directory_separator,
-    shell_path_has_separator, shell_path_is_absolute, shell_path_last_separator,
-    supports_glob_metacharacters_in_filenames,
+    default_search_path, effective_access, fallback_shell, logical_path, login_shell,
+    named_user_home, null_device_path, open_history_file, path_exists, path_is_directory,
+    path_is_file, path_is_same_file, path_metadata, read_directory, read_path, remove_file,
+    resolve_command_path, run_editor, search_path_separator, set_current_directory,
+    shell_directory_separator, shell_path_has_separator, shell_path_is_absolute,
+    shell_path_last_separator, supports_glob_metacharacters_in_filenames,
 };
 mod process;
 pub use process::{
