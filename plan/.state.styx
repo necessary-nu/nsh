@@ -1681,7 +1681,9 @@ assertions (
     {id bash.divergences.read-count-waits-for-the-line, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:26:46.48065553Z}
     {id bash.divergences.procsub-in-bang, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:27:05.856128497Z}
     {id bash.divergences.call-argument-frames, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:27:32.27137626Z}
-    {id tooling.moved-only-cannot-see-a-rename, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:28:05.357183216Z}
+    {id tooling.moved-only-cannot-see-a-rename, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:30:58.889527107Z}
+    {id tooling.disk.headroom-cannot-see-the-fuzz-build-tree, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:31:01.136496989Z}
+    {id bash.divergences.redirection-status-without-a-command, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:35:38.421860902Z}
 )
 
 impl_evidence (

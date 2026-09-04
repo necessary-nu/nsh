@@ -9921,6 +9921,13 @@ children (
                                                 kind @note
                                                 text "`give-a-null-commands-failed-redirection-dashs-status` IS A SUBSET OF THIS NODE AND HAS BEEN FOLDED IN. Merged 2026-09-04; the older node is removed.\n\nIt was filed 2026-09-03 while closing `stop-the-noclobber-append-case-flaking`, from a row in that node's POSIX differential table, and it covered only POSIX's null command -- a redirection with no words in front of it. This node covers that case and four more shapes it never reached: a compound command, an `if`, and a command word that expanded to nothing.\n\nIts four measured rows, taken against `/usr/bin/dash` 0.5.12 and the pinned Bash 5.3.15 on `4db6db2`, and RE-MEASURED HERE at `f6f7f66` on a release build of it -- all four still reproduce, so nothing that has landed since has touched them:\n\n    echo one > f; set -C; > f; echo s=$?     dash 2   nsh 1   bash 1\n    > /no/such/dir/x; echo s=$?              dash 2   nsh 1   bash 1\n    < /no/such/file; echo s=$?               dash 2   nsh 1   bash 1\n    exec 2>/dev/null; > /no/such/dir/x       dash 2   nsh 1\n\nThe `set -C` row is the one worth keeping from it: a `noclobber` refusal reaches the same two sites as an open failure, so whatever fix lands here must cover it, and it is the row that connects this node to the survey case that first exposed the family.\n\nWHY THE DUPLICATE HAPPENED, since it is the second one today. The older id says \"a null command's failed redirection\" and this one says \"without a command\"; they are the same sentence in two vocabularies, and neither `nplan ready` nor a grep for the obvious word would have put them side by side. The first duplicate today -- `harness.bash-comparison-baseline-is-stale` against `harness.oils-baseline-is-behind` -- had the same shape: two names for one subject, filed hours apart by agents who each searched for their own wording.\n\nThis node keeps the older one's dep on `harness.oils-baseline-is-behind`, for the reason that dep exists at all: its DONE WHEN ends in a differential row, and a row judged against an unauditable register asserts nothing."
                                             }
+
+                                            {
+                                                at 2026-09-04T15:35:38.421860902Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -12455,6 +12462,7 @@ children (
                         id tooling.moved-only-cannot-see-a-rename
                         title "Let moved-only see both sides of a rename"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T13:13:16.461132341Z
@@ -12468,6 +12476,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T15:30:58.889527107Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -12879,6 +12894,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 WHILE CLOSING `harness.oracle-outside-the-worktree`, AND NOT PART OF IT. Found because the machine hit 100% in the middle of that node's measurements and `scripts/disk-headroom` had nothing to offer.\n\n`scripts/disk-headroom` enumerates one build tree per checkout: `for checkout in \"${CHECKOUTS[@]}\"; do target=$checkout/target`. This repository has a second one inside the main checkout. `fuzz/` is a separate cargo workspace with its own `fuzz/target`, and the script never looks there, so it is invisible to both the report and `--reclaim`.\n\nMEASURED 2026-09-04 at 15:18, load 35, with `/` at 100% and 436 MiB free:\n\n    du -sb fuzz/target  ->  0.74 GiB\n    stat fuzz/target    ->  last written 2026-08-29 14:56 (six days)\n    scripts/disk-headroom -> \"0.00 GiB total\"\n\nNothing named it in `/proc/*/cmdline` and nothing had written inside it for two hours, so it met every one of the script's own tests for safe -- clean checkout, no build tool naming it, no recent write -- and was offered by none of them because the loop never reached it. It was removed by hand to keep the machine alive, which is exactly the decision the tool exists to stop a session making on its own.\n\nWHY IT IS NOT JUST A MISSING LINE. The script's stated rule is \"anything outside a checkout `git worktree list` names\" is none of our business, and `fuzz/` is inside one. So the question is how a checkout's build trees are found rather than whether this one counts: `fuzz/target` today, and any future nested cargo workspace after it. `CACHEDIR.TAG` is cargo's own mark on a build tree root and is what `scripts/sandboxed` was taught to look for on the same day, so a bounded search for that marker inside each checkout would find both and would not need a list.\n\nWATCH THE MAIN-CHECKOUT RULE. `$ROOT/target` is deliberately never offered whole -- removing it costs the next worker a full rebuild. `fuzz/target` is not that: no gate, no documented command and no other node's measurement depends on it being warm, and rebuilding it needs `cargo-fuzz` and a nightly toolchain that a routine run does not touch. Decide explicitly which side of that rule a nested tree falls on, and say so where the loop makes the choice.\n\nDONE WHEN `scripts/disk-headroom` reports `fuzz/target` with its size and the reason it is or is not offered, `tests/harness/disk-headroom-selftest.sh` has a case for a nested build tree, and the total the tool offers on this machine changes by the measured amount rather than by an assumed one."
+                            }
+
+                            {
+                                at 2026-09-04T15:31:01.136496989Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }

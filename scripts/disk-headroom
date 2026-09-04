@@ -25,6 +25,15 @@
 #     for space that the next build immediately wants back. Its size is
 #     reported so the choice can be made deliberately, and it is never in the
 #     total this script offers to reclaim.
+#
+# WHAT IT LOOKS AT is every build tree inside a checkout, not one per checkout.
+# `fuzz/` is a cargo workspace of its own with its own `fuzz/target`, and on
+# 2026-09-04 this script offered "0.00 GiB total" while 0.74 GiB of six-day-old
+# `fuzz/target` sat inside the main checkout and builds were being refused for
+# want of 436 MiB. It met every one of the tests below for safe and was reached
+# by none of them, because the loop looked at `$checkout/target` and stopped.
+# It was removed by hand, which is the decision this tool exists to stop a
+# session making alone.
 set -euo pipefail
 
 usage() {
@@ -151,6 +160,44 @@ in_use() { # in_use TARGET-DIR MINUTES
     return 1
 }
 
+# Cargo writes `CACHEDIR.TAG` at the root of every build tree it makes, which
+# is already how `scripts/sandboxed` recognises one, so searching a checkout
+# for that marker finds its build trees without a list that has to be kept up
+# to date -- `fuzz/target` today, and whatever nested workspace comes after it.
+#
+# The search is bounded three ways, because it runs on the way to answering a
+# question about a machine that is already short. `$checkout/target` is pruned:
+# it is the tree the loop below handles by name, and it is the multi-gigabyte
+# one. `.git` is pruned. Depth stops at NESTED_DEPTH, which reaches
+# `fuzz/target` at 3 and `tests/.build/target-hos` at 4. Measured at 0.05s on
+# this checkout.
+#
+# A tree found inside another is dropped rather than counted twice: cargo tags
+# each per-target subdirectory as well as the root, so `target/CACHEDIR.TAG`
+# and `target/x86_64-pc-windows-gnu/CACHEDIR.TAG` both exist and only the
+# outermost is a tree anyone means.
+NESTED_DEPTH=${NSH_DISK_NESTED_DEPTH:-5}
+case $NESTED_DEPTH in '' | *[!0-9]*) usage ;; esac
+
+nested_build_trees() { # nested_build_trees CHECKOUT
+    local checkout=$1 tag tree inner emitted=() seen
+    while IFS= read -r tag; do
+        tree=${tag%/CACHEDIR.TAG}
+        seen=false
+        for inner in ${emitted[@]+"${emitted[@]}"}; do
+            if [[ $tree == "$inner"/* ]]; then
+                seen=true
+                break
+            fi
+        done
+        if $seen; then continue; fi
+        emitted+=("$tree")
+        printf '%s\n' "$tree"
+    done < <(/usr/bin/find "$checkout" -maxdepth "$NESTED_DEPTH" \
+        \( -path "$checkout/target" -o -name .git \) -prune -o \
+        -name CACHEDIR.TAG -print 2>/dev/null | LC_ALL=C sort)
+}
+
 SAFE_PATHS=()
 SAFE_LABELS=()
 SAFE_BYTES=()
@@ -197,6 +244,34 @@ done
 echo
 echo "== reclaimable =="
 for checkout in "${CHECKOUTS[@]}"; do
+    [[ -d $checkout ]] || continue
+    while IFS= read -r nested; do
+        [[ -n $nested ]] || continue
+        if in_use "$nested" "$RECENT"; then
+            KEPT+=("$nested -- written to within $RECENT minutes, or a build tool names it")
+            continue
+        fi
+        # THE MAIN CHECKOUT'S RULE DOES NOT REACH A NESTED TREE, deliberately.
+        # `$ROOT/target` is held back because the next worker rebuilds it and
+        # the documented commands want it warm. A nested workspace's tree is
+        # not that: rebuilding `fuzz/target` needs cargo-fuzz and a nightly
+        # toolchain no routine run touches, no gate reads either of them, and
+        # nothing in the tree so much as names `tests/.build/target-hos`.
+        #
+        # The dirt guard does not reach one in the main checkout either, for
+        # the reason the main checkout has a rule of its own: a checkout four
+        # sessions share is dirty at every moment, so applying it here would
+        # hold every nested tree forever and rebuild the "0.00 GiB total" this
+        # was filed for. `in_use` above is what guards them, with the long
+        # window, because a wrong answer here costs a rebuild.
+        if [[ $checkout != "$ROOT" ]] &&
+            [[ -n $(/usr/bin/git -C "$checkout" status --porcelain 2>/dev/null) ]]; then
+            KEPT+=("$nested -- $checkout has uncommitted changes")
+            continue
+        fi
+        offer "$nested" "$RECENT" "build output of a nested cargo workspace under $checkout"
+    done < <(nested_build_trees "$checkout")
+
     target=$checkout/target
     [[ -d $target ]] || continue
     # The shared checkout is the one every other session builds against, and
