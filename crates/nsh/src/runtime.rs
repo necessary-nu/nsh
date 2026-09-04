@@ -122,7 +122,7 @@ fn run_startup_task(
                 Ok(StartupAdvance::Finished)
             }
         }
-        StartupTask::CommandLoop => Ok(match command_loop(shell, true)? {
+        StartupTask::CommandLoop => Ok(match command_loop(shell, InputFrame::Stream)? {
             crate::evaluation::Flow::Done(_) => StartupAdvance::Finished,
             crate::evaluation::Flow::Exit { status } => StartupAdvance::Exit(status),
             control => unreachable!("command loop returned local control: {control:?}"),
@@ -269,12 +269,41 @@ pub(crate) fn run(shell: &mut Shell, startup: &Startup) -> crate::status::ExitSt
  * loop; it turns on prompting if the shell is interactive.
  */
 
+/// Which input a command loop is reading, which decides two independent
+/// things.
+///
+/// The C's `top` asks only whether this loop prompts, and [`Stream`] is
+/// that answer. The second question is asked only at end of input: is this
+/// loop's input *the shell's own*?
+///
+/// Running out of the shell's own input with `-i` live writes a newline,
+/// because the input the person was typing into has ended. Running out of
+/// a `.` operand or a profile has not ended it -- the loop that pushed the
+/// frame carries on and prompts again -- so the newline would land between
+/// the operand's output and the next prompt.
+///
+/// [`Stream`]: InputFrame::Stream
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum InputFrame {
+    /// Input this loop may prompt for and counts consecutive end-of-file
+    /// on for `ignoreeof`. Both of the command-line entry's own inputs are
+    /// this, a script operand included, because a script that runs
+    /// `set -i` prompts from the line after it.
+    Stream,
+    /// The shell's own command file, read by a loop that does not prompt.
+    CommandFile,
+    /// A frame pushed over one of the two above: a `.` or `source`
+    /// operand, or a profile.
+    Pushed,
+}
+
 // [spec:dash:sem:main.cmdloop-fn]
 // [spec:posix:req:builtin.set.opt-o-ignoreeof]
 pub(crate) fn command_loop(
     shell: &mut Shell,
-    top_level: bool,
+    frame: InputFrame,
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
+    let top_level = frame == InputFrame::Stream;
     let mut status = crate::status::ExitStatus::SUCCESS;
     let mut eof_count = 0usize;
     /* `set -i` can change prompting and the other live interactive option
@@ -335,8 +364,17 @@ pub(crate) fn command_loop(
             if !interactive_input {
                 /* Preserve dash's line termination when a command file used
                  * the runtime `set -i` extension: prompting may be live, but
-                 * EOF still terminates this non-interactive input source. */
-                if !shell.options.enabled(ShellOption::IgnoreEof)
+                 * EOF still terminates this non-interactive input source.
+                 *
+                 * A pushed frame is excluded because the newline belongs to
+                 * the input source *ending*, and a `.` operand ending does
+                 * not end the source the person is typing into: the loop
+                 * that pushed it carries on and prompts again, so the line
+                 * would land between the script's output and the next
+                 * prompt. dash writes nothing there, and so does the pinned
+                 * Bash 5.3 for `.` and `source` alike. */
+                if frame != InputFrame::Pushed
+                    && !shell.options.enabled(ShellOption::IgnoreEof)
                     && shell.options.enabled(ShellOption::Interactive)
                 {
                     shell.write_output(crate::output::OutputDestination::Stderr, b"\n")?;
@@ -435,7 +473,7 @@ fn read_profile(
 
         /* An `exit` in a profile travels out as control flow after the
          * structured input scope has restored the previous frame. */
-        command_loop(shell, false)
+        command_loop(shell, InputFrame::Pushed)
     })
 }
 
@@ -452,7 +490,7 @@ pub(crate) fn read_command_file(
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
     crate::resource::with_resources(shell, |shell, _resources| {
         crate::input::set_input_file(shell, name, crate::input::InputFileOptions::PUSHED)?;
-        command_loop(shell, false)
+        command_loop(shell, InputFrame::Pushed)
     })
 }
 

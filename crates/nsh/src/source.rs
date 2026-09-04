@@ -24,6 +24,7 @@ use nsh_platform::NativeStrExt as _;
 use crate::context::Shell;
 use crate::error::Error;
 use crate::evaluation::Flow;
+use crate::runtime::InputFrame;
 use crate::status::ExitStatus;
 
 /// Where [`Shell::run`] reads commands.
@@ -318,8 +319,8 @@ impl Shell {
                     shell,
                     crate::evaluation::EvaluationContext::DEFAULT,
                 ),
-                Kind::File(_) => crate::runtime::command_loop(shell, false),
-                Kind::Stream => crate::runtime::command_loop(shell, true),
+                Kind::File(_) => crate::runtime::command_loop(shell, InputFrame::CommandFile),
+                Kind::Stream => crate::runtime::command_loop(shell, InputFrame::Stream),
             }
         });
         match outcome {

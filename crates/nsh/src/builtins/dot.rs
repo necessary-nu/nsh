@@ -147,7 +147,7 @@ fn run_dot_with_missing_status(
                 full_path.as_slice().as_bstr(),
                 call_line,
             );
-            let outcome = command_loop(shell, false);
+            let outcome = command_loop(shell, crate::runtime::InputFrame::Pushed);
             /* A dot script's `RETURN` action runs whatever `functrace`
              * says: Bash withholds the trap from *functions*, and this is
              * not one. It runs while the frame is still innermost. */

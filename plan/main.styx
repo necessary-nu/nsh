@@ -3501,12 +3501,27 @@ children (
                         kind @fix
                         constrained_by ([spec:nsh:sem:idiom.specified-defects+1])
                         deps (harness.oils-baseline-is-behind)
+                        sealed true
                         log (
                             {
                                 at 2026-09-02T14:42:35.109969337Z
                                 author "brendan@necessary.nu"
                                 kind @blocker
                                 text "`. FILE` AT AN INTERACTIVE PROMPT PRINTS A BLANK LINE dash DOES NOT. Found 2026-09-02 while closing `deliver-a-prompt-interrupt-without-eating-the-next-line`, as the one case out of fifteen in that node's signal matrix that still differed from dash after the fix -- and then found to have nothing to do with signals at all.\n\nMEASURED on a pseudo-terminal with `TERM=dumb`, `PS1='$ '`, against `/usr/bin/dash`, with a shell built at `a81455c` and with one built from its parent, identically:\n\n    file holds `echo IN-DOT`\n      dash  $ . d1.sh <nl> IN-DOT <nl> $ echo b\n      nsh   $ . d1.sh <nl> IN-DOT <nl> <nl> $ echo b\n\n    file holds `:` and prints nothing\n      dash  $ . d3.sh <nl> $ echo b\n      nsh   $ . d3.sh <nl> <nl> $ echo b\n\nSo it is not about what the file printed and not about a missing final newline: the extra line is there when the file produces no output at all. It is the `.` itself.\n\nIT IS THE BUILT-IN AND NOT THE GENERAL CASE, which is what makes it worth a node rather than a shrug. The two other ways of running shell text from a prompt agree with dash exactly: `eval 'echo IN-EVAL'` and `x=$(echo sub); echo $x` both give byte-identical transcripts in both shells. Only the input-frame that `.` pushes leaves the extra newline behind, so the place to look is where that frame is popped and where the prompt decides whether the cursor is at the start of a line -- not in `eval`'s or the substitution's path, which share most of the rest.\n\nWHY IT IS EASY TO MISATTRIBUTE, and this cost a measurement here. Under a signal test the extra line lands next to the newline an interrupt prints, and reads as the interrupt printing two. Both binaries above were measured with no signal involved, one line of script each, which is what told the two apart.\n\nNOT MEASURED YET, and worth doing before fixing: whether the pinned Bash 5.3 prints the extra line (this repository's `.` is dash's, but the Bash profile has to agree with whichever answer is chosen), whether a non-interactive `.` is affected at all -- no survey case has moved, so probably not -- and whether `source` in Bash mode takes the same path.\n\nDONE WHEN `. FILE` at an interactive prompt writes exactly what dash writes for a file that prints something and for one that prints nothing, and a case covers both so the blank line cannot come back beside a signal where nobody will see it."
+                            }
+
+                            {
+                                at 2026-09-04T21:09:10.347561244Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T21:28:18.722503503Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -9598,6 +9613,14 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Doing → Done (nplan complete)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T21:28:14.697096009Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FINAL DIFFERENTIAL TALLY, promised by `80ca2c9`'s commit message, which recorded the sweep at 89 of 119 corpora because it was still running.\n\nInterleaved control-then-fix per corpus against `/usr/bin/dash` 0.5.12-12 (`tests/.build/ref/src/dash`), each pass in its own working directory, corpora smallest-first, 8 jobs, load 15-40:\n\n    107 of 119 corpora compared\n      0 with any PASS, FAIL or XFAIL difference\n     10 differing in FLAKY count only\n\nFLAKY is the harness's own re-run classifier rather than a result, the ten differences fall on both sides (six where the control flaked and the fix did not, four the other way), and one of the ten is the corpus named `synth_flaky`. `aud_state_var`, the corpus closest to this change, was PASS=40 FAIL=0 XFAIL=3 identically on both sides.\n\nTHE LAST TWELVE WERE NOT RUN, and the reason is the machine rather than the result. The disk reached 13 MiB free for the third time in the session while two other sessions were building into it, and the remaining corpora are the largest -- the three 4,000-case `printf` fuzzers and the parser fuzzers. The sweep was stopped rather than kept writing to a full filesystem. They are also the twelve this change cannot reach: none of them contains `declare`, `local`, `typeset`, an integer attribute or an assignment whose value is arithmetic, and the change is confined to the Bash dialect in any case.\n\nONE CAVEAT ON ATTRIBUTION, worth stating because the interleaving was supposed to remove exactly this. The control was built from `9bb719e`; the treatment was built from a working tree that also held another session's then-uncommitted work in `parser/bash.rs`, `script.rs` and `nsh-lint/` (since landed as `9cf7746`..`da35644`). With zero PASS/FAIL differences the conclusion is unaffected -- there was nothing to attribute -- but had a corpus moved, a second run would have been needed to say whose it was."
+                                                after_done true
                                             }
                                         )
                                     }
