@@ -12875,6 +12875,13 @@ children (
                                 kind @status
                                 text "Todo → Doing (nplan start)"
                             }
+
+                            {
+                                at 2026-09-04T12:01:04.785028472Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "AN ARGUMENT RESCUED FROM A WORKTREE BEFORE IT WAS DELETED, 2026-09-04. The code is superseded; the reasoning is not, and this node still owns `[spec:nsh:req:cost.locale-selected-per-operation]`.\n\nThe abandoned `locale-followons` worktree carried an uncommitted ASCII fast path on `Locale::is_alpha` and `Locale::is_alphanumeric`, dropped during the `origin/master` merge on the grounds that the `byte_classes` table subsumes it. That was the right call about the code. What went with it was a justification worth keeping, because it is a *guarantee* rather than an optimisation:\n\n    /// A byte of the portable character set is answered without asking,\n    /// and that is not an approximation: POSIX fixes the classification\n    /// of those characters in every locale -- the letters are `alpha`\n    /// everywhere, and no character of `digit`, `punct`, `cntrl` or\n    /// `space` may be. So the C library can only agree, and asking it\n    /// costs a thread-locale selection per byte of every name the shell\n    /// reads.\n\n    if byte.is_ascii() { return byte.is_ascii_alphabetic(); }\n\nand it was held by a test, `every_locale_agrees_on_portable_characters`, which asserted `isalpha`/`isalnum` against `is_ascii_alphabetic`/`is_ascii_alphanumeric` for all 128 low bytes in each charmap the suite runs in -- exhaustive rather than sampled, since there are only 128 to try, and deliberately silent about the high bytes.\n\nWHY IT MATTERS HERE. `cost.locale-selected-per-operation` says the selection count is a property of this library's structure rather than of the input. The fast path is the sharpest case of that: for a variable name, which is ASCII by the grammar that admits it, the correct number of selections is zero, and POSIX -- not measurement, not a table -- is what licenses answering without asking. Whatever shape the fix takes, the test is the part to keep: it turns \"we believe the C library agrees here\" into something that fails when it does not.\n\nThe worktree is gone. Nothing else in it was unique: its `parser.rs` held the `re_entering` dialect gate that `bash.divergences.re-entered-parse` deliberately removed today, and its one-line `variables.rs` change was superseded by the in-place mutation the merge took."
+                            }
                         )
                     }
 
