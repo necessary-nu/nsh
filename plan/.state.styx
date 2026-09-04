@@ -1678,6 +1678,10 @@ assertions (
     {id harness.oils-baseline-is-behind, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:37:15.700222525Z}
     {id bash.divergences.publish-names.interactive-surface, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:25:22.073811443Z}
     {id tooling.disk.wrapper-drops-a-hyphenated-cargo-variable, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:41:31.388199538Z}
+    {id bash.divergences.read-count-waits-for-the-line, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:26:46.48065553Z}
+    {id bash.divergences.procsub-in-bang, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:27:05.856128497Z}
+    {id bash.divergences.call-argument-frames, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:27:32.27137626Z}
+    {id tooling.moved-only-cannot-see-a-rename, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:28:05.357183216Z}
 )
 
 impl_evidence (

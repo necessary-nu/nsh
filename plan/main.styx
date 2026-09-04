@@ -9650,6 +9650,13 @@ children (
                                                 kind @note
                                                 text "Found 2026-09-03 while closing `wait-for-process-substitutions-in-the-wait-builtin`, and left out of it: that node was about what `wait` blocks on, and this is about what `$!` names. Measured against the pinned Bash 5.3.15 on `89ee017`.\n\n    echo hi > >(sleep 0.2; cat); echo \"[$!]\"\n      bash: [1538474]   -- the substitution's own pid\n      nsh:  []          -- nothing was ever put in the background\n\n    sleep 5 & echo hi > >(sleep 0.2; cat); echo \"[$!]\"\n      bash: [1538497]   -- the substitution and not the `sleep`\n\nThe second row is the one that matters: the substitution *overwrites* a background job's pid there, so this is not a matter of filling in a blank.\n\nTHE MODULE COMMENT SAYS THE OPPOSITE, AND IT IS WRONG. `crates/nsh/src/evaluation/bash_process_substitution.rs` opens with \"The child is nobody's job. Bash does not wait for a process substitution and does not set `$!` to it\". Both halves have now been measured false: `89ee017` fixed the wait, and `$!` is this. What is still true is the job *record* -- `jobs` prints nothing for one in either shell -- so the comment needs correcting rather than deleting.\n\nWHERE. `shell.background_process` is what `$!` reads, and `jobs::fork::record_forked_child` is what writes it for a background command. `bash_process_substitution::substitute` already keeps the child's pid in `shell.last_process_substitution` as of `89ee017`, so the value is in hand; what is not settled is whether writing `background_process` from there disturbs `wait $!`, which must still name the substitution (measured: `echo x > >(sleep 0.3; cat); wait $!` waits in Bash).\n\nNOT MEASURED YET, and worth measuring first: whether `$!` survives into a subshell as Bash's does, what `wait $!` answers as a *status* for a substitution, and whether an input substitution `<(...)` sets it too.\n\nDONE WHEN. `$!` names the most recent process substitution as the reference names it, a background job started afterwards still overwrites it, `jobs` still prints nothing, the module comment says what is true, and a differential table holds the rows."
                                             }
+
+                                            {
+                                                at 2026-09-04T15:27:05.856128497Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -9819,6 +9826,13 @@ children (
                                                 kind @note
                                                 text "FOUND 2026-09-04 WHILE BUILDING THE REGRESSION TEST FOR `tooling.tests.half-read-character-pty`, WHICH IS WHERE IT COST AN HOUR: that node's plan was a pseudo-terminal handshake, and the handshake cannot be built because of this.\n\n`read -n N` MUST RETURN AS SOON AS N CHARACTERS HAVE BEEN READ. This shell returns when the delimiter arrives instead, so on any source a person or another program is still writing to, `read -n1` blocks until a newline.\n\nMEASURED 2026-09-04 against the pinned Bash 5.3.15, `LC_ALL=C.UTF-8`, script `read -rn1 a; printf 'a=%s\\n' \"$a\"`, one byte `X` written and nothing else:\n\n    source                                   bash          nsh -o bash\n    pipe                                     a=X           (blocks)\n    pseudo-terminal, canonical               a=X           (blocks)\n    pseudo-terminal, ICANON cleared          a=X           (blocks)\n    pipe, via `exec 3<&0; read -rn1 -u3 a`   a=X           a=X\n\nIT IS NOT OUTPUT BUFFERING, which was the first suspicion and is what `tooling.tests.half-read-character-pty`'s attempt 3 blamed. Writing the answer to `>&2` instead of stdout changes nothing on any of the three blocking rows, and the pseudo-terminal rows have a line-buffered stdout in any case. Nor is it the terminal mode: clearing ICANON from outside makes the kernel hand the byte over and the shell still does not answer.\n\nWHERE IT IS. The last row is the whole diagnosis. `read -u N` takes `ReadStream::Descriptor` in `crates/nsh/src/builtins/read/stream.rs`, which reads the descriptor a byte at a time and returns each one, and that row matches the reference. `read` with no `-u` takes `ReadStream::Standard`, which goes through `crate::input::read_input_unit` -- the shell's own input stack, shared with the parser -- and that stack does not hand over a unit until it has the line. `read_record` in `crates/nsh/src/builtins/read/bash.rs` is not at fault: its `if limit.is_some_and(|limit| record.characters >= limit) { return ... }` is correct and is simply never reached in time, because `next_unit` has not returned.\n\nWHAT IT COSTS. Every interactive `read -n1` -- a menu, a \"press any key\", `read -rsn1` for a keystroke -- waits for Enter, which is exactly what `-n1` exists to avoid. `crates/nsh/src/builtins/read/bash.rs`'s `buffered_character_width` fallback, which the multi-byte work built, is reached in practice only through the file path for the same reason.\n\nWHAT TO CHECK BEFORE COMMITTING TO A FIX. Whether the input stack can hand over a partial line at all without stealing bytes from a later `read` or from the parser -- `standard_input_state.bufferable` is already false for a pipe and a terminal in canonical mode, which is dash's answer to the same question, so the bytes may already be arriving one at a time and only the *delivery* is held back. If so the fix is small and local; if not, it reaches `crates/nsh/src/input/read.rs` and the tee machinery, and that is a different size of change.\n\nDONE WHEN the four rows above all read `a=X`, `crates/nsh-cli/tests/multibyte_across_a_read_boundary.rs` still passes, and a differential row covers `read -n1` on a pipe so this cannot come back. The pseudo-terminal harness in `crates/nsh-cli/tests/default_history_navigation.rs` is what the terminal rows want."
                                             }
+
+                                            {
+                                                at 2026-09-04T15:26:46.48065553Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -9862,6 +9876,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found while closing `bash.divergences.publish-names.call-stack-arrays` on 2026-09-04, measured against the pinned Bash 5.3.15 at `69d2a45`.\\n\\nThat node published both names and wired the one frame the reference installs without `shopt -s extdebug`: the shell's own positional parameters, pushed by the first read taken with nothing on the call stack. Two frames it also pushes are still missing, and both are a *push* rather than a computation, so they compose with the one that landed rather than replacing it.\\n\\nA DOT SCRIPT PUSHES ITS OWN ARGUMENTS, extdebug or not (`. lib.sh q r`, shell started `-s a b`):\\n\\n    bash: declare -a BASH_ARGC=([0]=\"2\")   BASH_ARGV=([0]=\"r\" [1]=\"q\")\\n    nsh:  declare -a BASH_ARGC=()          BASH_ARGV=()\\n\\nand with no arguments of its own the frame is the *script path*, which is stranger and is the reference's own answer:\\n\\n    printf 'declare -p BASH_ARGC BASH_ARGV\\\\n' > lib.sh;  . ./lib.sh   with the shell started -s a b\\n    bash: BASH_ARGC=([0]=\"1\" [1]=\"2\")  BASH_ARGV=([0]=\"<abs path to lib.sh>\" [1]=\"b\" [2]=\"a\")\\n\\nA FUNCTION CALL PUSHES ITS ARGUMENTS UNDER `shopt -s extdebug`:\\n\\n    shopt -s extdebug; f(){ declare -p BASH_ARGC BASH_ARGV; }; f a b\\n    bash: BASH_ARGC=([0]=\"2\" [1]=\"0\")  BASH_ARGV=([0]=\"b\" [1]=\"a\")\\n    nsh:  BASH_ARGC=()                 BASH_ARGV=()\\n\\nWHERE THE WORK GOES. `variables::call_stack::CallFrame` already carries the three facts a frame has; a fourth field holding the call's own words would let `push_function` and `push_source` fill it, and `special::publish_call_arguments` -- which today refuses to fill anything when `call_stack.depth() > 0` -- would walk the frames instead. `push_function` is called from `evaluation.rs:1702` and does not currently receive the expanded words, so that signature grows; `push_source` from `builtins/dot.rs:130` already has the operands beside it.\\n\\nWHAT TO SETTLE FIRST. The reference pushes a dot script's frame unconditionally and a function's only under extdebug, which means the two are not one mechanism, and the read-time shim that `publish_call_arguments` implements is a third. Measure whether `shopt -u extdebug` mid-script pops what was pushed before deciding the shape.\\n\\nNo survey case covers any of it: `assign-extended.test.sh` exercises `declare -F` under extdebug and not these two names."
+                                            }
+
+                                            {
+                                                at 2026-09-04T15:27:32.27137626Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
                                             }
                                         )
                                     }
@@ -12115,7 +12136,6 @@ children (
                         title "Share the differential helper as a crate, not by file path"
                         kind @refactor
                         constrained_by ([spec:nsh:req:idiom.module-boundaries])
-                        deps (tooling.nplan.data-is-not-production)
                         log (
                             {
                                 at 2026-09-03T16:40:42.352000993Z
@@ -12442,6 +12462,13 @@ children (
                                 kind @note
                                 text "`scripts/moved-only` CANNOT PROVE THE ONE THING IT EXISTS FOR WHEN THE MOVE IS A RENAME. Found 2026-09-04 by `struct.posix-children-under-unix`, whose whole change was five `git mv`s.\n\n    $ scripts/moved-only\n    scripts/moved-only: the set of functions changed, so this is not only a move\n      new:   a_charmap_answers_for_its_own_characters\n      new:   apply_editor_terminal_attributes\n      ... 90 lines, every one `new:`, not one `gone:`\n\nWHY. Line 38 collects touched files with `git diff --name-only --diff-filter=ACMRD \"$base\" -- '*.rs'`, and `git diff` applies rename detection by default, so a `git mv` is reported as one path -- the destination -- rather than two. The loop then asks `git show \"$base:$path\"` for a destination that did not exist at the base, gets nothing, and every function in the file lands on the `after` side with no `before` to cancel it. A pure rename is therefore always reported as a total rewrite, and the failure grows with the size of the file moved rather than with anything about the change.\n\nIt is a false alarm rather than a silent pass, which is the better failure of the two, but it is still the check unable to answer its own question in the case it was written for -- the script's own header calls itself \"the check that lets a split of a two-thousand-line file be reviewed as the move it claims to be\".\n\n    $ git diff --name-only --diff-filter=ACMRD HEAD -- '*.rs' | wc -l\n    9\n    $ git diff --no-renames --name-only --diff-filter=ACMRD HEAD -- '*.rs' | wc -l\n    14\n\nTHE FIX IS ONE FLAG: `--no-renames` on that one `git diff`. The rest of the script already handles a path that exists on one side only -- the comment above the loop says so, having been taught it by untracked files -- so nothing else changes. Verified by running the unmodified script with rename detection turned off in the environment instead:\n\n    $ GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=false scripts/moved-only\n    scripts/moved-only: 174 function(s) across 14 file(s), unchanged\n\nThat is the workaround for anyone who hits this before the flag lands. A regression test for it is cheap and worth having: `git mv` one fixture file and assert the script still says \"unchanged\"."
                             }
+
+                            {
+                                at 2026-09-04T15:28:05.357183216Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 
@@ -12601,41 +12628,6 @@ children (
                     }
 
                     {
-                        id tooling.nplan.seal-through-merge
-                        title "Stop the semantic plan merge dropping a seal only one side set"
-                        kind @fix
-                        log (
-                            {
-                                at 2026-09-03T18:11:48.229889032Z
-                                author "brendan@necessary.nu"
-                                kind @blocker
-                                text "MERGING `origin/master` INTO THIS TREE SILENTLY UNSEALED EIGHT COMPLETED NODES. Found 2026-09-03 while verifying the merge on branch `merge-origin`; caught only because the whole `plan/main.styx` diff was read line by line, and it would have been invisible in a review that read the merge for conflicts.\n\n`.gitattributes` routes `plan/**/*.styx` to `merge=nplan`, whose driver is `nplan merge-driver --ancestor %O --ours %A --theirs %B ...`. Git reported no conflict in `plan/main.styx`; the driver resolved it and staged its answer.\n\n    sealed true, counted:  base 9788287: 45   ours abe28ce: 155   theirs origin/master: 46\n    merged: 148 -- eight fewer than the 156 the two sides together set\n\nThe eight, each of them `sealed true` on OUR side, absent from base and absent from theirs, so the three-way answer is unambiguously sealed:\n\n    optional-line-editor\n    bash-mode-error-boundary\n    bash-array-assignment-gaps\n    bash-expansion-gaps\n    bash-select-and-time-grammar\n    bash-named-descriptor-redirection\n    bash-introspection-gaps\n    bound-recursive-evaluation\n\nIt is not systematic -- 102 of our other 110 post-base seals survived the same merge -- so it is eight specific nodes and not \"the driver drops `sealed`\". The mechanism is unestablished and finding it is this node's first job; a `nplan merge-driver` run over these three exact blobs is the reproducer, and the three revisions are named above so it can be run without the branch.\n\nWHY IT MATTERS MORE THAN EIGHT FLAGS. `nplan audit` reports \"unsealed completions: completed nodes whose decomposition was never sealed -- work may be missing under them\", so an unsealed completion is a standing invitation to reopen a node that was in fact finished. A merge that quietly manufactures eight of them corrupts exactly the signal that is supposed to say where work is missing. And the loss is in the direction that does not announce itself: nothing fails, no check fires, the plan simply asserts less than it did.\n\nRESTORED BY HAND in the merge commit, by re-inserting `sealed true` before each of the eight nodes' `log (` -- which is where our side had it and where every other sealed node has it. `plan/.state.styx` was checked at the same time and lost nothing: its `assertions` block is re-sorted alphabetically by the driver, and 163 ours plus 59 theirs reconcile to 165 with no id missing from either side.\n\nDONE WHEN the driver keeps a field only one side set, and a test merges a plan whose two sides differ by a seal."
-                            }
-                        )
-                    }
-
-                    {
-                        id tooling.nplan.data-is-not-production
-                        title "Stop nplan's footprint gate billing a data file as wholly production code"
-                        kind @fix
-                        log (
-                            {
-                                at 2026-09-03T15:58:35.701559798Z
-                                author "brendan@necessary.nu"
-                                kind @note
-                                text "FOUND 2026-09-03 WHILE CLOSING `stop-a-required-register-entry-firing-test-footprint`, WHICH FIXED THE SYMPTOM IN THIS REPOSITORY AND NOT THE CAUSE. That node exempted `crates/nsh-lint/FUNCTION_DENSITY.toml` and `plan/**` in `.config/nplan/config.styx` (`5a13522`), which is a list this repository has to keep by hand and every other nplan repository has to discover for itself.\n\nTHE CAUSE IS ONE LINE OF POLICY IN `nplan`, at `crates/scaffold/src/quality/metrics.rs` (nplan at `f66f7eab`), where `FileMetrics::prod_loc` is documented as: \"For languages without fidelity walkers, all of `code_loc` lands here.\" tokei has fidelity walkers for Rust and a handful of others; it has none for TOML, JSON, YAML, Markdown or Styx. So a checked-in register, a lockfile, a manifest and a plan file are each billed as production code against a test:prod floor no test of theirs could ever move, while the same rule is what correctly bills Shell and C++, which have no walker either and are code.\n\nWHY IT IS NOT \"EXCLUDE EVERY NON-WALKER LANGUAGE\". Shell and C++ are production code and must keep counting. The distinction wanted is data versus code, not walked versus unwalked, and tokei already knows the difference -- it is the same classification that decides a language has no *functions* to count. That is the design question and the reason this is a node rather than a patch.\n\nMEASURED HERE, 2026-09-03, so the size of the effect is on the record. `crates/nsh-lint`: 42 of 1893 production lines were the register (2.2%), in a crate whose ratio the gate had already put at 0.147 against a 0.200 floor. The workspace-root rollup that every delivery commit is judged on: 10,405 of 101,716 production lines were `plan/main.styx` (10.2%), against the same floor with two milli of margin.\n\nWHAT INSTALLING A FIX COSTS, and it is why this is filed rather than done. `nplan-mcp` links the commit logic in rather than shelling out to the CLI, so a rebuilt `nplan` on disk changes nothing until the operator installs both binaries and restarts every agent session in the checkout -- see `install-the-pathspec-committing-nplan` and `d0ffd39`, where that took two steps and a session restart. A gate change cannot be demonstrated from inside a session, which makes it operator work by construction.\n\nDONE WHEN a checked-in data file does not count toward a crate's production LOC in nplan itself, the rule distinguishes data from unwalked code rather than from unwalked anything, and this repository's `quality.exempt-paths` no longer has to name `plan/**` or a register to stay honest."
-                            }
-
-                            {
-                                at 2026-09-04T12:57:52.642186067Z
-                                author "brendan@necessary.nu"
-                                kind @status
-                                text "Todo → Doing (nplan start)"
-                            }
-                        )
-                    }
-
-                    {
                         id tooling.nplan.install-the-pathspec
                         title "Install the nplan that commits a pathspec, and demonstrate it here"
                         kind @chore
@@ -12669,7 +12661,6 @@ children (
                         id tooling.nplan.lint-crate-footprint
                         title "Look at the linting crate's own test footprint on purpose"
                         kind @test
-                        deps (tooling.nplan.data-is-not-production)
                         log (
                             {
                                 at 2026-09-03T15:58:57.145034263Z
@@ -12749,28 +12740,6 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Done (nplan complete)"
-                            }
-                        )
-                    }
-
-                    {
-                        id tooling.nplan.wip-counts-workers-as-sprawl
-                        title "Tell one worker sprawling across six nodes from six workers on one node each"
-                        kind @fix
-                        deps (harness.oracle-outside-the-worktree)
-                        log (
-                            {
-                                at 2026-09-03T23:30:08.0787342Z
-                                author "brendan@necessary.nu"
-                                kind @note
-                                text "FOUND 2026-09-04 WHEN THE WIP BUDGET BLOCKED A SESSION THAT HELD NO UNCOMMITTED FILES AT ALL.\n\nThe budget measures the checkout and attributes every dirty path to the node whose footprint contains it. With six agents working concurrently in one checkout -- the mode this repository has used all week -- it reported:\n\n    spread  6 / 1 node(s) OVER\n    files   18 / 10 file(s) OVER\n    lines   1114 / 500 line(s) OVER\n\nand refused to let the coordinating session stop. Every one of those 18 files belonged to a *running* agent: `struct.windows-locale-export` had 3, `perf.locale.unreachable-positions` 3, `harness.derived-corpus-age` 2, `perf.locale.ifs-separator-table` 1, and so on. `nplan_wip` names them correctly. The coordinator had nothing to commit, nothing to split, and no worktree to move anything into, so none of the three remedies the message offers applies to whoever receives it.\n\nTHE MODEL IS SINGLE-WORKER AND THE CHECKOUT IS NOT. `spread 6/1` is the interesting number, because 6 nodes with 3 files each is exactly what six healthy workers look like, and it is indistinguishable here from one worker who has lost the thread across six nodes. Those are opposite conditions and only the second is a problem. The same is true of `files` and `lines`: a cap that is right for one worker is arithmetic nonsense for six, and raising it to 6x would stop catching the sprawl it exists to catch.\n\nWHAT WOULD TELL THEM APART. The information is already in the tree. Each `doing` node carries a claim with an author and, under `nplan_worktree`, a worktree; a node with files and no live claim is abandoned work, while six nodes with six live claims are six workers. Budgeting per claim rather than per checkout would report each of these agents at 1/1 nodes and 3/10 files, which is what they are, and would still report one worker across six nodes as 6/1.\n\nTHE SECOND EFFECT IS WORSE THAN THE BLOCK. Three separate agents were told by `nplan_start` to take their node in a worktree, because *another* node had uncommitted files. That is the budget working as designed, and it pushed finished work onto branches: `nplan/bash.divergences.unclosed-extglob` carries two good commits, gates green, that cannot be merged because `plan/main.styx` is dirty in the shared checkout from a different agent. So the budget's own mechanism produces the condition that keeps the budget breached.\n\nNOT THE SAME AS THE PATHSPEC FIX. `b8bee180` stopped a commit carrying another session's *staged* files. This is about *counting* another session's unstaged ones. The first was a correctness bug; this is a model that predates concurrent agents in one checkout.\n\nDONE WHEN a session with no uncommitted files of its own is not told it is over budget, one worker across six nodes still is, and the message names which claims the paths belong to rather than offering three remedies to someone who owns none of them."
-                            }
-
-                            {
-                                at 2026-09-04T13:32:21.388207252Z
-                                author "brendan@necessary.nu"
-                                kind @note
-                                text "FROM `tooling.nplan.seal-through-merge`, 2026-09-04, and left here rather than acted on because this node is blocked on `harness.oracle-outside-the-worktree`.\n\nTHIS NODE'S FIX RAISES THE EXPOSURE OF THE ONE THIS SESSION JUST FIXED. This node's own evidence records that the budget \"pushed finished work onto branches\" and that `nplan/bash.divergences.unclosed-extglob` carries two good commits that cannot be merged. Every one of those branches has to come back through a three-way merge of `plan/main.styx`, which `.gitattributes` routes to `merge=nplan`. The seal defect fixed today lives exactly there: `three_way_node` merged `sealed` as `ours && theirs`, so a seal set on only one side was dropped silently, exit 0, no markers. Measured truth table (installed binary, 2026-09-04): the intersection is correct on all four ancestor-sealed rows and loses the seal on BOTH rows where the ancestor was open — ours-only and theirs-only alike.\n\nSo the two nodes compose in the wrong direction. Budgeting per claim will let more workers stay in the checkout, but the part of this node's remedy that survives — sending work to worktrees and branches when it genuinely is sprawl — multiplies plan-file merges, and until the merge fix is INSTALLED (`~/.cargo/bin/nplan`, plus a restart of `nplan-mcp`, per `tooling.nplan.install-the-pathspec`) each of those merges can quietly unseal any node both sides already had. That is invisible by construction: nothing fails, and `nplan audit` reports the damage as \"unsealed completions ... work may be missing under them\", i.e. as a reason to reopen finished work.\n\nWORTH SAYING IN THE SAME BREATH as this node's central observation. Both defects have the same root shape: a model that assumes one worker and one line of history. The budget attributes every dirty path in the checkout to a single actor; the merge driver resolves a disagreement between two lines of history by intersecting them. Six workers make the first wrong; branches — which the first one's remedy creates — make the second wrong.\n\nNOTHING HERE CHANGES THIS NODE'S DONE WHEN. It is an ordering observation: if this node lands before the merge fix is installed, the window in which seals are lost gets wider, not narrower. The fix is committed in `~/git/nplan` (see `tooling.nplan.seal-through-merge`); installing it is operator work for the same reason `install-the-pathspec` was."
                             }
                         )
                     }

@@ -16,6 +16,48 @@
 # a helper is a different commit, and this is expected to report it.
 set -euo pipefail
 
+# `--self-test` builds a repository whose only change is a `git mv` and runs
+# this script against it. It exists because the flag below is one word that
+# nothing else would notice the loss of: with rename detection back on, the
+# first case reports every function in the moved file as invented. The
+# second case moves a file AND folds a helper out of it, so the test can be
+# seen to fail rather than only to pass.
+if [ "${1-}" = "--self-test" ]; then
+    self=$(cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    (
+        cd "$work"
+        git init -q .
+        git config user.email self-test@invalid
+        git config user.name self-test
+        mkdir src
+        printf 'pub fn one() {}\nfn two() {}\n' > src/alpha.rs
+        git add -A
+        git -c commit.gpgsign=false commit -qm base
+        git mv src/alpha.rs src/beta.rs
+    ) >/dev/null
+
+    status=0
+    moved=$(cd "$work" && "$self" 2>&1) || status=$?
+    case $status:$moved in
+        0:*unchanged*) echo "  ok: a pure rename reads as a move" ;;
+        *) echo "  FAIL: a pure rename must read as a move, got: $moved" >&2; exit 1 ;;
+    esac
+
+    sed -i '/fn two/d' "$work/src/beta.rs"
+    status=0
+    folded=$(cd "$work" && "$self" 2>&1) || status=$?
+    case $status:$folded in
+        1:*"gone:  two"*) echo "  ok: a rename that folds a helper is still reported" ;;
+        *) echo "  FAIL: folding a helper must be reported, got: $folded" >&2; exit 1 ;;
+    esac
+
+    echo "scripts/moved-only: self-test passed"
+    exit 0
+fi
+
 base=${1:-HEAD}
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null || {
     echo "scripts/moved-only: no such commit: $base" >&2
@@ -33,9 +75,19 @@ names() {
 # `git diff` cannot see one that has never been staged -- which this check
 # discovered about itself on its first real use, by reporting nineteen
 # functions gone and none arrived.
+#
+# `--no-renames` because rename detection reports a `git mv` as the one path
+# it arrived at rather than the two it spans, and the loop below reads each
+# path on both sides: with the source name never listed, `git show
+# "$base:$destination"` finds nothing, the before side stays empty, and a
+# pure move reads as a total rewrite. A five-file `git mv` was reported as
+# 90 invented functions and not one lost on 2026-09-04. The loop wants both
+# halves of the pair -- one existing only at the base, one only in the tree
+# -- which is the same shape untracked files taught it above, and it already
+# handles it.
 touched=$(
     {
-        git diff --name-only --diff-filter=ACMRD "$base" -- '*.rs'
+        git diff --no-renames --name-only --diff-filter=ACMRD "$base" -- '*.rs'
         git ls-files --others --exclude-standard -- '*.rs'
     } | sort -u
 )
