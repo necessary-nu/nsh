@@ -31,6 +31,12 @@
 //! ordinary indexed arrays that every existing reader already
 //! understands.
 //!
+//! `BASH_ARGC` and `BASH_ARGV` are a fourth kind and the odd one: the
+//! reference *installs* them on the read that first asks for them,
+//! pushing the shell's own arguments, and they then stand however the
+//! parameters move afterwards. So they are published empty like an
+//! array, refreshed like a clock, and written once like a fact.
+//!
 //! Recomputation is driven from the read path rather than from a timer
 //! because a shell has no timer: [`refresh`] runs on the same lookups
 //! `$LINENO` already used, and the [`Callback::Special`] mark on the
@@ -72,6 +78,10 @@ const INHERITABLE: [&[u8]; 4] = [b"HOSTNAME", b"HOSTTYPE", b"MACHTYPE", b"OSTYPE
 /// The highest value `$RANDOM` produces, as Bash documents it.
 const RANDOM_MODULUS: u64 = 32_768;
 
+/// The two call-stack names whose value a read installs rather than
+/// recomputes, count first.
+const CALL_ARGUMENT_NAMES: [&[u8]; 2] = [b"BASH_ARGC", b"BASH_ARGV"];
+
 /// The per-shell state behind the generators and clocks.
 ///
 /// `published` is not a cache: publishing writes into the variable table,
@@ -90,6 +100,10 @@ pub(crate) struct SpecialState {
     /// a line, and only a change of answer is acted on, so a script's own
     /// `PS1=` is never taken back.
     prompts_entered: bool,
+    /// Whether the shell's own arguments have been pushed onto
+    /// `BASH_ARGC` and `BASH_ARGV`. See [`publish_call_arguments`]: the
+    /// reference pushes rather than computes, so this happens once.
+    call_arguments_published: bool,
 }
 
 impl SpecialState {
@@ -100,6 +114,7 @@ impl SpecialState {
             seconds_origin: 0.0,
             seconds_base: 0,
             prompts_entered: true,
+            call_arguments_published: false,
         }
     }
 
@@ -258,6 +273,54 @@ fn publish(shell: &mut Shell) {
     }
     mark_published_facts(shell);
     publish_directory_stack(shell);
+    publish_call_frames(shell);
+}
+
+/// The five names that describe the call in progress.
+///
+/// Three of them are `variables::call_stack`'s and were only entered on
+/// a push, so a shell that had never called anything did not have them
+/// at all; the reference has all three from the moment it starts. The
+/// other two are entered empty here and filled by the read that asks
+/// for them.
+// [spec:nsh:req:compat.bash.names.call-stack]
+fn publish_call_frames(shell: &mut Shell) {
+    super::call_stack::refresh(shell);
+    for name in CALL_ARGUMENT_NAMES {
+        let name = BStr::new(name);
+        store_array(shell, name, &[]);
+        if let Some(entry) = shell.variables.entries.get_mut(name) {
+            entry.callback = Callback::Special;
+        }
+    }
+}
+
+/// `BASH_ARGC` and `BASH_ARGV`, on the first read that asks for them.
+///
+/// The reference publishes both empty and fills them from the shell's own
+/// positional parameters on the first read taken with no frame on the
+/// call stack -- its own source calls that mimicking the behaviour it had
+/// before `shopt -s extdebug` existed. The fill is a *push* and not a
+/// computation, and that is observable: after one read, `set -- x y z`
+/// leaves `${BASH_ARGV[@]}` spelling the arguments the shell started
+/// with, and entering a function leaves the pushed frame standing rather
+/// than emptying it. A read taken with a frame already on the stack fills
+/// nothing at all, which is why the reference answers `()` for both
+/// inside a function.
+///
+/// `BASH_ARGV` runs innermost-argument-first, so the words are reversed:
+/// `sh -s a b c` gives `([0]="c" [1]="b" [2]="a")`.
+// [spec:nsh:req:compat.bash.names.call-stack]
+fn publish_call_arguments(shell: &mut Shell) {
+    if shell.variables.special.call_arguments_published || shell.variables.call_stack.depth() > 0 {
+        return;
+    }
+    shell.variables.special.call_arguments_published = true;
+    let mut words = shell.options.positional_parameters.words();
+    let count = BString::from(words.len().to_string());
+    words.reverse();
+    store_array(shell, BStr::new(CALL_ARGUMENT_NAMES[0]), &[count]);
+    store_array(shell, BStr::new(CALL_ARGUMENT_NAMES[1]), &words);
 }
 
 /// Give the published facts the attributes Bash publishes them with.
@@ -544,6 +607,10 @@ pub(crate) fn refresh(shell: &mut Shell, name: &BStr) {
     if entry.callback != Callback::Special {
         return;
     }
+    if CALL_ARGUMENT_NAMES.contains(&(name.as_ref() as &[u8])) {
+        publish_call_arguments(shell);
+        return;
+    }
     let Some(value) = compute(shell, name) else {
         return;
     };
@@ -656,7 +723,14 @@ pub(crate) fn assigned(shell: &mut Shell, name: &BStr, value: Option<&BStr>) {
 // [spec:nsh:req:compat.bash.conditionals-arithmetic]
 pub(crate) fn is_assigned(shell: &mut Shell, name: &BStr) -> bool {
     let bytes: &[u8] = name.as_ref();
-    let Some(open) = bytes.iter().position(|byte| *byte == b'[') else {
+    let bracket = bytes.iter().position(|byte| *byte == b'[');
+    /* Asking is a read, and for one name the read is what makes the
+     * answer true: `test -v BASH_ARGC` is false in a reference that has
+     * never looked at it and true afterwards, because looking is what
+     * pushes the shell's arguments onto it. */
+    // [spec:nsh:req:compat.bash.names.call-stack]
+    refresh(shell, BStr::new(&bytes[..bracket.unwrap_or(bytes.len())]));
+    let Some(open) = bracket else {
         // A name declared with `-a` or `-A` holds nothing until an
         // element exists: `typeset -a a; test -v a` is false in Bash and
         // stays false until an element is written.

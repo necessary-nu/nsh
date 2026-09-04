@@ -192,11 +192,18 @@ facility this shell does not provide.
 > `BASH_ARGV` MUST exist wherever the reference has them, including at rest
 > with no function running, where the reference publishes them empty rather
 > than absent. A name the reference declares without assigning MUST be
-> declared without a value here too, because the difference is observable:
-> `set -u` diagnoses a declared-but-unassigned name and is silent about an
-> assigned empty one. Each MUST be an indexed array value per
-> `[spec:nsh:req:compat.bash.value-model]`, not a scalar spelled to resemble
-> one, and MUST hold the frames of the call actually in progress.
+> declared without a value here too, because the difference is observable
+> in the listing a script walks: `declare -a FUNCNAME` against
+> `declare -a BASH_SOURCE=()`. It is not observable through `set -u`, which
+> diagnoses both -- an empty indexed array has no element zero either, so
+> `$FUNCNAME` and `$BASH_SOURCE` are equally unbound and `${FUNCNAME[@]}`
+> and `${BASH_SOURCE[@]}` are equally silent. Each MUST be an indexed array
+> value per `[spec:nsh:req:compat.bash.value-model]`, not a scalar spelled
+> to resemble one, and MUST hold the frames of the call actually in
+> progress. For `BASH_ARGC` and `BASH_ARGV` those frames are installed by a
+> read rather than computed on one: the first read taken with nothing on
+> the call stack pushes the shell's own positional parameters and they then
+> stand, and a read taken with a frame on the stack pushes nothing.
 
 > [spec:nsh:req:compat.bash.names.environment-facts]
 > `TERM` and `SHELL` MUST carry the reference's defaults when the invoking

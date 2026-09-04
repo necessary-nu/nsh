@@ -321,7 +321,11 @@ fn subscripted_value(shell: &mut Shell, base: &BStr, subscript: &BStr) -> Result
     } else {
         arrays::resolve_selector(shell, base, subscript)?
     };
-    let Some(stored) = crate::variables::value::variable_value(shell, base).cloned() else {
+    /* Owned rather than borrowed because the read path recomputes some
+     * names, and a subscripted read is a read: `${BASH_ARGC[@]}` is what
+     * pushes the shell's arguments onto it, exactly as `$BASH_ARGC` is. */
+    // [spec:nsh:req:compat.bash.names.call-stack]
+    let Some(stored) = crate::variables::value::variable_value_owned(shell, base) else {
         /* A whole-array read of a name that holds nothing is an array of no
          * elements, not an unset scalar: it contributes no fields and `set
          * -u` has nothing to complain about. */
@@ -457,6 +461,15 @@ pub(super) fn value_expansion(
             } else {
                 Ok(empty_value(context))
             }
+        }
+        /* `$z` is `${z[0]}` for an array, and an array with no element
+         * zero has nothing there to name. The reference diagnoses
+         * `declare -a z=(); set -u; echo "$z"` exactly as it diagnoses a
+         * name it has never seen, and it is the same question the four
+         * empty call-stack arrays are asked at rest. */
+        // [spec:nsh:req:compat.bash.names.call-stack]
+        Value::Variable(value) if value.scalar_ref().is_none() => {
+            value_expansion(shell, name, Value::Unset, context)
         }
         Value::Variable(value) => Ok(Expansion::one(Field::from_bytes(
             value.scalar_ref().unwrap_or_else(|| BStr::new(b"")),

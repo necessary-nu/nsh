@@ -89,6 +89,60 @@ const AN_INTEGER_FACT_IS_ARITHMETIC: &[&str] = &[
     "echo $(( EUID - EUID ))\n",
 ];
 
+/// The five names that describe the call in progress, at rest and in one.
+///
+/// Measured on the pinned 5.3.15, fed on standard input. At rest the
+/// reference has all five and this shell had none of them: `FUNCNAME`
+/// *declared* with no value, `BASH_SOURCE`, `BASH_LINENO` and
+/// `BASH_ARGV` assigned empty, and `BASH_ARGC` answering `([0]="0")` to
+/// a named lookup while a whole listing still shows `()`.
+///
+/// That asymmetry is not a rendering difference. `BASH_ARGC` and
+/// `BASH_ARGV` are *pushed* by the first read taken with nothing on the
+/// call stack, from the shell's own positional parameters, and then
+/// stand: `set -- x y z` after a read leaves them spelling what the
+/// shell started with, and a read taken inside a function pushes
+/// nothing, which is why both answer `()` there.
+///
+/// `BASH_SOURCE`'s value is the one thing not compared directly. Its
+/// entry for a function defined on standard input is `$0`, which is a
+/// different string in the two shells by construction, so the rows ask
+/// whether it equals `$0` rather than what it is.
+const THE_CALL_IN_PROGRESS_IS_FIVE_NAMES: &[&str] = &[
+    "for n in FUNCNAME BASH_SOURCE BASH_LINENO BASH_ARGC BASH_ARGV; do declare -p $n; done\n",
+    "declare -p | grep -E '^declare -a (FUNCNAME|BASH_SOURCE|BASH_LINENO|BASH_ARGC|BASH_ARGV)'\n",
+    "echo \"[${FUNCNAME+s}][${BASH_SOURCE+s}][${BASH_LINENO+s}][${BASH_ARGC+s}][${BASH_ARGV+s}]\"\n",
+    "for n in FUNCNAME BASH_SOURCE BASH_LINENO BASH_ARGC BASH_ARGV; do test -v $n; echo \"$n=$?\"; done\n",
+    "echo \"${#FUNCNAME[@]}/${#BASH_SOURCE[@]}/${#BASH_LINENO[@]}/${#BASH_ARGC[@]}/${#BASH_ARGV[@]}\"\n",
+    /* An empty array has no element zero either way, so `set -u`
+     * diagnoses every one of the four the shell has not filled and is
+     * silent about the `[@]` form of all five. */
+    "set -u\necho \"[${FUNCNAME[@]}][${BASH_SOURCE[@]}][${BASH_LINENO[@]}][${BASH_ARGV[@]}]\"\necho after\n",
+    "set -u\necho \"[$BASH_ARGC]\"\necho after\n",
+    "set -u\n( echo \"[$FUNCNAME]\" )\necho \"status=$?\"\n",
+    "set -u\n( echo \"[$BASH_SOURCE]\" )\necho \"status=$?\"\n",
+    /* The push happens once, from wherever the parameters stood when it
+     * happened, and nothing afterwards moves it. */
+    "set -- x y z\necho \"[${BASH_ARGC[@]}][${BASH_ARGV[@]}]\"\n",
+    "echo \"[$BASH_ARGC]\"\nset -- x y z\necho \"[${BASH_ARGC[@]}][${BASH_ARGV[@]}]\"\n",
+    "declare -p | grep -c 'BASH_ARGC=()'\necho \"[$BASH_ARGC]\"\ndeclare -p | grep 'BASH_ARGC'\n",
+    "f(){ echo \"in=[$BASH_ARGC][${BASH_ARGV[@]}]\"; }\nf q\necho \"out=[$BASH_ARGC]\"\n",
+    /* A call in progress, and the same five names once it is over. */
+    "f(){ declare -p FUNCNAME BASH_LINENO BASH_ARGC BASH_ARGV; }\nf a b\n",
+    "f(){ echo \"${#BASH_SOURCE[@]}/${#FUNCNAME[@]}/${#BASH_LINENO[@]}\"; }\nf\n",
+    "f(){ [ \"${BASH_SOURCE[0]}\" = \"$0\" ] && echo same || echo differ; }\nf\n",
+    "f(){ :; }\nf\nfor n in FUNCNAME BASH_SOURCE BASH_LINENO; do declare -p $n; done\n",
+    "g(){ declare -p FUNCNAME BASH_LINENO; }\nf(){ g; }\nf\n",
+    /* A dot script reaches `BASH_SOURCE` and leaves `FUNCNAME` declared.
+     * The file goes under `mktemp -d` because the suite runs sandboxed
+     * with only `target/` writable, and a redirection the shell cannot
+     * perform makes a row agree for the wrong reason. The source name is
+     * compared without its directory for the same reason `$0` is: the
+     * two shells are handed different temporary directories. */
+    "d=$(mktemp -d)\nprintf 'declare -p FUNCNAME BASH_LINENO\\n' > \"$d/lib.sh\"\n. \"$d/lib.sh\"\nrm -rf \"$d\"\n",
+    "d=$(mktemp -d)\nprintf 'echo \"[${BASH_SOURCE[0]##*/}][${#BASH_SOURCE[@]}]\"\\n' > \"$d/lib.sh\"\n. \"$d/lib.sh\"\nrm -rf \"$d\"\n",
+];
+
 /// A prompt is a name for a shell somebody is watching.
 ///
 /// Measured on the pinned 5.3.15: fed on standard input the reference
@@ -127,25 +181,28 @@ const A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL: &[&str] = &[
 ///
 /// This is the diff the node asked to start from, kept as a check: the
 /// letters and the name have to agree for all of them, and the two
-/// shells' start-up sets are otherwise not comparable at all -- the
-/// reference has `FUNCNAME`, `BASH_SOURCE`, `OLDPWD` and fifteen others
-/// this shell does not publish. `PS1` and `PS2` are not shared either,
-/// and the reference is the one without them:
+/// shells' start-up sets are still not comparable whole -- the reference
+/// has `OLDPWD`, `SHELL`, `TERM` and ten others this shell does not
+/// publish, thirteen of the nineteen it started with. `PS1` and `PS2` are not shared either, and the reference is
+/// the one without them:
 /// [`A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL`] is where those two are asked.
 ///
 /// `SECONDS` is the one shared name left out, and it is out because it
 /// is measured rather than because it was missed: in the reference it
 /// carries no letter until something *reads* it, and `-i` afterwards --
 /// a fresh `declare -p` lists `declare -- SECONDS` and
-/// `: $SECONDS; declare -p` lists `declare -i SECONDS`. Reproducing
-/// that needs the read to set the attribute and needs `declare -p NAME`
-/// to be a read, which it is not here;
-/// `mark-seconds-when-it-is-read` holds both halves.
+/// `: $SECONDS; declare -p` lists `declare -i SECONDS`. A row here would
+/// read it and so could not see the difference at all;
+/// `mark-seconds-when-it-is-read` holds that half.
 fn every_shared_name() -> Vec<String> {
     const SHARED: &[&str] = &[
         "BASH",
         "BASHOPTS",
         "BASHPID",
+        "BASH_ARGC",
+        "BASH_ARGV",
+        "BASH_LINENO",
+        "BASH_SOURCE",
         "BASH_SUBSHELL",
         "BASH_VERSINFO",
         "BASH_VERSION",
@@ -153,6 +210,7 @@ fn every_shared_name() -> Vec<String> {
         "EPOCHREALTIME",
         "EPOCHSECONDS",
         "EUID",
+        "FUNCNAME",
         "GROUPS",
         "HOSTNAME",
         "HOSTTYPE",
@@ -217,6 +275,13 @@ fn a_read_only_fact_refuses_a_write() {
 #[test]
 fn an_integer_fact_is_arithmetic() {
     agrees(&[], AN_INTEGER_FACT_IS_ARITHMETIC);
+}
+
+/// All five call-stack names exist wherever the reference has them.
+// [spec:nsh:req:compat.bash.names.call-stack/test]
+#[test]
+fn the_call_in_progress_is_five_names() {
+    agrees(&[], THE_CALL_IN_PROGRESS_IS_FIVE_NAMES);
 }
 
 /// Neither prompt is on the table of a shell nobody is watching.
