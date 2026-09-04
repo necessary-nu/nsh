@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-04T00:06:55.232777707Z
+last_sync_at 2026-09-04T02:40:43.268296533Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -1686,6 +1686,13 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.no-ignored-results}
     ), rule_versions_seen (
         {id idiom.no-ignored-results, version 0}
+    )}
+    {id bash.divergences.publish-names.call-stack-arrays, covered_rules (
+        compat.bash.names.call-stack
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.names.call-stack}
+    ), rule_versions_seen (
+        {id compat.bash.names.call-stack, version 0}
     )}
     {id bash.divergences.publish-names.withhold-prompts, covered_rules (
         compat.bash.names.only-what-the-reference-has
@@ -5847,10 +5854,5 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
-    )}
-    {id bash.divergences.publish-names.call-stack-arrays, covered_rules (
-        compat.bash.names.call-stack
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.bash.names.call-stack}
     )}
 )
