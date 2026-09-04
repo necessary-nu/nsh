@@ -378,9 +378,24 @@ SANDBOX_ARGS=(
 # call for the same reason -- "the fuzz containment mounts an empty tmpfs over
 # /tmp, so an oracle kept there is invisible to the targets; keep it outside
 # /tmp" -- and widening a deliberately narrow read-only allowance into a
-# writable build tree would spend the containment to save a path. /tmp is a
-# tmpfs on this machine besides, so a build tree there is spending RAM to hide
-# itself.
+# writable build tree would spend the containment to save a path.
+#
+# CORRECTED 2026-09-04. This said "/tmp is a tmpfs on this machine besides, so
+# a build tree there is spending RAM to hide itself", and the refusal below
+# told the user so in as many words. It is not one, and had stopped being one
+# before anyone looked:
+#
+#     $ findmnt -no SOURCE,FSTYPE /tmp
+#     /dev/sda2[/data/tmp] xfs
+#     $ stat -c %d /tmp /home/brendan/work/dash
+#     2050 /tmp
+#     2050 /home/brendan/work/dash
+#
+# /tmp is a bind of /data/tmp on the same device as the checkout, so a tree
+# there costs exactly the disk `--disk` guards rather than RAM. The refusal
+# stands on the containment alone, which is the half that does not depend on
+# how the host is mounted, and the sentence about RAM is now printed only when
+# /tmp is measured to be a tmpfs.
 #
 # `CACHEDIR.TAG` is cargo's own mark on the root of a build tree, which is what
 # separates this from the rustdoc case: nothing above /tmp/rustdoctestXXXXXX
@@ -411,7 +426,11 @@ if $RUNNER && [[ ${1-} == /tmp/* && -f ${1-} ]]; then
         echo "(os error 2)' for a binary that is present, executable and runs from a" >&2
         echo "prompt -- which is about where the build tree is and not about the shell." >&2
         echo "Point CARGO_TARGET_DIR outside /tmp; a worktree's own target/ is the" >&2
-        echo "intended place, and /tmp is RAM here as well as hidden." >&2
+        echo "intended place." >&2
+        if [[ $(/usr/bin/stat -f -c '%T' /tmp 2>/dev/null) == tmpfs ]]; then
+            echo "/tmp is a tmpfs here besides, so that tree is spending RAM as well as" >&2
+            echo "hiding." >&2
+        fi
         exit 1
     fi
     READABLES+=("$(cd "$(dirname "$1")" && pwd -P)")

@@ -12881,6 +12881,20 @@ children (
                                 kind @note
                                 text "FOUND 2026-09-02 WHILE CLOSING `stop-the-machine-running-out-of-disk`, AND DELIBERATELY LEFT ALONE THERE.\n\n`git worktree list` records two worktrees inside a Claude session scratchpad:\n\n    /tmp/claude-1000/-home-brendan-work-dash/a8f54ffd-.../scratchpad/trimtree  903d5c0 (detached)\n    /tmp/claude-1000/-home-brendan-work-dash/a8f54ffd-.../scratchpad/wt        903d5c0 (detached)\n\nNeither was created by the session that filed this. Both are 16 MB with no `target/`, so they cost almost nothing in disk -- which is why `stop-the-machine-running-out-of-disk` did not touch them, and why this is filed rather than folded in. Three things about them are worth someone's attention anyway.\n\nTHEY ARE ON A TMPFS. `/tmp` on this machine is a tmpfs, so those 32 MB are RAM, and so is anything built in them. That tmpfs was at 22 GiB of 32 GiB while this was written, almost all of it other projects' scratch. A worktree there also cannot be measured in: `refuse-a-survey-run-whose-shell-the-boundary-hides` records that a `CARGO_TARGET_DIR` under `/tmp` makes the survey harness's own binary vanish inside the containment boundary.\n\nONE OF THEM IS DIRTY. `wt` carries an uncommitted modification to `crates/nsh-platform/src/locale.rs`. That is the one thing near a worktree that no build regenerates, so it must not be removed without finding out whose it is. `trimtree` is clean.\n\nBOTH ARE BEHIND. They sit at `903d5c0`, which was HEAD before this afternoon's work and is now several commits back.\n\n`scripts/disk-headroom` reports them and refuses to reclaim either -- the dirty one for its dirt, and it names the tmpfs -- so nothing is at risk. What is missing is the decision: a scratchpad is session-scoped and these outlive the session that made them, so the records accumulate.\n\nDONE WHEN each is either claimed by a live session, or its uncommitted change is rescued and the worktree removed with `git worktree remove` and `git worktree prune`; and there is an answer to whether a worktree belongs in a session scratchpad on a tmpfs at all, given that it is RAM and that the survey harness cannot measure from there."
                             }
+
+                            {
+                                at 2026-09-04T15:39:18.959951703Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T15:43:25.214162973Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "BOTH HALVES OF THE PREMISE ARE GONE, AND THE SECOND ONE IS THE INTERESTING HALF. Measured 2026-09-04 at `ddbaccd`.\n\nTHE TWO WORKTREES NO LONGER EXIST.\n\n    $ git worktree list --porcelain | grep ^worktree\n    worktree /home/brendan/work/dash\n    worktree /home/brendan/work/nsh-wt-a8f54ffd     <- another session's, live\n    $ git worktree prune -n -v\n    (no output -- no stale record to drop)\n    $ ls .../scratchpad/trimtree .../scratchpad/wt\n    absent, both\n\nNeither path exists, neither is recorded, and nothing needs pruning. `wt`'s uncommitted `crates/nsh-platform/src/locale.rs` change was not lost by neglect: `1e96b33` (\"Rescue an argument from a worktree before deleting it\") records a deliberate pass over the abandoned worktrees on 2026-09-04, in which each removed tree's added lines were checked against master and then against the whole of `crates/` before deletion, precisely because that day's locale work had moved code between files. The one thing that survived only as an argument -- an ASCII fast path on `Locale::is_alpha` -- is written down there and belongs to `perf.locale.per-byte-of-a-name`. A working-tree modification is not a git object, so there is nothing left to recover and no further action available on this half.\n\nAND `/tmp` IS NOT A TMPFS ON THIS MACHINE ANY MORE.\n\n    $ findmnt -no SOURCE,FSTYPE /tmp\n    /dev/sda2[/data/tmp] xfs\n    $ stat -c %d /tmp /home/brendan/work/dash\n    2050 /tmp\n    2050 /home/brendan/work/dash\n    $ df -h /tmp /\n    /dev/sda2  149G  124G  26G  83%  /tmp\n    /dev/sda2  149G  124G  26G  83%  /\n\nIt is a bind of `/data/tmp` on the same device as the checkout. The node was filed on 2026-09-02 against a 32 GiB tmpfs; that is no longer the shape of the host. So a worktree in a session scratchpad costs exactly the disk `scripts/sandboxed --disk` and `scripts/disk-headroom` already guard, rather than RAM -- and `disk-headroom` says nothing about RAM for one, correctly, because it reads `stat -f -c %T` per checkout rather than asserting.\n\nTHE ANSWER THE NODE ASKS FOR is that a worktree still does not belong in a session scratchpad, but for one reason rather than two. The survey containment mounts an empty tmpfs over `/tmp`, so a build tree kept there is invisible from inside it -- `refuse-a-survey-run-whose-shell-the-boundary-hides` -- and that is true however the host has `/tmp` mounted. The RAM argument was the second reason and it has expired. The practice has already moved on its own: the live worktree today is `/home/brendan/work/nsh-wt-a8f54ffd`, outside `/tmp`.\n\nWHAT NEEDED FIXING was that `scripts/sandboxed` asserted the dead half rather than measuring it, in a comment AND in the refusal it prints:\n\n    $ scripts/sandboxed --cargo-runner -- /tmp/<tree with a CACHEDIR.TAG>/debug/deps/probe\n    Point CARGO_TARGET_DIR outside /tmp; a worktree's own target/ is the\n    intended place, and /tmp is RAM here as well as hidden.\n\nA check telling its reader something confident about something it never looked at, which is the family `docs/spec/nsh/verification.md` exists for. The sentence is now printed only when `/tmp` measures as a tmpfs; the refusal itself is unchanged and stands on the containment. Seen both ways: absent on this host, and present under `unshare -rm` with a real tmpfs mounted over `/tmp`.\n\n`README.md` carries the same expired claim and is out of this node's territory -- filed as `tooling.disk.readme-says-tmp-is-ram`."
+                            }
                         )
                     }
 
@@ -12888,6 +12902,7 @@ children (
                         id tooling.disk.headroom-cannot-see-the-fuzz-build-tree
                         title "Offer the second build tree inside the checkout, not just `target/`"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T13:38:28.471207156Z
@@ -12901,6 +12916,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T15:39:17.020293253Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -12937,6 +12959,20 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
+
+                    {
+                        id tooling.disk.readme-says-tmp-is-ram
+                        title "Stop the README telling readers a /tmp checkout spends RAM"
+                        kind @docs
+                        log (
+                            {
+                                at 2026-09-04T15:43:06.083221661Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "FOUND 2026-09-04 WHILE CLOSING `tooling.disk.worktrees-on-tmpfs`, AND NOT PART OF IT -- that node's territory was `scripts/`.\n\n`README.md` line 266, in the \"Budget for this\" paragraph on worktree discipline:\n\n    Remove a worktree when its node is done, and note that a checkout\n    under `/tmp` is spending RAM rather than disk, which `disk-headroom`\n    says out loud.\n\nBoth halves are now false on this machine. Measured 2026-09-04:\n\n    $ findmnt -no SOURCE,FSTYPE /tmp\n    /dev/sda2[/data/tmp] xfs\n    $ stat -c %d /tmp /home/brendan/work/dash\n    2050 /tmp\n    2050 /home/brendan/work/dash\n\n`/tmp` is a bind of `/data/tmp` on the same device as the checkout, so a worktree there costs the same disk everything else guards. And `disk-headroom` does not say it out loud: it reads `stat -f -c %T` per checkout and prints the tmpfs line only when the answer is `tmpfs`, so on this host it says nothing -- which is right, and leaves the README the only thing still asserting it.\n\nWHAT TO KEEP. The advice around it stands and is the valuable part: remove a worktree when its node is done, and keep a build tree out of `/tmp` -- but for the reason that survives, which is that the survey containment mounts an empty tmpfs over `/tmp` and a tree kept there is invisible from inside it. `scripts/sandboxed` was corrected the same day and carries the measurement and a dated correction; the README paragraph can point at that rather than restate a host fact that expires.\n\nWHY IT IS WORTH A NODE RATHER THAN A ONE-LINE EDIT: this is the second place the same expired fact was written down, and a third may exist. Whoever picks it up should grep for the claim rather than fix the line -- and consider whether a host fact belongs in prose at all when a script beside it can measure it."
                             }
                         )
                     }
