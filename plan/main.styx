@@ -12456,6 +12456,7 @@ children (
                         title "Fence a half-read multi-byte character with the pty harness, not a pipe"
                         kind @test
                         constrained_by ([spec:nsh:req:oracle.checks-do-not-share-state])
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T17:40:20.226092205Z
@@ -12476,6 +12477,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "single-flight overridden: started while harness.derived-corpus-age had uncommitted WIP"
+                            }
+
+                            {
+                                at 2026-09-04T00:01:52.304880954Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -12526,17 +12534,26 @@ children (
                     }
 
                     {
-                        id oracle.creation-mask-check-measures-nothing
-                        title "Give the creation-mask check a static skip, or a reason, instead of a silent return"
-                        kind @fix
+                        id tooling.tests.shared-state-lint
+                        title "Find a check that reads or writes state its siblings share"
+                        kind @test
+                        deps (tooling.tests.forked-child-holds-pipe tooling.tests.half-read-character-pty tooling.tests.read-the-umask)
                         log (
                             {
-                                at 2026-09-03T23:46:02.556201824Z
+                                at 2026-09-04T00:05:35.575633157Z
                                 author "brendan@necessary.nu"
-                                kind @blocker
-                                text "`cargo test -p nsh --test oracle_measurement` FAILS AT HEAD, AND HAS BEEN FAILING SINCE BEFORE 74f31fc. Found 2026-09-04 while closing `perf.locale.unreachable-positions`, whose own workspace run reported it and which had nothing to do with it.\n\nTHE REPORT, verbatim:\n\n    crates/nsh-platform/src/unix/process.rs:577: early-return in\n    `reporting_the_creation_mask_never_unmasks_the_process`: returns\n    without measuring, guarded by\n    `let Some(ambient) = published_creation_mask() else`\n\nVERIFIED PRE-EXISTING, not collateral from another session's in-flight work in that crate. A detached worktree was made at 74f31fc with `git worktree add --detach`, `cargo test -p nsh --test oracle_measurement` built there against its own `CARGO_TARGET_DIR`, and the binary run directly (the sandboxed cargo runner cannot chdir into a worktree, which is a second small finding). It failed there with the same single line. `crates/nsh-platform/src/unix/process.rs` is unmodified in the shared checkout and its last commit is `7bd762f`, so the failure travels with HEAD.\n\nWHY IT IS NOT VISIBLE. `.config/nplan/config.styx` deliberately carries no `test` entry for the Rust platform -- the commit gate runs fmt, clippy and `nsh-lint` only, for reasons the config states at length -- so nothing refuses a commit while this is red. It shows only in a full `cargo test --workspace`, which is where two sessions in a row have now had to decide whether the failure was theirs.\n\nTHE THREE EXITS the lint itself names, in its own message, and the check is right that one of them is owed: a static skip through a `pub const fn ... -> bool` host fact from nsh-platform, a `#[ignore]`, or an `// oracle-violation: early-return=<reason>` inside the check. The honest one here is probably the third: the guard is `published_creation_mask()` returning `None`, which is a runtime property of the process's umask rather than of the host, and the test's own doc comment already explains that a process whose mask is zero has nothing to tell apart. That reasoning is the reason the suppression wants; it is written in the comment above the return and not in the form the lint reads.\n\nDONE WHEN `cargo test -p nsh --test oracle_measurement` passes at HEAD, and the way it passes is a recorded decision rather than a deleted assertion."
+                                kind @note
+                                text "THE THIRD INSTANCE IS WHAT OPENS THIS NODE, AND THE ARGUMENT IS THE ONE `verification.md` ALREADY MAKES.\n\nThree checks were found by hand in one sitting sharing process state with the checks running beside them, and all three are now fixed:\n\n    the file-creation mask   `umask(0)` then `umask(saved)` -- 49 of 50 runs failed\n                             a sibling, 0 of 50 after\n    an inherited pipe        a forked child held a sibling's write end open, so\n                             end-of-input never arrived -- 299 of 20,000, 0 after\n    a half-read character    fenced with a pipe, which cannot produce the case\n\nOnly the first left behind a check that would catch its own return: `reporting_the_creation_mask_never_unmasks_the_process` fails with the dance forced (87 of 201 files carried bits `0o077` should have removed) and passes without it. The other two are true by construction -- a process of their own, no shared state touched -- and are measured only as the absence of a flake.\n\nA RULE WHOSE EVIDENCE IS THAT NOTHING HAS FLAKED YET IS THE SHAPE THIS FILE EXISTS TO REFUSE. `[spec:nsh:req:oracle.checks-do-not-share-state]` is a claim about every check in the workspace, not about three of them. Nothing fires when the next test forks with a pipe open, or reads the umask to see what it is, or picks a descriptor number it closed a moment ago. `nplan spec uncovered` agrees: the rule has zero annotation sites in `crates/`.\n\nTHE PRECEDENT IS EXACT. `oracle.cannot-measure-is-a-failure` was written from five instances found in one sitting, and what made it a rule rather than five fixes was `crates/nsh/tests/oracle_measurement.rs` -- a check that reads every `#[test]` under `crates/` and reports two structural shapes, with a recorded opt-out for the case it cannot judge. Three instances here, found the same way, in the same week.\n\nWHAT THE CHECK CAN SEE, AND WHAT IT CANNOT. The reachable shapes are syntactic: a `#[test]` that calls `umask`, `chdir`, `dup2`, `close` on a number, or `setenv`/`remove_var`; a `Command`/fork whose descriptors are not closed on the child side; a test that both writes and restores a process-global. What it cannot see is the same thing `verification.md` already says no lint here reaches -- a check whose *input* is not what its name says. The half-read-character node is exactly that case: it was fenced with a pipe, which cannot produce a half-read character at all, and no textual shape distinguishes that from a correct fence.\n\nSo the honest scope is the two-thirds that is syntactic, and the node should say in its own commit which shapes it does not reach, as `oracle_measurement.rs` does.\n\nDONE WHEN a check reads every `#[test]` under `crates/` and reports a test that touches process state shared with its siblings; it is seen to fail on each of the three instances above, restored from git rather than described; the opt-out is the same `<code>=<reason>` grammar `oracle-violation` already uses; and the rule carries an impl and a `/test` annotation, which is what would let `tooling.tests` derive done."
                             }
                         )
+                    }
+                )
+                log (
+                    {
+                        at 2026-09-04T00:05:35.733422556Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "NOT CLOSING THIS NODE, 2026-09-04, ON THE AGENT'S OWN EVIDENCE.\n\nIts three children are done and their numbers are good -- the mask went from 49 failures in 50 runs to 0, the inherited pipe from 299 in 20,000 to 0, and the half-read character is deterministic across three straddle positions. The agent said plainly that it made `[spec:nsh:req:oracle.checks-do-not-share-state]` true and measurable for the mask half and true *by construction* for the other two, and left the decision here. That is the right report and the answer it points to is no.\n\nThe rule is a claim about every check in this workspace. Two of three instances are evidenced only by the absence of a flake, and `nplan spec uncovered` still lists the rule with no annotation site in `crates/`, so the tool and the argument agree. `tooling.tests.shared-state-lint` is the missing delivery and now deps on all three children; when it lands the rule gets its impl and `/test` sites and this node derives done rather than being asserted.\n\nWorth keeping: the parent holds the rule and the children do not, which is why finishing all three children did not close it. That is the decomposition working, not a gap."
                     }
                 )
             }
