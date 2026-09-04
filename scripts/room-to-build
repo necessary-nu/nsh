@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Stand in front of every `rustc` this workspace runs and refuse the ones the
 # filesystem cannot hold.
 #
@@ -35,6 +35,26 @@
 # The same script under `#!/bin/bash` with two `stat` invocations measured
 # 6.61 ms, which is a third of a second added to a workspace build to ask a
 # question twice in a slower shell.
+#
+# CORRECTION, 2026-09-04, the same day. The paragraph above is kept verbatim
+# because its arithmetic is right and its conclusion was wrong: it chose the
+# shell on cost alone, and cost was not the only thing at stake. `/bin/sh` here
+# is dash, and dash drops every environment entry whose name is not a valid
+# shell identifier -- which is correct of it, and fatal here, because cargo
+# hands a test crate `CARGO_BIN_EXE_nsh-survey` and that name has a hyphen in
+# it. The variable was gone before this script's first line, so
+# `env!("CARGO_BIN_EXE_nsh-survey")` had nothing to read and
+# `crates/nsh-survey/tests/{bash_reference,smoosh_runner}.rs` stopped
+# compiling. `cargo test --workspace` was red on master for two hours.
+#
+# A wrapper cannot forward what its interpreter discarded before it started, so
+# no amount of care inside the script reaches this. The shell has to be one
+# that keeps such names, and `bash` does. Measured here at load 7.5, 200
+# invocations of this script as it now stands: 3.07 ms under sh, 4.55 ms under
+# bash. That is 1.5 ms x 150 invocations = 0.22 s on a from-clean
+# `cargo test --workspace --no-run` that takes 33.7 s, against a defect that
+# stopped the workspace compiling. The original measurement of 6.61 ms was of a
+# version asking twice; asking once costs most of the difference back.
 #
 # THE THRESHOLD AND THE MODE COME FROM THE WRAPPER'S OWN VARIABLES, so the two
 # checks cannot disagree about what "enough" means or about whether the reader
