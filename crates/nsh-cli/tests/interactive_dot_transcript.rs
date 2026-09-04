@@ -206,7 +206,7 @@ fn operands(name: &str) -> std::path::PathBuf {
 }
 
 /// `.` on a file that prints writes what dash writes.
-// [spec:nsh:sem:idiom.specified-defects/test]
+// [spec:nsh:sem:idiom.specified-defects+1/test]
 // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
 #[test]
 fn dot_on_a_speaking_file_matches_dash() {
@@ -220,7 +220,7 @@ fn dot_on_a_speaking_file_matches_dash() {
 /// The one that shows the blank line is the built-in's and not the
 /// operand's: there is no output for a missing final newline to be missing
 /// from.
-// [spec:nsh:sem:idiom.specified-defects/test]
+// [spec:nsh:sem:idiom.specified-defects+1/test]
 #[test]
 fn dot_on_a_silent_file_matches_dash() {
     let directory = operands("silent");
@@ -232,7 +232,7 @@ fn dot_on_a_silent_file_matches_dash() {
 ///
 /// They agreed before and have to still agree, because a fix that reached
 /// them would be changing the prompt rather than the built-in.
-// [spec:nsh:sem:idiom.specified-defects/test]
+// [spec:nsh:sem:idiom.specified-defects+1/test]
 #[test]
 fn eval_and_substitution_still_match_dash() {
     let directory = operands("others");
@@ -249,7 +249,7 @@ fn eval_and_substitution_still_match_dash() {
 /// session that is typed at does not do. Both spellings are here because
 /// they take different paths into the same loop -- a script operand and
 /// standard input -- and only one of them was at risk.
-// [spec:nsh:sem:idiom.specified-defects/test]
+// [spec:nsh:sem:idiom.specified-defects+1/test]
 // [spec:posix:req:builtin.set.opt-o-ignoreeof/test]
 #[test]
 fn own_input_ending_still_writes_the_newline() {
