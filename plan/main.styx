@@ -9718,6 +9718,20 @@ children (
                                             }
                                         )
                                     }
+
+                                    {
+                                        id bash.divergences.read-count-waits-for-the-line
+                                        title "Return from `read -n` when the count is reached, not when the line is"
+                                        kind @fix
+                                        log (
+                                            {
+                                                at 2026-09-04T00:00:07.838743046Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FOUND 2026-09-04 WHILE BUILDING THE REGRESSION TEST FOR `tooling.tests.half-read-character-pty`, WHICH IS WHERE IT COST AN HOUR: that node's plan was a pseudo-terminal handshake, and the handshake cannot be built because of this.\n\n`read -n N` MUST RETURN AS SOON AS N CHARACTERS HAVE BEEN READ. This shell returns when the delimiter arrives instead, so on any source a person or another program is still writing to, `read -n1` blocks until a newline.\n\nMEASURED 2026-09-04 against the pinned Bash 5.3.15, `LC_ALL=C.UTF-8`, script `read -rn1 a; printf 'a=%s\\n' \"$a\"`, one byte `X` written and nothing else:\n\n    source                                   bash          nsh -o bash\n    pipe                                     a=X           (blocks)\n    pseudo-terminal, canonical               a=X           (blocks)\n    pseudo-terminal, ICANON cleared          a=X           (blocks)\n    pipe, via `exec 3<&0; read -rn1 -u3 a`   a=X           a=X\n\nIT IS NOT OUTPUT BUFFERING, which was the first suspicion and is what `tooling.tests.half-read-character-pty`'s attempt 3 blamed. Writing the answer to `>&2` instead of stdout changes nothing on any of the three blocking rows, and the pseudo-terminal rows have a line-buffered stdout in any case. Nor is it the terminal mode: clearing ICANON from outside makes the kernel hand the byte over and the shell still does not answer.\n\nWHERE IT IS. The last row is the whole diagnosis. `read -u N` takes `ReadStream::Descriptor` in `crates/nsh/src/builtins/read/stream.rs`, which reads the descriptor a byte at a time and returns each one, and that row matches the reference. `read` with no `-u` takes `ReadStream::Standard`, which goes through `crate::input::read_input_unit` -- the shell's own input stack, shared with the parser -- and that stack does not hand over a unit until it has the line. `read_record` in `crates/nsh/src/builtins/read/bash.rs` is not at fault: its `if limit.is_some_and(|limit| record.characters >= limit) { return ... }` is correct and is simply never reached in time, because `next_unit` has not returned.\n\nWHAT IT COSTS. Every interactive `read -n1` -- a menu, a \"press any key\", `read -rsn1` for a keystroke -- waits for Enter, which is exactly what `-n1` exists to avoid. `crates/nsh/src/builtins/read/bash.rs`'s `buffered_character_width` fallback, which the multi-byte work built, is reached in practice only through the file path for the same reason.\n\nWHAT TO CHECK BEFORE COMMITTING TO A FIX. Whether the input stack can hand over a partial line at all without stealing bytes from a later `read` or from the parser -- `standard_input_state.bufferable` is already false for a pipe and a terminal in canonical mode, which is dash's answer to the same question, so the bytes may already be arriving one at a time and only the *delivery* is held back. If so the fix is small and local; if not, it reaches `crates/nsh/src/input/read.rs` and the tee machinery, and that is a different size of change.\n\nDONE WHEN the four rows above all read `a=X`, `crates/nsh-cli/tests/multibyte_across_a_read_boundary.rs` still passes, and a differential row covers `read -n1` on a pipe so this cannot come back. The pseudo-terminal harness in `crates/nsh-cli/tests/default_history_navigation.rs` is what the terminal rows want."
+                                            }
+                                        )
+                                    }
                                 )
                                 log (
                                     {
@@ -10014,6 +10028,7 @@ children (
                         id harness.creation-mask-check-returns-early
                         title "Give the creation-mask check something to measure on every host"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T23:28:10.553901472Z
@@ -10034,6 +10049,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "single-flight overridden: started while bash.divergences.publish-names.call-stack-arrays had uncommitted WIP"
+                            }
+
+                            {
+                                at 2026-09-03T23:48:25.732453511Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

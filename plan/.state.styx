@@ -1659,7 +1659,7 @@ assertions (
     {id bash.divergences.publish-names.environment-facts, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:28:38.994782265Z}
     {id tooling.tests.half-read-character-pty, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:34:17.343329031Z}
     {id bash.divergences.publish-names.call-stack-arrays, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:35:50.077383618Z}
-    {id harness.creation-mask-check-returns-early, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:44:23.55423771Z}
+    {id harness.creation-mask-check-returns-early, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:48:25.732453511Z}
 )
 
 impl_evidence (
