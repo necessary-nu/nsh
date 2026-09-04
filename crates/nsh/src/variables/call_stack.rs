@@ -14,13 +14,19 @@
 //! expansion, arithmetic, `${#x}`, `${x[@]}` and `${x:1}`, and a value
 //! that is an ordinary indexed array answers all of them without the
 //! expansion pipeline knowing this module exists.
+//!
+//! The other two names Bash publishes about a call, `BASH_ARGC` and
+//! `BASH_ARGV`, are not here: the reference installs them on the read
+//! that asks for them rather than on a push, so they sit beside the
+//! clocks in [`super::special`]. This module is what tells that read
+//! whether a frame is in progress.
 
 use std::collections::BTreeMap;
 
 use bstr::{BStr, BString};
 
 use super::value::{VariableKind, VariableValue};
-use super::{VariableAttributes, arrays};
+use super::{VariableAttributes, VariableState, arrays};
 use crate::context::Shell;
 use crate::options::Dialect;
 
@@ -29,6 +35,26 @@ const MAIN: &[u8] = b"main";
 
 /// The three arrays this module owns, in the order they are refreshed.
 const ARRAY_NAMES: [&[u8]; 3] = [b"FUNCNAME", b"BASH_SOURCE", b"BASH_LINENO"];
+
+/// The one of the three the reference leaves *declared* rather than
+/// assigned when it is empty.
+const DECLARED_WHEN_EMPTY: &[u8] = ARRAY_NAMES[0];
+
+/// What `BASH_SOURCE` names for a body the shell read before any file
+/// was opened -- from standard input, or from `-c`.
+///
+/// It is `$0` and not `main`. `main` is `FUNCNAME`'s bottom frame, which
+/// is a different thing and is spelled that way there. Measured on the
+/// pinned 5.3.15: a function defined on standard input reports
+/// `BASH_SOURCE[0]` as `MYNAME` under `exec -a MYNAME bash -c ...` and as
+/// `zero0` under `bash -c '...' zero0`, so it follows the name the shell
+/// was invoked under rather than the path the binary was found at.
+fn invocation_source(shell: &Shell) -> BString {
+    shell
+        .options
+        .argument_zero()
+        .map_or_else(|| BString::from(MAIN), BStr::to_owned)
+}
 
 /// Whether a frame is a function call or a dot script.
 ///
@@ -77,12 +103,12 @@ impl CallStack {
     }
 
     /// The file whose commands are executing, as `BASH_SOURCE` spells it.
-    fn current_source(&self) -> BString {
+    fn current_source(&self, fallback: BString) -> BString {
         self.frames
             .last()
             .map(|frame| frame.source.clone())
             .or_else(|| self.base.clone())
-            .unwrap_or_else(|| BString::from(MAIN))
+            .unwrap_or(fallback)
     }
 
     /// `FUNCNAME`, `BASH_SOURCE`, `BASH_LINENO`, innermost first.
@@ -172,7 +198,10 @@ pub(crate) fn record_definition(shell: &mut Shell, name: &BStr) {
     if shell.options.dialect() != Dialect::Bash {
         return;
     }
-    let source = shell.variables.call_stack.current_source();
+    let source = shell
+        .variables
+        .call_stack
+        .current_source(invocation_source(shell));
     shell
         .variables
         .call_stack
@@ -194,19 +223,13 @@ pub(crate) fn definition_source(shell: &Shell, name: &BStr) -> BString {
         .definitions
         .get(name)
         .cloned()
-        .unwrap_or_else(|| BString::from(MAIN))
+        .unwrap_or_else(|| invocation_source(shell))
 }
 
 /// Enter a function call, at `line` of the caller's file.
 // [spec:nsh:req:compat.bash.traps-introspection]
 pub(crate) fn push_function(shell: &mut Shell, name: &BStr, line: i32) {
-    let source = shell
-        .variables
-        .call_stack
-        .definitions
-        .get(name)
-        .cloned()
-        .unwrap_or_else(|| BString::from(MAIN));
+    let source = definition_source(shell, name);
     shell.variables.call_stack.frames.push(CallFrame {
         kind: FrameKind::Function,
         name: name.to_owned(),
@@ -237,23 +260,31 @@ pub(crate) fn pop(shell: &mut Shell) {
 
 /// Write the three arrays back into the variable table.
 ///
-/// An empty array is *unset* rather than empty, so `set -u` diagnoses
-/// `$FUNCNAME` outside a function exactly as Bash does.
+/// An empty stack is published empty rather than unset, because the
+/// reference has all three names from the moment it starts: at rest on
+/// standard input it prints `declare -a BASH_SOURCE=()` and
+/// `declare -a BASH_LINENO=()`, and a script walking `declare -p` sees
+/// them. `FUNCNAME` is the one it leaves *declared* with no value at all,
+/// which is `VariableState::Declared` here.
+///
+/// Neither spelling gives `$FUNCNAME` a value: an empty indexed array has
+/// no element zero either, so `set -u` still diagnoses all three outside
+/// a function, and `${FUNCNAME[@]}` is still silent under it. The
+/// difference the two spellings do make is the one `declare -p` prints,
+/// which is the whole reason to keep them apart.
 ///
 /// A refusal is dropped rather than raised. The only way to earn one is
 /// to make one of the three names read-only, and a call must not fail
 /// because the shell could not publish its own introspection.
-fn refresh(shell: &mut Shell) {
+// [spec:nsh:req:compat.bash.names.call-stack]
+pub(crate) fn refresh(shell: &mut Shell) {
     if shell.options.dialect() != Dialect::Bash {
         return;
     }
     let values = shell.variables.call_stack.arrays();
     for (name, elements) in ARRAY_NAMES.into_iter().zip(values) {
+        let declared = elements.is_empty() && name == DECLARED_WHEN_EMPTY;
         let name = BStr::new(name);
-        if elements.is_empty() {
-            drop(super::unset_bytes(shell, name));
-            continue;
-        }
         let mut value = VariableValue::empty(VariableKind::Indexed);
         for (index, element) in elements.iter().enumerate() {
             value.set_indexed(index as u64, BStr::new(element.as_slice()));
@@ -268,6 +299,9 @@ fn refresh(shell: &mut Shell) {
             VariableAttributes::NONE,
             arrays::ReadOnlyGuard::Declaration,
         ));
+        if declared && let Some(entry) = shell.variables.entries.get_mut(name) {
+            entry.state = VariableState::Declared(VariableKind::Indexed);
+        }
     }
 }
 

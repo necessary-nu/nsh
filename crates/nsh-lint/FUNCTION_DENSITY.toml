@@ -118,3 +118,30 @@ stays `pub(super)`, and `conditional_primary` keeps reaching `super::keywords::n
 `density.rs`'s counter on 2026-09-02, the day the file reached 46 by gaining `conditional_chain` \
 and `conditional_test` for the `[[ ]]` newline work.
 """
+
+[[file]]
+path = "crates/nsh/src/variables/special.rs"
+answer = """
+Split the POSIX readers out to `crates/nsh/src/variables/readers.rs`. Fifteen functions move \
+-- `default_ifs`, `default_path`, `default_primary_prompt`, `default_continuation_prompt`, \
+`builtin_value`, `ifs_value`, `ifs_is_set`, `mail_value`, `mail_path_value`, `path_value`, \
+`primary_prompt_value`, `continuation_prompt_value`, `trace_prompt_value`, \
+`history_size_value` and `mail_path_is_set` -- leaving 31 functions here and 15 there. THEY \
+ARE ALREADY A SUBJECT AND NOT A LEFTOVER: every one of them reads a name POSIX defines and \
+this shell's own code depends on, none of them knows the Bash dialect exists, and the module \
+doc at the top of `special.rs` already introduces them as a separate thing from the facts, the \
+clocks and the published arrays that make up the rest. EXACTLY THREE NAMES CROSS THE SEAM, all \
+in one direction: `shell_path` calls `path_value`, and `publish_prompts` calls \
+`default_primary_prompt` and `default_continuation_prompt`, so `special.rs` takes those three \
+from the new module and nothing new leaves it. `builtin_value` is private and is called only by \
+the eight readers above it, so it moves with them rather than staying. The fifteen are `pub` \
+and re-exported by name from `crates/nsh/src/variables.rs`; that `pub use` changes which module \
+it names and no caller anywhere else changes, because every one of them reaches these through \
+`crate::variables::`. Counted with `density.rs`'s counter on 2026-09-04, the day the file \
+reached 46 by gaining `publish_prompts`, `default_primary_prompt`, \
+`default_continuation_prompt`, `publish_call_frames` and `publish_call_arguments` for the \
+published-names work. The sibling node `publish-names.ordinary-state` adds `OLDPWD`, `OPTERR`, \
+`HISTCMD`, `_`, `BASH_COMMAND`, `BASH_ARGV0`, `BASH_MONOSECONDS` and `BASH_EXECUTION_STRING` to \
+this same file, so it is the change that will be charged for this and it should do the split \
+first rather than last.
+"""
