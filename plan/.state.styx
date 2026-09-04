@@ -1655,7 +1655,6 @@ assertions (
     {id tooling.tests.read-the-umask, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:04:16.527250808Z}
     {id perf.locale.unreachable-positions, kind @doing, author "brendan@necessary.nu", at 2026-09-03T22:49:48.355714681Z}
     {id tooling.tests.forked-child-holds-pipe, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:33:47.26285143Z}
-    {id struct.platform-children-module, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:18:17.05984823Z}
     {id bash.divergences.publish-names.environment-facts, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:28:38.994782265Z}
     {id tooling.tests.half-read-character-pty, kind @complete, author "brendan@necessary.nu", at 2026-09-04T00:01:52.304880954Z}
     {id bash.divergences.publish-names.call-stack-arrays, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:35:50.077383618Z}
@@ -5844,5 +5843,10 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
+    )}
+    {id struct.platform-children-module, covered_rules (
+        idiom.declared-module-tree
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.declared-module-tree}
     )}
 )

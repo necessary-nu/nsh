@@ -50,6 +50,15 @@ const HOSTS: &[(&str, &str)] = &[("unix", "unix.rs"), ("windows", "windows.rs")]
 /// host, in every build".
 type Surface = BTreeMap<String, String>;
 
+/// One `pub use` of one name, before either host has claimed it: the name
+/// and the conditions that publication carries.
+///
+/// A list rather than a map, because the crate root publishes `UserId`
+/// twice -- once under `unix` and once under `windows` -- and folding
+/// those into one entry loses whichever host is read first, which is a
+/// name reported missing from a host that has it.
+type Publication = (String, String);
+
 /// Every host's table of contents publishes the same names under the same
 /// conditions, reported as findings.
 // [spec:nsh:req:idiom.platform-surface-parity/test]
@@ -69,7 +78,8 @@ pub(crate) fn hosts_publish_the_same_surface() -> Vec<String> {
                 continue;
             }
         };
-        let (mut surface, opaque) = published(&text);
+        let (host_published, opaque) = published(&text);
+        let mut surface: Surface = host_published.into_iter().collect();
         for (conditions, item) in opaque {
             reported.push(format!(
                 "{file} publishes `{item}` by a route this check cannot compare; \
@@ -138,8 +148,8 @@ fn drift(left: (&str, &Surface), right: (&str, &Surface)) -> Vec<String> {
 /// everything inside a module, a function or a test is not, so a
 /// `pub use` in a test module cannot be mistaken for a published name,
 /// and a brace inside a string literal cannot throw the reading off.
-fn published(text: &str) -> (Surface, Vec<(String, String)>) {
-    let mut surface = Surface::new();
+fn published(text: &str) -> (Vec<Publication>, Vec<(String, String)>) {
+    let mut surface = Vec::new();
     let mut opaque = Vec::new();
     let mut conditions: Vec<String> = Vec::new();
     let mut item = String::new();
@@ -153,7 +163,7 @@ fn published(text: &str) -> (Surface, Vec<(String, String)>) {
                 .strip_prefix("#[cfg(")
                 .and_then(|rest| rest.strip_suffix(")]"))
             {
-                conditions.push(condition.trim().to_owned());
+                conditions.extend(predicates(condition));
                 continue;
             }
             if line.starts_with('#') {
@@ -181,12 +191,46 @@ fn published(text: &str) -> (Surface, Vec<(String, String)>) {
         conditions.sort();
         let condition = conditions.join(" + ");
         for name in names_in(&item) {
-            surface.insert(name, condition.clone());
+            surface.push((name, condition.clone()));
         }
         conditions.clear();
         item.clear();
     }
     (surface, opaque)
+}
+
+/// One `cfg` attribute's conditions, with an `all(...)` opened up into
+/// the predicates it conjoins.
+///
+/// `#[cfg(all(unix, feature = "edit"))]` and the same two written as
+/// separate attributes mean one thing to the compiler, so they have to
+/// mean one thing here: a host predicate hidden inside an `all` would
+/// otherwise leave its names on neither surface, and be reported missing
+/// from the host that has them.
+fn predicates(condition: &str) -> Vec<String> {
+    let Some(inner) = condition
+        .trim()
+        .strip_prefix("all(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return vec![condition.trim().to_owned()];
+    };
+    let mut parts = Vec::new();
+    let mut depth = 0_usize;
+    let mut start = 0;
+    for (at, character) in inner.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.extend(predicates(&inner[start..at]));
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.extend(predicates(&inner[start..]));
+    parts
 }
 
 /// The names one `pub use` item publishes.
@@ -273,11 +317,12 @@ fn code_only(text: &str) -> String {
 mod tests {
     use super::*;
 
-    /// One `pub use` per shape the platform roots actually write, and the
-    /// three shapes that must not become names.
+    /// One `pub use` per shape the platform roots actually write, the
+    /// three shapes that must not become names, and the one name two
+    /// hosts publish from the same file.
     #[test]
     fn a_table_of_contents_reads() {
-        let (surface, opaque) = published(
+        let (published_names, opaque) = published(
             "mod locale;\n\
              pub use locale::{Locale, LocaleCharacter};\n\
              #[cfg(feature = \"edit\")]\n\
@@ -286,21 +331,34 @@ mod tests {
              pub use paths::{\n    AccessMode,\n    absolute_path,\n};\n\
              pub use windows::*;\n\
              pub use text::NativeStrExt as Native;\n\
+             #[cfg(unix)]\n\
+             pub use unix_facts::UserId;\n\
+             #[cfg(windows)]\n\
+             pub use windows_facts::UserId;\n\
              #[cfg(test)]\n\
              mod tests {\n    pub use hidden::NotPublished;\n}\n",
         );
-        assert_eq!(surface.get("Locale").map(String::as_str), Some(""));
-        assert_eq!(surface.get("LocaleCharacter").map(String::as_str), Some(""));
+        let condition = |wanted: &str| -> Vec<&str> {
+            published_names
+                .iter()
+                .filter(|(name, _)| name == wanted)
+                .map(|(_, conditions)| conditions.as_str())
+                .collect()
+        };
+        assert_eq!(condition("Locale"), [""]);
+        assert_eq!(condition("LocaleCharacter"), [""]);
+        assert_eq!(condition("editor_terminal_size"), ["feature = \"edit\""]);
+        assert_eq!(condition("execute_program"), [""]);
+        assert_eq!(condition("absolute_path"), [""]);
+        assert_eq!(condition("Native"), [""]);
         assert_eq!(
-            surface.get("editor_terminal_size").map(String::as_str),
-            Some("feature = \"edit\"")
+            condition("UserId"),
+            ["unix", "windows"],
+            "a name two hosts publish is two publications, not one"
         );
-        assert_eq!(surface.get("execute_program").map(String::as_str), Some(""));
-        assert_eq!(surface.get("absolute_path").map(String::as_str), Some(""));
-        assert_eq!(surface.get("Native").map(String::as_str), Some(""));
-        assert!(!surface.contains_key("*"), "a glob is not a name");
+        assert!(condition("*").is_empty(), "a glob is not a name");
         assert!(
-            !surface.contains_key("NotPublished"),
+            condition("NotPublished").is_empty(),
             "an indented `pub use` is not a top-level publication"
         );
         assert!(opaque.is_empty(), "{opaque:?}");
@@ -343,28 +401,30 @@ mod tests {
         let source = workspace_root().join(PLATFORM);
         for (_, file) in HOSTS {
             let text = std::fs::read_to_string(source.join(file)).expect("a host root is readable");
-            let (surface, opaque) = published(&text);
+            let (names, opaque) = published(&text);
             assert!(
-                surface.len() > 100,
+                names.len() > 100,
                 "{file} read as {} published names",
-                surface.len()
+                names.len()
             );
-            assert!(surface.contains_key("LocaleCharacter"), "{file}");
             assert!(opaque.is_empty(), "{file}: {opaque:?}");
         }
     }
 
-    /// The crate root's host-guarded publications are found, since the
-    /// facts modules are published from there and nowhere else.
+    /// The crate root carries part of *both* surfaces, and the same name
+    /// on each: `UserId` is published there once per host, and reading it
+    /// for one host must not take it away from the other.
     #[test]
     fn the_crate_root_carries_part_of_each_surface() {
         let text = std::fs::read_to_string(workspace_root().join(PLATFORM).join(CRATE_ROOT))
             .expect("the crate root is readable");
-        let (surface, _) = published(&text);
-        let guarded: Vec<_> = surface
-            .iter()
-            .filter_map(|(name, conditions)| without(conditions, "windows").map(|_| name.as_str()))
-            .collect();
-        assert!(guarded.contains(&"UserId"), "{guarded:?}");
+        let (names, _) = published(&text);
+        for (host, _) in HOSTS {
+            let guarded: Vec<_> = names
+                .iter()
+                .filter_map(|(name, conditions)| without(conditions, host).map(|_| name.as_str()))
+                .collect();
+            assert!(guarded.contains(&"UserId"), "{host}: {guarded:?}");
+        }
     }
 }

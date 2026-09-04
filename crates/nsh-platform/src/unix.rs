@@ -1,55 +1,33 @@
-/* The POSIX implementation of the shell's operating-system boundary,
- * and the table of contents for the subjects it divides into.
- *
- * There is no `//!` here, and there cannot be: this file is `include!`d
- * into the crate root, where an inner attribute is no longer the first
- * thing in the module. The doc for each subject is on the subject.
- *
- * Two of the children below predate the directory: `descriptor`,
- * `locale`, `terminal` and `editor_terminal` were split out one at a
- * time and sit beside this file in `src/`, while everything this change
- * moved is in `src/unix/`. `signal_names` is shared with the Windows
- * host and belongs in neither.
- *
- * Every name published below is published by `windows.rs` too, under the
- * same conditions. The shell names them with no `cfg`, so a host short of
- * one fails in the shell on a target nobody here builds rather than in
- * the file that is short; `nsh-lint`'s `hosts_publish_the_same_surface`
- * compares the two lists so the shortfall is reported where it is. */
+//! The POSIX implementation of the shell's operating-system boundary,
+//! and the table of contents for the subjects it divides into.
+//!
+//! Four subjects sit beside this file rather than under `unix/` --
+//! `descriptor`, `locale`, `terminal` and `editor_terminal`, split out
+//! one at a time before the directory existed -- and are declared by the
+//! crate root, which is the module their files are in. `signal_names` is
+//! shared with the Windows host and is declared there too. Everything in
+//! `src/unix/` is declared below and resolves by convention, which is
+//! what this file being a module rather than an included text buys.
+//!
+//! Every name this file and the crate root publish for POSIX is
+//! published for Windows as well, under the same conditions. The shell
+//! names them with no `cfg`, so a host short of one fails in the shell on
+//! a target nobody here builds rather than in the file that is short;
+//! `nsh-lint`'s `hosts_publish_the_same_surface` compares the two lists
+//! so the shortfall is reported where it is.
+// [spec:nsh:req:idiom.declared-module-tree]
 // [spec:nsh:req:idiom.platform-surface-parity]
 
-mod descriptor;
-pub use descriptor::{AsDescriptor, BorrowedDescriptor, Descriptor, move_fd_cloexec};
-mod locale;
-pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};
-mod signal_names;
-pub use signal_names::{SIGNAL_COUNT, SIGNAL_NAMES};
-mod terminal;
-pub use terminal::{TerminalSettings, is_terminal, terminal_canonical_mode};
-mod unix_facts;
-pub use unix_facts::{
-    GroupId, UserId, descriptor_limit, effective_gid, effective_uid, host_name, real_uid,
-    supplementary_groups, wait_for_input,
-};
-/* The only user of `nshedit-plat`, and so the only part of the boundary
- * the `edit` feature gates. */
-#[cfg(feature = "edit")]
-mod editor_terminal;
-#[cfg(feature = "edit")]
-pub use editor_terminal::{
-    EditorTerminalAttributes, TerminalApply, TerminalControlCharacter,
-    apply_editor_terminal_attributes, editor_terminal_attributes, editor_terminal_size,
-    wait_for_terminal_input,
+/* What the children below need from the crate root. A child sees this
+ * module's names through `use super::*`, so the crate-root types cross
+ * into the subject modules here, in one place -- which is how
+ * `windows.rs` hands its children the private items they share. */
+use crate::descriptor;
+use crate::{
+    AsDescriptor, ChildStatus, Descriptor, ForkResult, ProcessGroupId, ProcessGroupState,
+    ProcessId, ProcessSelector, ProcessTarget, SIGNAL_COUNT, Signal, SignalRequest,
 };
 
-/* The subject split of this file, in `src/unix/`. This file is
- * `include!`d into the crate root rather than declared as a module, so a
- * bare `mod paths;` here would name `src/paths.rs`; `#[path]` is what
- * puts the children in a directory named for their parent. The include
- * is load-bearing and stays: it is what makes `unix_facts` a descendant
- * of the module declaring `UserId`, which is the asymmetry `ca0fa37`
- * had to work around on the Windows side. */
-#[path = "unix/endpoints.rs"]
 mod endpoints;
 pub use endpoints::{
     OpenMode, PIPE_BUFFER, ProcessDescriptorTransaction, anonymous_file, create_temporary_file,
@@ -59,13 +37,11 @@ pub use endpoints::{
     supports_bidirectional_pseudoterminal_pair, supports_tee, take_file_contents, tee, write_all,
     write_once,
 };
-#[path = "unix/errors.rs"]
 mod errors;
 pub use errors::{
     PathErrorKind, command_exec_failure_status, is_bad_descriptor_error, is_exec_format_error,
     is_path_error, is_pseudoterminal_end, platform_error,
 };
-#[path = "unix/paths.rs"]
 mod paths;
 pub use paths::{
     AccessMode, DirectoryEntry, FileKind, FileMetadata, absolute_path,
@@ -77,7 +53,6 @@ pub use paths::{
     shell_path_has_separator, shell_path_is_absolute, shell_path_last_separator,
     supports_glob_metacharacters_in_filenames,
 };
-#[path = "unix/process.rs"]
 mod process;
 pub use process::{
     LimitResource, ProcessTimes, ResourceLimit, creation_mask, current_process_group,
@@ -88,7 +63,6 @@ pub use process::{
     set_foreground_process_group, set_process_group, set_resource_limit, wait_for_any_child,
     wait_for_child,
 };
-#[path = "unix/signals.rs"]
 mod signals;
 pub use signals::{
     BlockedSignals, SignalAction, child_signal, configure_here_document_writer_signals,
@@ -97,7 +71,6 @@ pub use signals::{
     send_signal, signal_action, signal_is_blocked, terminal_input_signal, terminal_output_signal,
     terminal_stop_signal, terminate_with_interrupt, termination_signal, unblock_all_signals,
 };
-#[path = "unix/text.rs"]
 mod text;
 pub use text::{
     NativeStrExt, ShellBytesExt, input_newline_width, trim_command_substitution_output,
@@ -114,6 +87,7 @@ fn raw_process_group(group: ProcessGroupId) -> std::io::Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Locale;
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt as _;
