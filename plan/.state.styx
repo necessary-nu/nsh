@@ -1506,6 +1506,7 @@ assertions (
     {id bash.divergences.shell-fact-attributes, kind @complete, author "brendan@necessary.nu", at 2026-09-02T15:52:55.903431341Z}
     {id bash.divergences.substitution-in-subscript, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:01:17.458720557Z}
     {id bash.divergences.take-back-readonly, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:14.8134587Z}
+    {id bash.divergences.unclosed-extglob, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:25:28.139093667Z}
     {id bash.divergences.unset-every-operand, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:27:55.921955841Z}
     {id bash.divergences.wait-for-procsubs, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:13:35.015275991Z}
     {id bound-recursive-evaluation, kind @complete, author "brendan@necessary.nu", at 2026-08-30T21:27:15.450115667Z}

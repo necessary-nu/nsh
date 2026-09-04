@@ -521,6 +521,19 @@ fn finish_word_token(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<Tok
     if lexer.subscript_depth != 0 {
         return Err(syntax_error(shell, b"Missing ']'"));
     }
+    /* An open group makes blanks, operators and newlines the pattern's
+     * own bytes, so a word does not end while one is open: a depth still
+     * above zero here means the input ran out mid-group, and everything
+     * that followed is inside the word rather than a command. Bash opens
+     * the group in its parser and refuses the script, and a word read out
+     * of it would not be a second reading of the same script but a
+     * shorter script. Only `bash::open_extended_glob` raises the depth
+     * and it returns early unless `bash::active`, so the POSIX dialect
+     * cannot arrive here. */
+    // [spec:nsh:req:compat.bash.expansion-globbing]
+    if lexer.extglob_depth != 0 {
+        return Err(syntax_error(shell, b"Missing ')'"));
+    }
     /* The outer `Option` is whether what was just read is a redirection
      * prefix at all; the inner one is whether it carried one, since an
      * operator with nothing before it takes its own default. A prefix is
