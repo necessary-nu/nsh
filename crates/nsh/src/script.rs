@@ -54,7 +54,28 @@ impl Reader {
     ///
     /// When the shell it holds cannot be built, which is when the process
     /// cannot open the null device its diagnostics go to.
+    // [spec:nsh:req:embedding-safety.reading-without-running]
     pub fn new() -> Result<Reader, Error> {
+        Reader::in_dialect(false)
+    }
+
+    /// A reader of Bash syntax, as [`crate::Shell`] reads it with the
+    /// `bash` option on.
+    ///
+    /// The dialect decides the grammar, so it has to be the caller's to
+    /// choose: `[[ -f x ]]` is a command in one and a word in the other,
+    /// and a reader fixed to POSIX would answer a Bash embedder about a
+    /// language it is not running.
+    ///
+    /// # Errors
+    ///
+    /// As [`Reader::new`].
+    // [spec:nsh:req:embedding-safety.reading-without-running]
+    pub fn bash() -> Result<Reader, Error> {
+        Reader::in_dialect(true)
+    }
+
+    fn in_dialect(bash: bool) -> Result<Reader, Error> {
         let streams = crate::streams::Streams::discarding().map_err(|error| {
             Error::other(
                 0,
@@ -62,7 +83,10 @@ impl Reader {
                 format!("cannot open the reader's streams: {error}").as_bytes(),
             )
         })?;
-        let shell = Shell::builder().streams(streams).build()?;
+        let shell = Shell::builder()
+            .streams(streams)
+            .option(BStr::new(b"bash"), bash)
+            .build()?;
         Ok(Reader { shell })
     }
 
@@ -77,6 +101,11 @@ impl Reader {
     /// The shell's own syntax error, with its message. Nothing has been
     /// written to the host: the diagnostic the parser reports on its way
     /// out went to the reader's null stderr.
+    ///
+    /// The parse is `parse_command`, the one [`crate::Shell::run`] uses,
+    /// so what a caller is told is what the shell would act on rather
+    /// than a second reading that could drift from it.
+    // [spec:nsh:req:embedding-safety.reading-without-running]
     pub fn read(&mut self, source: &BStr) -> Result<Script, Error> {
         let shell = &mut self.shell;
         crate::resource::with_resources(shell, |shell, _resources| {
@@ -243,6 +272,14 @@ pub struct Word {
 /// `quoted` is the one fact expansion turns on. A quoted piece is text and
 /// nothing else; an unquoted literal may be a pattern or a `~`, and an
 /// unquoted expansion is split into fields and matched against the disk.
+///
+/// Between the variant and that flag, two spellings the shell runs
+/// differently read differently here: `'$x'` is a quoted [`Piece::Literal`]
+/// where `"$x"` is a quoted [`Piece::Parameter`], and `$x` is the same
+/// parameter unquoted. Which quote was written is not a distinction the
+/// shell draws, and is in [`Word::source`] for a caller that wants the
+/// spelling back rather than the meaning.
+// [spec:nsh:req:embedding-safety.reading-without-running]
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum Piece {
@@ -829,5 +866,87 @@ mod tests {
         // called `[[`, and this reader says so rather than guessing.
         assert!(matches!(one(b"[[ -n x ]]"), Command::Simple(_)));
         assert!(matches!(one(b"time make"), Command::Other));
+    }
+
+    /// A Bash reader is asked about Bash, not about POSIX.
+    ///
+    /// The same bytes are a different program in the two dialects, so a
+    /// reader that could only be POSIX would answer a Bash embedder
+    /// confidently and wrongly. `[[ -n x ]]` is the shortest pair: a
+    /// simple command named `[[` in one dialect, a conditional this
+    /// projection does not describe in the other.
+    // [spec:nsh:req:embedding-safety.reading-without-running/test]
+    #[test]
+    fn a_reader_reads_the_dialect_it_was_given() {
+        let posix = Reader::new()
+            .expect("a reader")
+            .read(BStr::new(b"[[ -n x ]]"))
+            .expect("a script");
+        let bash = Reader::bash()
+            .expect("a reader")
+            .read(BStr::new(b"[[ -n x ]]"))
+            .expect("a script");
+        assert!(matches!(posix.commands[0], Command::Simple(_)));
+        assert!(matches!(bash.commands[0], Command::Other));
+    }
+
+    /// Run a script in an ordinary shell and give back what it wrote.
+    fn ran(source: &[u8]) -> BString {
+        let mut shell = Shell::builder()
+            .streams(crate::streams::Streams::capture().expect("captured streams"))
+            .build()
+            .expect("a shell");
+        shell.run(BStr::new(source)).expect("a run");
+        shell.take_captured_stdout().expect("the output")
+    }
+
+    /// A pair the shell runs differently has to read differently.
+    ///
+    /// Nothing in this repository consumes the projection, so a
+    /// distinction it drops is invisible here unless something goes
+    /// looking. This is what looks.
+    ///
+    /// The pairs are not held to a recorded expectation. Each side is
+    /// RUN, in this shell, and the two outputs must differ before the
+    /// reading is asked about at all -- so the projection is measured
+    /// against the shell's own behaviour rather than against itself, and
+    /// a pair that has stopped being a pair is reported rather than
+    /// quietly passed.
+    // [spec:nsh:req:embedding-safety.reading-without-running/test]
+    // [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
+    #[test]
+    fn a_pair_the_shell_runs_differently_reads_differently() {
+        let _guard = crate::test_support::lock();
+        for (left, right) in [
+            /* Splitting: one field or two. */
+            (&b"printf '%s|' 'a b'"[..], &b"printf '%s|' a b"[..]),
+            /* A quoted expansion against the same bytes as data. */
+            (b"x=y; printf '%s|' \"$x\"", b"x=y; printf '%s|' '$x'"),
+            /* A substitution against its own spelling. */
+            (b"printf '%s|' \"$(echo h)\"", b"printf '%s|' '$(echo h)'"),
+            /* Arithmetic against its own spelling. */
+            (b"printf '%s|' $((1+1))", b"printf '%s|' '$((1+1))'"),
+            /* An empty quoted run is a field; nothing is not. */
+            (b"printf '%s|' '' x", b"printf '%s|' x"),
+            /* The operator between two commands. */
+            (b"false && printf 'x|'", b"false; printf 'x|'"),
+        ] {
+            assert_ne!(
+                ran(left),
+                ran(right),
+                "{:?} and {:?} no longer run differently, so this pair \
+                 measures nothing and has to be replaced",
+                BStr::new(left),
+                BStr::new(right),
+            );
+            assert_ne!(
+                format!("{:?}", read(left).commands),
+                format!("{:?}", read(right).commands),
+                "{:?} and {:?} run differently and read the same, so the \
+                 reading lost a distinction the shell draws",
+                BStr::new(left),
+                BStr::new(right),
+            );
+        }
     }
 }

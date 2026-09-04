@@ -12832,6 +12832,20 @@ children (
                             }
                         )
                     }
+
+                    {
+                        id tooling.moved-only-reads-the-whole-dirty-tree
+                        title "Let moved-only be asked about one change rather than about the whole working tree"
+                        kind @fix
+                        log (
+                            {
+                                at 2026-09-04T21:02:47.928384882Z
+                                author "brendan@necessary.nu"
+                                kind @blocker
+                                text "`scripts/moved-only` PROVES A PROPERTY OF THE WORKING TREE AND IS READ AS A PROPERTY OF ONE CHANGE. Found 2026-09-04 by `struct.conditional-sub-grammar`, whose whole delivery is the proof this script produces.\n\nThe script collects its subject with `git diff --no-renames --name-only --diff-filter=ACMRD \\\"$base\\\" -- '*.rs'` plus every untracked `.rs`, and there is no way to narrow it. In this shared checkout that is not the change being reviewed: at 4c5dd97 the tree carried six other sessions' modified files under `crates/nsh/src/` and one untracked test, so a run in the checkout would have compared their function sets against the base alongside mine and reported their additions as functions this split invented. That is precisely the reading the script exists to refuse -- its own header calls itself \\\"the check that lets a split of a two-thousand-line file be reviewed as the move it claims to be\\\", and a reviewer who runs it and sees `new:` lines has no way to tell whose they are.\n\n    $ git status --short -- '*.rs' | wc -l      # 2026-09-04 22:5x, this checkout\n    8      of which 2 were mine\n\nIT IS NOT THE RENAME DEFECT AND IT SURVIVES ITS FIX. `tooling.moved-only-cannot-see-a-rename` added `--no-renames` and a `--self-test`, and both hold: the self-test passes, and a `git mv` now reads as a move. This is the pathspec, not the rename detection.\n\nTHE WORKAROUND, WHICH IS WHAT THIS NODE'S PROOF ACTUALLY USED, and it is expensive enough to be worth replacing. `git worktree add --detach <path> HEAD`, copy in only the files the change owns, run the script there, remove the worktree. It costs a full source checkout and a moment's disk on a filesystem that reached 100% four times today, and it has to be redone for every re-measurement. Verified honest: `git status --short` in that worktree listed exactly the two files, and the script reported 46 functions across 2 files, unchanged.\n\nTHE FIX IS PROBABLY A PATHSPEC ARGUMENT. `scripts/moved-only [BASE] [-- PATHSPEC...]`, passed through to both the `git diff` and the `git ls-files --others`, so a caller can say which files the change is for -- the same thing `nplan_commit`'s `paths` already asks for and for the same reason. Two considerations before implementing. A pathspec is a claim the caller makes, so a change that touched a file outside it would be proved about the wrong set and the script should say what it was restricted to in its success line rather than only the counts. And the `--self-test` should grow a case for it: a second modified file outside the pathspec whose functions the run must NOT report, which is the failure this node is about and the one the current self-test cannot see."
+                            }
+                        )
+                    }
                 )
             }
         )

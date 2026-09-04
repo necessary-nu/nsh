@@ -1507,7 +1507,6 @@ derived_priorities (
 
 assertions (
     {id accept-newlines-inside-a-conditional, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:58:32.974921997Z}
-    {id an-embedder-cannot-read-a-script-without-running-it, kind @doing, author "brendan@necessary.nu", at 2026-09-03T12:19:00.375084237Z}
     {id apply-a-declaring-builtin-through-the-reference, kind @complete, author "brendan@necessary.nu", at 2026-09-02T12:45:11.445443261Z}
     {id bash-array-assignment-gaps, kind @complete, author "brendan@necessary.nu", at 2026-08-30T20:27:14.492865423Z}
     {id bash-expansion-gaps, kind @complete, author "brendan@necessary.nu", at 2026-08-30T20:16:02.886219554Z}
@@ -1721,7 +1720,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.status-flow-signal, version 0}
     )}
-    {id an-embedder-cannot-read-a-script-without-running-it}
+    {id an-embedder-cannot-read-a-script-without-running-it, covered_rules (
+        embedding-safety.reading-without-running
+    ), covered_claims (
+        {impl_name nsh-library, rule embedding-safety.reading-without-running}
+    )}
     {id audit-bug-for-bug-behavior, covered_rules (
         idiom.specified-defects
     ), covered_claims (
