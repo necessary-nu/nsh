@@ -9790,6 +9790,13 @@ children (
                                                 kind @note
                                                 text "WHAT `perf.locale.ifs-separator-table` DID TO THE FILE YOU ARE ABOUT TO EDIT, 2026-09-04. `crates/nsh/src/expand/typed/split.rs` no longer builds its own separator table: `struct IfsCharacter` and `fn separators` have moved to `crates/nsh/src/expand.rs` beside `IfsCache` and `update_ifs_cache`, and `split.rs::fields` now reads `shell.ifs.separators`. `split.rs` lost three functions and its `bstr::BString` and `crate::characters::width` imports; everything else in it -- `separator_at`, `field_into_fields`, `skip_whitespace` -- is untouched.\n\nWHAT THAT MEANS FOR THIS NODE, WHICH IS THE POINT OF THE NOTE. The question \"which blanks does the split treat as whitespace\" is now answered in exactly one place and at exactly one time: `expand.rs::ifs_separators`, at the moment `IFS` or the locale is assigned, by\n\n    locale.decode_exact(&bytes, bytes.len())\n        .is_some_and(|wide| locale.wide_is_space(wide))\n\nThat is `iswspace` on the character, and it is where a divergence about multibyte blanks has to be settled. It should be easier rather than harder: the predicate was previously re-evaluated on every field split, so a change to it had to be reasoned about in a loop, and the `whitespace` bit is now a cached property of one character with one producer.\n\nCARE, AND IT IS NEW. The bit is now cached, so anything that changes which characters count as blanks must also be something `update_ifs_cache` is called for. The two callers are in `crates/nsh/src/variables.rs::run_callback` -- `Callback::Ifs` when `IFS` is assigned, and `Callback::Locale` when the locale changes -- and both were already there. A divergence that turned on, say, a shell option rather than on `IFS` or the locale would have no invalidation point and would need one.\n\nNOTHING WAS SETTLED ABOUT WHICH BLANKS THE TWO REFERENCES SPLIT AT. The predicate is byte-for-byte what it was; only where and how often it runs changed. `bash::active` is not consulted anywhere in the new code, so this node's gating decision is still entirely open."
                                             }
+
+                                            {
+                                                at 2026-09-04T16:45:29.313482936Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -10026,6 +10033,7 @@ children (
                                         id bash.divergences.expansion-error-status-in-bash-mode
                                         title "Answer 127 where Bash ends a non-interactive shell over an expansion"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-04T13:19:46.43196289Z
@@ -10039,6 +10047,20 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T17:28:29.999223955Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FINISHED FROM A KILLED AGENT'S WORKING TREE, 2026-09-04. The agent that wrote this hit a session rate limit while waiting on two differential sweeps and never gated it. What follows is what I verified before landing it, and what I did not.\n\nVERIFIED. `cargo test --workspace` green. `gate-bash` PASS -- 873 eligible, 868 pass, 5 dispositioned. Oils `bash-comparison --expect-shell bash` against the 445-case baseline: **0 newly failing, 2 no longer failing** -- `fatal-errors.test.sh:3` and `:4`, which is this change paying off in the survey. Differential subset against `/usr/bin/dash` 0.5.12-12 over six corpora, controlled against a binary built from HEAD in a separate worktree: five identical, and the sixth is a parser corpus this change cannot reach (see the erratum on `bash.divergences.multibyte-blank-split`).\n\nNOT VERIFIED. The whole-corpus differential sweep, which is what the agent was waiting for when it died. It was not run because the machine reached 0 bytes free twice this evening and two other sessions are building into the same filesystem. The subset above is the substitute and it is a smaller claim.\n\nONE THING THE LINT CAUGHT IN THE HALF-FINISHED WORK, and it is the reason this could not simply be committed as found. `crates/nsh/src/runtime.rs:213` said \"Measured against the pinned Bash 5.3.15, in its default mode and under `--posix` alike\" in a file that never runs the reference -- `unmeasured-provenance`, which `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` refuses. The table was not wrong; the file could not have told anyone if it had gone wrong. Resolved the documented way: the comment now names `crates/nsh-cli/tests/bash_expansion_error_status.rs`, which runs every case through both shells in all three invocation shapes and holds no expected values of its own. That is the same resolution the two earlier instances took.\n\nWHAT THE AGENT ESTABLISHED, kept here because its commit message was never written. The status belongs to the *frame the shell leaves through* rather than to the failure: `sh -c 'unset x; echo ${x?z}'` ends with 127, the same script as a file operand or on standard input ends with 1, and both of the reference's modes agree, so it is not a `--posix` question. Bash evaluates a `-c` string through `parse_and_execute`, whose jump handler answers `EX_NOTFOUND`, and reads a file or standard input through a loop that answers the failure's own status."
+                                            }
+
+                                            {
+                                                at 2026-09-04T17:28:35.146963335Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

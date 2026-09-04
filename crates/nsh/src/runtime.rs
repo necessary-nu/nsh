@@ -204,7 +204,41 @@ pub(crate) fn run(shell: &mut Shell, startup: &Startup) -> crate::status::ExitSt
             Err(error) => {
                 let interrupted = error.is_interrupt();
                 let unrecoverable_read = error.is_unrecoverable_read();
-                shell.status = error.status();
+                /* The status a shell leaves when a failure ends it before
+                 * its input was read out is the failure's own, which the
+                 * dialect stamped where the diagnostic was written -- with
+                 * one exception, and the exception belongs to the *frame*
+                 * rather than to the failure.
+                 *
+                 * Measured by
+                 * `crates/nsh-cli/tests/bash_expansion_error_status.rs`,
+                 * which runs every case below through both shells in all
+                 * three invocation shapes and holds no expected values of
+                 * its own. In the reference's default mode and under
+                 * `--posix` alike: `${x?word}`, `${x:?word}`
+                 * and a `set -u` read of an unset name end a `-c` shell
+                 * with 127 and end a script file or a standard-input shell
+                 * with 1. Bash evaluates a `-c` string through
+                 * `parse_and_execute`, whose jump handler answers
+                 * `EX_NOTFOUND`, and reads a file or standard input through
+                 * a loop that answers the failure's own status. That is why
+                 * the test below is on the startup task: the same refusal
+                 * inside `eval`, inside `.` and inside a function all leave
+                 * through this frame and all answer 127 under `-c`, while a
+                 * `( )` subshell and a command substitution never reach it
+                 * and already agree at 1 and 0.
+                 *
+                 * The default dialect is not in this: dash answers 2 for
+                 * every invocation shape and so does this shell. */
+                // [spec:nsh:req:compat.bash.error-boundary]
+                shell.status = if task == StartupTask::Command
+                    && error.is_expansion()
+                    && shell.options.dialect() == crate::options::Dialect::Bash
+                {
+                    crate::status::ExitStatus::NOT_FOUND
+                } else {
+                    error.status()
+                };
                 drop(error);
                 shell.clear_evaluation_resources();
 

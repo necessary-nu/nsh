@@ -286,6 +286,30 @@ facility this shell does not provide.
 > holds that. Seven imported Smoosh results lose to this paragraph and are
 > registered in `docs/divergences.md`.
 >
+> Corrected 2026-09-04 by that node, everything above kept verbatim: "the
+> reference ends a non-interactive shell with 127 in both its modes" is true
+> only of a shell started with `-c`, which is how that measurement was taken.
+> Re-measured in all three invocation shapes against the pinned Bash 5.3.15:
+> `unset x; echo ${x?word}`, `${x:?word}` and a `set -u` read of an unset name
+> end the shell with **127** from `sh -c` and from `sh -s -c`, in the default
+> mode and under `--posix` alike, and with **1** from a script file operand and
+> from standard input. The number belongs to the frame the shell leaves through
+> rather than to the failure: Bash evaluates a `-c` string through
+> `parse_and_execute`, whose jump handler answers `EX_NOTFOUND`, and reads a
+> file or standard input through a loop that answers the failure's own status.
+> That is why the same refusal inside `eval`, inside `.` and inside a function
+> body all answer 127 under `-c`, while a `( )` subshell answers 1 and a
+> command substitution answers 0 in every shape, because neither reaches that
+> frame.
+>
+> Bash mode therefore MUST take status 127 for a terminal expansion refusal
+> that ends a shell whose input was a `-c` command string, and MUST keep status
+> 1 for that refusal in every other invocation and for every failure Bash
+> recovers from -- a bad substitution, a subscript that will not evaluate and
+> any arithmetic failure all answer 1 in all three shapes, which is what the
+> first paragraph above says and is unchanged. The default dialect is untouched
+> and still answers dash's 2 in every invocation shape.
+>
 > Source: `[dec:nsh:we-own-the-defects]`
 
 ## Interactive profile

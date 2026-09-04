@@ -1028,6 +1028,37 @@ PARSING divergence" -- and OSH also declines to reproduce it.
 Costs `var-op-patsub.test.sh:23` in the compatibility survey, registered
 as a sanctioned divergence rather than a defect.
 
+### A `&` child does not inherit the `-c` shell's 127
+
+**Status:** deliberate, and narrow. `crates/nsh/src/runtime.rs`.
+
+Bash's exit status for a terminal expansion refusal -- `${x?word}`,
+`${x:?word}`, a `set -u` read of an unset name -- is a property of the
+frame the shell leaves through rather than of the failure. A `-c` string
+is evaluated by `parse_and_execute`, whose jump handler answers
+`EX_NOTFOUND`; a script file and standard input go through a reader loop
+that answers the failure's own status. Bash mode reproduces that, and
+`bash.divergences.expansion-error-status-in-bash-mode` is the node.
+
+One consequence of *how* Bash reaches 127 is not reproduced. A child
+forked for `&` inherits the whole C stack, so it unwinds through the same
+`parse_and_execute` frame and exits 127 too, while a `( )` subshell sets
+up a `setjmp` of its own and exits 1. This shell answers 1 in both.
+Measured 2026-09-04 against the pinned Bash 5.3.15:
+
+| script, run as `sh -c` | bash | nsh -o bash |
+|---|---|---|
+| `unset x; echo ${x?z} & wait $!; echo "s=$?"` | `s=127` | `s=1` |
+| `unset x; ( echo ${x?z} ); echo "s=$?"` | `s=1` | `s=1` |
+| `unset x; echo $(echo ${x?z}); echo "s=$?"` | `s=0` | `s=0` |
+
+Only the first row differs, and reproducing it would mean giving a
+forked background child a different answer from a forked subshell child
+for the same refusal -- a distinction that exists in the reference only
+as a consequence of where its two `setjmp`s are, and which no rule this
+repository wrote asks for. The shell that *started* the job still answers
+Bash's number, which is what a script reads.
+
 ## Bash-compatibility divergences taken under `[dec:nsh:minimal-unsafe]`
 
 The shell reaches the host only through `nsh-platform`, and that boundary

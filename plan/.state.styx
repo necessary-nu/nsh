@@ -1687,7 +1687,8 @@ assertions (
     {id tooling.disk.worktrees-on-tmpfs, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:44:15.37194993Z}
     {id bash.divergences.exec-argument-zero, kind @complete, author "brendan@necessary.nu", at 2026-09-04T16:12:51.422269599Z}
     {id bash.divergences.publish-names.table-views, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:58:29.522603092Z}
-    {id bash.divergences.expansion-error-status-in-bash-mode, kind @doing, author "brendan@necessary.nu", at 2026-09-04T16:43:23.785920849Z}
+    {id bash.divergences.expansion-error-status-in-bash-mode, kind @complete, author "brendan@necessary.nu", at 2026-09-04T17:28:35.146963335Z}
+    {id bash.divergences.multibyte-blank-split, kind @doing, author "brendan@necessary.nu", at 2026-09-04T16:45:29.313482936Z}
 )
 
 impl_evidence (
