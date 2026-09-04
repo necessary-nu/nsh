@@ -12918,6 +12918,7 @@ children (
                         id tooling.disk.wrapper-drops-a-hyphenated-cargo-variable
                         title "Stop the rustc wrapper stripping `CARGO_BIN_EXE_nsh-survey` from every compile"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T14:29:45.392078396Z
@@ -12938,6 +12939,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T14:41:31.388199538Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

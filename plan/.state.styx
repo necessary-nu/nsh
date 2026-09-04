@@ -1677,7 +1677,7 @@ assertions (
     {id tooling.disk.reach-every-build, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:59:02.815360504Z}
     {id harness.oils-baseline-is-behind, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:37:15.700222525Z}
     {id bash.divergences.publish-names.interactive-surface, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:25:22.073811443Z}
-    {id tooling.disk.wrapper-drops-a-hyphenated-cargo-variable, kind @doing, author "brendan@necessary.nu", at 2026-09-04T14:41:04.857859808Z}
+    {id tooling.disk.wrapper-drops-a-hyphenated-cargo-variable, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:41:31.388199538Z}
 )
 
 impl_evidence (
