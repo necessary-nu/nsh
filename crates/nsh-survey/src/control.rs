@@ -27,7 +27,6 @@
 //! copy would have been a second set of constants to measure.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::env;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
@@ -121,15 +120,19 @@ pub(crate) fn require_bash_basename(shell: &Path) -> Result<()> {
 /// could therefore never run there: "stale entry on a passing case" was
 /// refused with "the gate needs the pinned Bash ... is not there" rather
 /// than for its own reason, on this change and on `750758b` alike.
+///
+/// Which checkout's `target/` is `location`'s question, because a
+/// worktree has none of its own; see there for why that is the ordinary
+/// case here rather than an exotic one.
 pub(crate) fn pinned_reference() -> Result<PathBuf> {
-    let path = env::var_os("NSH_FUZZ_BASH").map_or_else(
-        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/bash-reference/bash"),
-        PathBuf::from,
-    );
+    let path = crate::bash_reference::location::locate(Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../.."
+    )))
+    .map_err(|nowhere| format!("the gate needs the pinned Bash for its control run.\n{nowhere}"))?;
     let path = fs::canonicalize(&path).map_err(|error| {
         format!(
-            "the gate needs the pinned Bash for its control run and {} is not there ({error}); \
-             build it with `nsh-survey build-bash-reference` or name it with NSH_FUZZ_BASH",
+            "the pinned Bash at {} is not readable: {error}",
             path.display()
         )
     })?;

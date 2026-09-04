@@ -411,7 +411,7 @@ fn guard_unchanged(root: &Path, path: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::process::ScratchTree;
 
@@ -420,7 +420,11 @@ mod tests {
     /// Identity and default branch are given on the command line so the
     /// machine's own git configuration cannot decide what this test
     /// measures.
-    fn git(repo: &Path, arguments: &[&str]) {
+    ///
+    /// Shared with the tests for `bash_reference::location`, which build
+    /// a repository and a linked worktree of it for the same reason:
+    /// only real git can say what a worktree's `.git` looks like.
+    pub(crate) fn git(repo: &Path, arguments: &[&str]) {
         let mut command = Command::new("git");
         command.arg("-C").arg(repo);
         for setting in [
@@ -452,7 +456,7 @@ mod tests {
     /// from `date -u -d @SECONDS` rather than worked out here; the first
     /// spelling of this test had 1972-02-29 against a number that is
     /// 1972-03-01, and the formatter was right.
-    // [spec:nsh:req:oracle.recording-carries-its-age/test]
+    // [spec:nsh:req:oracle.recording-carries-its-age+1/test]
     #[test]
     fn the_stamp_is_a_date_anyone_can_read() {
         for (seconds, expected) in [
@@ -478,7 +482,7 @@ mod tests {
     /// A zero would read as "the recording is current", which is the one
     /// wrong answer: a rebase, a shallow clone and a recording taken over
     /// uncommitted work all reach this branch.
-    // [spec:nsh:req:oracle.recording-carries-its-age/test]
+    // [spec:nsh:req:oracle.recording-carries-its-age+1/test]
     #[test]
     fn an_absent_commit_has_no_distance() {
         assert!(commits_since("0000000000000000000000000000000000000000").is_none());

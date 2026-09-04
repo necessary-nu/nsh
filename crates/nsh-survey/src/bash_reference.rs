@@ -1335,5 +1335,9 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+pub(crate) mod location;
+
+#[cfg(test)]
+mod location_tests;
 #[cfg(test)]
 mod tests;

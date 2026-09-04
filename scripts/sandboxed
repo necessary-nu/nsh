@@ -357,8 +357,63 @@ SANDBOX_ARGS=(
 # directory` -- the boundary working exactly as specified, on the wrong file.
 # Only the directory holding the program comes back, and read-only, so a case
 # still cannot see or touch what else is in the session's /tmp.
+#
+# THAT NARROWNESS IS ALSO A TRAP, AND IT COST A SESSION A DETOUR ON 2026-09-04.
+# A whole `CARGO_TARGET_DIR` under /tmp -- the obvious place for a worktree
+# measuring on its own, and what the house rules' "its own CARGO_TARGET_DIR"
+# invites -- puts `deps/<test binary>` in scope and leaves its sibling
+# `<profile>/nsh` out of it. Every test that starts `CARGO_BIN_EXE_nsh` then
+# reports
+#
+#     start /tmp/.../debug/nsh: No such file or directory (os error 2)
+#
+# for a binary that is present, executable, `ldd`-clean and runs from a prompt,
+# and the same test binary run straight out of `deps/` passes every case. It
+# reads as a broken workspace and it is a statement about where the build tree
+# is. Measured directly against this wrapper: a script in `deps/` sees its own
+# directory holding one file and the profile directory above it holding only
+# `deps`.
+#
+# It refuses rather than binding the tree back. The fuzz harness makes the same
+# call for the same reason -- "the fuzz containment mounts an empty tmpfs over
+# /tmp, so an oracle kept there is invisible to the targets; keep it outside
+# /tmp" -- and widening a deliberately narrow read-only allowance into a
+# writable build tree would spend the containment to save a path. /tmp is a
+# tmpfs on this machine besides, so a build tree there is spending RAM to hide
+# itself.
+#
+# `CACHEDIR.TAG` is cargo's own mark on the root of a build tree, which is what
+# separates this from the rustdoc case: nothing above /tmp/rustdoctestXXXXXX
+# carries one.
+build_tree_of() { # build_tree_of PROGRAM
+    local directory
+    directory=$(cd "$(dirname "$1")" 2>/dev/null && pwd -P) || return 1
+    while [[ $directory != / ]]; do
+        [[ ! -f $directory/CACHEDIR.TAG ]] || {
+            printf '%s\n' "$directory"
+            return 0
+        }
+        directory=${directory%/*}
+        [[ -n $directory ]] || directory=/
+    done
+    return 1
+}
+
 READABLES=()
 if $RUNNER && [[ ${1-} == /tmp/* && -f ${1-} ]]; then
+    if tree=$(build_tree_of "$1"); then
+        echo "scripts/sandboxed: cargo asked to run a program from a build tree on /tmp:" >&2
+        echo "scripts/sandboxed:   $1" >&2
+        echo "scripts/sandboxed:   $tree  <- the CARGO_TARGET_DIR holding it" >&2
+        echo "This boundary replaces /tmp with an empty tmpfs, so nothing in that tree" >&2
+        echo "except the directory holding the program itself exists from inside it. A" >&2
+        echo "test that starts CARGO_BIN_EXE_<name> fails with 'No such file or directory" >&2
+        echo "(os error 2)' for a binary that is present, executable and runs from a" >&2
+        echo "prompt -- which is about where the build tree is and not about the shell." >&2
+        echo "Point CARGO_TARGET_DIR outside /tmp; a worktree's own target/ is the" >&2
+        echo "intended place, and /tmp is RAM here as well as hidden." >&2
+        exit 1
+    fi
     READABLES+=("$(cd "$(dirname "$1")" && pwd -P)")
 fi
 for path in "${WRITABLES[@]}" "${READABLES[@]}"; do

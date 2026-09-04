@@ -12,34 +12,95 @@
 // [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 // [spec:nsh:req:compat.bash.reference-profile]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The pinned Bash, named by `NSH_FUZZ_BASH` or found beside the build
-/// tree, and checked against the version the calibration record holds.
+/// Where a build of this repository leaves the pinned Bash, relative to
+/// the checkout that ran it.
+const UNDER_A_CHECKOUT: &str = "target/bash-reference/bash";
+
+/// The checkout git keeps this repository's shared directories in.
+///
+/// A linked worktree has no build tree of its own -- worktrees share one
+/// repository's history and keep their own working files -- so a build
+/// artefact lives in whichever checkout ran the build, and from a
+/// worktree that is the one git calls the main one. `--git-common-dir`
+/// names its `.git`, and the checkout is that directory's parent. Asked
+/// of git rather than parsed here because a worktree's pointer may be
+/// relative, may be reached through a second worktree, and has been
+/// spelled more than one way; `--path-format=absolute` is what makes the
+/// answer independent of where it was asked from.
+///
+/// `None` covers everything that is not a worktree of a repository with
+/// a working tree, "git is not installed" included, and the caller then
+/// reports the one place it did look.
+///
+/// `nsh-survey`'s `bash_reference::location` answers the same question
+/// for the survey gate and is deliberately a second copy: nothing in
+/// this workspace lets a test tree and another package's binary share a
+/// module without a dependency edge, and `struct.differential-helper-crate`
+/// is the node that will make one. Change both or neither.
+fn main_checkout(from: &Path) -> Option<PathBuf> {
+    let asked = Command::new("git")
+        .arg("-C")
+        .arg(from)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !asked.status.success() {
+        return None;
+    }
+    let common = PathBuf::from(String::from_utf8(asked.stdout).ok()?.trim());
+    common.parent().map(Path::to_path_buf)
+}
+
+/// The pinned Bash, named by `NSH_FUZZ_BASH` or found in a checkout of
+/// this repository, and checked against the version the calibration
+/// record holds.
+///
+/// `NSH_FUZZ_BASH` is taken as the whole answer: a run that names its own
+/// oracle has answered the question, and searching past a name that is
+/// wrong would hide the mistake behind whatever else the machine has.
 ///
 /// The pin itself is read out of that record by the same string search
 /// `nsh::fuzzing::reference` uses, so the two cannot drift apart; that
 /// module sits behind a feature these tests do not turn on.
+///
+/// The record is read from *this* checkout while the shell may come from
+/// another, and that is deliberate: the record is a tracked source file
+/// and belongs to the tree under test, the shell is a build artefact and
+/// belongs to whichever checkout built one. The version comparison below
+/// is what holds the two together.
 pub fn path() -> PathBuf {
-    let path = std::env::var_os("NSH_FUZZ_BASH").map_or_else(
+    let tried = std::env::var_os("NSH_FUZZ_BASH").map_or_else(
         || {
-            PathBuf::from(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../target/bash-reference/bash"
-            ))
+            let checkout = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
+            let checkout = std::fs::canonicalize(checkout).unwrap_or_else(|_| checkout.to_owned());
+            let mut places = vec![checkout.join(UNDER_A_CHECKOUT)];
+            if let Some(shared) = main_checkout(&checkout).filter(|shared| *shared != checkout) {
+                places.push(shared.join(UNDER_A_CHECKOUT));
+            }
+            places
         },
-        PathBuf::from,
+        |named| vec![PathBuf::from(named)],
     );
-    assert!(
-        path.exists(),
-        "no pinned Bash at {}, so what this file records cannot be checked \
-         against the reference that produced it\n\
-         build it and name it to the run:\n\
-         \x20   cargo run -p nsh-survey -- build-bash-reference\n\
-         \x20   (or point NSH_FUZZ_BASH at an existing pinned build)",
-        path.display()
-    );
+    let path = tried
+        .iter()
+        .find(|candidate| candidate.exists())
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "no pinned Bash, so what this file records cannot be checked against the \
+                 reference that produced it. None of the places a checkout of this \
+                 repository keeps one has it:\n{}build it, or name a pinned build this \
+                 machine already has:\n\x20   cargo run -p nsh-survey -- build-bash-reference\
+                 \n\x20   NSH_FUZZ_BASH=/path/to/pinned/bash <command>",
+                tried
+                    .iter()
+                    .map(|candidate| format!("  {}\n", candidate.display()))
+                    .collect::<String>(),
+            )
+        });
 
     let record = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),

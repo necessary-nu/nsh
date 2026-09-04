@@ -242,6 +242,23 @@ under `/tmp` is spending RAM rather than disk, which `disk-headroom` says out
 loud. `tests/harness/disk-headroom-selftest.sh` is its self-test; every case in
 it is about something the tool must refuse to delete.
 
+Two ways that practice used to come back red for reasons that were not the
+change are now the harness's problem rather than the reader's. **The pinned
+Bash is a build artefact, so a fresh worktree has none of its own.** The
+differential tests and the survey gate ask git which checkout the repository
+shares — `git rev-parse --git-common-dir` — and use the reference built there,
+after the worktree's own `target/` and after `NSH_FUZZ_BASH`, which still names
+one outright and is still the way to point a run at a particular build. When no
+checkout has one the run fails and names every place it looked, because "could
+not measure" is a result and never a pass. **And `CARGO_TARGET_DIR` may not be
+under `/tmp`**: the boundary replaces `/tmp` with an empty tmpfs and binds back
+only the directory holding the program cargo handed it, so
+`<profile>/deps/<test binary>` runs while the `CARGO_BIN_EXE_nsh` beside it
+does not exist — `No such file or directory (os error 2)` for a binary that is
+present, executable and runs from a prompt. `scripts/sandboxed` now refuses
+that layout by name instead; `tests/harness/tmp-build-tree-selftest.sh` is its
+self-test.
+
 The budget itself is spent inside the boundary: `timeout` stands in front of
 the command *within* the namespace, with a wider one outside as a backstop for
 a sandbox that never got as far as running anything. Stopping a command by
@@ -258,8 +275,8 @@ the abandoned-process threshold down with it.
 
 The abandoned-process and budget self-tests may not be run through the
 wrapper: both ask the host what survived a finished command, which is what the
-boundary hides. The free-space one asks nothing the boundary hides, and runs
-either way.
+boundary hides. The free-space and build-tree ones ask nothing the boundary
+hides, and run either way.
 
 ## Repository layout
 
