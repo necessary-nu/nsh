@@ -10211,6 +10211,20 @@ children (
                                             }
                                         )
                                     }
+
+                                    {
+                                        id bash.divergences.dollar-quoted-string-not-translated
+                                        title "A $\"...\" string is two data bytes here and a translation lookup in Bash"
+                                        kind @fix
+                                        log (
+                                            {
+                                                at 2026-09-04T21:04:04.488601072Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FOUND 2026-09-04 as by-catch of `make-printing-reversible`, while establishing what spelling the fallback speller could use for a data `$` sitting in front of an empty inert run. Not the task; filed rather than fixed.\n\nMEASURED, `target/release/nsh` against the pinned `target/bash-reference/bash` 5.3.15:\n\n    printf '%s|' $\"\"     nsh: $|    bash: |    bash --posix: |\n    printf '%s|' a$\"\"b   nsh: a$b|  bash: ab|  bash --posix: ab|\n\nBash reads `$\"...\"` as a locale-translated string -- with no message catalogue it yields the string itself, so `$\"\"` is the empty string and the `$` is consumed. This shell has no such construct, so the `$` is ordinary data and only the `\"\"` is a quoted run. The divergence is present in Bash's own POSIX mode too, so it is not gated by `--posix` and a Bash-mode caller sees it.\n\nTHE POSITION IS ALREADY TAKEN AND IT IS DELIBERATE. `canonicalize-word-parts`' 2026-08-27 errata says so directly: \"`$\\\"...\\\"` HAS NO BEHAVIOUR TO KEEP ... This shell does not translate: `QuoteKind::DollarDouble` was written by `parser/bash.rs` and read only by the printer ... The run records the `$\\\"`, so the marker comes back with the translation when there is one.\" So the tree deliberately carries no marker for it, and that is the right call while there is nothing to translate with.\n\nWHAT IS MISSING IS THE REGISTRATION, NOT THE FEATURE. The divergence is in neither `docs/divergences.md` nor `tests/harness/divergences.sh`, and `grep -rn 'DollarDouble' docs/` finds nothing. A deliberate divergence that no register names is indistinguishable from an unnoticed one, which is the whole subject of `sanctioned-divergences`.\n\nTWO WAYS TO CLOSE IT AND THEY ARE NOT THE SAME SIZE. Registering it as a sanctioned divergence is small and is probably right: without a message catalogue the only observable difference is the `$` byte. Implementing it means a marker on the word again -- exactly the field the canonicalization deleted for being write-only -- plus `textdomain`/`bindtextdomain` state and a `gettext` call at expansion, so it should not be started without deciding it is wanted.\n\nA THIRD READING WORTH CHECKING FIRST: whether Bash consuming the `$` when there is no catalogue is behaviour this shell should match even with no translation implemented. That is one byte and needs no catalogue machinery at all, and it would close the observable half of the divergence on its own."
+                                            }
+                                        )
+                                    }
                                 )
                                 log (
                                     {

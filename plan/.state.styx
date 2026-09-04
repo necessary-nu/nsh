@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-04T20:58:59.743454902Z
+last_sync_at 2026-09-04T21:03:24.160182802Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -1482,6 +1482,7 @@ derived_priorities (
     {id tooling.disk.wrapper-drops-a-hyphenated-cargo-variable, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id tooling.integrate-remote-master, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.moved-only-cannot-see-a-rename, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
+    {id tooling.moved-only-reads-the-whole-dirty-tree, priority 0, derived_at 2026-09-04T21:03:24.160182802Z}
     {id tooling.nplan.commit-a-pathspec, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.nplan.head-took-half-a-file, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.nplan.install-the-pathspec, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1724,6 +1725,8 @@ impl_evidence (
         embedding-safety.reading-without-running
     ), covered_claims (
         {impl_name nsh-library, rule embedding-safety.reading-without-running}
+    ), rule_versions_seen (
+        {id embedding-safety.reading-without-running, version 0}
     )}
     {id audit-bug-for-bug-behavior, covered_rules (
         idiom.specified-defects
