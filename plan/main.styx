@@ -12009,6 +12009,13 @@ children (
                                 kind @blocker
                                 text "THIRTY-ONE FILES REACH ACROSS A PACKAGE BOUNDARY WITH A RELATIVE PATH:\n\n    #[path = \"../../nsh/tests/pinned_bash/mod.rs\"]\n    mod pinned_bash;\n\nEvery differential test in `crates/nsh-cli/tests/` opens with that line, to get the `answer(shell, dialect, script)` helper that runs one script through both this shell and the pinned Bash. It is 31 of the 38 `#[path]` attributes in the workspace.\n\nWHY IT EXISTS, AND WHY THE REASON IS GOOD. Each file under `tests/` is its own crate, so integration tests cannot share code by ordinary means; and the `duplication` gate refused three copies of `answer()` when the first differential tests landed, correctly. Moving the helper to one file and pointing at it was the cheap answer, and it was the right call at three files.\n\nWHY IT IS NOT THE RIGHT ANSWER AT THIRTY-ONE. The path is `../../nsh/tests/...`: it leaves `nsh-cli` and reaches into a *different package's* test directory, which Cargo does not know about and cannot check. `nsh-cli`'s tests now compile a file that belongs to `nsh`, with no dependency edge recording it. Move or rename `crates/nsh/tests/pinned_bash/mod.rs` and thirty-one files in another crate stop compiling, with nothing in either `Cargo.toml` having hinted that they could. The scoped `#[allow(dead_code)]` each copy carries is a second symptom: every test binary compiles the whole helper and uses part of it.\n\nTHE FIX IS A CRATE. A small `nsh-test-support` (or similar) with the helper as its only public surface, a `dev-dependencies` entry in both `nsh` and `nsh-cli`, and `use nsh_test_support::answer;` replacing all thirty-one attributes. That is the arrangement Cargo has for exactly this, it makes the edge visible to the tool, and it lets the helper have its own tests. Check what else has quietly accumulated in `pinned_bash/mod.rs` while it was being shared this way.\n\nWatch `test-footprint` when the crate is created: a new crate whose lines are nearly all production and whose ratio starts at zero is the shape that fired the gate on `crates/nsh-lint` twice, and `stop-a-required-register-entry-firing-test-footprint` is the recent precedent for how that argument goes.\n\nNot urgent -- nothing is broken and the tests pass. It is on the list because thirty-one files depend on a path no manifest mentions."
                             }
+
+                            {
+                                at 2026-09-04T13:20:18.997062174Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "THIS IS NOW THE WHOLE OF THE `#[path]` CENSUS, AND IT GREW AGAIN. Measured 2026-09-04 by `struct.editor-absent-path-attribute`, on finishing the last instance outside this node.\n\n    $ grep -rn '#\\[path' --include=*.rs . | grep -v '^./target/'\n\nAt `86dd53b` and again at `a3a7bf6`: 36 lines, one of them the attribute spelled inside a comment in `crates/nsh-platform/src/lib.rs`, so 35 real -- 34 of them `#[path = \"../../nsh/tests/pinned_bash/mod.rs\"]` in `crates/nsh-cli/tests/`, and 1 the feature-off editor module. After `ac11c6d` removed that one, every real `#[path]` in the workspace is this node's. The count this node recorded was 31, then 32; it is 34.\n\nA THIRTY-FIFTH IS ARRIVING FROM A DIFFERENT DIRECTION, and it is worth knowing about before this node is picked up. Another session's uncommitted `crates/nsh/tests/pinned_bash/mod.rs` (for `harness.oracle-outside-the-worktree`) adds\n\n    #[path = \"../../../nsh-survey/src/bash_reference/location.rs\"]\n\nreaching *out* of the test tree into a sibling package's `src/`, where the existing 34 reach *into* `crates/nsh/tests/`. So the helper this node means to make a crate is itself about to acquire a file-path dependency on a third package, and a crate that solves the 34 has to carry that too, or `location.rs` has to move.\n\n`crates/nsh-survey/src/bash_reference/location.rs:20` says in its own doc comment that \"the harness includes this file by `#[path]` rather than depending on this crate\", which names the constraint: `nsh-survey` is not a dependency of `nsh`'s dev tree, and adding it would be the alternative."
+                            }
                         )
                     }
 
@@ -12235,6 +12242,7 @@ children (
                         title "Name the feature-off editor module by its own file, not a path attribute"
                         kind @refactor
                         deps (struct.posix-children-under-unix)
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T23:25:38.316816896Z
@@ -12248,6 +12256,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T13:20:09.293190743Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

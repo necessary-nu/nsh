@@ -1673,7 +1673,7 @@ assertions (
     {id harness.spec-cannot-see-the-shell-harness, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:19:21.941213258Z}
     {id tooling.nplan.data-is-not-production, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:52.642186067Z}
     {id struct.posix-children-under-unix, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:16:37.240687246Z}
-    {id struct.editor-absent-path-attribute, kind @doing, author "brendan@necessary.nu", at 2026-09-04T13:16:42.516885197Z}
+    {id struct.editor-absent-path-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:20:09.293190743Z}
 )
 
 impl_evidence (
