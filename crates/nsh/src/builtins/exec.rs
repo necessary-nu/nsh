@@ -8,15 +8,35 @@
 //! This is the builtin `[dec:nsh:public-surface]` singles out: an
 //! embedded shell cannot survive it, so the API gates it behind a `Host`
 //! method a frontend grants and an ordinary embedder refuses.
+//!
+//! # The letters that name the process
+//!
+//! POSIX gives `exec` no options and dash takes none: `exec -a N prog`
+//! reads `-a` as the program and reports it missing. Bash gives it three,
+//! and two of them say what the image will call itself. Measured against
+//! the pinned Bash 5.3.15:
+//!
+//! * `exec -a MYNAME sh -c 'echo $0'` prints `MYNAME` -- the program is
+//!   still found by the word after the name, and only `argv[0]` moves.
+//! * `exec -l sh -c 'echo $0'` prints `-/bin/sh`, and `exec -l -a N`
+//!   prints `-N`: the letter prefixes a hyphen to whatever `argv[0]`
+//!   would otherwise have been, which is how a login shell is spelled.
+//! * `exec -c` runs the program with an empty environment. That is not a
+//!   name, it is the environment, and it is not taken here --
+//!   `bash.divergences.exec-empty-environment` holds the measurement.
+//!
+//! The letters live inside the dialect test for the reason `export -n`'s
+//! do: they are Bash's alone, and taking them in the POSIX dialect would
+//! move dash.
 
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
 
-use bstr::{BStr, ByteSlice};
+use bstr::{BStr, BString, ByteSlice};
 
 use crate::evaluation::Flow;
-use crate::execution::execute_external_command;
+use crate::execution::execute_external_command_named;
 
 // [spec:dash:sem:eval.execcmd-fn]
 // [spec:posix:syn:builtin.exec.syn]
@@ -31,13 +51,30 @@ use crate::execution::execute_external_command;
 // [spec:posix:req:builtin.exec.exit-status]
 // [spec:nsh:def:idiom.shell-options]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut utility = args.get(1..).unwrap_or_default();
-    if utility
-        .first()
-        .is_some_and(|argument| *argument == BStr::new(b"--"))
-    {
-        utility = &utility[1..];
-    }
+    // [spec:nsh:req:compat.bash.builtins-special-variables]
+    let (utility, argument_zero) = if shell.options.dialect() == crate::options::Dialect::Bash {
+        let mut option_scan = crate::options::Options::new(args);
+        let mut name: Option<&BStr> = None;
+        let mut login = false;
+        while let Some(letter) = option_scan.next(&mut shell.diagnostics(), b"a:l")? {
+            match letter {
+                b'a' => name = Some(option_scan.arg()),
+                _ => login = true,
+            }
+        }
+        let operands = option_scan.operands();
+        let argument_zero = spelled_name(name, login, operands.first().copied());
+        (operands, argument_zero)
+    } else {
+        let mut utility = args.get(1..).unwrap_or_default();
+        if utility
+            .first()
+            .is_some_and(|argument| *argument == BStr::new(b"--"))
+        {
+            utility = &utility[1..];
+        }
+        (utility, None)
+    };
 
     if !utility.is_empty() {
         let interactive_root = shell
@@ -63,7 +100,13 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         /* Hoisted out of `shellexec`'s argument list, which also takes
          * the shell; see the note in `eval.rs`'s `evalcommand`. */
         let path = crate::variables::path_value(shell);
-        let outcome = execute_external_command(shell, utility, path.as_slice().as_bstr(), None);
+        let outcome = execute_external_command_named(
+            shell,
+            utility,
+            path.as_slice().as_bstr(),
+            None,
+            argument_zero.as_deref().map(BStr::new),
+        );
 
         if interactive_root {
             /* A successful exec never returns. On failure, restore the
@@ -87,4 +130,21 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return outcome;
     }
     Ok(Flow::Done((0).into()))
+}
+
+/// The `argv[0]` `-a` and `-l` between them ask for, or `None` when the
+/// program keeps the name it was found by.
+///
+/// `-l` is not a name of its own: it prefixes a hyphen to whichever name
+/// is in force, which is `-a`'s when there is one and the program word
+/// otherwise -- `exec -l sh` runs as `-/bin/sh` in the reference and
+/// `exec -l -a N sh` as `-N`. With no operand there is no program to run
+/// under any name and the answer is never read.
+fn spelled_name(name: Option<&BStr>, login: bool, program: Option<&BStr>) -> Option<BString> {
+    if !login {
+        return name.map(|name| BString::from(name.to_vec()));
+    }
+    let mut spelled = BString::from(vec![b'-']);
+    spelled.extend_from_slice(name.or(program).unwrap_or_default());
+    Some(spelled)
 }

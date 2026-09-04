@@ -227,6 +227,31 @@ pub fn execute_external_command(
     path: &BStr,
     path_index: Option<usize>,
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
+    execute_external_command_named(shell, arguments, path, path_index, None)
+}
+
+/// The same, with the `argv[0]` the program runs under named separately
+/// from the word it is found by.
+///
+/// `exec -a name` and `exec -l` are the only callers that need the two to
+/// differ, which is why this is a second entry point rather than a
+/// parameter on the one every other path through the evaluator uses: a
+/// command word is its own `argv[0]` everywhere else, and a signature
+/// that let it not be would invite the two to drift apart at sites where
+/// nothing distinguishes them.
+///
+/// `[dec:nsh:host-owns-the-process]` still governs. Replacing the image
+/// is the grant; running it under another name is a narrowing of what the
+/// host already permitted, and the permission check below is the same one.
+// [spec:posix:req:cmd.nonbuiltin-path-search-execl]
+// [spec:nsh:req:compat.bash.builtins-special-variables]
+pub fn execute_external_command_named(
+    shell: &mut crate::context::Shell,
+    arguments: &[&BStr],
+    path: &BStr,
+    path_index: Option<usize>,
+    argument_zero: Option<&BStr>,
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
     let command = arguments.first().expect("shellexec needs a command name");
 
     /* A library shell may fork children, but it may not replace the host
@@ -247,7 +272,7 @@ pub fn execute_external_command(
         Ok(environment) => environment,
         Err(error) => return native_exec_failure(shell, command, &error),
     };
-    let arguments: Vec<OsString> = match arguments
+    let mut argv: Vec<OsString> = match arguments
         .iter()
         .map(|word| word.try_to_os_string())
         .collect::<std::io::Result<_>>()
@@ -255,6 +280,16 @@ pub fn execute_external_command(
         Ok(arguments) => arguments,
         Err(error) => return native_exec_failure(shell, command, &error),
     };
+    /* Kept before the name is written over it: the search below asks for
+     * the program by the word it was written as, and only the vector the
+     * image will read moves. */
+    let program = argv[0].clone();
+    if let Some(name) = argument_zero {
+        match name.try_to_os_string() {
+            Ok(name) => argv[0] = name,
+            Err(error) => return native_exec_failure(shell, command, &error),
+        }
+    }
     /* The last fork this process will ever make is behind us, so a
      * `<(list)` name may now stop being close-on-exec. Doing it here rather
      * than when the name was built is what keeps the pipe out of every
@@ -267,8 +302,8 @@ pub fn execute_external_command(
         return exec_failure(shell, command, error);
     }
     let error = if nsh_platform::shell_path_has_separator(command) {
-        let resolved = nsh_platform::resolve_command_path(Path::new(&arguments[0]), &envv);
-        try_external_candidate(resolved.as_os_str(), &arguments, &envv)
+        let resolved = nsh_platform::resolve_command_path(Path::new(&program), &envv);
+        try_external_candidate(resolved.as_os_str(), &argv, &envv)
     } else {
         let mut search_error =
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
@@ -281,8 +316,7 @@ pub fn execute_external_command(
                     Err(error) => return native_exec_failure(shell, command, &error),
                 };
                 let candidate = nsh_platform::resolve_command_path(&candidate, &envv);
-                let candidate_error =
-                    try_external_candidate(candidate.as_os_str(), &arguments, &envv);
+                let candidate_error = try_external_candidate(candidate.as_os_str(), &argv, &envv);
                 if !nsh_platform::is_path_error(
                     &candidate_error,
                     nsh_platform::PathErrorKind::NotFound,

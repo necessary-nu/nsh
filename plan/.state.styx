@@ -1685,7 +1685,7 @@ assertions (
     {id tooling.disk.headroom-cannot-see-the-fuzz-build-tree, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:39:17.020293253Z}
     {id bash.divergences.redirection-status-without-a-command, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:35:38.421860902Z}
     {id tooling.disk.worktrees-on-tmpfs, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:44:15.37194993Z}
-    {id bash.divergences.exec-argument-zero, kind @doing, author "brendan@necessary.nu", at 2026-09-04T15:54:20.458304431Z}
+    {id bash.divergences.exec-argument-zero, kind @complete, author "brendan@necessary.nu", at 2026-09-04T16:12:51.422269599Z}
     {id bash.divergences.publish-names.table-views, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:58:29.522603092Z}
 )
 
