@@ -1676,7 +1676,7 @@ assertions (
     {id struct.editor-absent-path-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:20:09.293190743Z}
     {id tooling.disk.reach-every-build, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:59:02.815360504Z}
     {id harness.oils-baseline-is-behind, kind @doing, author "brendan@necessary.nu", at 2026-09-04T14:01:26.999826924Z}
-    {id bash.divergences.publish-names.interactive-surface, kind @doing, author "brendan@necessary.nu", at 2026-09-04T14:14:27.209313022Z}
+    {id bash.divergences.publish-names.interactive-surface, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:25:22.073811443Z}
 )
 
 impl_evidence (

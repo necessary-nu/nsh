@@ -9246,6 +9246,7 @@ children (
                                                 title "Decide what to publish for the four names that belong to a surface this shell has not got"
                                                 kind @feat
                                                 constrained_by ([spec:nsh:req:compat.bash.names.only-what-the-reference-has])
+                                                sealed true
                                                 log (
                                                     {
                                                         at 2026-09-03T17:25:41.988808188Z
@@ -9273,6 +9274,13 @@ children (
                                                         author "brendan@necessary.nu"
                                                         kind @status
                                                         text "Todo → Doing (nplan start)"
+                                                    }
+
+                                                    {
+                                                        at 2026-09-04T14:25:22.073811443Z
+                                                        author "brendan@necessary.nu"
+                                                        kind @status
+                                                        text "Doing → Done (nplan complete)"
                                                     }
                                                 )
                                             }
@@ -13029,6 +13037,20 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 WHILE CLOSING `stop-a-forked-child-holding-a-sibling-test-s-pipe-open`, IN THE SAME BINARY AND THE SAME FAMILY. It is the third instance of one shape and the first that does not fail: it hangs instead, which is why nobody has seen it.\n\n`crates/nsh-platform/src/unix.rs`, `descriptor_transaction_validates_targets`, last three lines:\n\n    let (read, write) = pipe().unwrap();\n    assert_eq!(invalid_transaction([(-1, Some(write))]), ErrorKind::InvalidInput);\n    let mut byte = [0];\n    assert_eq!(read_once(&read, &mut byte).unwrap(), 0);\n\nThe refused transaction owns `write` and drops it, and the read then expects end of input. That is exactly the exposure just fixed in `end_of_input_counts_as_available`: a sibling test's child forked between the `pipe()` and the drop holds a duplicate write end, so the pipe is not at end of input. The difference is that `read_once` BLOCKS where `wait_for_input` answered. The read waits until the last write end anywhere closes, which is when the child exits, and then correctly reports 0. So the assertion cannot be wrong -- only late.\n\nWHY IT IS STILL WORTH A NODE. Its runtime, and in the limit whether it returns at all, depend on what an unrelated test's child is doing. A child that blocks -- on a full pipe, on a wait, on a terminal -- makes this a hang with no diagnostic, in a test that names none of it. `[spec:nsh:req:oracle.checks-do-not-share-state]` names \"a pipe inherited by a forked child\" as shared process state a check must not depend on, and this depends on it.\n\nMEASURED 2026-09-04, 32 cores. The same window in the sibling was worth 299 failures in 20,000 runs of that pair at `--test-threads 32`, load 30-39, so the fork does land inside it at about 1.5% in that configuration. This test takes the same 1.5% as a stall rather than a failure, and the binary now has four forking checks (`descriptor_transaction_installs_slots`, two in `descriptor_name.rs`, and the new one in `unix_facts.rs`) rather than one.\n\nWHAT THE ANSWER PROBABLY IS. The same as the sibling's: build the pipe in a process of its own, or -- since what this test is really asserting is that a refused transaction drops the sources it was handed -- assert that from the transaction's own error and the descriptor it was given, without a pipe whose end of input a stranger can hold. `stop-a-freed-descriptor-number-racing-its-test` already made the first half of this test local that way; this is the half it left.\n\nNOT MEASURED, and worth doing before fixing: whether the same shape is live in `crates/nsh/tests/`. `streams_embed.rs`, `glob_buffer.rs`, `expansion_buffer.rs`, `smoosh_errors.rs` and `errors_are_values.rs` all build capture pipes and read them to end of input, and at least `smoosh_errors.rs` and `errors_are_values.rs` fork in the same binary. Those forks are deliberate and happen after their own pipes, but whether any of them can land inside a sibling's window has not been checked.\n\nDONE WHEN the assertion does not depend on whether another test's child is alive, and the pair runs clean at `--test-threads 32` at a count that would have shown the stall -- 20,000 is what the sibling needed."
+                            }
+                        )
+                    }
+
+                    {
+                        id tooling.tests.bin-path-at-compile-time
+                        title "Read the survey binary's path at run time, where cargo promises it"
+                        kind @test
+                        log (
+                            {
+                                at 2026-09-04T14:26:26.443005649Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "FOUND 2026-09-04 WHEN IT REFUSED A COMMIT THAT HAD NOTHING TO DO WITH IT. `nplan_commit`'s own lint check is `cargo clippy --workspace --all-targets -- -D warnings`, and it failed twice in a row on a commit whose only files were `crates/nsh-cli/tests/bash_shell_facts.rs` and `docs/divergences.md`:\n\n    error: environment variable `CARGO_BIN_EXE_nsh-survey` not defined at compile time\n      --> crates/nsh-survey/tests/smoosh_runner.rs:48:55\n      --> crates/nsh-survey/tests/smoosh_runner.rs:77:14\n      --> crates/nsh-survey/tests/bash_reference.rs:8:31\n       = help: `CARGO_BIN_EXE_nsh-survey` may not be available for the current Cargo target\n       = help: Cargo sets build script variables at run time. Use `std::env::var(...)` instead\n\nrustc names the fix in the diagnostic, and it is three call sites.\n\nWHAT I COULD NOT ESTABLISH, recorded so the next person does not repeat it. `RUSTC_WRAPPER= cargo clippy --workspace --all-targets -- -D warnings` passed immediately afterwards, and a plain `cargo clippy` then passed as well, so the first suspicion was `1bfbb52`'s `build.rustc-wrapper = \"scripts/room-to-build\"`. It is not that on its own: `touch crates/nsh-survey/src/main.rs && cargo clippy -p nsh-survey --all-targets -- -D warnings` recompiles the package with the wrapper in place and passes. The wrapper's own header says cargo's fingerprint does not include it, which is why toggling it re-checked everything and why the state that failed could not be got back. So the trigger is some cold or invalidated clippy state and the wrapper may or may not be part of it; two runs failed, and every run since has passed.\n\nWHY IT IS WORTH FIXING ANYWAY RATHER THAN WAITING FOR IT AGAIN. `env!(\"CARGO_BIN_EXE_x\")` asks at *compile* time for something cargo documents as a run-time environment variable, so the failure mode is a compile error in a file nobody touched, in a crate the committer may not have looked at, on a check that is the gate. `std::env::var(\"CARGO_BIN_EXE_nsh-survey\")` cannot fail that way; it fails where the test runs, naming the test. `crates/nsh/tests/pinned_bash/mod.rs` and `crates/nsh-cli/tests/bash_shell_facts.rs` use `env!(\"CARGO_BIN_EXE_nsh\")` in the same shape and would go the same way.\n\nDONE WHEN the three sites in `crates/nsh-survey/tests/` read the path at run time, `cargo clippy --workspace --all-targets -- -D warnings` is clean from a `cargo clean -p nsh-survey`, and the tests still find the binary. Whether to convert the `CARGO_BIN_EXE_nsh` sites too is a judgement about how many places should carry a `expect()` for something cargo always sets; they are not failing today."
                             }
                         )
                     }
