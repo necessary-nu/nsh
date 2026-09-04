@@ -79,6 +79,18 @@
 # right is no evidence that the prose is: the first two were wrong in
 # prose alone.
 #
+# THE SEVENTH WAS RIGHT IN EVERY PARTICULAR, which is worth recording
+# beside the six because it says what a verified entry costs. The entry
+# for `crates/nsh/src/parser/bash.rs` predicted eleven functions moving
+# and 35 left, named `take_word` and `ConditionalWord` as the two things
+# that cross and must stay, and said the move was imports with no
+# signature change. Acted on 2026-09-04: 35 and 11 exactly, no visibility
+# widened, four `super::` prefixes shortened by one hop and nothing else
+# touched -- `scripts/moved-only` reports 46 functions across 2 files,
+# unchanged. It is the one entry whose author wrote it from the code that
+# stays as well as the code that goes, which is what the paragraph below
+# had just started asking for.
+#
 # So write the answer from the code that *stays* as much as from the code
 # that goes, count with `density.rs`'s counter rather than by eye, and if
 # you are picking an entry up, verify it rather than trust it. That is
@@ -101,20 +113,3 @@ mark = 45
 # The cap the register gives warning of, from
 # `.config/nplan/config.styx`: `function-density {max-per-file 50}`.
 cap = 50
-
-[[file]]
-path = "crates/nsh/src/parser/bash.rs"
-answer = """
-Split the conditional sub-grammar out to `crates/nsh/src/parser/bash/conditional.rs`. \
-Eleven functions move -- `conditional`, `conditional_expression`, `conditional_chain`, \
-`conditional_or`, `conditional_and`, `conditional_primary`, `conditional_test`, \
-`closes_conditional`, `unary_operator`, `binary_operator`, `matches_a_pattern` -- with the \
-`ConditionalExpression` struct they pass between them, leaving 35 functions here and 11 there. \
-TWO THINGS CROSS THE SEAM AND HAVE TO STAY: `take_word` and the `ConditionalWord` it returns \
-are also used by `compound_array` for an array element, so the new module takes both from \
-`super` rather than taking them with it. `command_prefix` keeps calling `conditional`, which \
-stays `pub(super)`, and `conditional_primary` keeps reaching `super::keywords::nested` and \
-`super::tokens::mark`, so the move is imports and no signature changes. Counted with \
-`density.rs`'s counter on 2026-09-02, the day the file reached 46 by gaining `conditional_chain` \
-and `conditional_test` for the `[[ ]]` newline work.
-"""

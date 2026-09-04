@@ -12478,6 +12478,7 @@ children (
                         kind @refactor
                         constrained_by ([spec:nsh:req:idiom.module-boundaries])
                         deps (harness.oils-baseline-is-behind)
+                        sealed true
                         log (
                             {
                                 at 2026-09-02T12:54:57.353266838Z
@@ -12498,6 +12499,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "single-flight overridden: started while an-embedder-cannot-read-a-script-without-running-it had uncommitted WIP"
+                            }
+
+                            {
+                                at 2026-09-04T21:00:45.478489631Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

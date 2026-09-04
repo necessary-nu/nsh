@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-04T12:38:02.706421474Z
+last_sync_at 2026-09-04T20:58:59.743454902Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -872,7 +872,7 @@ rule_versions (
     {id jobctl.suspended-job-message, version 0}
     {id oracle.cannot-measure-is-a-failure, version 0}
     {id oracle.checks-do-not-share-state, version 0}
-    {id oracle.recording-carries-its-age, version 0}
+    {id oracle.recording-carries-its-age, version 1}
     {id oracle.refuses-a-mismeasurement, version 0}
     {id param.byte-values, version 0}
     {id param.denotation, version 0}
@@ -1011,7 +1011,6 @@ rule_versions (
     {id redir.output-truncate, version 0}
     {id redir.purpose, version 0}
     {id redir.quoting-suppresses-recognition, version 0}
-    {id redir.redirect-fn, version 0}
     {id redir.word-expansion, version 0}
     {id redir.word-pathname-expansion, version 0}
     {id sh.command-language-interpreter, version 0}
@@ -1190,6 +1189,7 @@ rule_versions (
 
 derived_priorities (
     {id accept-newlines-inside-a-conditional, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id akm.platform-boundary-decision-is-unwritten, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id an-embedder-cannot-read-a-script-without-running-it, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id apply-a-declaring-builtin-through-the-reference, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash-array-assignment-gaps, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
@@ -1198,26 +1198,37 @@ derived_priorities (
     {id bash-mode-error-boundary, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bash-named-descriptor-redirection, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bash-select-and-time-grammar, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
+    {id bash.divergences.alias-listing-in-bash-mode, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.allexport-after-unset, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.allexport-compound-readonly, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.array-letter-plain-operand, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.assignment-error-in-a-c-string, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.call-argument-frames, priority 0, derived_at 2026-09-04T12:38:02.706421474Z}
+    {id bash.divergences.call-arrays-refuse-unset, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.compound-integer-attribute, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.dot-script-operands-are-positional-parameters, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.empty-bracket-class, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.errexit-over-an-assignment-error, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.error-boundary-status-collisions, priority 0, derived_at 2026-09-04T11:10:16.847978444Z}
     {id bash.divergences.exec-argument-zero, priority 0, derived_at 2026-09-04T12:38:02.706421474Z}
+    {id bash.divergences.exec-empty-environment, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
+    {id bash.divergences.expansion-error-status-in-bash-mode, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.export-minus-n, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.hash-option-set, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.local-after-unset, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.local-dash, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.multibyte-blank-split, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.non-identifier-environment-names, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.procsub-in-bang, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.publish-names.call-stack-arrays, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.publish-names.environment-facts, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.publish-names.interactive-surface, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.publish-names.ordinary-state, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.publish-names.table-views, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.publish-names.withhold-prompts, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.re-entered-parse, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.read-count-waits-for-the-line, priority 0, derived_at 2026-09-04T00:06:55.232777707Z}
+    {id bash.divergences.redirection-status-without-a-command, priority 3, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.reference-to-a-non-name, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.refused-integer-abandons-list, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.reserved-name-listing, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1229,6 +1240,7 @@ derived_priorities (
     {id bash.divergences.unclosed-extglob, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.unset-every-operand, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bash.divergences.unset-readonly-contract, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id bash.divergences.wait-by-pid-for-a-procsub, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id bash.divergences.wait-for-procsubs, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id bound-recursive-evaluation, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id bound-repeated-evaluation-work, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1248,6 +1260,7 @@ derived_priorities (
     {id close-the-pattern-replacement-divergence, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id close-untargeted-fuzz-divergences, priority 0, derived_at 2026-08-29T12:05:39.737829999Z}
     {id contain-the-workspace-tests-that-run-cases, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id cost.windows-records-no-locale-work, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id decide-tree-canonicity, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id define-oils-survey-manifests, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id deliver-a-prompt-interrupt-without-eating-the-next-line, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1337,18 +1350,23 @@ derived_priorities (
     {id fix-xcu-exit-status-listed-values-binding, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fuzz-the-shell, priority 0, derived_at 2026-08-27T23:19:04.80080471Z}
     {id gate-bash-builtins-options, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
-    {id give-a-null-commands-failed-redirection-dashs-status, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id give-each-gate-run-its-own-shell, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id give-the-failing-case-baseline-the-gates-control, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id guard-the-process-file-creation-mask, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
-    {id harness.bash-comparison-baseline-is-stale, priority 0, derived_at 2026-09-04T12:38:02.706421474Z}
     {id harness.creation-mask-check-returns-early, priority 0, derived_at 2026-09-03T23:34:33.427780551Z}
     {id harness.derived-corpus-age, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id harness.differential-kill-after, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.fuzz-oracle-outside-the-worktree, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
+    {id harness.fuzz-targets-claim-nothing, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id harness.group-run-wrong-dialect, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id harness.no-lint-reads-a-shell-check, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id harness.noclobber-append-flake, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id harness.oils-baseline-is-behind, priority 0, derived_at 2026-09-03T23:27:36.484253333Z}
     {id harness.oracle-outside-the-worktree, priority 0, derived_at 2026-09-03T23:27:36.484253333Z}
+    {id harness.posix-rules-cannot-see-the-shell-harness, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
+    {id harness.provenance-restamp-left-in-a-shared-file, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
+    {id harness.redirect-multi-times-out-under-load, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
+    {id harness.refresh-cannot-write-inside-the-containment, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id harness.shell-the-boundary-hides, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id harness.spec-cannot-see-the-shell-harness, priority 0, derived_at 2026-09-03T23:27:36.484253333Z}
     {id harness.target-is-a-link, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1447,6 +1465,7 @@ derived_priorities (
     {id struct.dead-decision-citations-in-spec, priority 0, derived_at 2026-09-03T23:15:13.109354178Z}
     {id struct.differential-helper-crate, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id struct.editor-absent-path-attribute, priority 0, derived_at 2026-09-03T23:27:36.484253333Z}
+    {id struct.facts-under-their-hosts, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id struct.platform-children-module, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id struct.posix-children-under-unix, priority 0, derived_at 2026-09-03T23:27:36.484253333Z}
     {id struct.printers-unread-locale, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1454,20 +1473,21 @@ derived_priorities (
     {id struct.substitution-quoted-flag, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id struct.windows-locale-export, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id test-fc-histfile-reload-format, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
+    {id tooling.disk.headroom-cannot-see-the-fuzz-build-tree, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id tooling.disk.keep-headroom, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.disk.name-the-full-disk, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.disk.reach-every-build, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.disk.readme-says-tmp-is-ram, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id tooling.disk.worktrees-on-tmpfs, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.disk.wrapper-drops-a-hyphenated-cargo-variable, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id tooling.integrate-remote-master, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
+    {id tooling.moved-only-cannot-see-a-rename, priority 0, derived_at 2026-09-04T20:58:59.743454902Z}
     {id tooling.nplan.commit-a-pathspec, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
-    {id tooling.nplan.data-is-not-production, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.nplan.head-took-half-a-file, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.nplan.install-the-pathspec, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.nplan.lint-crate-footprint, priority 1, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.nplan.register-entry-footprint, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.nplan.restore-the-head, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
-    {id tooling.nplan.seal-through-merge, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
-    {id tooling.nplan.wip-counts-workers-as-sprawl, priority 0, derived_at 2026-09-03T23:34:33.427780551Z}
     {id tooling.oracle-sweep-red-on-master, priority 0, derived_at 2026-09-04T00:06:55.232777707Z}
     {id tooling.plan-shape, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
     {id tooling.repin-editor-crates, priority 0, derived_at 2026-09-03T22:17:55.056597249Z}
@@ -1671,7 +1691,6 @@ assertions (
     {id harness.oracle-outside-the-worktree, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:42:59.128374229Z}
     {id bash.divergences.error-boundary-status-collisions, kind @complete, author "brendan@necessary.nu", at 2026-09-04T14:14:08.865771282Z}
     {id harness.spec-cannot-see-the-shell-harness, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:19:21.941213258Z}
-    {id tooling.nplan.data-is-not-production, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:52.642186067Z}
     {id struct.posix-children-under-unix, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:16:37.240687246Z}
     {id struct.editor-absent-path-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:20:09.293190743Z}
     {id tooling.disk.reach-every-build, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:59:02.815360504Z}
@@ -1691,7 +1710,7 @@ assertions (
     {id bash.divergences.multibyte-blank-split, kind @doing, author "brendan@necessary.nu", at 2026-09-04T16:45:29.313482936Z}
     {id bash.divergences.refused-integer-abandons-list, kind @doing, author "brendan@necessary.nu", at 2026-09-04T20:29:06.355570437Z}
     {id struct.dead-decision-citations-in-spec, kind @complete, author "brendan@necessary.nu", at 2026-09-04T20:46:27.398524355Z}
-    {id struct.conditional-sub-grammar, kind @doing, author "brendan@necessary.nu", at 2026-09-04T20:50:33.462062169Z}
+    {id struct.conditional-sub-grammar, kind @complete, author "brendan@necessary.nu", at 2026-09-04T21:00:45.478489631Z}
 )
 
 impl_evidence (
@@ -2452,6 +2471,8 @@ impl_evidence (
         idiom.printable-ast
     ), covered_claims (
         {impl_name nsh-library, rule idiom.printable-ast}
+    ), rule_versions_seen (
+        {id idiom.printable-ast, version 2}
     )}
     {id modernize-builtin-registry, covered_rules (
         idiom.builtin-registry
