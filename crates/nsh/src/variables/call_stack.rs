@@ -16,10 +16,17 @@
 //! expansion pipeline knowing this module exists.
 //!
 //! The other two names Bash publishes about a call, `BASH_ARGC` and
-//! `BASH_ARGV`, are not here: the reference installs them on the read
-//! that asks for them rather than on a push, so they sit beside the
-//! clocks in [`super::special`]. This module is what tells that read
-//! whether a frame is in progress.
+//! `BASH_ARGV`, keep their storage beside the clocks in
+//! [`super::special`], because their bottom frame belongs to no call:
+//! the reference installs it on the first read that asks, from the
+//! shell's own parameters. Everything above that bottom frame is pushed
+//! and popped from here, by the same three functions that move the other
+//! three arrays -- and *what* a frame contributes is not uniform:
+//!
+//! * a dot script contributes the word that named it, always;
+//! * a function call contributes its own arguments, but only under
+//!   `shopt -s extdebug`;
+//! * a plain function call contributes nothing at all.
 
 use std::collections::BTreeMap;
 
@@ -77,6 +84,9 @@ pub(crate) struct CallFrame {
     source: BString,
     /// `BASH_LINENO[i]`: the line the call was written on.
     line: i32,
+    /// Whether this frame put a frame on the `BASH_ARGV` stack, and so
+    /// owes it a pop. Not every frame does: see the module header.
+    arguments: bool,
 }
 
 /// The frames, the script the shell was started with, and where each
@@ -167,6 +177,16 @@ impl CallStack {
     pub(crate) fn depth(&self) -> usize {
         self.frames.len()
     }
+
+    /// How many *function* frames are active, which is the narrower
+    /// question `BASH_ARGC`'s install asks: the reference installs from
+    /// inside a dot script and refuses from inside a function.
+    pub(crate) fn function_depth(&self) -> usize {
+        self.frames
+            .iter()
+            .filter(|frame| frame.kind == FrameKind::Function)
+            .count()
+    }
 }
 
 /// How deeply the evaluator is nested, counting every re-entry that
@@ -227,26 +247,57 @@ pub(crate) fn definition_source(shell: &Shell, name: &BStr) -> BString {
 }
 
 /// Enter a function call, at `line` of the caller's file.
+///
+/// The call's own arguments reach `BASH_ARGV` only under
+/// `shopt -s extdebug`; without it the reference answers `()` inside a
+/// function it has been given arguments for, which is what makes the two
+/// halves of this pair separate mechanisms rather than one. They are
+/// read from the positional parameters rather than passed in because the
+/// caller has already made them the parameters by the time it gets here:
+/// that is what `$1` inside the body means.
+// [spec:nsh:req:compat.bash.names.call-stack]
 // [spec:nsh:req:compat.bash.traps-introspection]
 pub(crate) fn push_function(shell: &mut Shell, name: &BStr, line: i32) {
     let source = definition_source(shell, name);
+    let mut arguments = false;
+    if shell.options.shopt(crate::options::BashShopt::ExtDebug) {
+        let words = shell.options.positional_parameters.words();
+        arguments = super::special::push_call_arguments(shell, words);
+    }
     shell.variables.call_stack.frames.push(CallFrame {
         kind: FrameKind::Function,
         name: name.to_owned(),
         source,
         line,
+        arguments,
     });
     refresh(shell);
 }
 
 /// Enter a dot script, at `line` of the file that named it.
+///
+/// A dot script's `BASH_ARGV` frame is the word that named it, and it is
+/// pushed whether or not `extdebug` is on -- measured on the pinned
+/// 5.3.15, where `. lib.sh` from a shell started `-s a b c` reports
+/// `BASH_ARGC=([0]="1" [1]="3")` with `BASH_ARGV[0]` the path. It is the
+/// *word*, resolved the way `BASH_SOURCE` resolves it: a `PATH`-found
+/// name reports the file it was found at in both.
+///
+/// The reference pushes the operands instead when the dot script is
+/// given any, and only under `extdebug`. This shell has no dot-script
+/// operands to push -- see
+/// `bash.divergences.dot-script-operands-are-positional-parameters` --
+/// so there is one shape here rather than two.
+// [spec:nsh:req:compat.bash.names.call-stack]
 // [spec:nsh:req:compat.bash.traps-introspection]
 pub(crate) fn push_source(shell: &mut Shell, path: &BStr, line: i32) {
+    let arguments = super::special::push_call_arguments(shell, vec![path.to_owned()]);
     shell.variables.call_stack.frames.push(CallFrame {
         kind: FrameKind::Source,
         name: BString::from("source"),
         source: path.to_owned(),
         line,
+        arguments,
     });
     refresh(shell);
 }
@@ -254,7 +305,11 @@ pub(crate) fn push_source(shell: &mut Shell, path: &BStr, line: i32) {
 /// Leave the innermost frame.
 // [spec:nsh:req:compat.bash.traps-introspection]
 pub(crate) fn pop(shell: &mut Shell) {
-    shell.variables.call_stack.frames.pop();
+    if let Some(frame) = shell.variables.call_stack.frames.pop()
+        && frame.arguments
+    {
+        super::special::pop_call_arguments(shell);
+    }
     refresh(shell);
 }
 
@@ -315,6 +370,25 @@ mod tests {
     fn bash_shell() -> Shell {
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         shell.options.set(ShellOption::Bash, true);
+        shell
+    }
+
+    /// `BASH_ARGC` as the stack it is, outermost frame last.
+    fn argument_counts(shell: &mut Shell) -> Vec<BString> {
+        let name = BStr::new("BASH_ARGC");
+        super::super::value::variable_value_owned(shell, name)
+            .as_ref()
+            .map(arrays::elements)
+            .unwrap_or_default()
+    }
+
+    /// A shell that has been through the dialect's publish, which is
+    /// what puts `BASH_ARGC` and `BASH_ARGV` on the table at all: the
+    /// pushes below write into those entries and decline to resurrect a
+    /// name that is not there.
+    fn published_bash_shell() -> Shell {
+        let mut shell = bash_shell();
+        super::super::special::dialect_changed(&mut shell);
         shell
     }
 
@@ -399,6 +473,71 @@ mod tests {
             shell.variables.call_stack.frame_source(1),
             Some(BString::from("script.sh"))
         );
+    }
+
+    /// A dot script's frame is the word that named it, and it is gone
+    /// again once the frame is popped -- which is what leaves the
+    /// install's own frame standing underneath.
+    // [spec:nsh:req:compat.bash.names.call-stack/test]
+    #[test]
+    fn a_dot_script_pushes_the_naming_word() {
+        let _g = lock();
+        let shell = &mut published_bash_shell();
+        push_source(shell, BStr::new("lib.sh"), 4);
+        assert_eq!(
+            lookup_bytes(shell, BStr::new("BASH_ARGV")),
+            Some(BString::from("lib.sh"))
+        );
+        assert_eq!(
+            lookup_bytes(shell, BStr::new("BASH_ARGC")),
+            Some(BString::from("1"))
+        );
+
+        pop(shell);
+        assert_eq!(
+            lookup_bytes(shell, BStr::new("BASH_ARGC")),
+            Some(BString::from("0"))
+        );
+    }
+
+    /// A function call pushes its arguments only under `extdebug`, and
+    /// what it pushes is the positional parameters the caller has
+    /// already installed for the body.
+    // [spec:nsh:req:compat.bash.names.call-stack/test]
+    #[test]
+    fn a_traced_function_frame_pushes_its_arguments() {
+        let _g = lock();
+        let shell = &mut published_bash_shell();
+        crate::options::set_positional_parameters(shell, &[BStr::new("a"), BStr::new("b")]);
+
+        // An untraced call pushes nothing, and a read taken inside one
+        // installs nothing either, so both names stay the empty arrays
+        // the dialect published -- an empty array has no element zero.
+        push_function(shell, BStr::new("f"), 1);
+        assert_eq!(argument_counts(shell), Vec::<BString>::new());
+
+        // The read taken once the frame is gone is the install, and it
+        // is the only frame there is: one count, for the shell's own two
+        // parameters.
+        pop(shell);
+        assert_eq!(argument_counts(shell), vec![BString::from("2")]);
+
+        shell.options.set_bash_option(BStr::new("extdebug"), true);
+        push_function(shell, BStr::new("f"), 1);
+        assert_eq!(
+            argument_counts(shell),
+            vec![BString::from("2"), BString::from("2")]
+        );
+        // Innermost argument first, which is the order the whole stack
+        // runs in.
+        assert_eq!(
+            lookup_bytes(shell, BStr::new("BASH_ARGV")),
+            Some(BString::from("b"))
+        );
+
+        // The pop takes the call's frame and leaves the install's.
+        pop(shell);
+        assert_eq!(argument_counts(shell), vec![BString::from("2")]);
     }
 
     /// The POSIX dialect never publishes the arrays.

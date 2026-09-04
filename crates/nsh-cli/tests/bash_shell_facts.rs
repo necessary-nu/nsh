@@ -196,11 +196,28 @@ const A_COMMAND_STRING_IS_A_NAME: &[&str] = &[
 /// a named lookup while a whole listing still shows `()`.
 ///
 /// That asymmetry is not a rendering difference. `BASH_ARGC` and
-/// `BASH_ARGV` are *pushed* by the first read taken with nothing on the
-/// call stack, from the shell's own positional parameters, and then
+/// `BASH_ARGV` are *pushed* by the first read taken with no function
+/// call in progress, from the shell's own positional parameters, and then
 /// stand: `set -- x y z` after a read leaves them spelling what the
 /// shell started with, and a read taken inside a function pushes
 /// nothing, which is why both answer `()` there.
+///
+/// A CALL PUSHES A FRAME OF ITS OWN on top of that install, and which
+/// calls push is not uniform -- three separate answers measured on the
+/// pinned 5.3.15, all of them here:
+///
+///   * a function call pushes its arguments only under
+///     `shopt -s extdebug`, and a plain call pushes nothing at all;
+///   * a dot script pushes the word that named it, `extdebug` or not;
+///   * turning `extdebug` on is itself an install, which is why the
+///     frames under a traced call spell the parameters the shell started
+///     with rather than the ones the call replaced them with.
+///
+/// Everything a call pushes it drops on return, so the rows ask again
+/// afterwards. The dot-script rows put their file under `mktemp -d` for
+/// the reason the `BASH_SOURCE` ones do, and compare `BASH_ARGV[0]`
+/// without its directory because the two shells are handed different
+/// temporary directories.
 ///
 /// `BASH_SOURCE`'s value is the one thing not compared directly. Its
 /// entry for a function defined on standard input is `$0`, which is a
@@ -227,6 +244,23 @@ const THE_CALL_IN_PROGRESS_IS_FIVE_NAMES: &[&str] = &[
     "f(){ echo \"in=[$BASH_ARGC][${BASH_ARGV[@]}]\"; }\nf q\necho \"out=[$BASH_ARGC]\"\n",
     /* A call in progress, and the same five names once it is over. */
     "f(){ declare -p FUNCNAME BASH_LINENO BASH_ARGC BASH_ARGV; }\nf a b\n",
+    /* What a call's own arguments do to the two stacked names. */
+    "set -- s1 s2\nshopt -s extdebug\nf(){ declare -p BASH_ARGC BASH_ARGV; }\nf a b\ndeclare -p BASH_ARGC BASH_ARGV\n",
+    "set -- s1 s2\nf(){ declare -p BASH_ARGC BASH_ARGV; }\nf a b\ndeclare -p BASH_ARGC BASH_ARGV\n",
+    "shopt -s extdebug\ng(){ echo \"${BASH_ARGC[*]}/${BASH_ARGV[*]}\"; }\nf(){ g p q r; }\nf a b\n",
+    "shopt -s extdebug\nf(){ echo \"${#BASH_ARGC[@]}/${#BASH_ARGV[@]}\"; }\nf a b c\necho \"${#BASH_ARGC[@]}/${#BASH_ARGV[@]}\"\n",
+    "shopt -s extdebug\nf(){ test -v BASH_ARGC; echo \"v=$?\"; echo \"${BASH_ARGC[1]}\"; }\nf a\n",
+    /* Turning the option on is the install; turning it off is not, and
+     * a call made after it is off pushes nothing. */
+    "shopt -s extdebug\nset -- x y z\ndeclare -p BASH_ARGC BASH_ARGV\n",
+    "shopt -u extdebug\nset -- x y z\ndeclare -p BASH_ARGC BASH_ARGV\n",
+    "f(){ shopt -s extdebug; }\nset -- x y\nf\ndeclare -p BASH_ARGC BASH_ARGV\n",
+    "shopt -s extdebug\nshopt -u extdebug\nf(){ declare -p BASH_ARGC; }\nf a\n",
+    /* A dot script pushes the word that named it, and the install goes
+     * under it -- unless a function call is what asked for the file, in
+     * which case there is nothing to install under. */
+    "set -- s1 s2\nd=$(mktemp -d)\nprintf 'echo \"in=[${BASH_ARGC[*]}][${BASH_ARGV[0]##*/}]\"\\n' > \"$d/lib.sh\"\n. \"$d/lib.sh\"\necho \"after=[${BASH_ARGC[*]}]\"\nrm -rf \"$d\"\n",
+    "set -- s1 s2\nd=$(mktemp -d)\nprintf 'echo \"in=[${BASH_ARGC[*]}][${BASH_ARGV[0]##*/}]\"\\n' > \"$d/lib.sh\"\nf(){ . \"$d/lib.sh\"; }\nf a\necho \"after=[${BASH_ARGC[*]}]\"\nrm -rf \"$d\"\n",
     "f(){ echo \"${#BASH_SOURCE[@]}/${#FUNCNAME[@]}/${#BASH_LINENO[@]}\"; }\nf\n",
     "f(){ [ \"${BASH_SOURCE[0]}\" = \"$0\" ] && echo same || echo differ; }\nf\n",
     "f(){ :; }\nf\nfor n in FUNCNAME BASH_SOURCE BASH_LINENO; do declare -p $n; done\n",

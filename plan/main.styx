@@ -9885,6 +9885,7 @@ children (
                                         title "Push a call's own arguments onto `BASH_ARGC` and `BASH_ARGV`"
                                         kind @feat
                                         deps (harness.oils-baseline-is-behind)
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-04T11:17:41.361705396Z
@@ -9898,6 +9899,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T15:54:22.326555689Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -9913,6 +9921,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found while measuring `bash.divergences.publish-names.call-stack-arrays` on 2026-09-04, against the pinned Bash 5.3.15 at `69d2a45`. Not that node's task and not fixed there.\\n\\n    printf 'exec -a MYNAME <pinned bash> -c \"echo 0=\\\\$0\"\\\\n' | nsh -o bash\\n      nsh:  exec: -a: not found\\n      bash: 0=MYNAME\\n\\n`exec -a name` runs the program with `argv[0]` set to `name` rather than to the program's path. This shell's `exec` takes no options at all, so the `-a` is read as the program to run and the line fails with 127.\\n\\nWHY IT IS WORTH MORE THAN ITS SIZE. It is the only way a script can hand a child a different `argv[0]`, and in this repository `argv[0]` is what selects the dialect: `exec -a bash \"$0\"` is how a Bash-mode script re-enters itself, and it is the trick a differential test would use to ask a question about the *invocation* rather than about the script -- an inherited `TERM`, an inherited `PS1`, a shell started under another name. `crates/nsh-cli/tests/bash_shell_facts.rs` needed exactly that and could not use it, so `pinned_bash::answer_with_env` was added to start the child from outside instead. Both are worth having; the one that is missing is the one a script can reach.\\n\\nIt is also what proves a measurement about `$0`: `BASH_SOURCE[0]` and `$BASH_ARGV0` were both settled by running the reference through `exec -a totallyother` and watching the answer follow the name rather than the path.\\n\\nScope note: `exec` in this shell is `crates/nsh/src/builtins/exec.rs`, and the option would have to reach `nsh_platform::execute_program`, whose `argv` the caller assembles. `[dec:nsh:host-owns-the-process]` governs `exec` and should be read before changing it -- replacing the host's process image is granted rather than assumed, and a different `argv[0]` is a change to what is granted."
+                                            }
+
+                                            {
+                                                at 2026-09-04T15:54:20.458304431Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
                                             }
                                         )
                                     }

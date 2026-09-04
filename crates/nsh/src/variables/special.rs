@@ -24,11 +24,15 @@
 //! the shell is running a command with no text, and `BASH_COMMAND`
 //! being unset says the shell has not told you.
 //!
-//! `BASH_ARGC` and `BASH_ARGV` are a fourth kind and the odd one: the
-//! reference *installs* them on the read that first asks for them,
-//! pushing the shell's own arguments, and they then stand however the
-//! parameters move afterwards. So they are published empty like an
-//! array, refreshed like a clock, and written once like a fact.
+//! `BASH_ARGC` and `BASH_ARGV` are a fourth kind and the odd one: they
+//! are a *stack*, and two unrelated things push onto it. The reference
+//! *installs* a bottom frame of the shell's own arguments on the first
+//! read that asks for them, and it then stands however the parameters
+//! move afterwards; separately, a call that has arguments to record
+//! pushes a frame of its own and drops it on return. So they are
+//! published empty like an array, reached from the read path like a
+//! clock, written once like a fact -- and moved by `call_stack`'s pushes
+//! like `FUNCNAME`.
 //!
 //! Recomputation is driven from the read path rather than from a timer
 //! because a shell has no timer: [`refresh`] runs on the same lookups
@@ -117,9 +121,17 @@ pub(crate) struct SpecialState {
     /// `PS1=` is never taken back.
     prompts_entered: bool,
     /// Whether the shell's own arguments have been pushed onto
-    /// `BASH_ARGC` and `BASH_ARGV`. See [`publish_call_arguments`]: the
+    /// `BASH_ARGC` and `BASH_ARGV`. See [`install_call_arguments`]: the
     /// reference pushes rather than computes, so this happens once.
     call_arguments_published: bool,
+    /// The `BASH_ARGV` stack, outermost frame first, each frame holding
+    /// that call's words in the order they were written.
+    ///
+    /// The bottom frame is the install's; every frame above it belongs to
+    /// a call in progress and is dropped when that call returns. Kept
+    /// here rather than derived from `call_stack` because the bottom one
+    /// belongs to no call at all.
+    call_arguments: Vec<Vec<BString>>,
     /// The run of tokens `$BASH_COMMAND` spells back.
     ///
     /// The run and not the text: keeping one is an `Arc` clone and two
@@ -140,6 +152,7 @@ impl SpecialState {
             seconds_base: 0,
             prompts_entered: true,
             call_arguments_published: false,
+            call_arguments: Vec::new(),
             current_command: None,
         }
     }
@@ -473,32 +486,112 @@ fn publish_call_frames(shell: &mut Shell) {
     }
 }
 
-/// `BASH_ARGC` and `BASH_ARGV`, on the first read that asks for them.
+/// Write the two names out from [`SpecialState::call_arguments`].
 ///
-/// The reference publishes both empty and fills them from the shell's own
-/// positional parameters on the first read taken with no frame on the
-/// call stack -- its own source calls that mimicking the behaviour it had
-/// before `shopt -s extdebug` existed. The fill is a *push* and not a
-/// computation, and that is observable: after one read, `set -- x y z`
-/// leaves `${BASH_ARGV[@]}` spelling the arguments the shell started
-/// with, and entering a function leaves the pushed frame standing rather
-/// than emptying it. A read taken with a frame already on the stack fills
-/// nothing at all, which is why the reference answers `()` for both
-/// inside a function.
+/// `BASH_ARGC` runs innermost frame first and `BASH_ARGV` runs
+/// innermost *argument* first, so the stack is walked backwards and each
+/// frame's own words are reversed inside it: a shell started `-s a b c`
+/// with nothing called gives `([0]="3")` and `([0]="c" [1]="b" [2]="a")`.
 ///
-/// `BASH_ARGV` runs innermost-argument-first, so the words are reversed:
-/// `sh -s a b c` gives `([0]="c" [1]="b" [2]="a")`.
+/// A name a script has unset is not written back. The mark went with the
+/// entry, which is how a script takes one of these back for its own use;
+/// writing here anyway would put the name back on the table at the next
+/// call the script made, which is not the shell's to decide.
+fn store_call_arguments(shell: &mut Shell) {
+    if !CALL_ARGUMENT_NAMES
+        .iter()
+        .all(|name| shell.variables.entries.contains_key(BStr::new(*name)))
+    {
+        return;
+    }
+    let mut counts = Vec::with_capacity(shell.variables.special.call_arguments.len());
+    let mut words = Vec::new();
+    for frame in shell.variables.special.call_arguments.iter().rev() {
+        counts.push(BString::from(frame.len().to_string()));
+        words.extend(frame.iter().rev().cloned());
+    }
+    for (name, elements) in CALL_ARGUMENT_NAMES.into_iter().zip([counts, words]) {
+        let name = BStr::new(name);
+        store_array(shell, name, &elements);
+        if let Some(entry) = shell.variables.entries.get_mut(name) {
+            entry.callback = Callback::Special;
+        }
+    }
+}
+
+/// Install the frame the reference has before anything is called: the
+/// shell's own positional parameters.
+///
+/// Once, and never again. The install is a *push* and not a computation,
+/// and that is observable: after it, `set -- x y z` leaves
+/// `${BASH_ARGV[@]}` spelling the arguments the shell started with.
+///
+/// Unconditional, because one of its two callers is `shopt -s extdebug`,
+/// which the reference lets install from inside a function -- measured on
+/// the pinned 5.3.15: `f(){ shopt -s extdebug; }; set -- x y; f` leaves
+/// `BASH_ARGC=([0]="0")`, which is `f`'s own empty parameter list and not
+/// the shell's `x y`. The read path applies the function gate itself.
 // [spec:nsh:req:compat.bash.names.call-stack]
-fn publish_call_arguments(shell: &mut Shell) {
-    if shell.variables.special.call_arguments_published || shell.variables.call_stack.depth() > 0 {
+pub(crate) fn install_call_arguments(shell: &mut Shell) {
+    if shell.options.dialect() != Dialect::Bash || shell.variables.special.call_arguments_published
+    {
         return;
     }
     shell.variables.special.call_arguments_published = true;
-    let mut words = shell.options.positional_parameters.words();
-    let count = BString::from(words.len().to_string());
-    words.reverse();
-    store_array(shell, BStr::new(CALL_ARGUMENT_NAMES[0]), &[count]);
-    store_array(shell, BStr::new(CALL_ARGUMENT_NAMES[1]), &words);
+    let words = shell.options.positional_parameters.words();
+    shell.variables.special.call_arguments.push(words);
+    store_call_arguments(shell);
+}
+
+/// `BASH_ARGC` and `BASH_ARGV`, on the first read that asks for them.
+///
+/// The reference fills them from the shell's own positional parameters on
+/// the first read taken with no *function* frame in progress -- its own
+/// source calls that mimicking the behaviour it had before
+/// `shopt -s extdebug` existed -- and they then stand however the
+/// parameters move afterwards. A read taken inside a function fills
+/// nothing at all, which is why the reference answers `()` for both
+/// there.
+///
+/// The gate is a function frame and not any frame. A dot script is not
+/// one: measured on the pinned 5.3.15, `. lib.sh` at the top level
+/// installs the shell's parameters under the frame the dot script itself
+/// pushes, while the same `. lib.sh` from inside a function installs
+/// nothing.
+// [spec:nsh:req:compat.bash.names.call-stack]
+fn publish_call_arguments(shell: &mut Shell) {
+    if shell.variables.call_stack.function_depth() > 0 {
+        return;
+    }
+    install_call_arguments(shell);
+}
+
+/// Push a call's own arguments, for a call that has any to push.
+///
+/// The frame goes on top of whatever the install left, so the two
+/// compose rather than replacing one another, and the install is what
+/// this reaches for first: the reference's push walks the same two names
+/// a read does, so it installs before it pushes.
+///
+/// Answers whether it pushed, so the caller knows whether it owes a pop.
+/// Only the Bash dialect has these names, and a dialect that changes
+/// mid-script must not leave a frame owing a pop that was never taken.
+// [spec:nsh:req:compat.bash.names.call-stack]
+pub(crate) fn push_call_arguments(shell: &mut Shell, words: Vec<BString>) -> bool {
+    if shell.options.dialect() != Dialect::Bash {
+        return false;
+    }
+    publish_call_arguments(shell);
+    shell.variables.special.call_arguments.push(words);
+    store_call_arguments(shell);
+    true
+}
+
+/// Drop the frame [`push_call_arguments`] pushed, as the call returns.
+// [spec:nsh:req:compat.bash.names.call-stack]
+pub(crate) fn pop_call_arguments(shell: &mut Shell) {
+    shell.variables.special.call_arguments.pop();
+    store_call_arguments(shell);
 }
 
 /// Give the published facts the attributes Bash publishes them with.

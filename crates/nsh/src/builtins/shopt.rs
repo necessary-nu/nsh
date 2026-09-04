@@ -115,8 +115,22 @@ fn mutate(shell: &mut Shell, selection: &Selection<'_>) -> Result<Flow, Error> {
         }
         match selection.namespace {
             Namespace::Bash => {
+                let traced = shell.options.shopt(crate::options::BashShopt::ExtDebug);
                 let known = shell.options.set_bash_option(name, on);
                 debug_assert!(known);
+                /* Turning `extdebug` on is what makes a call record its
+                 * arguments, and the reference installs `BASH_ARGV`'s
+                 * bottom frame at that moment rather than waiting for
+                 * the first read. Measured on the pinned 5.3.15:
+                 * `shopt -s extdebug; set -- x y; declare -p BASH_ARGC`
+                 * answers with the parameters the shell *started* with,
+                 * so the install had already happened; the same two
+                 * lines without the `shopt` answer `x y`. Turning it off
+                 * does not install, and neither does any other option. */
+                // [spec:nsh:req:compat.bash.names.call-stack]
+                if !traced && shell.options.shopt(crate::options::BashShopt::ExtDebug) {
+                    crate::variables::special::install_call_arguments(shell);
+                }
             }
             Namespace::Shell => crate::options::set_option_by_name(shell, name, on)?,
         }
