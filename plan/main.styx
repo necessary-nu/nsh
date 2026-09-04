@@ -10186,6 +10186,7 @@ children (
                         id harness.oracle-outside-the-worktree
                         title "Find the pinned Bash from a worktree that has no `target/` of its own"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T23:27:00.298862622Z
@@ -10199,6 +10200,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T13:42:59.128374229Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -12767,6 +12775,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-02 WHILE CLOSING `tell-a-full-disk-from-a-compiler-bug`, AND NOT PART OF IT. That node gave `scripts/sandboxed` a free-space precondition that refuses under 2 GiB and names the misleading signatures. It works, and it reaches strictly less than the node assumed.\n\nTHE GAP. `scripts/sandboxed` is asked only when somebody types it. The README documents `scripts/sandboxed -- cargo build` and says to keep the wrapper on the outside because it is what asks the machine-state questions, but nothing enforces that for a build, and the spelling agents are actually told to use elsewhere is bare: the repository's own measuring guidance is `cargo build --release -p nsh-cli`, with no wrapper. That command never reaches the check.\n\n`.cargo/config.toml` does not close it. The runner entry gives every test binary the containment boundary whether or not the wrapper was typed, but cargo calls a runner to *run* a binary, which is after every link has already happened. By then the question is answered. `tell-a-full-disk-from-a-compiler-bug` skips the check in `--cargo-runner` mode for exactly that reason, and that part is right.\n\nSO THE FAILURE THE NODE WAS FILED FOR IS STILL REACHABLE. Both recorded incidents were builds: a `cargo build --release -p nsh-survey` that died with ENOSPC, and a `cargo test --workspace` that died as eight `ld terminated with signal 7 [Bus error]` failures. Typed without the wrapper, both would still do that today.\n\nCANDIDATES, and the trade in each. A `build.rs` in a workspace crate reaches every `cargo build`, `cargo test` and `cargo check` with no opt-in at all, which is the only option that needs nobody to remember anything -- but cargo re-runs a build script only when the package changes, so it would fire on the fresh full builds that actually fail and not on incremental ones. That may be exactly right, since a from-clean build is what costs 2.79 GiB, but it should be measured rather than assumed. A cargo alias cannot inject a check. Documenting the wrapper spelling in the measuring notes is the cheapest and is what is already being relied on, unsuccessfully.\n\nDONE WHEN a `cargo build --release -p nsh-cli` typed with no wrapper on a machine under the threshold says so by name rather than dying as a linker crash, and the cost of whatever reaches it -- a build script's own compile time, or a re-run rule -- is measured and stated."
+                            }
+
+                            {
+                                at 2026-09-04T13:43:05.404890547Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }

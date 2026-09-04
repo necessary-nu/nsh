@@ -40,3 +40,32 @@ git-fetch-with-cli = true
 # nothing here.
 [target.'cfg(unix)']
 runner = ["scripts/sandboxed", "--cargo-runner", "--"]
+
+# The other half of the same idea, at the other end of a command. The runner
+# above carries the containment boundary to every binary cargo runs; this
+# carries the free-space precondition to every crate cargo compiles.
+#
+# `tell-a-full-disk-from-a-compiler-bug` gave `scripts/sandboxed` a check that
+# refuses under 2 GiB and names the three signatures a full filesystem wears --
+# a linker bus error under an LLVM stack trace, a silent rustc ICE, and cargo's
+# own ENOSPC. It reaches only a command somebody typed the wrapper in front of,
+# and both recorded incidents were builds spelled without it. The runner cannot
+# stand in for it: cargo calls a runner to *run* a binary, so by then every
+# link has already happened, which is why the wrapper skips that check in
+# `--cargo-runner` mode.
+#
+# A wrapper is where a *build* meets the disk. It reaches `cargo build`,
+# `cargo test`, `cargo check`, `cargo clippy`, `cargo run` and a build script's
+# own compilation, with nothing to remember and no spelling to get right.
+#
+# Cargo does not put the wrapper in a unit's fingerprint, so this cost no
+# rebuild to add and costs none to remove -- measured, `-p nsh-cli` answered
+# "Finished" in 0.11s before and 0.09s after with nothing recompiled. What it
+# does cost is 2.29 ms per rustc: 98 ms on a from-clean release build of
+# nsh-cli, 344 ms on a from-clean `cargo test --workspace --no-run`. The script
+# carries the arithmetic behind both numbers.
+#
+# Relative, like the runner, because cargo resolves both against this file's
+# directory -- which is what makes a worktree use its own copy.
+[build]
+rustc-wrapper = "scripts/room-to-build"

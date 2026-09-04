@@ -1,0 +1,119 @@
+#!/bin/sh
+# Stand in front of every `rustc` this workspace runs and refuse the ones the
+# filesystem cannot hold.
+#
+# WHY THE EXISTING CHECK DOES NOT COVER THIS. `scripts/sandboxed` asks the same
+# question with the same numbers, but only when somebody types it, and the
+# spelling this repository's own measuring guidance uses is bare:
+# `cargo build --release -p nsh-cli`. `.cargo/config.toml`'s runner entry
+# cannot help either -- cargo calls a runner to *run* a binary, which is after
+# every link has already happened -- and that is why the wrapper skips the
+# free-space check in `--cargo-runner` mode. Both recorded incidents were
+# builds, so both would still die as an LLVM stack trace today.
+#
+# A `build.rs` was the other candidate and reaches less than it appears to.
+# Cargo caches a build script's result and re-runs it when the package changes,
+# so it fires on the from-clean build and not on the one after it; and it lives
+# in one package, so `cargo build -p nsh-survey` would never run nsh-cli's.
+# `rustc` is where every one of those commands meets the disk.
+#
+# WHAT IT COSTS, measured 2026-09-04 on this machine at load 21-28, from clean,
+# into a private `CARGO_TARGET_DIR`:
+#
+#   nothing to switch on. Cargo's fingerprint does not include the wrapper, so
+#   adding it recompiled nothing: `cargo build --release -p nsh-cli` answered
+#   "Finished in 0.11s" without it and "in 0.09s" with it. Same reason turning
+#   sccache on does not rebuild the world.
+#
+#   2.29 ms per invocation, and rustc runs once per crate rather than once per
+#   file. 43 invocations for a from-clean `cargo build --release -p nsh-cli`:
+#   98 ms against a 20.9 s build, and 99 MiB of output. 150 invocations for a
+#   from-clean `cargo test --workspace --no-run`: 344 ms against 33.7 s, and
+#   2.9 GiB of output -- which is the figure the 2 GiB threshold sits below.
+#
+# THE SHELL IS `sh` AND THE `statfs` IS ONE CALL BECAUSE OF THAT ARITHMETIC.
+# The same script under `#!/bin/bash` with two `stat` invocations measured
+# 6.61 ms, which is a third of a second added to a workspace build to ask a
+# question twice in a slower shell.
+#
+# THE THRESHOLD AND THE MODE COME FROM THE WRAPPER'S OWN VARIABLES, so the two
+# checks cannot disagree about what "enough" means or about whether the reader
+# has already said to go ahead. `NSH_TEST_DISK=warn` builds here rather than
+# warning: the difference between warn and refuse is a message printed once,
+# and this runs once per crate, so warning would arrive forty-three times for a
+# build that was going to succeed.
+#
+# IT NEVER REFUSES OVER A QUESTION IT COULD NOT ASK. A path it cannot `statfs`
+# is not evidence of a full disk, and a build stopped by a broken check is a
+# worse outcome than the failure this exists to name.
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: cargo calls this as build.rustc-wrapper; see .cargo/config.toml" >&2
+    exit 2
+fi
+
+DISK=${NSH_TEST_DISK:-refuse}
+DISK_MIN=${NSH_TEST_DISK_MIN:-2048}
+case $DISK in
+    refuse) ;;
+    warn | ignore) exec "$@" ;;
+    *)
+        echo "scripts/room-to-build: NSH_TEST_DISK must be refuse, warn or ignore" >&2
+        exit 2
+        ;;
+esac
+case $DISK_MIN in
+    '' | *[!0-9]*)
+        echo "scripts/room-to-build: NSH_TEST_DISK_MIN must be a number of mebibytes" >&2
+        exit 2
+        ;;
+esac
+
+# Where this compilation's output is going, which is the filesystem the
+# question is about, and the reason it is read rather than assumed: a
+# `CARGO_TARGET_DIR` can sit on a different device from the checkout, and then
+# only one of the two answers.
+#
+# AN INVOCATION WITH NO `--out-dir` IS LET THROUGH RATHER THAN ASKED ABOUT THE
+# WORKING DIRECTORY. Cargo omits it for the `rustc -vV` probe it runs at
+# startup, which writes nothing; asking about the working directory there would
+# refuse a worktree on a full filesystem whose build tree has room, and it
+# would do it before cargo had said which crate it was even building.
+OUT=
+previous=
+for argument in "$@"; do
+    if [ "$previous" = --out-dir ]; then
+        OUT=$argument
+        break
+    fi
+    previous=$argument
+done
+[ -n "$OUT" ] || exec "$@"
+
+# `%a` is the count of blocks a non-superuser may still use and `%S` the size
+# of one, which is the product `df` prints as "Avail" -- the same reading
+# `scripts/sandboxed` and `scripts/disk-headroom` take.
+room=$(/usr/bin/stat -f -c '%a %S' "$OUT" 2>/dev/null) || exec "$@"
+available=$((${room% *} * ${room#* }))
+[ "$available" -lt "$((DISK_MIN * 1024 * 1024))" ] || exec "$@"
+
+# The three signatures are quoted here rather than left to a document because
+# the reader arrives at this message instead of at one of them, and the next
+# thing they do is search for whichever one they saw last time.
+/usr/bin/awk -v o="$OUT" -v a="$available" -v m="$((DISK_MIN * 1024 * 1024))" \
+    'BEGIN { printf "scripts/room-to-build: %s has %.2f GiB free, under %.2f GiB\n", o, a / 1073741824, m / 1073741824 }' >&2
+cat >&2 <<'REASON'
+Refusing to compile into it. Below that mark a build's failure stops naming its
+own cause: a linker out of room dies as 'ld terminated with signal 7 [Bus
+error]' under an LLVM stack trace asking for an upstream bug report, rustc dies
+as an ICE carrying no message, and only cargo itself ever says 'No space left
+on device'.
+
+  scripts/disk-headroom              # where the space went
+  scripts/disk-headroom --reclaim    # take back what is safe to take
+
+NSH_TEST_DISK=ignore builds anyway; NSH_TEST_DISK_MIN is the threshold in
+mebibytes.
+REASON
+exit 1

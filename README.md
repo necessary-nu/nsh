@@ -211,6 +211,31 @@ and runs anyway, `=ignore` skips the check, and `NSH_TEST_DISK_MIN` sets the
 threshold in mebibytes. `tests/harness/disk-selftest.sh` is its self-test, and
 unlike the other two it may be run through the wrapper.
 
+**Cargo carries that question too, and it has to, because the wrapper only
+answers it when somebody types the wrapper.** The measuring commands in this
+file and elsewhere are spelled bare — `cargo build --release -p nsh-cli` — and
+the runner entry cannot stand in, since cargo calls a runner to *run* a binary,
+which is after every link has already happened. So `.cargo/config.toml` also
+names `scripts/room-to-build` as `build.rustc-wrapper`, and every crate cargo
+compiles is asked whether its output directory has room first. It reads
+`NSH_TEST_DISK` and `NSH_TEST_DISK_MIN` from the same place the wrapper does,
+so the two can never disagree; `warn` builds here rather than warning, because
+the check runs once per crate and a warning would arrive forty-three times for
+a build that was going to succeed. An invocation with no `--out-dir` — cargo's
+startup `rustc -vV` — and a directory it cannot `statfs` are both let through:
+neither is evidence of a full disk, and a build stopped by a broken check is
+worse than the failure this exists to name.
+
+It costs nothing to add and nothing to remove: cargo does not put the wrapper
+in a unit's fingerprint, so switching it on recompiled nothing. What it costs
+per build is 2.29 ms per rustc, and rustc runs once per crate rather than once
+per file — measured at load 21-28, 43 invocations and 98 ms against a 20.9 s
+from-clean `cargo build --release -p nsh-cli`, and 150 invocations and 344 ms
+against a 33.7 s from-clean `cargo test --workspace --no-run` whose output is
+2.9 GiB. `tests/harness/room-to-build-selftest.sh` is its self-test; its last
+two cases run a bare `cargo build` against a throwaway package, because
+"it reaches a build nobody wrapped" is the claim and nothing else tests it.
+
 A refusal leaves you with a number and nowhere to go, so `scripts/disk-headroom`
 answers the other half: where the space went, and which of it is safe to take
 back.
@@ -275,8 +300,8 @@ the abandoned-process threshold down with it.
 
 The abandoned-process and budget self-tests may not be run through the
 wrapper: both ask the host what survived a finished command, which is what the
-boundary hides. The free-space and build-tree ones ask nothing the boundary
-hides, and run either way.
+boundary hides. The free-space, build-tree and room-to-build ones ask nothing
+the boundary hides, and run either way.
 
 ## Repository layout
 

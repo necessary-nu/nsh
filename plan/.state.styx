@@ -1668,12 +1668,13 @@ assertions (
     {id widen-the-survey-failure-list-extraction, kind @complete, author "brendan@necessary.nu", at 2026-09-02T04:39:21.797323296Z}
     {id tooling.oracle-sweep-red-on-master, kind @complete, author "brendan@necessary.nu", at 2026-09-04T12:46:12.990115892Z}
     {id bash.divergences.empty-bracket-class, kind @complete, author "brendan@necessary.nu", at 2026-09-04T12:46:13.453314052Z}
-    {id harness.oracle-outside-the-worktree, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:56:43.520625639Z}
+    {id harness.oracle-outside-the-worktree, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:42:59.128374229Z}
     {id bash.divergences.error-boundary-status-collisions, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:08.743673125Z}
     {id harness.spec-cannot-see-the-shell-harness, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:19:21.941213258Z}
     {id tooling.nplan.data-is-not-production, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:52.642186067Z}
     {id struct.posix-children-under-unix, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:16:37.240687246Z}
     {id struct.editor-absent-path-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:20:09.293190743Z}
+    {id tooling.disk.reach-every-build, kind @doing, author "brendan@necessary.nu", at 2026-09-04T13:43:05.404890547Z}
 )
 
 impl_evidence (
