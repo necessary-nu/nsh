@@ -35,6 +35,13 @@
 # `--update-baseline-from-dirty-tree` records the list anyway and names every
 # such path in `uncommitted`. `ee98cec` had no way to do that and attributed
 # two entries it removed to a commit that did not remove them.
+#
+# `recorded_at` is the other half of that: the commit says which build, and
+# this says whether anything has run one since. A comparison prints both,
+# with how many commits the tree has moved and how many of those are under
+# `crates/`, because a list nothing has run against the current tree is not
+# a regression set and its count reads exactly the same either way. It is a
+# fact and not a threshold: no age refuses a comparison.
 
 schema = 1
 group = "bash-comparison"
@@ -42,14 +49,9 @@ expectation_shell = "bash"
 posix = false
 timeout_ms = 5000
 oils_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
-shell_sha256 = "beba1b9f32c504c8236aff4dcd85ddba36d52508d7c3786b1c1e6f26ef94230e"
-nsh_commit = "59b9f6acd235af8cfe4d8cf910900e520cf9cba6"
-uncommitted = [
-    "crates/nsh-platform/src/locale.rs",
-    "crates/nsh-platform/src/unix.rs",
-    "crates/nsh-platform/src/windows/locale.rs",
-    "crates/nsh/src/input.rs",
-]
+shell_sha256 = "8cac7b8dd50e6a62c3e4d6acc6b78022ba35f139b23810c93e3b70edf6ef5eec"
+nsh_commit = "f6f7f66be4da3d3d4120285c479330f5202a82fe"
+recorded_at = "2026-09-04T14:33:01Z"
 failing = [
     "alias.test.sh:0",
     "alias.test.sh:10",
@@ -98,6 +100,7 @@ failing = [
     "array.test.sh:77",
     "assign-deferred.test.sh:3",
     "assign-extended.test.sh:10",
+    "assign-extended.test.sh:4",
     "assign-extended.test.sh:7",
     "assign-extended.test.sh:8",
     "assign-extended.test.sh:9",
@@ -487,16 +490,7 @@ failing = [
     "var-ref.test.sh:12",
     "var-sub-quote.test.sh:38",
     "var-sub.test.sh:4",
-    "vars-bash.test.sh:0",
-    "vars-special.test.sh:31",
-    "vars-special.test.sh:32",
-    "vars-special.test.sh:33",
     "vars-special.test.sh:34",
-    "vars-special.test.sh:35",
-    "vars-special.test.sh:36",
-    "vars-special.test.sh:37",
-    "vars-special.test.sh:38",
-    "vars-special.test.sh:39",
     "vars-special.test.sh:4",
     "vars-special.test.sh:40",
     "word-split.test.sh:39",
