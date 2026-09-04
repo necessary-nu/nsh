@@ -802,6 +802,66 @@ printf '%s\n' 'readonly R=1; R=2; echo "rc=$?"' > "$case_file"
 check "unset_readonly_diagnostic: the assignment refusal is not excused" 1 \
 	'SH: 1: R: is read only' 'R: is read-only' 2 2 "$case_file"
 
+printf '%s\n' '. ./nosuchfile.sh 2>&1; echo "rc=$?"' > "$case_file"
+DOT_REF='SH: 1: .: cannot open ./nosuchfile.sh: No such file'
+DOT_PORT='.: ./nosuchfile.sh: not found'
+check "dot_missing_file_diagnostic: only the diagnostic spelling differs" 0 \
+	"$DOT_REF" "$DOT_PORT" 2 2 "$case_file"
+[ "$DS_DIVERGENCE" = dot_missing_file_diagnostic ] || no \
+	"dot_missing_file_diagnostic: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "dot_missing_file_diagnostic: a diagnostic about another file is not excused" 1 \
+	"$DOT_REF" '.: ./other.sh: not found' 2 2 "$case_file"
+check "dot_missing_file_diagnostic: the old status 1 is not excused" 1 \
+	"$DOT_REF" "$DOT_PORT" 2 1 "$case_file"
+check "dot_missing_file_diagnostic: a shell that carried on is not excused" 1 \
+	"$DOT_REF" "$DOT_PORT"$'\nrc=2' 2 2 "$case_file"
+check "dot_missing_file_diagnostic: a dropped diagnostic is not excused" 1 \
+	"$DOT_REF" '' 2 2 "$case_file"
+check "dot_missing_file_diagnostic: a different open failure is not excused" 1 \
+	'SH: 1: .: cannot open ./nosuchfile.sh: Permission denied' "$DOT_PORT" 2 2 "$case_file"
+printf '%s\n' 'echo hi' > "$case_file"
+check "dot_missing_file_diagnostic: a case that runs no dot is outside the entry" 1 \
+	"$DOT_REF" "$DOT_PORT" 2 2 "$case_file"
+
+printf '%s\n' ': ${x?boom}' 'echo NOTREACHED' > "$case_file"
+PARAM_REF='./script.sh: 1: x: boom'
+check "parameter_error_diagnostic: only dash's spine differs" 0 \
+	"$PARAM_REF" 'x: boom' 2 2 "$case_file"
+[ "$DS_DIVERGENCE" = parameter_error_diagnostic ] || no \
+	"parameter_error_diagnostic: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "parameter_error_diagnostic: another word is not excused" 1 \
+	"$PARAM_REF" 'x: bang' 2 2 "$case_file"
+check "parameter_error_diagnostic: another name is not excused" 1 \
+	'./script.sh: 1: y: boom' 'y: boom' 2 2 "$case_file"
+check "parameter_error_diagnostic: the old status 1 is not excused" 1 \
+	"$PARAM_REF" 'x: boom' 2 1 "$case_file"
+check "parameter_error_diagnostic: a shell that carried on is not excused" 1 \
+	"$PARAM_REF" $'x: boom\nNOTREACHED' 2 2 "$case_file"
+printf '%s\n' 'printf "%s\n" "cat <<EOF" "${x:?boom}" EOF > t.sh; . ./t.sh 2>&1; echo rc=$?' > "$case_file"
+check "parameter_error_diagnostic: the sourced script name is a second field" 0 \
+	$'SH: 1: ./t.sh: x: boom\nrc=2' $'x: boom\nrc=2' 0 0 "$case_file"
+printf '%s\n' 'echo hi' > "$case_file"
+check "parameter_error_diagnostic: a case with no ? expansion is outside the entry" 1 \
+	'SH: 1: x: boom' 'x: boom' 2 2 "$case_file"
+
+printf '%s\n' 'set -u' 'echo $x' > "$case_file"
+NOUNSET_REF='SH: 2: x: parameter not set'
+check "nounset_error_diagnostic: only dash's spine differs" 0 \
+	"$NOUNSET_REF" 'x: parameter not set' 2 2 "$case_file"
+[ "$DS_DIVERGENCE" = nounset_error_diagnostic ] || no \
+	"nounset_error_diagnostic: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "nounset_error_diagnostic: another name is not excused" 1 \
+	"$NOUNSET_REF" 'y: parameter not set' 2 2 "$case_file"
+check "nounset_error_diagnostic: another message is not excused" 1 \
+	'SH: 2: x: something else' 'x: something else' 2 2 "$case_file"
+check "nounset_error_diagnostic: the old status 1 is not excused" 1 \
+	"$NOUNSET_REF" 'x: parameter not set' 2 1 "$case_file"
+check "nounset_error_diagnostic: a dropped diagnostic is not excused" 1 \
+	"$NOUNSET_REF" '' 2 2 "$case_file"
+printf '%s\n' 'echo $x' > "$case_file"
+check "nounset_error_diagnostic: a case that never enables nounset is outside the entry" 1 \
+	"$NOUNSET_REF" 'x: parameter not set' 2 2 "$case_file"
+
 printf '%s\n' 'PS4='"'"'[$(echo sub)] '"'"'; set -x; echo hi' > "$case_file"
 RE_SYNTAX='SH: 1: Syntax error: end of file unexpected (expecting ")")'
 check "re_entered_prompt_substitution: the substitution dash loses to a stale token" 0 \

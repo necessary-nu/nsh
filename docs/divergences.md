@@ -545,6 +545,55 @@ this entry cannot excuse and only the code change fixes.
 `aud_exec_struct.txt` `64/7/2` to `65/6/3`, and `salvage.txt` `6913/50/18` to
 `6914/49/19`.
 
+### `dot_missing_file_diagnostic` / `parameter_error_diagnostic` / `nounset_error_diagnostic`
+
+**Status:** implemented in the Rust; dash unchanged. Category 3.
+`crates/nsh/src/builtins/dot.rs`,
+`crates/nsh/src/expand/typed/parameter.rs`.
+
+Three siblings of `unset_readonly_diagnostic`, and the same residue: once
+`bash.divergences.error-boundary-status-collisions` gave these failures
+dash's status 2, the statuses agree and nothing is left but the
+diagnostic's shape. dash writes every one of them through its
+`$0: line: ` spine -- with the sourced script's name as a second field
+when the failure happened inside a `.` script -- and this shell keeps the
+prefix-less spelling `[spec:nsh:req:compat.smoosh.error-contracts]` fixed:
+
+```
+$ dash -c '. ./nonesuch'          dash: 1: .: cannot open ./nonesuch: No such file
+$ nsh  -c '. ./nonesuch'          .: ./nonesuch: not found
+$ dash -c ': ${x?boom}'           dash: 1: x: boom
+$ nsh  -c ': ${x?boom}'           x: boom
+$ dash -c 'set -u; echo $x'       dash: 1: x: parameter not set
+$ nsh  -c 'set -u; echo $x'       x: parameter not set
+```
+
+Each entry rewrites exactly one complete reference line and nothing else.
+`dot_missing_file_diagnostic` fires only in a case that runs a `.` at a
+command position and carries the operand across, so a diagnostic about a
+different file, or about a different `open` failure, is still a
+difference. `parameter_error_diagnostic` reads the names out of the case
+file -- the parameters the script actually wrote a `?` expansion for --
+and rewrites a line only for one of those, which is what stops it from
+becoming a blanket excuse for a missing spine.
+`nounset_error_diagnostic` is scoped to a case that enables `nounset` and
+to the single message that option produces. The statuses and every other
+byte stay compared exactly, so a shell that carried on past one of these
+still fails.
+
+`tests/harness/divtest.sh` holds 28 cases across the three, every one of
+them a difference the entry must refuse.
+
+Measured 2026-09-04 over the whole corpus, before and after the status
+change and these entries together: `TOTAL PASS=60881 FAIL=891 FLAKY=93
+XFAIL=999` became `TOTAL PASS=61093 FAIL=679 FLAKY=56 XFAIL=1205`. Of the
+212 cases that stopped failing, 206 are explained by a register entry and
+six now match dash exactly. Twenty-three corpora improved and four reached
+`FAIL=0`: `aud_exec_fuzz1` (`1465/35` to `1500/0`, almost all of them
+`set -u` reads), `aud_parser_expand` (`137/5`), `aud_parser_discard`
+(`53/1`) and `aud_state_input` (`31/1`). None of the three entries is
+reported stale, and the ten entries that are were stale before this too.
+
 ### `re_entered_prompt_substitution`
 
 **Status:** implemented in the Rust; dash unchanged. Category 3.
@@ -670,6 +719,11 @@ Corrected 2026-09-04, original kept verbatim above: the recorded total is
 now 180/186. `builtin.unset.test` joined these five under the entry below,
 which is a second, unrelated Smoosh divergence and not a change to this one.
 
+Corrected again the same day: 173/186. Seven further cases joined under
+the entry after that one, for the same reason and by the same argument.
+The five named in this entry are unaffected by either; the total is shared
+and the divergences are not.
+
 Not covered by this entry: an EXIT action that fails to *parse*. There
 bash keeps the pre-trap status and dash reports its own syntax-error
 status; this shell follows dash. The action never completed, so the rule
@@ -722,6 +776,108 @@ recorded total from 181/186 to 180/186. The Bash dialect is untouched
 and still matches 5.3.15 exactly. The remaining difference from dash --
 the diagnostic spelling -- is registered above as
 `unset_readonly_diagnostic`.
+
+### Four more refusals end the shell with dash's status, not Smoosh's
+
+**Status:** deliberate. `crates/nsh/src/builtins/dot.rs`,
+`crates/nsh/src/builtins/export.rs`,
+`crates/nsh/src/evaluation/command.rs::classify_abandoned_command`,
+`crates/nsh/src/error.rs::expansion_error_value`.
+
+The entry above resolved this collision for `unset` and named it as the
+first. These are the rest of the class. Every one of them already ended
+the shell, so the *boundary* was never in question; it was the number,
+and 1 was the imported Smoosh byte where 2 is the dialect's.
+
+Measured 2026-09-04 against `tests/.build/ref/src/dash` 0.5.12-12, the
+pinned Bash 5.3.15, and a release build of this change, load 18-54. The
+first two columns are the two references; the last two are the two
+dialects, and no Bash-dialect answer moved.
+
+| script (`-c`, `; echo R` appended) | dash | bash | bash --posix | nsh | nsh -o bash |
+|---|---|---|---|---|---|
+| `. ./nonesuch` | 2 | 0 `R` | 1 | **2** | 0 `R` |
+| `readonly a=b; export a=c` | 2 | 0 `R` | 1 | **2** | 0 `R` |
+| `: < missing` | 2 | 0 `R` | 1 | **2** | 0 `R` |
+| `unset x; echo ${x:?boom}` | 2 | 127 | 127 | **2** | 1 |
+
+The argument is the one the `unset` entry sets out and it is not repeated
+here: POSIX.1-2024 XCU 2.8.1 requires the exit and leaves the status
+unspecified, so nothing in the standard breaks the tie;
+`[spec:nsh:req:compat.smoosh.error-contracts]` and
+`[spec:nsh:req:compat.bash.error-boundary]` are both this repository's
+rules, and `[spec:nsh:sem:idiom.specified-defects+1]` does not rank two of
+those against each other; the tie goes to the contract over the imported
+evidence. What is worth writing down is what checking each case *on its
+own merits* turned up, because two of the four are not the same argument
+twice.
+
+**The fourth row is where the class stops being one accident.** The node
+that filed this expected all five to be the shell accidentally reproducing
+GNU Bash's POSIX mode, which is what the `unset` case turned out to be.
+It holds for the first three: `bash --posix` answers 1 for each. It is
+false for the expansion, where both Bash modes answer **127**, so the 1
+there was nobody's answer but Smoosh's. That removes a supporting argument
+without supplying a competing authority -- Bash is not this dialect's
+reference -- so the row still moves, but for a plainer reason than the
+others.
+
+**The third row costs no divergence at all; it removes one.** `: < missing`,
+`exec < missing`, `exec 3</nonesuch` and `{ exec 8</dev/null; } 8<&-; : <&8`
+are now byte-for-byte identical to dash, diagnostic and status alike.
+`classify_abandoned_command` had computed the dialect's status, asserted in
+a `debug_assert_eq!` that the carried error still held it, and then
+returned a literal 1. The one shape in that row still unequal is
+`: 2>&9`, where the statuses now agree at 2 and this shell writes
+`9: Bad file descriptor` for a duplication dash refuses silently -- an
+older difference of dash's own `dupredirect`, unmoved by this and
+untouched here.
+
+**The second row removed a contradiction inside this shell.** A plain
+`a=c` on a read-only name has always answered 2 here, through
+`Diagnostics::dialect_error`; `export a=c` answered a hard-coded 1 at a
+different site. The shell gave two numbers for one refusal depending on
+whether a declaration utility was written in front of it. One site serves
+both `export` and `readonly`, so `readonly a=c` -- a fifth spelling the
+node did not name -- moves with it.
+
+**`command` withdraws the fatality, not the number.** `command readonly
+x=1` answers 2, which is dash's answer and matches what the same script
+does without the `command`. A number that told a script whether `command`
+had been written in front of a built-in is information neither reference
+offers.
+
+Only the numbers move. Every diagnostic keeps the prefix-less Smoosh
+spelling -- `.: ./nonesuch: not found`, `export: a: is read only`,
+`x: z` -- in both dialects, so a script does not have to know which
+dialect it is running under to read a message. That is the same split the
+`unset` entry made.
+
+**Two clauses of the same Smoosh bullet deliberately do not move.**
+`source` on a missing file keeps 1: `source` is not a POSIX built-in, dash
+has no answer for it, and one oracle is not a collision.
+`crates/nsh/tests/smoosh_errors.rs::missing_dot_is_fatal` asserts both
+halves side by side, which is what makes the distinction a claim rather
+than an oversight. "A failed no-operand `exec` redirection" -- Smoosh's
+`exec 9&<-`, which parses as a backgrounded `exec 9` beside a foreground
+`<-` -- also keeps 1: dash answers 2 there too, but no rule this
+repository wrote has contested it, so it is a plain divergence rather than
+a decision and `bash.divergences.redirection-status-without-a-command`
+holds it along with the compound-command shapes
+(`{ echo hi; } < missing`, `if ... fi < missing`) that have the same
+defect at the other frame.
+
+Seven Smoosh cases move to `nonpassing` in
+`tests/surveys/smoosh/RESULTS.toml`, taking the recorded total from
+180/186 to 173/186: `builtin.dot.nonexistent`,
+`builtin.readonly.assign.noninteractive`, `builtin.command.nospecial`,
+`builtin.special.redir.error`, `semantics.redir.close`,
+`semantics.error.noninteractive` and
+`semantics.noninteractive.expansion.exit`. Six of the seven fail on the
+recorded exit status alone and every stdout and stderr byte still
+matches; the seventh is `builtin.command.nospecial`, whose recorded
+stdout is the `?=` line, so the same number reaches it through stdout
+instead.
 
 ## Bash-compatibility divergences taken under `[dec:nsh:we-own-the-defects]`
 

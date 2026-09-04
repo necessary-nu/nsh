@@ -271,6 +271,21 @@ facility this shell does not provide.
 > where dash answers 2, measured 2026-09-04;
 > `bash.divergences.error-boundary-status-collisions` holds them.
 >
+> Extended 2026-09-04 by that node, everything above kept verbatim: those four
+> now answer 2 as well, so the default dialect's number is the same one
+> wherever XCU 2.8.1 makes a failure fatal -- a missing `.` operand, a
+> declaration utility's refusal of a read-only name, a redirection error on a
+> directly invoked special built-in, and an unset-parameter `?` expansion or a
+> `set -u` read. Each was measured against `/usr/bin/dash` 0.5.12-12 first and
+> each agrees with it. Two things the same measurement establishes and this
+> requirement does not yet say. `command` withdraws the fatality and not the
+> number, so `command readonly x=1` answers 2 here and in dash; and Bash mode's
+> "exit status 1" above holds for the failures Bash *recovers* from but not for
+> an expansion error, where the reference ends a non-interactive shell with 127
+> in both its modes -- `bash.divergences.expansion-error-status-in-bash-mode`
+> holds that. Seven imported Smoosh results lose to this paragraph and are
+> registered in `docs/divergences.md`.
+>
 > Source: `[dec:nsh:we-own-the-defects]`
 
 ## Interactive profile

@@ -324,6 +324,14 @@ pub enum Error {
     Expansion {
         /// `errlinno` as it stood when expansion failed.
         line: i32,
+        /// The status the shell takes from it, which is the dialect's:
+        /// 2 where XCU 2.8.1 ends a non-interactive shell and dash
+        /// answers 2, 1 where Bash mode reports and reads on. A field
+        /// rather than a constant because the frame that finally takes
+        /// it is several `?` returns away from the dialect that wrote
+        /// the diagnostic.
+        // [spec:nsh:req:compat.bash.error-boundary]
+        status: crate::status::ExitStatus,
         /// The diagnostic without a shell or command prefix.
         message: BString,
     },
@@ -471,7 +479,8 @@ impl Error {
             Error::Interrupted { signal } => signal.as_status(),
             // [spec:posix:req:sh.exit-status-values]
             Error::UnrecoverableRead { .. } => crate::status::ExitStatus::UNRECOVERABLE_READ,
-            Error::Expansion { .. } | Error::Abandoned { .. } => crate::status::ExitStatus::FAILURE,
+            Error::Expansion { status, .. } => *status,
+            Error::Abandoned { .. } => crate::status::ExitStatus::FAILURE,
             Error::Other { status, .. } => *status,
         }
     }
@@ -684,6 +693,7 @@ impl Diagnostics<'_> {
     pub fn expansion_error_value(&mut self, msg: &[u8]) -> Error {
         let error = Error::Expansion {
             line: self.line,
+            status: self.dialect.refusal_status(),
             message: BString::from(msg),
         };
         let mut record = BString::from(msg);

@@ -986,9 +986,11 @@ fn run_external_command(
 /// The C's `bail:`: what a failure before the utility ran meant.
 ///
 /// A redirection-only command has no built-in entry whose specialness
-/// can classify the failure. The adopted Smoosh contract uses the
-/// shell-error status 1 for that path; this is the foreground half of
-/// the parsed `exec 9&<-` case.
+/// can classify the failure, so neither shell ends over a bare
+/// `> /nonesuch-dir/x`. The adopted Smoosh contract gives that path the
+/// shell-error status 1 through [`redirection_only_status`], where dash
+/// answers 2 -- the one status in this frame that is still Smoosh's, and
+/// `bash.divergences.redirection-status-without-a-command` holds it.
 ///
 /// The dialect test below is the same withdrawal of specialness that
 /// [`builtin_error_is_fatal`] makes, at the other of the two frames that
@@ -1050,14 +1052,17 @@ fn classify_abandoned_command(
             !error.is_expansion(),
             "expansion errors bypass redirection status"
         );
-        // Smoosh's adopted POSIX closure profile assigns status 1 to a
-        // redirection failure on a directly invoked special builtin.
-        // Its diagnostic was already written by the redirection layer.
-        shell.status = ExitStatus::FAILURE;
-        return Err(crate::error::Error::reported(
-            shell.evaluation.diagnostic_line,
-            1,
-        ));
+        /* The status is the redirection layer's, which the
+         * `debug_assert_eq!` above pins: it has already taken the
+         * dialect's number -- 2 for `: <missing` in the POSIX dialect,
+         * where dash also answers 2 -- and re-deriving one here could
+         * only contradict the diagnostic that was written with it.
+         * Smoosh records 1 for this case; that is a sanctioned
+         * divergence in `docs/divergences.md` rather than a number to
+         * reinstate. */
+        // [spec:nsh:req:compat.bash.error-boundary]
+        shell.status = error.status();
+        return Err(error);
     }
 
     Ok(status)

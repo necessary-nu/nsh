@@ -17,6 +17,13 @@
 //! differs from this shell's in almost every case and is registered as
 //! such in `docs/divergences.md`; what is asserted is whether execution
 //! continued, and with what status.
+//!
+//! The POSIX column is dash's answer, measured against
+//! `tests/.build/ref/src/dash` 0.5.12-12 on 2026-09-04: every case below
+//! but the first agrees with it exactly, and the first is a construct
+//! dash cannot parse. It is recorded rather than run because dash is not
+//! wired into this crate's test harness the way `pinned_bash` wires the
+//! reference Bash.
 
 mod pinned_bash;
 
@@ -54,12 +61,17 @@ const fn case(
 /// before the utility, the utility's own refusal of an operand, its
 /// option scan, and the loop count Bash refuses fatally.
 const CASES: &[Case] = &[
-    /* The redirection layer refuses before the utility is entered. */
+    /* The redirection layer refuses before the utility is entered.
+     * `exec 1000000<` is the one case whose POSIX status is not dash's:
+     * dash's lexer takes only a one-digit IO_NUMBER, so it reads the
+     * number as `exec`'s operand and answers 127 for a command it cannot
+     * find. Multi-digit descriptors are this shell's, and the 1 is the
+     * redirection layer's own for a slot past `RLIMIT_NOFILE`. */
     case(b"exec 1000000</dev/null", (1, b""), (0, b"after\n")),
-    case(b"exec 3</nonesuch-nsh-boundary", (1, b""), (0, b"after\n")),
+    case(b"exec 3</nonesuch-nsh-boundary", (2, b""), (0, b"after\n")),
     case(
         b": > /nonesuch-dir-nsh-boundary/x",
-        (1, b""),
+        (2, b""),
         (0, b"after\n"),
     ),
     /* The utility itself refuses. */
@@ -67,7 +79,7 @@ const CASES: &[Case] = &[
     case(b"local x=1", (2, b""), (0, b"after\n")),
     case(b"export 'a['=1", (2, b""), (0, b"after\n")),
     case(b"readonly 'a['=1", (2, b""), (0, b"after\n")),
-    case(b". /nonesuch-file-nsh-boundary", (1, b""), (0, b"after\n")),
+    case(b". /nonesuch-file-nsh-boundary", (2, b""), (0, b"after\n")),
     case(b"eval 'syntax ((('", (2, b""), (0, b"after\n")),
     /* An unknown option is the same class: `set` and `unset` are special
      * built-ins, so refusing one of their options used to end the shell.

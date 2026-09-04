@@ -101,6 +101,27 @@ contracts that do not determine the named observation remain in force.
 > directly invoked special built-in, and the unset-parameter `?` expansion --
 > and they are not decided by this paragraph;
 > `bash.divergences.error-boundary-status-collisions` holds them.
+>
+> Decided 2026-09-04 by that node, everything above kept verbatim: all four
+> take `[spec:nsh:req:compat.bash.error-boundary]`'s 2 in the default dialect,
+> each having been measured against `/usr/bin/dash` 0.5.12-12 on its own merits
+> first. Only the number moves; every diagnostic and every stdout byte above is
+> still the profile's, which is why the shape of each bullet's claim survives.
+> Three further results follow from the same three code paths and move with
+> them: `command readonly x=bar` writes `"?=2\n"`, since `command` withdraws the
+> fatality and not the number and dash answers 2 there too; `readonly a=c` on a
+> read-only name is the `export` bullet's own site under its other name; and
+> `semantics.redir.close`'s duplication from a closed descriptor is the
+> special-built-in redirection bullet reached through `:`. Seven survey cases
+> therefore move to `nonpassing` and the recorded total is 173/186.
+>
+> Two clauses above are deliberately NOT moved, because nothing collides with
+> them. `source` on a missing file keeps status 1: it is not a POSIX built-in,
+> dash has no answer for it, and a lone oracle is not a collision. "A failed
+> no-operand `exec` redirection" keeps status 1 for the same reason no rule
+> has yet contested it, although dash does answer 2 --
+> `bash.divergences.redirection-status-without-a-command` holds that, and it is
+> a plain divergence rather than a decision.
 
 ## Adopted extensions
 

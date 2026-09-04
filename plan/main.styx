@@ -10150,6 +10150,13 @@ children (
                                 kind @note
                                 text "`harness.bash-comparison-baseline-is-stale` IS THIS NODE, FILED TWICE. Merged here 2026-09-04 and the other removed.\n\nTwo agents found the same thing within the hour, from opposite ends: this one while closing `harness.derived-corpus-age`, whose new provenance reporting printed the age; the other while closing the four `publish-names` nodes, when the comparison it had to run said the same thing about itself. Both quote the same header:\n\n    recorded at 59b9f6acd235af8cfe4d8cf910900e520cf9cba6 over 4 uncommitted\n    path(s), whose effects are in this list and in no commit:\n    crates/nsh-platform/src/locale.rs, crates/nsh-platform/src/unix.rs,\n    crates/nsh-platform/src/windows/locale.rs, crates/nsh/src/input.rs\n\nThey differ only in the distance they measured: 25 commits since at `74f31fc`, 30 by the time the second looked. That the two counts disagree is itself the finding working.\n\nWHAT THE OTHER NODE ADDED, kept here: the header carries its own rule -- \"read the difference the refresh prints before you keep it\" -- and that rule cannot be applied to this file, because part of the difference belongs to a tree nobody can reconstruct. So the list is not merely old; it is unauditable by its own standard, which is a stronger reason to re-record than age alone.\n\nThe duplicate is evidence for `[spec:nsh:req:oracle.recording-carries-its-age]` rather than an accident: the age was invisible this morning and two independent readers tripped over it within an hour of it becoming visible."
                             }
+
+                            {
+                                at 2026-09-04T14:01:26.999826924Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 
@@ -12769,6 +12776,7 @@ children (
                         kind @build
                         constrained_by ([spec:nsh:req:idiom.conformance-closure])
                         deps (tooling.disk.name-the-full-disk tooling.disk.keep-headroom)
+                        sealed true
                         log (
                             {
                                 at 2026-09-02T18:01:12.848990479Z
@@ -12782,6 +12790,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T13:59:02.815360504Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

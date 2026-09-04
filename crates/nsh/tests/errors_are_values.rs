@@ -141,36 +141,38 @@ fn function_survives_redirect_failure() {
 // redirectsafe: the arm that does not swallow
 // ---------------------------------------------------------------------
 
-/// A redirection error on a **special** built-in aborts the script. The
-/// adopted Smoosh closure profile keeps that boundary and assigns status 1
-/// to the shell error, intentionally taking precedence over dash's status 2.
+/// A redirection error on a **special** built-in aborts the script with
+/// dash's status 2, which is the redirection layer's own and what
+/// `[spec:nsh:req:compat.bash.error-boundary]` writes down for this
+/// dialect. The Smoosh profile records 1 for the same case and is a
+/// sanctioned divergence.
 ///
 /// It is the direction that matters most here: a conversion that made the
 /// swallow unconditional would print the same bytes and then print
 /// `after`, and only the status and the missing line say so.
 #[test]
-// [spec:nsh:req:compat.smoosh.error-contracts/test]
+// [spec:nsh:req:compat.bash.error-boundary/test]
 fn special_builtin_redirect_aborts() {
     let (out, status) = run(": > /nonexistent-dir/x; echo after");
     assert_eq!(
         out,
         "sh: 1: cannot create /nonexistent-dir/x: Directory nonexistent\n"
     );
-    assert_eq!(status, 1);
+    assert_eq!(status, 2);
 }
 
 /// `exec` with a failing redirection is the same shape and is worth its
 /// own case, because `exec` reaches `redirectsafe` with `EV_EXIT` set and
 /// no command word at all.
 #[test]
-// [spec:nsh:req:compat.smoosh.error-contracts/test]
+// [spec:nsh:req:compat.bash.error-boundary/test]
 fn failing_exec_redirect_aborts() {
     let (out, status) = run("exec 3> /nonexistent-dir/x; echo after");
     assert_eq!(
         out,
         "sh: 1: cannot create /nonexistent-dir/x: Directory nonexistent\n"
     );
-    assert_eq!(status, 1);
+    assert_eq!(status, 2);
 }
 
 /// The exact shape of the bug this node shipped at `96cadd4`, kept as a

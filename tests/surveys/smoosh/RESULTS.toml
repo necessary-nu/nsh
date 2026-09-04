@@ -3,7 +3,7 @@ survey = "smoosh-shell-posix"
 source_commit = "cc67dbe6a4953e51431997eac025b5e3f46c3d2d"
 group = "full"
 shell = "target/release/nsh"
-shell_sha256 = "950c671f4e700bec9c66af38c9994315e27e0d012c1f08c308400dd07b16b377"
+shell_sha256 = "abda2ac4c3fc570e920dac681a06e6ccaf4ce8ddf2a8a4977887f5d542919a86"
 shell_flags = []
 containment = "sandbox-pid-net-ro-root"
 posix_mode = "shell-native"
@@ -13,11 +13,31 @@ known_hang_timeout_ms = 1000
 [totals]
 selected = 186
 executed = 186
-pass = 180
-fail = 6
+pass = 173
+fail = 13
 timeout = 0
 error = 0
 skip = 0
+
+[[nonpassing]]
+name = "builtin.command.nospecial.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "builtin.dot.nonexistent.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "builtin.readonly.assign.noninteractive.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "builtin.special.redir.error.test"
+outcome = "fail"
+known_hang = false
 
 [[nonpassing]]
 name = "builtin.trap.subshell.false.exit.test"
@@ -41,6 +61,21 @@ known_hang = false
 
 [[nonpassing]]
 name = "builtin.unset.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "semantics.error.noninteractive.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "semantics.noninteractive.expansion.exit.test"
+outcome = "fail"
+known_hang = false
+
+[[nonpassing]]
+name = "semantics.redir.close.test"
 outcome = "fail"
 known_hang = false
 

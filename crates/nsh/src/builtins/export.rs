@@ -98,8 +98,22 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     {
                         let mut message = name.to_vec();
                         message.extend_from_slice(b": is read only");
+                        /* A plain `a=c` on the same read-only name already
+                         * answers 2 here, through `dialect_error`; this
+                         * arm answered a literal 1, so the shell gave two
+                         * numbers for one refusal depending on whether a
+                         * declaration utility was written in front of it.
+                         * 2 is the dialect's: XCU 2.8.1 makes a special
+                         * built-in's refusal fatal and leaves the status
+                         * unspecified, dash answers 2, and
+                         * `[spec:nsh:req:compat.bash.error-boundary]`
+                         * writes 2 down for the default dialect. `command`
+                         * withdraws the fatality, not the number, so
+                         * `command readonly x=1` answers 2 as it does in
+                         * dash. */
                         // [spec:nsh:req:compat.bash.error-boundary]
-                        return Err(shell.diagnostics().builtin_error_value(1, &message));
+                        let status = shell.options.dialect().refusal_status();
+                        return Err(shell.diagnostics().builtin_error_value(status, &message));
                     }
                     let value = BStr::new(value.as_slice());
                     match shell.evaluation.declared_kind {

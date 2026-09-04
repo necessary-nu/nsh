@@ -63,9 +63,24 @@ fn find_dot_file(shell: &mut crate::context::Shell, basename: &BStr) -> Option<B
 // [spec:posix:req:builtin.dot.interfaces]
 // [spec:posix:req:builtin.dot.exit-status]
 pub fn run_dot(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    run_dot_with_missing_status(shell, args, crate::status::ExitStatus::FAILURE)
+    /* Status 2 in the POSIX dialect, not the 1 the imported Smoosh bytes
+     * record. `.` is a POSIX special built-in, so XCU 2.8.1 makes a file
+     * it cannot find fatal to a non-interactive shell and
+     * `[spec:posix:req:builtin.dot.exit-status]` asks only for "non-zero";
+     * dash answers 2 and `[spec:nsh:req:compat.bash.error-boundary]`
+     * writes 2 down for this dialect. Only the number moves: the
+     * diagnostic stays the prefix-less `.: NAME: not found` the Smoosh
+     * contract fixes, in both dialects. Bash reports and carries on with
+     * 1, which is what the Bash dialect keeps. */
+    // [spec:nsh:req:compat.bash.error-boundary]
+    let missing_status = shell.options.dialect().refusal_status();
+    run_dot_with_missing_status(shell, args, missing_status)
 }
 
+/// `source` is not a POSIX built-in and dash has no answer for it, so the
+/// Smoosh contract stands unopposed here: a missing file is 1 in both
+/// dialects. The collision `run_dot` resolves needs two oracles, and this
+/// name has one.
 // [spec:nsh:req:compat.smoosh.source-builtin]
 pub fn run_source(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     run_dot_with_missing_status(shell, args, crate::status::ExitStatus::FAILURE)

@@ -76,6 +76,9 @@ DS_NORMALIZERS=(
 	logical_fd_introspection
 	ulimit_default_soft_report
 	unset_readonly_diagnostic
+	dot_missing_file_diagnostic
+	parameter_error_diagnostic
+	nounset_error_diagnostic
 )
 
 # Set by ds_sanctioned to the id that matched, for the report.
@@ -689,6 +692,72 @@ dsnorm_unset_readonly_diagnostic() {
 	[ "$normalized" != "$DS_REF" ] || return 0
 	DS_REF=$normalized
 	ds_record_divergence unset_readonly_diagnostic
+}
+
+# `.` refusing a file it cannot find. Both shells end a non-interactive
+# shell with status 2 since `bash.divergences.error-boundary-status-collisions`,
+# so the whole of the difference is the diagnostic: dash writes it through its
+# `$0: line: ` spine and names the failed `open`, where the port keeps the
+# prefix-less `.: NAME: not found` that
+# `[spec:nsh:req:compat.smoosh.error-contracts]` fixes. Rewrite only that one
+# complete line, only in a case that runs a `.` at a command position, and
+# carry the operand across so a diagnostic about a different file is not
+# excused. The statuses and the rest of the output stay compared byte for
+# byte, which is what holds the fatality here.
+dsnorm_dot_missing_file_diagnostic() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)\.[[:space:]]' || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" |
+		sed -E 's#^(([$>] )*)(SH|\./script\.sh): [0-9]+: \.: cannot open (.+): No such file$#\1.: \4: not found#')
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence dot_missing_file_diagnostic
+}
+
+# A `${name?word}` expansion refusing an unset parameter. Same shape and same
+# reason as the entry above: the statuses agree at 2 and only dash's spine
+# differs, with a sourced script's name in it as a second field when the
+# failure happened inside one.
+#
+# The names are read out of the case rather than matched as a pattern, so the
+# rewrite reaches exactly the parameters the script wrote a `?` expansion for.
+# A diagnostic about any other name -- or any other diagnostic that lost its
+# prefix -- is still a difference, which is what stops this from becoming a
+# blanket excuse for a missing spine.
+dsnorm_parameter_error_diagnostic() {
+	local name normalized=$DS_REF
+	local -a names
+	mapfile -t names < <(grep -oE '\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?:?\?' "$DS_CASE" 2>/dev/null |
+		sed -E 's/^\$\{//; s/(\[[^]]*\])?:?\?$//' | sort -u)
+	[ "${#names[@]}" -gt 0 ] || return 0
+	for name in "${names[@]}"; do
+		case $name in
+		[A-Za-z_]*) ;;
+		*) continue ;;
+		esac
+		normalized=$(printf '%s\n' "$normalized" |
+			sed -E "s#^(([\$>] )*)(SH|\./script\.sh): [0-9]+: (\./[^ :]+: )?($name): #\1$name: #")
+	done
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence parameter_error_diagnostic
+}
+
+# Reading an unset parameter under `set -u`. The third member of the same
+# class, and the one the generated corpora reach most often. Scoped to a case
+# that actually enables `nounset`, and to the one message that option
+# produces: a line whose remainder is anything but `parameter not set` keeps
+# its prefix and stays a difference, so this cannot excuse a spine dropped
+# from an unrelated diagnostic.
+dsnorm_nounset_error_diagnostic() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)set[[:space:]]+([-+][A-Za-z]*u|-o[[:space:]]+nounset)' ||
+		return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" |
+		sed -E 's#^(([$>] )*)(SH|\./script\.sh): [0-9]+: (\./[^ :]+: )?([A-Za-z_][A-Za-z0-9_]*): parameter not set$#\1\5: parameter not set#')
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence nounset_error_diagnostic
 }
 
 # A command substitution in a prompt is expanded, where dash replays the outer

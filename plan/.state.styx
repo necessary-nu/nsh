@@ -1674,7 +1674,8 @@ assertions (
     {id tooling.nplan.data-is-not-production, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:52.642186067Z}
     {id struct.posix-children-under-unix, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:16:37.240687246Z}
     {id struct.editor-absent-path-attribute, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:20:09.293190743Z}
-    {id tooling.disk.reach-every-build, kind @doing, author "brendan@necessary.nu", at 2026-09-04T13:43:05.404890547Z}
+    {id tooling.disk.reach-every-build, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:59:02.815360504Z}
+    {id harness.oils-baseline-is-behind, kind @doing, author "brendan@necessary.nu", at 2026-09-04T14:01:26.999826924Z}
 )
 
 impl_evidence (
