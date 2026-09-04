@@ -1670,7 +1670,7 @@ assertions (
     {id bash.divergences.empty-bracket-class, kind @complete, author "brendan@necessary.nu", at 2026-09-04T12:46:13.453314052Z}
     {id harness.oracle-outside-the-worktree, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:56:43.520625639Z}
     {id bash.divergences.error-boundary-status-collisions, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:08.743673125Z}
-    {id harness.spec-cannot-see-the-shell-harness, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:26.633679328Z}
+    {id harness.spec-cannot-see-the-shell-harness, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:19:21.941213258Z}
     {id tooling.nplan.data-is-not-production, kind @doing, author "brendan@necessary.nu", at 2026-09-04T12:57:52.642186067Z}
     {id struct.posix-children-under-unix, kind @complete, author "brendan@necessary.nu", at 2026-09-04T13:16:37.240687246Z}
     {id struct.editor-absent-path-attribute, kind @doing, author "brendan@necessary.nu", at 2026-09-04T13:16:42.516885197Z}

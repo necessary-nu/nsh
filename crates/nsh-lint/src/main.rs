@@ -847,9 +847,8 @@ fn modules_follow_rust_subsystems() -> Vec<String> {
 /// A relocation that reaches somewhere else entirely is not reported, and
 /// that is a limit rather than an oversight: `crates/nsh-cli/tests/` reaches
 /// a helper in another package because integration tests cannot share code
-/// any other way, and `crates/nsh/src/lib.rs` names a second file for one
-/// `cfg`-selected module. Both are their own nodes, and reporting them from
-/// here would make this check red about something it cannot fix.
+/// any other way, which is its own node, and reporting it from here would
+/// make this check red about something it cannot fix.
 // [spec:nsh:req:idiom.declared-module-tree/test]
 fn the_module_tree_is_declared() -> Vec<String> {
     let workspace = workspace_root();

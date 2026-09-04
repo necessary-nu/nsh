@@ -211,9 +211,13 @@ pub(crate) mod runtime;
 // ---- interactive editor ----------------------------------------------
 /* One name, two modules. `edit` links `nshedit` and `nshterm`; without it
  * the shell keeps the same internal API and answers that it cannot edit,
- * so no call site reads a `cfg`. See `editor_absent.rs`. */
+ * so no call site reads a `cfg`. Binding one name to whichever of two
+ * files a feature selects is a re-export and not a module declaration,
+ * which is why the second is spelled that way: each file then answers to
+ * the module path it is written at. */
 #[cfg(feature = "edit")]
 pub(crate) mod editor;
 #[cfg(not(feature = "edit"))]
-#[path = "editor_absent.rs"]
-pub(crate) mod editor;
+mod editor_absent;
+#[cfg(not(feature = "edit"))]
+pub(crate) use editor_absent as editor;
