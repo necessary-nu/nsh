@@ -122,6 +122,21 @@ contracts that do not determine the named observation remain in force.
 > has yet contested it, although dash does answer 2 --
 > `bash.divergences.redirection-status-without-a-command` holds that, and it is
 > a plain divergence rather than a decision.
+>
+> Decided 2026-09-04 by that node, everything above kept verbatim: "A failed
+> no-operand `exec` redirection" takes 2 as well, and it got there by a
+> different route than the four above rather than by the same argument. It was
+> never a collision. This shell answered 2 for a failed redirection written in
+> front of a command word and 1 for the same failure written without one --
+> `{ echo hi; } < missing`, `if ... fi < missing`, a command word that expanded
+> to nothing, a null command's redirection and a `noclobber` refusal -- and
+> neither `/usr/bin/dash` 0.5.12-12 nor the pinned Bash 5.3.15 draws that line:
+> dash answers 2 for every shape and Bash answers 1 for every shape. Removing
+> the inconsistency moves Smoosh's `exec 9&<-`, which parses as a backgrounded
+> `exec 9` beside a foreground `<-` and is one of those shapes. Only the number
+> moves; the case's empty stdout and both of its diagnostics are unchanged. An
+> eighth survey case therefore moves to `nonpassing` and the recorded total is
+> 172/186. `source` on a missing file still keeps 1, for the reason above.
 
 ## Adopted extensions
 

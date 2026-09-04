@@ -9982,6 +9982,7 @@ children (
                                         title "Give a compound or command-less redirection failure the dialect's status"
                                         kind @fix
                                         deps (harness.oils-baseline-is-behind)
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-04T13:19:21.855276116Z
@@ -10002,6 +10003,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-04T16:40:53.082441713Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

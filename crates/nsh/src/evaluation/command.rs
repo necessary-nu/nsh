@@ -987,10 +987,18 @@ fn run_external_command(
 ///
 /// A redirection-only command has no built-in entry whose specialness
 /// can classify the failure, so neither shell ends over a bare
-/// `> /nonesuch-dir/x`. The adopted Smoosh contract gives that path the
-/// shell-error status 1 through [`redirection_only_status`], where dash
-/// answers 2 -- the one status in this frame that is still Smoosh's, and
-/// `bash.divergences.redirection-status-without-a-command` holds it.
+/// `> /nonesuch-dir/x`. What it *answers* is the redirection layer's own
+/// status, which `OpenFailureContext::status` already took from the
+/// dialect: 2 in the POSIX dialect, where dash answers 2 for every one of
+/// `< missing`, `<-`, `> /nonesuch-dir/x`, a `noclobber` refusal and a
+/// command word that expanded to nothing, and 1 in Bash mode, where the
+/// reference answers 1. Until
+/// `bash.divergences.redirection-status-without-a-command` this frame
+/// forced the imported Smoosh 1 over that number, so the shell answered 2
+/// when a command word was written in front of the redirection and 1 when
+/// one was not -- a distinction neither reference makes. Smoosh's 1 for
+/// the no-operand `exec` shape is now a sanctioned divergence in
+/// `docs/divergences.md`.
 ///
 /// The dialect test below is the same withdrawal of specialness that
 /// [`builtin_error_is_fatal`] makes, at the other of the two frames that
@@ -1014,11 +1022,6 @@ fn classify_abandoned_command(
     status: ExitStatus,
     redirection_error: Option<Error>,
 ) -> Result<ExitStatus, Error> {
-    let status = redirection_only_status(
-        status,
-        redirection_error.as_ref(),
-        expansion.trace_start.is_some(),
-    );
     shell.status = status;
 
     /* We have a redirection error. */

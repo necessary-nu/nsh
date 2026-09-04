@@ -724,6 +724,11 @@ the entry after that one, for the same reason and by the same argument.
 The five named in this entry are unaffected by either; the total is shared
 and the divergences are not.
 
+Corrected a third time the same day: 172/186. `builtin.exec.badredir`
+joined under the entry after that one, which is a plain divergence from
+dash rather than a Smoosh-versus-contract collision. The five named in
+this entry are unaffected by any of the three.
+
 Not covered by this entry: an EXIT action that fails to *parse*. There
 bash keeps the pre-trap status and dash reports its own syntax-error
 status; this shell follows dash. The action never completed, so the rule
@@ -878,6 +883,109 @@ recorded exit status alone and every stdout and stderr byte still
 matches; the seventh is `builtin.command.nospecial`, whose recorded
 stdout is the `?=` line, so the same number reaches it through stdout
 instead.
+
+Corrected 2026-09-04, the entry above kept verbatim: one of those two
+clauses has since moved. "A failed no-operand `exec` redirection" is the
+entry below, which reached it from the other direction -- not as a
+collision with a written rule, but as an inconsistency inside this shell
+that dash does not have. `source` on a missing file still keeps 1, for
+the reason given above and unchanged.
+
+### A redirection failure answers the same number with or without a command word
+
+**Status:** deliberate. `crates/nsh/src/evaluation.rs` (the
+`Node::Redirect | Node::Group` arm),
+`crates/nsh/src/evaluation/command.rs::classify_abandoned_command`.
+
+This is not a Smoosh-versus-contract collision and it is not decided the
+way the two entries above are. It is one shell answering two numbers for
+one failure, and the argument for closing it is that neither reference
+draws the distinction.
+
+`OpenFailureContext::status` takes the dialect's number for every failed
+open and every `noclobber` refusal -- 2 in the POSIX dialect, 1 in Bash
+mode. Two frames then threw that number away and returned a literal
+`ExitStatus::FAILURE`: `evaluate_tree`'s `Node::Redirect | Node::Group`
+arm dropped the error without reading its status, and
+`redirection_only_status` replaced the status whenever there was a
+redirection error and no command word. Both are gone; the second function
+existed for nothing else and was removed with its single caller's call.
+
+Measured 2026-09-04 against `/usr/bin/dash` 0.5.12-12,
+`tests/.build/ref/src/dash` of the same version, the pinned Bash 5.3.15
+and `bash --posix`, every script run as a file operand with
+`echo "rc=$?"` appended. The diagnostic was already byte-identical to
+dash's in every row; only the number differed.
+
+| script | dash | bash | bash --posix | nsh | nsh -o bash |
+|---|---|---|---|---|---|
+| `{ echo hi; } < /nonexistent/zzz` | 2 | 1 | 1 | **2** | 1 |
+| `if : ; then echo t; fi < /nonexistent/zzz` | 2 | 1 | 1 | **2** | 1 |
+| `u=; $u < /nonexistent/zzz` | 2 | 1 | 1 | **2** | 1 |
+| `> /nonesuch-d/x` | 2 | 1 | 1 | **2** | 1 |
+| `<-` | 2 | 1 | 1 | **2** | 1 |
+| `echo one > f; set -C; > f` | 2 | 1 | 1 | **2** | 1 |
+| `true < /no/such/file` | 2 | 1 | 1 | 2 | 1 |
+
+The last row is the one that never moved, and it is the whole argument:
+the same failure with a command word written in front of it already
+answered 2. dash answers 2 for all seven and Bash answers 1 for all
+seven, so the shell was drawing a line neither of them draws.
+
+**What it costs, and why the cost is registered here.**
+`tests/surveys/smoosh/shell/builtin.exec.badredir` expects 1 for
+`exec 9&<-`, which parses as a backgrounded `exec 9` beside a foreground
+`<-` and is therefore one of the command-less shapes above. It now
+answers 2, matching dash. That is the eighth Smoosh case to move to
+`nonpassing` in `tests/surveys/smoosh/RESULTS.toml`, taking the recorded
+total from 173/186 to 172/186; its stdout is empty before and after and
+both diagnostics are unchanged, so the recorded exit status is the only
+byte that differs. The clause is decided in
+`[spec:nsh:req:compat.smoosh.error-contracts]` by a dated paragraph that
+keeps the original verbatim, which is this repository's practice for a
+correction.
+
+No entry is added to `tests/harness/divergences.sh` for this, because the
+change *removes* differences from dash rather than adding one: after it
+the port and the reference agree on every row above, diagnostic and
+status alike. `crates/nsh/tests/redirection_status_without_a_command.rs`
+is the witness for both dialects, and its last case asks the pinned Bash
+itself rather than trusting the Bash column recorded above.
+
+Measured over the whole corpus, before and after, on 2026-09-04 with a
+debug binary and a `RUNALL_OUT` of its own for each pass and a working
+directory of its own for each -- the second pass ran from a `git
+worktree` holding this change and nothing else, so no other session's
+in-flight files are in the number -- against
+`tests/.build/ref/src/dash` 0.5.12-12, 8 jobs, load 42-52:
+`TOTAL PASS=61094 FAIL=678 FLAKY=70 XFAIL=1206` became
+`TOTAL PASS=61096 FAIL=676 FLAKY=64 XFAIL=1205`.
+
+Three corpora improved by exactly one case each and each of the three is
+one of the shapes above: `aud_exec_core` `121/2` to `122/1` on
+*exitstatus: NREDIR redirect error*, and `aud_exec_deep` `90/5` to
+`91/4` and `aud_exec_more` `60/7` to `61/6`, both on *empty command with
+redirect error*. The node predicted two of the three; `aud_exec_deep`
+was not named in it.
+
+One corpus moved the other way and it is not a regression.
+`aud_parser_fuzz3` went `884/16` to `883/17` on
+`echo $(( echo ${w?'a$b'} ... )) ** | printf "<%s>" **`, whose
+`parameter_error_diagnostic` excuse stopped matching -- the same case is
+the one `XFAIL` that disappeared, which is why both counters moved by one
+together. It is a race between two pipeline elements, and the harness
+reports both shells producing two distinct outputs over its eleven runs.
+Run directly, eight times against each binary, the pre-change and
+post-change shells produce byte-identical output for it, so nothing in
+this change reaches it. The ten stale register entries the run reports
+are the same ten in both passes.
+
+Everything else that was run: the Smoosh survey `full` group 173/186 to
+172/186, the one case named above; the Bash closure gate PASS with no
+unexpected failure; the Oils `bash-comparison` group `pass=2189
+fail=446`, identical to the recorded baseline for a tree without
+`exec -a` in it; and `cargo test --workspace`, 963 tests across 87
+binaries, all passing.
 
 ## Bash-compatibility divergences taken under `[dec:nsh:we-own-the-defects]`
 

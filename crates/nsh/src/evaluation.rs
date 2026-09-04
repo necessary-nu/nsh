@@ -627,18 +627,6 @@ fn repeat_debug_trap(shell: &mut Shell, line: i32) -> Result<Flow, Error> {
     crate::trap::bash::run_debug(shell)
 }
 
-fn redirection_only_status(
-    status: ExitStatus,
-    redirection_error: Option<&Error>,
-    has_command: bool,
-) -> ExitStatus {
-    if redirection_error.is_some() && !has_command {
-        ExitStatus::FAILURE
-    } else {
-        status
-    }
-}
-
 /// Whether a built-in's failure ends the shell rather than becoming the
 /// command's status.
 ///
@@ -782,10 +770,22 @@ pub fn evaluate_tree(
                 let outcome = crate::resource::with_resources(shell, |shell, resources| {
                     match resources.apply_redirections(shell, &expanded_redirections) {
                         Err(error) if error.is_interrupt() || error.is_expansion() => Err(error),
+                        /* The status the redirection layer already computed,
+                         * not a constant. `OpenFailureContext::status` answers
+                         * the dialect -- 2 where dash answers 2, 1 in Bash mode
+                         * -- and forcing `FAILURE` here is what made
+                         * `{ echo hi; } < /nonexistent/zzz` answer 1 where the
+                         * same failure in front of a command word answered 2.
+                         * The number is read before the drop; the error itself
+                         * is still swallowed, because a compound command's
+                         * redirection failure is its status in both dialects
+                         * rather than the shell's end. */
+                        // [spec:nsh:req:compat.bash.error-boundary]
                         Err(error) => {
+                            let status = error.status();
                             drop(error);
                             check_exit = true;
-                            Ok(Flow::Done(ExitStatus::FAILURE))
+                            Ok(Flow::Done(status))
                         }
                         Ok(()) => evaluate_tree(
                             shell,

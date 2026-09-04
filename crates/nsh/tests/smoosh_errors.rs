@@ -98,12 +98,15 @@ fn missing_dot_is_fatal() {
 /// the dialect's 2 and is dash's answer byte for byte. Smoosh records 1
 /// and that is a sanctioned divergence.
 ///
-/// `exec 9&<-` is the contrast and it does not move. It parses as a
-/// backgrounded `exec 9` beside a foreground `<-`, so what fails is a
-/// redirection-only command with no special built-in in front of it --
-/// a different clause of the same Smoosh bullet, which dash also answers
-/// 2 for and which no rule this repository wrote has yet contested.
-/// `bash.divergences.redirection-status-without-a-command` holds it.
+/// `exec 9&<-` is the other clause of the same Smoosh bullet, and it now
+/// moves with this one. It parses as a backgrounded `exec 9` beside a
+/// foreground `<-`, so what fails is a redirection-only command with no
+/// special built-in in front of it. Until
+/// `bash.divergences.redirection-status-without-a-command` that shape
+/// forced Smoosh's 1 over the number the redirection layer had already
+/// computed, which is how the shell came to answer 2 with a command word
+/// written in front of a failed redirection and 1 without one. dash
+/// answers 2 for both, and Smoosh's 1 is a sanctioned divergence.
 // [spec:nsh:req:compat.smoosh.error-contracts/test]
 // [spec:nsh:req:compat.bash.error-boundary/test]
 #[test]
@@ -114,8 +117,8 @@ fn special_redirections_take_the_dialects_status() {
     assert!(stdout.is_empty(), "the shell ended before `echo`");
     assert_eq!(special, 2);
     assert_eq!(
-        no_command, 1,
-        "no built-in in front of it, so still Smoosh's"
+        no_command, 2,
+        "the redirection layer's number, not the imported 1"
     );
 }
 
