@@ -1,13 +1,12 @@
 //! The POSIX implementation of the shell's operating-system boundary,
 //! and the table of contents for the subjects it divides into.
 //!
-//! Four subjects sit beside this file rather than under `unix/` --
-//! `descriptor`, `locale`, `terminal` and `editor_terminal`, split out
-//! one at a time before the directory existed -- and are declared by the
-//! crate root, which is the module their files are in. `signal_names` is
-//! shared with the Windows host and is declared there too. Everything in
-//! `src/unix/` is declared below and resolves by convention, which is
-//! what this file being a module rather than an included text buys.
+//! Every POSIX-only subject is declared below and resolves by
+//! convention, which is what this file being a module rather than an
+//! included text buys. Two are declared by the crate root instead, for
+//! the one reason a `mod` item cannot reach them from here:
+//! `signal_names` is shared with the Windows host, and `unix_facts` sits
+//! in the crate root's directory rather than in `unix/`.
 //!
 //! Every name this file and the crate root publish for POSIX is
 //! published for Windows as well, under the same conditions. The shell
@@ -22,12 +21,23 @@
  * module's names through `use super::*`, so the crate-root types cross
  * into the subject modules here, in one place -- which is how
  * `windows.rs` hands its children the private items they share. */
-use crate::descriptor;
 use crate::{
-    AsDescriptor, ChildStatus, Descriptor, ForkResult, ProcessGroupId, ProcessGroupState,
-    ProcessId, ProcessSelector, ProcessTarget, SIGNAL_COUNT, Signal, SignalRequest,
+    ChildStatus, ForkResult, ProcessGroupId, ProcessGroupState, ProcessId, ProcessSelector,
+    ProcessTarget, SIGNAL_COUNT, Signal, SignalRequest,
 };
 
+mod descriptor;
+pub use descriptor::{AsDescriptor, BorrowedDescriptor, Descriptor, move_fd_cloexec};
+/* The only user of `nshedit-plat`, and so the only part of the boundary
+ * the `edit` feature gates. */
+#[cfg(feature = "edit")]
+mod editor_terminal;
+#[cfg(feature = "edit")]
+pub use editor_terminal::{
+    EditorTerminalAttributes, TerminalApply, TerminalControlCharacter,
+    apply_editor_terminal_attributes, editor_terminal_attributes, editor_terminal_size,
+    wait_for_terminal_input,
+};
 mod endpoints;
 pub use endpoints::{
     OpenMode, PIPE_BUFFER, ProcessDescriptorTransaction, anonymous_file, create_temporary_file,
@@ -42,6 +52,8 @@ pub use errors::{
     PathErrorKind, command_exec_failure_status, is_bad_descriptor_error, is_exec_format_error,
     is_path_error, is_pseudoterminal_end, platform_error,
 };
+mod locale;
+pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};
 mod paths;
 pub use paths::{
     AccessMode, DirectoryEntry, FileKind, FileMetadata, absolute_path,
@@ -71,6 +83,8 @@ pub use signals::{
     send_signal, signal_action, signal_is_blocked, terminal_input_signal, terminal_output_signal,
     terminal_stop_signal, terminate_with_interrupt, termination_signal, unblock_all_signals,
 };
+mod terminal;
+pub use terminal::{TerminalSettings, is_terminal, terminal_canonical_mode};
 mod text;
 pub use text::{
     NativeStrExt, ShellBytesExt, input_newline_width, trim_command_substitution_output,

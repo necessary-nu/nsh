@@ -235,25 +235,15 @@ pub use work::{LocaleWork, locale_work};
 mod signal_names;
 pub use signal_names::{SIGNAL_COUNT, SIGNAL_NAMES};
 
-/* The POSIX host. Its four pre-`src/unix/` subjects sit beside this file
- * rather than under `unix/`, and so are declared here for the same reason
- * `windows_facts` is: a `mod` item names a file relative to the module it
- * is written in, and these are not in the directory `unix.rs` owns. That
- * is the whole of why the list is this long, and it is the price of every
- * module below sitting at the path the source puts it at. */
+/* Each host owns every subject of its own except its facts, which are
+ * declared here because a `mod` item names a file relative to the module
+ * it is written in and `unix_facts.rs` sits in this directory rather than
+ * the one `unix.rs` owns, as `windows_facts.rs` does below. */
 // [spec:nsh:req:idiom.declared-module-tree]
 #[cfg(unix)]
-mod descriptor;
+mod unix;
 #[cfg(unix)]
-pub use descriptor::{AsDescriptor, BorrowedDescriptor, Descriptor, move_fd_cloexec};
-#[cfg(unix)]
-mod locale;
-#[cfg(unix)]
-pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};
-#[cfg(unix)]
-mod terminal;
-#[cfg(unix)]
-pub use terminal::{TerminalSettings, is_terminal, terminal_canonical_mode};
+pub use unix::*;
 #[cfg(unix)]
 mod unix_facts;
 #[cfg(unix)]
@@ -261,20 +251,6 @@ pub use unix_facts::{
     GroupId, UserId, descriptor_limit, effective_gid, effective_uid, host_name, real_uid,
     supplementary_groups, wait_for_input,
 };
-/* The only user of `nshedit-plat`, and so the only part of the boundary
- * the `edit` feature gates. */
-#[cfg(all(unix, feature = "edit"))]
-mod editor_terminal;
-#[cfg(all(unix, feature = "edit"))]
-pub use editor_terminal::{
-    EditorTerminalAttributes, TerminalApply, TerminalControlCharacter,
-    apply_editor_terminal_attributes, editor_terminal_attributes, editor_terminal_size,
-    wait_for_terminal_input,
-};
-#[cfg(unix)]
-mod unix;
-#[cfg(unix)]
-pub use unix::*;
 
 #[cfg(windows)]
 mod windows;

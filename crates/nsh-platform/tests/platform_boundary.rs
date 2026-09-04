@@ -121,7 +121,7 @@ fn platform_errors_are_typed() {
     assert_eq!(nsh_platform::command_exec_failure_status(&denied), 126);
 
     for source in [
-        "nsh-platform/src/locale",
+        "nsh-platform/src/unix/locale",
         "nsh-platform/src/unix",
         "nsh-platform/src/windows",
     ] {

@@ -155,19 +155,19 @@ const LOW_LEVEL_CRATES: &[&str] = &["libc", "rustix", "windows_sys", "ntapi", "n
 /// disagree are worse than one, and a new platform file is meant to be an
 /// explicit addition here rather than a silent one.
 const PRIVATE_PLATFORM_ALLOWLIST: &[&str] = &[
-    "crates/nsh-platform/src/descriptor.rs",
     "crates/nsh-platform/src/descriptor_name.rs",
-    "crates/nsh-platform/src/editor_terminal.rs",
-    "crates/nsh-platform/src/locale.rs",
-    "crates/nsh-platform/src/locale/characters.rs",
     "crates/nsh-platform/src/signal_names.rs",
-    "crates/nsh-platform/src/terminal.rs",
     "crates/nsh-platform/src/unix.rs",
+    "crates/nsh-platform/src/unix/descriptor.rs",
+    "crates/nsh-platform/src/unix/editor_terminal.rs",
     "crates/nsh-platform/src/unix/endpoints.rs",
     "crates/nsh-platform/src/unix/errors.rs",
+    "crates/nsh-platform/src/unix/locale.rs",
+    "crates/nsh-platform/src/unix/locale/characters.rs",
     "crates/nsh-platform/src/unix/paths.rs",
     "crates/nsh-platform/src/unix/process.rs",
     "crates/nsh-platform/src/unix/signals.rs",
+    "crates/nsh-platform/src/unix/terminal.rs",
     "crates/nsh-platform/src/unix_facts.rs",
     "crates/nsh-platform/src/windows.rs",
     "crates/nsh-platform/src/windows/broker.rs",
@@ -1323,7 +1323,7 @@ fn descriptors_cross_the_boundary_owned() -> Vec<String> {
     let workspace = workspace_root();
     let mut violations = Vec::new();
 
-    match text_at(&workspace, "crates/nsh-platform/src/descriptor.rs") {
+    match text_at(&workspace, "crates/nsh-platform/src/unix/descriptor.rs") {
         Err(report) => violations.push(report),
         Ok(descriptor) => {
             for required in [

@@ -391,7 +391,7 @@ impl Locale {
 mod tests {
     use super::*;
     use crate::CharacterEncoding;
-    use crate::locale::tests::{current, utf8};
+    use crate::unix::locale::tests::{current, utf8};
 
     /// Three charmaps give three different answers for one character.
     ///

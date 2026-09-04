@@ -9814,6 +9814,13 @@ children (
                                                 kind @note
                                                 text "FOUND 2026-09-04 WHILE CLOSING `bash.divergences.unset-readonly-contract`, AND LEFT OUT OF IT DELIBERATELY: that node's decision named `unset` and only `unset`, and this is the same collision four more times. Measured on an attributable release build of the worktree branch for that node (own target dir, `-p nsh-cli`), against `tests/.build/ref/src/dash` (= `/usr/bin/dash` 0.5.12-12, byte-identical on all four), load 32.\n\n`[spec:nsh:req:compat.bash.error-boundary]` says of the default dialect: \"status 2 and a non-interactive shell that exits\". `[spec:nsh:req:compat.smoosh.error-contracts]` pins four *other* failures of the same class at status 1, and the shell follows the Smoosh rule at each:\n\n    . ./no-such-dot-file 2>/dev/null; echo reached     dash rc=2   nsh rc=1\n    readonly a=b; export a=c; echo reached             dash rc=2   nsh rc=1\n    : < missing-file 2>/dev/null; echo reached         dash rc=2   nsh rc=1\n    unset x; echo \"${x:?boom}\" 2>/dev/null; echo reached  dash rc=2  nsh rc=1\n\nEvery one of them exits, so the *boundary* is right in all four; it is the number that is the Smoosh rule's and not the dialect's. The `unset` node resolved exactly this collision in favour of `error-boundary`, on provenance -- imported evidence does not outrank a contract this repository wrote -- and recorded it in `docs/divergences.md`. The same argument reaches all four of these without modification, which is why leaving them is a decision rather than an oversight.\n\nWHAT MAKES THIS NOT AUTOMATIC. The `unset` case had a live rule violation *and* a corpus case observing it. These four are pinned the other way by passing tests: `crates/nsh/tests/smoosh_errors.rs::missing_dot_is_fatal`, `::readonly_assignment_is_fatal`, `::special_redirections_use_one` and `::expansion_modes_diverge` all assert 1 today and all pass. Moving them costs four Smoosh survey cases (`RESULTS.toml` would go 180/186 to something lower) and needs each one measured for its corpus consequences, which is more than a line.\n\nNOT MEASURED YET, and worth measuring first: whether the POSIX differential corpus observes any of the four (the `unset` one was observed by exactly 17 of 36,097 cases, so the surface may be small), and what `bash --posix` answers for each -- for `unset` it was 1, i.e. the shell was accidentally reproducing GNU Bash's POSIX mode, and if that holds for all five then the shape of the whole class is one accident rather than five.\n\nALSO WORTH RECORDING: `posix/harness` does not decide any of this. `adv-param-error-if-unset-exits`, `adv-redir-error-special-builtin-exits` and `adv-exec-dot-not-found-exits` all assert `status=\"nonzero\"`, so nsh's 1 and dash's 2 both pass, and nothing in the harness asserts the number 2 for this class at all. That is why `error-boundary`'s claim that status 2 is \"what the conformance harness observes\" was corrected as part of the `unset` node.\n\nDONE WHEN. Each of the four is either moved to 2 with the Smoosh result registered as a divergence beside the `unset` one, or explicitly kept at 1 with the reason written down, and `compat.smoosh.error-contracts`' collision paragraph names the outcome rather than saying the count is unknown."
                                             }
+
+                                            {
+                                                at 2026-09-04T12:57:08.743673125Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -10129,6 +10136,13 @@ children (
                                 kind @blocker
                                 text "FOUND 2026-09-04 WHILE CLOSING `harness.derived-corpus-age`, AND NOT PART OF IT. It decided where that node's annotation could go, which is why it is worth writing down rather than working around twice.\n\nTWO FACTS THAT DO NOT FIT TOGETHER.\n\n`[spec:nsh:req:oracle.recording-carries-its-age]` reads \\\"A checked-in recording of a reference's answers MUST carry which build of this shell it was made against and when.\\\" The node it was written from is about `fuzz/campaign/TARGET.archived`, and that file is *not* checked in: `fuzz/.gitignore` names `campaign`, deliberately -- \\\"it is reproducible from the archive and belongs no more in git than the archive does\\\". Nor is it a recording of a reference's *answers*; it is the listing of the inputs a derivation ran. The rule's substance -- a recording carries its age, and a run that reads one reports it -- applies exactly; its two qualifiers do not.\n\nAnd the annotation could not have gone there in any case. `.config/nspec/config.styx` gives the `nsh` spec one impl, `nsh-library`, `include (crates/**/*.rs)`. Nothing under `fuzz/` is indexed -- not the shell scripts and not `fuzz/fuzz_targets/*.rs` either -- so a `[spec:nsh:req:...]` line in `fuzz/corpus.sh` is prose and nothing else. `oracle.cannot-measure-is-a-failure` is already cited that way in `fuzz/corpus.sh`, `fuzz/run.sh`, `fuzz/sweep.sh` and `fuzz/run-selftest.sh`, and appears at none of those four in `nplan_spec_rule`'s impl list.\n\nSO THE COVERAGE LANDED ON THE OTHER RECORDING, which is the one the rule's words describe: `tests/surveys/oils/BASH_COMPARISON_FAILURES.toml` is checked in, is a recording of the pinned Bash's answers, recorded `nsh_commit` and not when, and its comparison reported the commit and not the age. Both halves were done under the node; only the Rust half is annotated, and the fuzz half -- which is what the node was actually filed about -- is invisible to `nplan_spec_status`.\n\nDONE WHEN ONE OF THREE IS CHOSEN AND WRITTEN DOWN.\n\n  1. The rule's first sentence drops \\\"checked-in\\\" and \\\"of a reference's answers\\\", so it covers a derived recording too, and the fuzz half stops being a rule the source cannot claim. Costs a version bump: `oracle.recording-carries-its-age` is v0 with sites only in `crates/nsh-survey`, so the restamp is small today and will not be later.\n\n  2. `nspec` grows an impl that indexes the harness -- `fuzz/**/*.sh`, `scripts/*`, `tests/harness/*.sh` -- so a check written in shell can carry the rule it implements. Four rules' worth of prose citations become real coverage; whether nspec can index a shell language at all is the first question.\n\n  3. It stays as it is, and the fact that a rule can be covered by one of the two things it is about is recorded where the next person will find it rather than rediscovered.\n\nNone is obviously right. What is wrong is the present state, where the answer is settled by which directory the code happens to be in."
                             }
+
+                            {
+                                at 2026-09-04T12:57:26.633679328Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 
@@ -10142,6 +10156,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 while closing `bash.divergences.unclosed-extglob` in a worktree made by `nplan_worktree` itself. Not that node's doing; it reproduces on an untouched tree.\n\nTWO WAYS A WORKTREE MEASUREMENT COMES BACK RED FOR REASONS THAT ARE NOT THE CHANGE. Both were hit in one session, both cost a detour, and both make a clean tree look broken -- which is the failure mode `harness.target-is-a-link` is already about.\n\n1. THE ORACLE IS LOOKED FOR IN THE SOURCE TREE, NOT BESIDE THE BUILD. `crates/nsh/tests/pinned_bash/mod.rs::path()` resolves `concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../target/bash-reference/bash\")`. A fresh `git worktree` has no `target/`, so every differential test in the workspace fails at once:\n\n    no pinned Bash at <worktree>/crates/nsh-cli/../../target/bash-reference/bash\n\non a machine that has a pinned Bash 5.3.15 built and calibrated two directories away. `NSH_FUZZ_BASH` is the documented escape and the message names it, but it has to be threaded through `cargo test`, `nplan_commit`'s own check phase and every survey invocation; the workaround actually used was `ln -s /home/brendan/work/dash/target/bash-reference <worktree>/target/bash-reference`. Since `nplan_worktree` is the tool this repo hands an agent for taking a node, the default path should find an oracle the repository already has -- resolve against the main checkout's `target/` when the worktree has none, or read the location out of the calibration record beside `BASH_REFERENCE_CASES.json`.\n\n2. A TARGET DIRECTORY UNDER `/tmp` MAKES EVERY DIFFERENTIAL TEST FAIL TO SPAWN. With `CARGO_TARGET_DIR=/tmp/.../scratchpad/tgt`, `cargo test -p nsh-cli` reports, for every test that runs the built shell:\n\n    start /tmp/.../tgt/debug/nsh: No such file or directory (os error 2)\n\nfor a binary that is present, executable, `ldd`-clean and runs from a prompt -- and the same test binary run directly out of `.../tgt/debug/deps/` passes all its cases. Measured on an untouched tree: `bash_globstar_shapes` fails identically, so it is not the change under test and not the new file. Moving `CARGO_TARGET_DIR` inside the worktree made all of it pass. This may be an artifact of the sandbox an agent runs under rather than of the repository, and finding out which is the first task here, because the house rules tell every agent to measure in a worktree \"with its own `CARGO_TARGET_DIR`\" and the obvious place to put one is the scratchpad.\n\nWHY IT MATTERS MORE THAN THE MINUTES IT COSTS. Both symptoms read as a broken workspace. An agent who trusts the first red run either reverts a correct change or bypasses a gate; one who does not, spends the session finding out that the harness was measuring the machine.\n\nDONE WHEN. A node taken with `nplan_worktree` can run `cargo test --workspace` and the Oils surveys without a symlink, an environment variable or a target directory in a particular place -- or each of those failures says plainly that it is about the layout and not about the shell."
+                            }
+
+                            {
+                                at 2026-09-04T12:56:43.520625639Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }
@@ -10178,6 +10199,62 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
+
+                    {
+                        id harness.posix-rules-cannot-see-the-shell-harness
+                        title "Decide whether the posix spec's impl scope should reach the shell harness too"
+                        kind @docs
+                        log (
+                            {
+                                at 2026-09-04T13:14:31.821725327Z
+                                author "brendan@necessary.nu"
+                                kind @blocker
+                                text "FOUND 2026-09-04 WHILE CLOSING `harness.spec-cannot-see-the-shell-harness`, AND DELIBERATELY NOT PART OF IT. That node widened the `nsh` spec only.\n\nTHE SAME BLIND SPOT EXISTS ONE NAMESPACE OVER. `tests/harness/divergences.sh:668` cites `[spec:posix:req:param.ps4]`, and the `posix` spec's single impl `shell` includes `crates/**/*.rs posix/harness/**/*.py`. No shell script is in that scope, so the citation is prose and `nplan spec rule param.ps4` lists no site there.\n\nWHY IT WAS NOT DONE IN PASSING. The `nsh` widening was justified by `docs/spec/nsh/verification.md` being a family of rules ABOUT this project's own checks -- a rule whose subject is a check should be claimable by the check, whatever language it is in. That argument does not transfer: a POSIX rule's subject is the shell, and the shipped shell is Rust. `divergences.sh` is a harness that OBSERVES `$PS4`, so if anything it is a `/test` site, and `config.styx` already records the posix decision that \"Python files are verification sites only\". Extending that to shell is the same shape and is a decision someone should take deliberately.\n\nDONE WHEN either `posix`'s `shell` impl includes the harness scripts as verification sites (mode is already `@both`, so a bare `[spec:posix:.../test]` line would be indexed the moment the glob reaches the file), or `config.styx` says why it does not and `divergences.sh`'s citation is left as the prose it is.\n\nTWO MECHANICAL FACTS MEASURED WHILE DOING THE `nsh` HALF, both of which apply here: an include glob's `*` crosses `/`, so `tests/*.sh` sweeps the 158 vendored Oils cases under `tests/surveys/oils/spec/`; and a rule reference is a claim only in bare form -- `` `[spec:...]` `` inside a sentence is prose and is not indexed, which is the form every citation outside `crates/` was written in."
+                            }
+                        )
+                    }
+
+                    {
+                        id harness.fuzz-targets-claim-nothing
+                        title "Say what the eleven fuzz targets are evidence for, now that they are swept"
+                        kind @docs
+                        log (
+                            {
+                                at 2026-09-04T13:14:48.82809165Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "FOUND 2026-09-04 WHILE CLOSING `harness.spec-cannot-see-the-shell-harness`. It is the first thing that node's widening made visible, which is the point of it.\n\n`fuzz/*.rs` is now inside the `nsh` spec's `nsh-harness` impl. Ten of the eleven targets appear in `nplan spec unmapped` claiming nothing, and two of them already say in prose what they are evidence for:\n\n    fuzz/fuzz_targets/roundtrip.rs:9    `[spec:nsh:req:idiom.printable-ast+2]`\n    fuzz/fuzz_targets/differential.rs:31 `[spec:nsh:req:compat.smoosh.error-contracts]`\n\nBoth are backticked mid-sentence, which is the prose form and is not indexed. The eleventh, `support.rs`, was annotated under the closing node because it is where obtaining the oracle panics.\n\nNOT DONE IN PASSING, deliberately: `idiom.printable-ast` and `compat.smoosh.error-contracts` are different rule families from the `oracle.*` ones that node was about, and a differential fuzz target is `/test` evidence of an unusual kind -- it runs on whatever the fuzzer generates rather than on a fixed case list, so what it establishes is a property under sampling and not a case. Whether that counts as verification evidence for a rule is a judgement, not a transcription.\n\nDONE WHEN each target either carries a bare `[spec:nsh:req:.../test]` line naming the rule it samples, or the file says why a fuzz target is not evidence for any rule and `verification.md` agrees. Reading them in one sitting is the cheap part; deciding what a sampled property proves is the work."
+                            }
+                        )
+                    }
+
+                    {
+                        id harness.no-lint-reads-a-shell-check
+                        title "Decide whether a shell check that claims a rule should be swept for the shape it forbids"
+                        kind @test
+                        log (
+                            {
+                                at 2026-09-04T13:15:08.581677049Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "FOUND 2026-09-04 WHILE CLOSING `harness.spec-cannot-see-the-shell-harness`, AND WRITTEN INTO `verification.md` RATHER THAN FIXED.\n\nAn nspec impl scope and a lint corpus are two different things, and after that node they disagree. `fuzz/*.sh`, `tests/harness/*` and `scripts/*` are now inside the `nsh` spec's `nsh-harness` impl, so a shell script can carry `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` and the coverage map will believe it. Nothing checks it. `crates/nsh/tests/oracle_measurement.rs` reads `#[test]` functions under `crates/` and only there, which is stated in its own file and now also in `verification.md`.\n\nSo seven shell claims landed that day whose only warrant is that somebody read the script. That is exactly the standard the rule they claim exists to refuse, one level up: a claim that cannot be seen to fail.\n\nWHAT A SHELL SWEEP WOULD LOOK FOR, if it is worth one: a `return 0` or `exit 0` reached when a fixture, a reference binary or a directory is absent; an assertion guarded by `[[ -x $ref ]] &&` with no else; a `|| :` that swallows the status of the thing being measured. `fuzz/sweep.sh` already carries the argument for the third -- deciding liveness by exit status reported five live findings as closed.\n\nWHAT ARGUES AGAINST IT, and it is the same argument `verification.md` records for not sweeping `fuzz/fuzz_targets/`: a shell script is full of legitimate early exits, and a lint that needs twenty-five suppressions on its first day does not survive to catch the twenty-sixth. Measure the false-positive count over the 22 scripts before writing anything.\n\nDONE WHEN either a sweep exists and has been seen to fail on a shell check that was made to skip its reference, or `verification.md`'s closing paragraph is replaced by a recorded decision that a shell claim is warranted by review alone and says who reviews it."
+                            }
+                        )
+                    }
+
+                    {
+                        id harness.provenance-restamp-left-in-a-shared-file
+                        title "Confirm the +1 restamp in provenance.rs landed with whoever commits that file"
+                        kind @chore
+                        log (
+                            {
+                                at 2026-09-04T13:15:27.220755775Z
+                                author "brendan@necessary.nu"
+                                kind @blocker
+                                text "A TWO-LINE LOOSE END LEFT ON PURPOSE BY `harness.spec-cannot-see-the-shell-harness`, 2026-09-04, BECAUSE THE FILE WAS NOT ITS TO COMMIT.\n\nThat node bumped `[spec:nsh:req:oracle.recording-carries-its-age]` v0 -> v1, which makes every unpinned reference to it stale -- measured: with all six sites at v0 the bumped rule read `101 covered, 1 stale` instead of `102 covered, 0 stale`. Six sites were restamped. Four are in files the node owned. Two are in `crates/nsh-survey/src/provenance.rs`:\n\n    provenance.rs:459   [spec:nsh:req:oracle.recording-carries-its-age+1/test]\n    provenance.rs:485   [spec:nsh:req:oracle.recording-carries-its-age+1/test]\n\nand at the moment of the commit that file also carried another session's in-flight change (`mod tests` -> `pub(crate) mod tests`, and a doc comment on `git()`, for the untracked `bash_reference/location.rs`). `nplan_commit`'s `paths` takes a file's whole working-tree content, so naming `provenance.rs` would have swept a colleague's unfinished refactor into this node's commit. It was left out of `paths` instead, with the restamp standing in the working tree.\n\nTWO OUTCOMES, and only one of them needs work:\n\n  * The session that owns that refactor commits `provenance.rs` and carries the two comment lines with it. Nothing further is required; close this by confirming `git log -1 --format=%H -- crates/nsh-survey/src/provenance.rs` names a commit whose content has `+1` at both sites.\n  * That session reverts its change, taking the restamp with it. Then `nplan spec stale` reports one stale reference and the fix is to put `+1` back at those two lines.\n\nCHECK WITH `nplan spec stale`, which names the file and the pinned version directly. If it says \"No stale references\" and the two lines are committed, this node is done by assertion."
                             }
                         )
                     }
@@ -12092,6 +12169,13 @@ children (
                                 kind @blocker
                                 text "FIVE POSIX-ONLY FILES SIT IN `crates/nsh-platform/src/` RATHER THAN `src/unix/`, WHERE THEIR WINDOWS COUNTERPARTS ALL SIT:\n\n    src/descriptor.rs        src/windows/descriptor.rs\n    src/locale.rs            src/windows/locale.rs\n    src/locale/characters.rs\n    src/terminal.rs          src/windows/terminal.rs\n    src/editor_terminal.rs   src/windows/editor_terminal.rs\n    src/unix_facts.rs        src/windows_facts.rs  (also in src/, so this pair is symmetric)\n\n`60752b6` says why: \"Four of those already existed at `src/` root on the POSIX side\" when the two hosts were given the same list of subjects, and it left them where they were.\n\nWHY THIS IS A NODE RATHER THAN PART OF `struct.platform-children-module`. That node made `unix.rs` a declared module, which forced a choice about these five: a `mod` item names a file relative to the module it is written in, so `mod locale;` in `src/unix.rs` names `src/unix/locale.rs`, which does not exist. Either they move into `src/unix/`, or the crate root declares them. The crate root declares them, for two reasons -- it is the smaller true change and it leaves `crate::locale` at exactly the path it already had, and, on 2026-09-04, another session held uncommitted edits in `locale.rs`, `locale/characters.rs` and `unix_facts.rs`, so moving those files would have destroyed live work. Neither reason is permanent.\n\nWHAT MOVING THEM BUYS. `src/unix/` would then hold everything POSIX-only, as `src/windows/` already holds everything Windows-only, and the crate root's `#[cfg(unix)]` block would shrink from ten `mod`/`pub use` pairs to one `mod unix;` plus one `pub use unix::*;` -- which is what the Windows side already reads as. `unix_facts.rs` would become `src/unix/facts.rs`, and by symmetry `windows_facts.rs` would become `src/windows/facts.rs` declared from `windows.rs` rather than from the crate root; `ca0fa37` moved `UserId` and `GroupId` into the facts modules themselves, so nothing depends on that declaration's position any more.\n\nWHAT TO CHECK BEFORE MOVING. `nsh-lint`'s `hosts_publish_the_same_surface` reads each host's `pub use` list out of the host root plus the crate root's host-guarded re-exports; moving publications from the crate root into `unix.rs` keeps them on the unix side either way, so the check should stay green across the move and going red is a finding. `scripts/moved-only` is the proof to attach, as it was for the module change."
                             }
+
+                            {
+                                at 2026-09-04T12:58:14.050458179Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 
@@ -12149,6 +12233,48 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
+
+                    {
+                        id tooling.moved-only-cannot-see-a-rename
+                        title "Let moved-only see both sides of a rename"
+                        kind @fix
+                        log (
+                            {
+                                at 2026-09-04T13:13:16.461132341Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "`scripts/moved-only` CANNOT PROVE THE ONE THING IT EXISTS FOR WHEN THE MOVE IS A RENAME. Found 2026-09-04 by `struct.posix-children-under-unix`, whose whole change was five `git mv`s.\n\n    $ scripts/moved-only\n    scripts/moved-only: the set of functions changed, so this is not only a move\n      new:   a_charmap_answers_for_its_own_characters\n      new:   apply_editor_terminal_attributes\n      ... 90 lines, every one `new:`, not one `gone:`\n\nWHY. Line 38 collects touched files with `git diff --name-only --diff-filter=ACMRD \"$base\" -- '*.rs'`, and `git diff` applies rename detection by default, so a `git mv` is reported as one path -- the destination -- rather than two. The loop then asks `git show \"$base:$path\"` for a destination that did not exist at the base, gets nothing, and every function in the file lands on the `after` side with no `before` to cancel it. A pure rename is therefore always reported as a total rewrite, and the failure grows with the size of the file moved rather than with anything about the change.\n\nIt is a false alarm rather than a silent pass, which is the better failure of the two, but it is still the check unable to answer its own question in the case it was written for -- the script's own header calls itself \"the check that lets a split of a two-thousand-line file be reviewed as the move it claims to be\".\n\n    $ git diff --name-only --diff-filter=ACMRD HEAD -- '*.rs' | wc -l\n    9\n    $ git diff --no-renames --name-only --diff-filter=ACMRD HEAD -- '*.rs' | wc -l\n    14\n\nTHE FIX IS ONE FLAG: `--no-renames` on that one `git diff`. The rest of the script already handles a path that exists on one side only -- the comment above the loop says so, having been taught it by untracked files -- so nothing else changes. Verified by running the unmodified script with rename detection turned off in the environment instead:\n\n    $ GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=false scripts/moved-only\n    scripts/moved-only: 174 function(s) across 14 file(s), unchanged\n\nThat is the workaround for anyone who hits this before the flag lands. A regression test for it is cheap and worth having: `git mv` one fixture file and assert the script still says \"unchanged\"."
+                            }
+                        )
+                    }
+
+                    {
+                        id cost.windows-records-no-locale-work
+                        title "Record locale work on Windows, where the counters are never touched"
+                        kind @fix
+                        log (
+                            {
+                                at 2026-09-04T13:13:28.740804165Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "`locale_work()` ANSWERS ZERO FOREVER ON WINDOWS, AND THE COMPILER ALREADY SAYS SO. Found 2026-09-04 while cross-checking `struct.posix-children-under-unix` for the two Windows targets.\n\n    $ cargo check -p nsh-platform --target x86_64-pc-windows-gnu\n    warning: function `record_selection` is never used\n      --> crates/nsh-platform/src/work.rs:66:15\n\n`crates/nsh-platform/src/work.rs` publishes `LocaleWork { selections, character_queries }` and `locale_work()` for `[spec:nsh:req:cost.asserted-as-work]`, whose point is that \"a cost rule constrains an implementation rather than an answer ... only a count of work done can\" separate the fast shell from the slow one. The two `pub(crate)` recorders that make the count real are called from `unix/locale.rs` (`record_selection`, once) and `unix/locale/characters.rs` (`record_character_queries`, eleven times). `windows/locale.rs` calls neither. So on Windows both counters stay at their initial zero, `LocaleWork::since` returns zero, and every assertion written against work done passes vacuously.\n\nTWO THINGS TO SEPARATE BEFORE FIXING. First, whether the Windows host does the work at all: `work.rs`'s own doc says character queries are \"the equivalent table lookups where there is no C library to ask\", so the subject exists on that host even though `Locale::character_encoding` on Windows is a constant `Utf8`. Second, whether a cost check that cannot run on a host should say so statically rather than pass -- `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` is the rule with an opinion about that, and a vacuous pass is what it exists to refuse.\n\nWHY NOTHING CAUGHT IT. `cargo clippy --workspace --all-targets -- -D warnings` is the lint gate and it only ever runs for the host triple, so a `dead_code` warning that exists solely in a Windows build is not an error anywhere. That is the same shape as the drift `nsh-lint`'s `hosts_publish_the_same_surface` was written for, one level down: not a name missing from a host's surface, but a name present on both and reachable on one.\n\nNOT INTRODUCED BY THE MOVE THAT FOUND IT. `record_selection`'s only caller was `src/locale.rs` under `#[cfg(unix)]` before and is `src/unix/locale.rs` after; the file's bytes are unchanged, which `scripts/moved-only` reports."
+                            }
+                        )
+                    }
+
+                    {
+                        id struct.facts-under-their-hosts
+                        title "Move each host's facts module under the host that owns it"
+                        kind @refactor
+                        log (
+                            {
+                                at 2026-09-04T13:13:46.629467656Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "THE LAST TWO PLATFORM SUBJECTS THAT SIT IN THE CRATE ROOT'S DIRECTORY RATHER THAN IN A HOST'S. Split out of `struct.posix-children-under-unix` on 2026-09-04, which moved the four asymmetric POSIX subjects and deliberately left this pair alone.\n\n    crates/nsh-platform/src/unix_facts.rs     -> src/unix/facts.rs\n    crates/nsh-platform/src/windows_facts.rs  -> src/windows/facts.rs\n\nWHY IT WAS NOT PART OF THAT NODE. The pair is already symmetric: both files sit beside `lib.rs`, both are declared and published by `lib.rs` under a host `cfg`, and neither host root can reach the other's. Nothing about them is the asymmetry that node named, and after it the crate root's two host blocks read identically -- `mod unix; pub use unix::*;` plus facts, `mod windows; pub use windows::*;` plus facts.\n\nWHAT IT WOULD BUY, and it is real: `src/unix/` and `src/windows/` would then hold everything of their host, the crate root would declare exactly two modules per host and publish two globs, and `ca0fa37` already moved `UserId` and `GroupId` into the facts modules themselves so nothing depends on the declaration's position.\n\nWHAT MAKES IT A NODE RATHER THAN A FIVE-MINUTE EDIT. `crates/nsh-lint/src/platform_surface.rs` reads part of each host's surface out of the crate root, on purpose, and its unit test `the_crate_root_carries_part_of_each_surface` asserts that `UserId` is published there under a host predicate for BOTH hosts -- with the comment that reading it for one host must not take it away from the other. Publishing the facts from the host roots makes that test's premise false. The parity check itself would stay green, because a name that leaves the crate root and arrives on the same host's root is on the same surface either way, but the test around it has to be rewritten to say what is still true. That is a change to the check that guards platform parity, made while moving the files it reads, which is exactly the pairing that wants its own commit and its own reviewer.\n\nAlso: `crates/nsh-lint/src/main.rs`'s `PRIVATE_PLATFORM_ALLOWLIST` names both files and is exact in both directions, and `descriptors_cross_the_boundary_owned` reads `src/unix_facts.rs` by path for `pub fn wait_for_input(fd: &impl AsDescriptor`. Both follow the files.\n\n`scripts/moved-only` is the proof to attach, run with rename detection off -- see `tooling.moved-only-cannot-see-a-rename`."
                             }
                         )
                     }
@@ -12297,6 +12423,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-03 WHILE CLOSING `stop-a-required-register-entry-firing-test-footprint`, WHICH FIXED THE SYMPTOM IN THIS REPOSITORY AND NOT THE CAUSE. That node exempted `crates/nsh-lint/FUNCTION_DENSITY.toml` and `plan/**` in `.config/nplan/config.styx` (`5a13522`), which is a list this repository has to keep by hand and every other nplan repository has to discover for itself.\n\nTHE CAUSE IS ONE LINE OF POLICY IN `nplan`, at `crates/scaffold/src/quality/metrics.rs` (nplan at `f66f7eab`), where `FileMetrics::prod_loc` is documented as: \"For languages without fidelity walkers, all of `code_loc` lands here.\" tokei has fidelity walkers for Rust and a handful of others; it has none for TOML, JSON, YAML, Markdown or Styx. So a checked-in register, a lockfile, a manifest and a plan file are each billed as production code against a test:prod floor no test of theirs could ever move, while the same rule is what correctly bills Shell and C++, which have no walker either and are code.\n\nWHY IT IS NOT \"EXCLUDE EVERY NON-WALKER LANGUAGE\". Shell and C++ are production code and must keep counting. The distinction wanted is data versus code, not walked versus unwalked, and tokei already knows the difference -- it is the same classification that decides a language has no *functions* to count. That is the design question and the reason this is a node rather than a patch.\n\nMEASURED HERE, 2026-09-03, so the size of the effect is on the record. `crates/nsh-lint`: 42 of 1893 production lines were the register (2.2%), in a crate whose ratio the gate had already put at 0.147 against a 0.200 floor. The workspace-root rollup that every delivery commit is judged on: 10,405 of 101,716 production lines were `plan/main.styx` (10.2%), against the same floor with two milli of margin.\n\nWHAT INSTALLING A FIX COSTS, and it is why this is filed rather than done. `nplan-mcp` links the commit logic in rather than shelling out to the CLI, so a rebuilt `nplan` on disk changes nothing until the operator installs both binaries and restarts every agent session in the checkout -- see `install-the-pathspec-committing-nplan` and `d0ffd39`, where that took two steps and a session restart. A gate change cannot be demonstrated from inside a session, which makes it operator work by construction.\n\nDONE WHEN a checked-in data file does not count toward a crate's production LOC in nplan itself, the rule distinguishes data from unwalked code rather than from unwalked anything, and this repository's `quality.exempt-paths` no longer has to name `plan/**` or a register to stay honest."
+                            }
+
+                            {
+                                at 2026-09-04T12:57:52.642186067Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }
