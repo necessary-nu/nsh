@@ -124,6 +124,15 @@ const C_STRINGS: &[&str] = &[
     "from_cbytes",
 ];
 
+/// The two spellings this file must not report itself for.
+///
+/// The sweep below reads every file under `crates/`, its own included, so
+/// a needle written whole here would be a finding like any other -- the
+/// same reason `citations.rs` spells no citation in full. Each is held as
+/// the two halves it is joined from.
+const PASTED_SOURCE: (&str, &str) = ("include", "!(\"");
+const RELOCATED_CHILD: (&str, &str) = ("#[", "path = \"");
+
 /// Descriptor spellings that carry a number instead of an owner.
 const RAW_DESCRIPTORS: &[&str] = &[
     "RawFd",
@@ -820,6 +829,53 @@ fn modules_follow_rust_subsystems() -> Vec<String> {
     ] {
         if source.join(old_file).exists() {
             reported.push(format!("compatibility module {old_file} still exists"));
+        }
+    }
+    reported
+}
+
+/// Every module is declared by a `mod` item in the file that owns it, so
+/// that a module's path in the source is its path in the tree.
+///
+/// Two shapes, and deliberately only two. The first is a source file
+/// pasted into another module, which is what makes the tree a lie. The
+/// second is the repair that forces: a `foo.rs` that is not a module
+/// cannot resolve `mod bar;` to `foo/bar.rs`, so it names the child by
+/// hand -- and a `foo.rs` that *is* a module never needs to, which is what
+/// makes that shape diagnostic rather than a matter of taste.
+///
+/// A relocation that reaches somewhere else entirely is not reported, and
+/// that is a limit rather than an oversight: `crates/nsh-cli/tests/` reaches
+/// a helper in another package because integration tests cannot share code
+/// any other way, and `crates/nsh/src/lib.rs` names a second file for one
+/// `cfg`-selected module. Both are their own nodes, and reporting them from
+/// here would make this check red about something it cannot fix.
+// [spec:nsh:req:idiom.declared-module-tree/test]
+fn the_module_tree_is_declared() -> Vec<String> {
+    let workspace = workspace_root();
+    let pasted = format!("{}{}", PASTED_SOURCE.0, PASTED_SOURCE.1);
+    let mut reported = Vec::new();
+    for path in rust_sources_in(&workspace, "crates") {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        let relative = relative_to_workspace(&path, &workspace);
+        if source.contains(&pasted) {
+            reported.push(format!(
+                "{relative} pastes a source file into another module; declare it \
+                 with a `mod` item and publish what it holds with `pub use`"
+            ));
+        }
+        let Some(stem) = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+        else {
+            continue;
+        };
+        let repair = format!("{}{}{stem}/", RELOCATED_CHILD.0, RELOCATED_CHILD.1);
+        if source.contains(&repair) {
+            reported.push(format!(
+                "{relative} names its own children by hand under `{stem}/`, which \
+                 only a file that is not a module has to do"
+            ));
         }
     }
     reported
@@ -1666,6 +1722,7 @@ fn main() {
             "modules_follow_rust_subsystems",
             modules_follow_rust_subsystems,
         ),
+        ("the_module_tree_is_declared", the_module_tree_is_declared),
         ("mystring_module_is_absent", mystring_module_is_absent),
         (
             "core_strings_are_length_delimited",

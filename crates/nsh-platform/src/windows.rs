@@ -33,6 +33,9 @@ use process::{CHILD_SYSTEM_TICKS, CHILD_USER_TICKS, filetime_ticks};
 use signals::SIGNAL_EXIT_BASE;
 use spawn::spawn_program_here;
 
+/* The one subject neither host owns; the crate root declares it. */
+use crate::{SIGNAL_COUNT, SIGNAL_NAMES};
+
 mod broker;
 mod children;
 pub use children::{fork_process, run_in_child, wait_for_any_child, wait_for_child};
@@ -90,12 +93,6 @@ pub use process::{
     restore_shell_process_runtime_state, set_foreground_process_group, set_process_group,
     set_resource_limit,
 };
-/* The one child both hosts declare, so it lives beside them in `src/`
- * rather than under either host's directory -- which is what the
- * `#[path]` is for. */
-#[path = "signal_names.rs"]
-mod signal_names;
-pub use signal_names::{SIGNAL_COUNT, SIGNAL_NAMES};
 mod signals;
 pub use signals::{
     BlockedSignals, SignalAction, child_signal, configure_here_document_writer_signals,

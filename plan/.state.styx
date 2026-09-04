@@ -1640,7 +1640,6 @@ assertions (
     {id stop-the-forking-tests-from-flaking, kind @complete, author "brendan@necessary.nu", at 2026-09-01T18:03:14.668188673Z}
     {id stop-the-fuzz-budget-paying-for-the-build, kind @complete, author "brendan@necessary.nu", at 2026-09-02T02:09:16.656636099Z}
     {id stop-the-locale-tests-passing-vacuously, kind @complete, author "brendan@necessary.nu", at 2026-08-29T12:35:51.627877045Z}
-    {id struct.platform-children-module, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:18:17.05984823Z}
     {id struct.script-module-port, kind @doing, author "brendan@necessary.nu", at 2026-09-03T17:39:34.261606606Z}
     {id test-fc-histfile-reload-format, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:11:25.747215108Z}
     {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
@@ -5743,6 +5742,11 @@ impl_evidence (
         {id shell-locale.invalid-selection, version 0}
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
+    )}
+    {id struct.platform-children-module, covered_rules (
+        idiom.declared-module-tree
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.declared-module-tree}
     )}
     {id struct.windows-locale-export, covered_rules (
         idiom.platform-surface-parity
