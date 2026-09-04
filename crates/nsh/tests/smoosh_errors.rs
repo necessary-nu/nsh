@@ -92,18 +92,27 @@ fn readonly_assignment_is_fatal() {
     assert_eq!(status, 1);
 }
 
+/// The one imported Smoosh result this profile declines, and the only
+/// thing about the case that moves. Smoosh records status 1 for a refused
+/// `unset`; `[spec:nsh:req:compat.bash.error-boundary]` writes 2 down for
+/// the default dialect and dash answers 2, so the imported byte loses to
+/// the rule this repository wrote about its own boundary. The stdout, the
+/// diagnostic and the shell ending there are still Smoosh's, and the
+/// second run is what says "ending there" rather than inferring it from
+/// the status.
 // [spec:nsh:req:compat.smoosh.error-contracts/test]
 #[test]
-fn unset_readonly_is_one() {
-    let (stdout, stderr, status) = run(
-        "readonly x=foo\ny=bar\nunset y\necho ${y-unset}\necho ${x-error}\nunset y\necho ${y-unset}\nunset x",
-        false,
-        false,
-    );
+fn unset_readonly_ends_the_shell_with_two() {
+    let smoosh_case = "readonly x=foo\ny=bar\nunset y\necho ${y-unset}\necho ${x-error}\nunset y\necho ${y-unset}\nunset x";
+    let (stdout, stderr, status) = run(smoosh_case, false, false);
 
     assert_eq!(stdout, b"unset\nfoo\nunset\n");
     assert_eq!(stderr, b"unset: x is read-only\n");
-    assert_eq!(status, 1);
+    assert_eq!(status, 2, "the dialect boundary, not the imported 1");
+
+    let (stdout, _, status) = run(&format!("{smoosh_case}\necho reached"), false, false);
+    assert_eq!(stdout, b"unset\nfoo\nunset\n");
+    assert_eq!(status, 2);
 }
 
 // [spec:nsh:req:compat.smoosh.error-contracts/test]

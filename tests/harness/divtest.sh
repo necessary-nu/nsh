@@ -760,6 +760,89 @@ printf '%s\n' 'trap '\''echo inner; exit 2'\'' EXIT' > "$case_file"
 check "exit_trap_final_status: another action is outside" 1 \
 	$'inner\n2' $'inner\n0' 0 0 "$case_file"
 
+printf '%s\n' 'readonly R=1; unset R; echo "rc=$?"; echo "$R"' > "$case_file"
+UNSET_RO_REF='SH: 1: unset: R: is read only'
+UNSET_RO_PORT='unset: R is read-only'
+check "unset_readonly_diagnostic: only the diagnostic spelling differs" 0 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 2 "$case_file"
+[ "$DS_DIVERGENCE" = unset_readonly_diagnostic ] || no \
+	"unset_readonly_diagnostic: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "unset_readonly_diagnostic: a diagnostic about another name is not excused" 1 \
+	"$UNSET_RO_REF" 'unset: Q is read-only' 2 2 "$case_file"
+check "unset_readonly_diagnostic: the old status 1 is not excused" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 1 "$case_file"
+check "unset_readonly_diagnostic: a shell that carried on is not excused" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT"$'\nrc=2\n1' 2 2 "$case_file"
+check "unset_readonly_diagnostic: a dropped diagnostic is not excused" 1 \
+	"$UNSET_RO_REF" '' 2 2 "$case_file"
+check "unset_readonly_diagnostic: a refusal dash never made is not excused" 1 \
+	'' "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly R=1; unset R' > "$case_file"
+check "unset_readonly_diagnostic: the file-mode program name is normalised too" 0 \
+	'./script.sh: 1: unset: R: is read only' "$UNSET_RO_PORT" 2 2 "$case_file"
+check "unset_readonly_diagnostic: another program name is not excused" 1 \
+	'other.sh: 1: unset: R: is read only' "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly r=1; unset r 2>&1 | sed '"'"'s|^[^:]*: ||'"'"'; echo rc=$?' > "$case_file"
+check "unset_readonly_diagnostic: the filtered spelling both cases use" 0 \
+	$'1: unset: r: is read only\nrc=0' $'r is read-only\nrc=0' 0 0 "$case_file"
+check "unset_readonly_diagnostic: a filtered diagnostic about another name is not excused" 1 \
+	$'1: unset: r: is read only\nrc=0' $'q is read-only\nrc=0' 0 0 "$case_file"
+check "unset_readonly_diagnostic: a changed filtered status record is not excused" 1 \
+	$'1: unset: r: is read only\nrc=0' $'r is read-only\nrc=1' 0 0 "$case_file"
+printf '%s\n' 'readonly r=1; unset r 2>&1; echo rc=$?' > "$case_file"
+check "unset_readonly_diagnostic: an unfiltered case does not get the filtered rewrite" 1 \
+	$'1: unset: r: is read only\nrc=0' $'r is read-only\nrc=0' 0 0 "$case_file"
+printf '%s\n' 'unset R; echo "rc=$?"' > "$case_file"
+check "unset_readonly_diagnostic: a case with no readonly is outside the entry" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly R=1; echo "rc=$?"' > "$case_file"
+check "unset_readonly_diagnostic: a case that never unsets is outside the entry" 1 \
+	"$UNSET_RO_REF" "$UNSET_RO_PORT" 2 2 "$case_file"
+printf '%s\n' 'readonly R=1; R=2; echo "rc=$?"' > "$case_file"
+check "unset_readonly_diagnostic: the assignment refusal is not excused" 1 \
+	'SH: 1: R: is read only' 'R: is read-only' 2 2 "$case_file"
+
+printf '%s\n' 'PS4='"'"'[$(echo sub)] '"'"'; set -x; echo hi' > "$case_file"
+RE_SYNTAX='SH: 1: Syntax error: end of file unexpected (expecting ")")'
+check "re_entered_prompt_substitution: the substitution dash loses to a stale token" 0 \
+	"$RE_SYNTAX"$'\n[$(echo sub)] echo hi\nhi' $'[sub] echo hi\nhi' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = re_entered_prompt_substitution ] || no \
+	"re_entered_prompt_substitution: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "re_entered_prompt_substitution: a different expansion is not excused" 1 \
+	"$RE_SYNTAX"$'\n[$(echo sub)] echo hi\nhi' $'[other] echo hi\nhi' 0 0 "$case_file"
+check "re_entered_prompt_substitution: a changed reference diagnostic is not excused" 1 \
+	$'SH: 1: Syntax error: something else\n[$(echo sub)] echo hi\nhi' \
+	$'[sub] echo hi\nhi' 0 0 "$case_file"
+check "re_entered_prompt_substitution: a lost traced command is not excused" 1 \
+	"$RE_SYNTAX"$'\n[$(echo sub)] echo hi\nhi' $'[sub] echo hi' 0 0 "$case_file"
+check "re_entered_prompt_substitution: a differing exit status is not excused" 1 \
+	"$RE_SYNTAX"$'\n[$(echo sub)] echo hi\nhi' $'[sub] echo hi\nhi' 0 2 "$case_file"
+printf '%s\n' 'PS4='"'"'[`echo bq`] '"'"'; set -x; echo hi' > "$case_file"
+check "re_entered_prompt_substitution: the backquote dash silently drops" 0 \
+	$'[] echo hi\nhi' $'[bq] echo hi\nhi' 0 0 "$case_file"
+check "re_entered_prompt_substitution: a backquote expanding to something else is refused" 1 \
+	$'[] echo hi\nhi' $'[zz] echo hi\nhi' 0 0 "$case_file"
+printf '%s\n' 'PS4='"'"'$(exit 3)x '"'"'; set -x; echo hi; echo rc=$?' > "$case_file"
+check "re_entered_prompt_substitution: dash recovering on its second prompt" 0 \
+	"$RE_SYNTAX"$'\n$(exit 3)x echo hi\nhi\nx echo rc=0\nrc=0' \
+	$'x echo hi\nhi\nx echo rc=0\nrc=0' 0 0 "$case_file"
+check "re_entered_prompt_substitution: a changed status record is not excused" 1 \
+	"$RE_SYNTAX"$'\n$(exit 3)x echo hi\nhi\nx echo rc=0\nrc=0' \
+	$'x echo hi\nhi\nx echo rc=3\nrc=3' 0 0 "$case_file"
+printf '%s\n' $'PS4=\'$(echo PS) \'\nset -x\necho hi\nset +x' > "$case_file"
+check "re_entered_prompt_substitution: only the last prompt of a file-shaped case" 0 \
+	$'PS echo hi\nhi\n'"$RE_SYNTAX"$'\n$(echo PS) set +x' \
+	$'PS echo hi\nhi\nPS set +x' 0 0 "$case_file"
+check "re_entered_prompt_substitution: a first prompt that also differed is refused" 1 \
+	$'XX echo hi\nhi\n'"$RE_SYNTAX"$'\n$(echo PS) set +x' \
+	$'PS echo hi\nhi\nPS set +x' 0 0 "$case_file"
+printf '%s\n' 'PS4='"'"'[$(echo other)] '"'"'; set -x; echo hi' > "$case_file"
+check "re_entered_prompt_substitution: another prompt value is outside the entry" 1 \
+	"$RE_SYNTAX"$'\n[$(echo other)] echo hi\nhi' $'[other] echo hi\nhi' 0 0 "$case_file"
+printf '%s\n' 'echo hi' > "$case_file"
+check "re_entered_prompt_substitution: a case with no prompt is outside the entry" 1 \
+	"$RE_SYNTAX"$'\n[$(echo sub)] echo hi\nhi' $'[sub] echo hi\nhi' 0 0 "$case_file"
+
 # ---- the dead-harness guard --------------------------------------
 #
 # A shell that stopped existing is not a shell that behaved differently.

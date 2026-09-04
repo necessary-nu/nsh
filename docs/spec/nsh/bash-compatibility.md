@@ -253,6 +253,24 @@ facility this shell does not provide.
 > the conformance harness observes. `set -o posix` leaves Bash mode per
 > `[spec:nsh:req:compat.bash.posix-option]` and therefore restores it.
 >
+> Corrected 2026-09-04, original kept verbatim above: "as the conformance
+> harness observes" is not true. Nothing in `posix/harness` covers `unset` on
+> a read-only name, and nothing there asserts the number 2 for this class at
+> all: the three adversarial cases that reach the boundary --
+> `adv-param-error-if-unset-exits`, `adv-redir-error-special-builtin-exits`
+> and `adv-exec-dot-not-found-exits` -- assert `status="nonzero"`, so this
+> shell's 1 and dash's 2 both pass. The only check that observed the `unset`
+> case at all asserted status 1, which is GNU Bash's POSIX mode rather than
+> this dialect's boundary, and is what the shell answered until
+> `bash.divergences.unset-readonly-contract`. The requirement itself stands --
+> XCU 2.8.1 is its ground, not a harness result -- and what now observes it
+> for `unset` is `crates/nsh/tests/smoosh_errors.rs` plus the `readonly unset`
+> case of `tests/corpus/aud_state_var.txt`, whose remaining diagnostic
+> difference from dash is the `unset_readonly_diagnostic` entry in
+> `docs/divergences.md`. Four other failures of the same class still answer 1
+> where dash answers 2, measured 2026-09-04;
+> `bash.divergences.error-boundary-status-collisions` holds them.
+>
 > Source: `[dec:nsh:we-own-the-defects]`
 
 ## Interactive profile

@@ -1499,6 +1499,7 @@ assertions (
     {id bash.divergences.local-after-unset, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:37:16.333688448Z}
     {id bash.divergences.local-dash, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:06.844771301Z}
     {id bash.divergences.publish-names.environment-facts, kind @doing, author "brendan@necessary.nu", at 2026-09-03T23:28:38.994782265Z}
+    {id bash.divergences.re-entered-parse, kind @complete, author "brendan@necessary.nu", at 2026-09-04T02:44:43.432762708Z}
     {id bash.divergences.reference-to-a-non-name, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:16.579259124Z}
     {id bash.divergences.reserved-name-listing, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:38:02.222963589Z}
     {id bash.divergences.seconds-on-read, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:25:06.226390647Z}
@@ -1508,6 +1509,7 @@ assertions (
     {id bash.divergences.take-back-readonly, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:14.8134587Z}
     {id bash.divergences.unclosed-extglob, kind @complete, author "brendan@necessary.nu", at 2026-09-03T23:25:28.139093667Z}
     {id bash.divergences.unset-every-operand, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:27:55.921955841Z}
+    {id bash.divergences.unset-readonly-contract, kind @complete, author "brendan@necessary.nu", at 2026-09-04T00:10:47.068280456Z}
     {id bash.divergences.wait-for-procsubs, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:13:35.015275991Z}
     {id bound-recursive-evaluation, kind @complete, author "brendan@necessary.nu", at 2026-08-30T21:27:15.450115667Z}
     {id bound-repeated-evaluation-work, kind @complete, author "brendan@necessary.nu", at 2026-08-31T09:36:32.75481754Z}

@@ -85,6 +85,22 @@ contracts that do not determine the named observation remain in force.
 >   closed on entry to the closed state, even if the compound command opened it
 >   permanently with `exec`. A later duplication from that descriptor fails;
 >   `semantics.redir.close.test` has empty stdout and returns 1.
+>
+> Where one of these imported results collides with a rule this repository
+> wrote about its own dialect boundary, the written rule wins and the Smoosh
+> result is recorded as a sanctioned divergence in `docs/divergences.md`
+> rather than followed: Smoosh's bytes are evidence of what another shell did,
+> which is the standing `[spec:nsh:sem:idiom.specified-defects+1]` also gives
+> dash's, and evidence does not outrank a contract. Recorded 2026-09-04, with
+> the bullets above kept verbatim. The refused `unset` is the first such
+> collision resolved: its status is
+> `[spec:nsh:req:compat.bash.error-boundary]`'s 2 rather than the 1 above,
+> while its stdout and its diagnostic are unchanged. Four bullets above are
+> the same collision and still answer 1 where dash answers 2 -- the missing
+> dot file, the `export` to a read-only name, the redirection error on a
+> directly invoked special built-in, and the unset-parameter `?` expansion --
+> and they are not decided by this paragraph;
+> `bash.divergences.error-boundary-status-collisions` holds them.
 
 ## Adopted extensions
 

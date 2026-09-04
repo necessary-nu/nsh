@@ -17,15 +17,22 @@
 //! stdin helper would have been green against the defect. `-c` is the
 //! shape a script actually meets it in.
 //!
-//! EVERY CASE IS BASH MODE, and that is a boundary rather than a
-//! convenience. dash has the same defect -- `dash -c 'PS4="$(echo P)+ ";
-//! set -x; echo hi'` traces with the unexpanded text -- so the POSIX
-//! dialect keeps it, and `errors_are_values.rs` pins dash's answer
-//! there. `state-a-re-entered-parse-starts-clean` holds that half.
+//! THE SUBSCRIPT CASES ARE BASH MODE BECAUSE A SUBSCRIPT IS, not because
+//! the repair is. `bash.divergences.re-entered-parse` measured the other
+//! four `expand_string` callers and ungated it: a pushed-back token belongs
+//! to the caller's source rather than to either grammar, so both dialects
+//! start the re-entered parse clean. `the_two_dialects_re_enter_alike`
+//! below is that half, and `errors_are_values.rs` holds what the POSIX
+//! dialect answers on its own. dash still replays the token -- registered
+//! as `re_entered_prompt_substitution` in `docs/divergences.md`.
 //!
-//! Nothing here is a recorded expectation. Every case runs in both
+//! Nothing here is a recorded expectation. Every case runs through two
 //! shells and the two answers are compared, so there is no literal to go
 //! stale: if Bash changes its mind, this reports it rather than passing.
+//! The last test's pair is this shell's own two dialects rather than
+//! nsh against Bash, because what it asserts is that the dialect does not
+//! decide -- and dash, which is the other reference, still answers
+//! differently on purpose.
 
 #[path = "../../nsh/tests/pinned_bash/mod.rs"]
 mod pinned_bash;
@@ -64,9 +71,6 @@ const A_SUBSTITUTION_UNDER_EVAL: &[&str] = &[
     "a=(9 8 7)\neval 'echo \"${a[`echo 2`]}\"'\n",
     "declare -A m=([k]=v)\neval 'echo \"${m[$(echo k)]}\"'\n",
     "a=(9 8 7)\neval 'a[$(echo 0)]=z'\ndeclare -p a\n",
-    /* The prompt expansion runs through the same re-entry, and a `$( )`
-     * in `PS4` under `set -x` is where a script meets it. */
-    "PS4=\"$(echo P)\"\nset -x\necho hi\n",
 ];
 
 /// What one shell said: its standard output and its exit status.
@@ -123,4 +127,62 @@ fn a_substitution_in_a_subscript_is_expanded() {
 fn a_re_entered_parse_reads_its_own_source() {
     agrees(A_SUBSTITUTION_UNDER_EVAL, both_on_input);
     agrees(A_SUBSTITUTION_UNDER_EVAL, both_as_argument);
+}
+
+/// A prompt written in the language both dialects share, so the dialect
+/// cannot be what decides the answer. Single-quoted throughout: a
+/// double-quoted `PS4="$(echo P)"` is expanded by the *assignment* and
+/// never re-enters the parser, which is a case that cannot fail.
+const A_SUBSTITUTION_IN_A_PROMPT: &[&str] = &[
+    "PS4='$(echo P)+ '; set -x; echo hi",
+    "PS4='[`echo P`] '; set -x; echo hi",
+    "PS4='$(exit 7)+ '; set -x; echo hi",
+    "PS4='[$(echo a)$(echo b)] '; set -x; echo hi",
+    /* The trace of the *last* command is where a `-c` body reaches end of
+     * input, so a multi-line body only shows it on `set +x`. Written as
+     * one line above for the same reason: the whole body is then the last
+     * command. */
+    "PS4='$(echo P) '\nset -x\necho hi\nset +x",
+    /* Genuinely unterminated, which must still be reported by both. */
+    "PS4='$(exit 7+ '; set -x; echo hi",
+];
+
+/// One script through one shell with **stderr merged into stdout**.
+///
+/// `pinned_bash::answer` discards stderr, and the whole of what a prompt
+/// case produces is the `set -x` trace, which is written there. Comparing
+/// two shells' stdout for these scripts would compare `hi` against `hi`
+/// and pass whatever either did with the prompt.
+fn merged(shell: &Path, dialect: &[&str], script: &str) -> Answer {
+    let output = std::process::Command::new(shell)
+        .args(dialect)
+        .arg(script)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("LC_ALL", "C")
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap_or_else(|error| panic!("start {}: {error}", shell.display()));
+    let mut bytes = output.stdout;
+    bytes.extend_from_slice(&output.stderr);
+    (bytes, output.status.code().unwrap_or(-1))
+}
+
+/// The same shell in its two dialects, as `(POSIX, Bash mode)`.
+fn both_dialects_as_argument(script: &str) -> (Answer, Answer) {
+    let nsh = Path::new(env!("CARGO_BIN_EXE_nsh"));
+    (
+        merged(nsh, &["-c"], script),
+        merged(nsh, &["-o", "bash", "-c"], script),
+    )
+}
+
+/// A re-entered parse reads its own source in *both* dialects: the state
+/// it used to inherit belongs to the caller's input rather than to either
+/// grammar, so gating the repair on the dialect would have left five
+/// callers answering differently for a reason neither dialect names.
+// [spec:nsh:def:idiom.token-stream/test]
+#[test]
+fn the_two_dialects_re_enter_alike() {
+    agrees(A_SUBSTITUTION_IN_A_PROMPT, both_dialects_as_argument);
 }

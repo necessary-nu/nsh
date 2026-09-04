@@ -306,7 +306,7 @@ name refusal, and an unsorted nsh permutation.
 ### POSIX corrections retained over dash
 
 **Status:** implemented in the Rust; dash unchanged. Category 3. Every ID
-below is registered in `tests/harness/divergences.sh`. Its 210 focused checks
+below is registered in `tests/harness/divergences.sh`. Its 238 focused checks
 exercise the intended matches and adversarial content, status and scope
 boundaries.
 
@@ -495,6 +495,120 @@ a shell that stops answering `^C`:
 not a crash but a shell that stops responding to `^C`, which no batch
 harness can observe because a batch harness never sends one.
 
+### `unset_readonly_diagnostic`
+
+**Status:** implemented in the Rust; dash unchanged. Category 3.
+`crates/nsh/src/builtins/unset.rs`.
+
+`unset` refusing a read-only name is a special built-in's failure, so
+POSIX.1-2024 XCU 2.8.1 ends a non-interactive shell. The status is left
+unspecified, which is why dash answers 2 and GNU Bash's POSIX mode answers
+1 and both conform.
+`[spec:nsh:req:compat.bash.error-boundary]` picks 2 for the default
+dialect, and as of 2026-09-04 the shell does:
+
+```
+$ dash -c 'readonly R=1; unset R; echo "rc=$?"'
+dash: 1: unset: R: is read only          # rc 2, no `rc=` line
+$ nsh  -c 'readonly R=1; unset R; echo "rc=$?"'
+unset: R is read-only                    # rc 2, no `rc=` line
+```
+
+What is left is the diagnostic. dash writes it through its `$0: line: `
+spine; this shell writes the prefix-less `unset: NAME is read-only` that
+`[spec:nsh:req:compat.smoosh.error-contracts]` fixed, and keeps that
+spelling in both dialects so a script does not have to know which one it
+is running under to read the message. Bash's own wording is a third
+answer again -- `unset: R: cannot unset: readonly variable` -- so there is
+no spelling that matches both references.
+
+The entry rewrites exactly that one complete reference line, in a case
+that both makes a name read-only and unsets one, and carries the name
+across so a diagnostic about a different variable is not excused. The
+statuses and every other byte are still compared exactly, which is what
+holds the fatality: the shell ending at that command is not part of what
+this entry excuses, and a port that carried on to print `rc=2` fails.
+
+Two corpus cases in `tests/corpus/salvage.txt` route the diagnostic through
+`sed 's|^[^:]*: ||'`, which strips one colon field from each side. The entry
+rewrites that filtered shape too, but only for a case containing that exact
+filter, so an unfiltered diagnostic that lost its command name is still a
+difference.
+
+Measured 2026-09-04. Seventeen cases in the whole 36,097-case corpus contain
+both a `readonly` and an `unset` and so can reach the changed line; run as
+one corpus they went from `PASS=13 FAIL=4 XFAIL=5` to `PASS=17 FAIL=0
+XFAIL=9`. The four that moved are the four where the *status* differed, which
+this entry cannot excuse and only the code change fixes.
+`tests/corpus/aud_state_var.txt` went `PASS=39 FAIL=1 XFAIL=2` to
+`PASS=40 FAIL=0 XFAIL=3`, `aud_state_flags.txt` `34/1/1` to `35/0/2`,
+`aud_exec_struct.txt` `64/7/2` to `65/6/3`, and `salvage.txt` `6913/50/18` to
+`6914/49/19`.
+
+### `re_entered_prompt_substitution`
+
+**Status:** implemented in the Rust; dash unchanged. Category 3.
+`crates/nsh/src/parser.rs::expand_string`.
+
+A prompt's text is re-parsed at expansion time, and `expand_string` used to
+start that parse on top of whatever the caller was reading. A pushed-back
+token belongs to the caller's source, so with a string-fed shell -- where the
+outer parse has already pushed `Eof` back -- a `$( )` in the prompt reached
+end of file at once:
+
+```
+$ dash -c "PS4='\$(echo P)+ '; set -x; echo hi"
+dash: 1: Syntax error: end of file unexpected (expecting ")")
+$(echo P)+ echo hi
+hi
+$ dash -c "PS4='\`echo P\`+ '; set -x; echo hi"
++ echo hi                    # the backquote form, expanded to nothing
+hi
+```
+
+The backquote row is the sharper one: no diagnostic, and a prompt that
+silently became empty. Measured 2026-09-04 against dash 0.5.12-12, eight
+`$( )` spellings and one backquote spelling diverge; `$(( ))` and `${ }` in
+the same position never did, and the same scripts on standard input are
+correct in both shells, because the outer parse has not reached its end
+there.
+
+`[spec:posix:req:param.ps4]` makes command substitution in `PS4`
+explicitly unspecified, so *declining* to expand would conform and this
+would be nobody's bug. Emitting a parse diagnostic for text that parses does
+not: that is a stale token replayed, not a choice, and
+`[dec:nsh:we-own-the-defects]` makes the question which shell is right
+rather than which is the C.
+
+**Both dialects, and that is the point.** `expand_string` has five callers --
+`PS4` (`evaluation/command.rs`), the interactive prompt (`parser.rs`), an
+array subscript (`variables/arrays.rs`), `(( ))`
+(`evaluation/bash_arithmetic.rs`) and the profile/`ENV` file name
+(`runtime.rs`). The subscript one was
+repaired first, gated on Bash mode, which left one shared function answering
+two ways for a reason neither dialect names. The other three were measured
+under `bash.divergences.re-entered-parse` before the gate came off: the
+profile name is expanded during startup, before any command has been parsed,
+so no token is pushed back and `ENV='$(echo FILE)'` already worked; the
+prompt is rendered only from a terminal-fed source, and `PS1='[$(echo s)] '`
+already resolved to `[s] ` through a pty in dash and in both dialects; and
+`(( ))` is Bash grammar the default dialect never reaches. So `PS4` was the
+whole of the observable defect, and the repair belongs to the function
+rather than to a dialect.
+
+The entry pins four complete result pairs, one per generated witness, both
+sides byte for byte -- including where in the script dash's outer parse
+happens to have reached. In `xtrace nested PS4` its *first* traced command
+expands correctly and only the last one does not, and in `ps4 error in
+cmdsub` it recovers on its second prompt because the first failed expansion
+consumed the stale token. Neither is something a looser entry could describe.
+
+Costs four cases, unchanged in number before and after: `aud_parser_ps4`
+holds `ps4 with cmdsub`, `ps4 with backquote` and `ps4 error in cmdsub`, and
+`aud_exec_edge` holds `xtrace nested PS4`. Both corpora returned to their
+prior tallies -- `PASS=43 FAIL=0` and `PASS=90 FAIL=2` -- with the four
+reported as `XFAIL(re_entered_prompt_substitution)`.
+
 ## POSIX survey improvements outside the differential register
 
 ### `edit.history-goto` / `edit.history-search-pattern`
@@ -552,10 +666,62 @@ Two of the five cite dash bug threads in their own comments. Recorded in
 `tests/surveys/smoosh/RESULTS.toml` under `nonpassing`, which is why the
 recorded total is 181/186 rather than 186/186.
 
+Corrected 2026-09-04, original kept verbatim above: the recorded total is
+now 180/186. `builtin.unset.test` joined these five under the entry below,
+which is a second, unrelated Smoosh divergence and not a change to this one.
+
 Not covered by this entry: an EXIT action that fails to *parse*. There
 bash keeps the pre-trap status and dash reports its own syntax-error
 status; this shell follows dash. The action never completed, so the rule
 above does not reach it, and nothing in the corpus decides it.
+
+### A refused `unset` ends the shell with dash's status, not Smoosh's
+
+**Status:** deliberate. `crates/nsh/src/builtins/unset.rs`.
+
+Smoosh's `builtin.unset` case records status 1 for `unset` on a read-only
+name -- `tests/surveys/smoosh/shell/builtin.unset.ec` holds `1`, and
+`[spec:nsh:req:compat.smoosh.error-contracts]` wrote it down. The default
+dialect answers 2.
+
+This is not two oracles disagreeing; it is two of this repository's own
+rules disagreeing, and one of them was being followed by accident.
+Measured 2026-09-04, `readonly R=1; unset R; echo CONTINUED`:
+
+    dash 0.5.12-12         rc=2  `unset: R: is read only`      no CONTINUED
+    pinned bash 5.3.15     rc=0  `cannot unset: readonly ...`     CONTINUED
+    pinned bash --posix    rc=1  `cannot unset: readonly ...`  no CONTINUED
+    nsh -o bash            rc=0  `unset: R is read-only`          CONTINUED
+    nsh, before this one   rc=1  `unset: R is read-only`       no CONTINUED
+
+The third and fifth rows are the point. Status 1 *and* exit is GNU Bash's
+POSIX mode, which nothing here ever chose; this shell was reaching it by
+taking Smoosh's status and dash's fatality. Meanwhile
+`[spec:nsh:req:compat.bash.error-boundary]` already required "status 2 and
+a non-interactive shell that exits" for the default dialect, in the
+paragraph whose preceding sentence is about a special built-in's refusal
+of a read-only name. So the shell was in violation of a rule, not sitting
+on an open question.
+
+`[spec:nsh:sem:idiom.specified-defects+1]` does not break the tie -- it
+ranks POSIX above an explicit nsh rule above a documented divergence, and
+says nothing about two nsh rules. POSIX does not either: XCU 2.8.1
+requires the exit and leaves the status unspecified. The tie is broken on
+provenance instead, which is the same ground that decision uses against
+dash. Smoosh's bytes are imported evidence of what another shell did;
+`error-boundary` is a contract this repository wrote about its own dialect
+boundary, citing the standard. Evidence does not outrank a contract.
+
+Only the status moves. The stdout `unset\nfoo\nunset\n`, the diagnostic
+`unset: x is read-only`, and the shell ending at that command are all
+still Smoosh's, and `crates/nsh/tests/smoosh_errors.rs` asserts every one
+of them. `builtin.unset.test` therefore fails the Smoosh survey on the
+status alone -- "expected 1, got 2" -- and is recorded in
+`tests/surveys/smoosh/RESULTS.toml` under `nonpassing`, which moves the
+recorded total from 181/186 to 180/186. The Bash dialect is untouched
+and still matches 5.3.15 exactly. The remaining difference from dash --
+the diagnostic spelling -- is registered above as
+`unset_readonly_diagnostic`.
 
 ## Bash-compatibility divergences taken under `[dec:nsh:we-own-the-defects]`
 

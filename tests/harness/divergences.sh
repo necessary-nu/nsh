@@ -75,6 +75,7 @@ DS_NORMALIZERS=(
 	missing_command_file_status
 	logical_fd_introspection
 	ulimit_default_soft_report
+	unset_readonly_diagnostic
 )
 
 # Set by ds_sanctioned to the id that matched, for the report.
@@ -660,6 +661,71 @@ dsnorm_ulimit_default_soft_report() {
 	done
 }
 
+# `unset` refusing a read-only name. Both shells end a non-interactive shell
+# with status 2, so the whole of the difference is the diagnostic: dash
+# writes it through its `$0: line: ` spine, and the port keeps the
+# prefix-less `unset: NAME is read-only` that
+# `[spec:nsh:req:compat.smoosh.error-contracts]` fixes. Rewrite only that one
+# complete line, only in a case that both makes a name read-only and unsets
+# one, and carry the name across so a diagnostic about a different variable
+# is not excused. The statuses and the rest of the output stay compared byte
+# for byte, which is what holds the fatality here: a port that ran on to the
+# next command would differ in a line this cannot reach.
+dsnorm_unset_readonly_diagnostic() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)readonly[[:space:]]' || return 0
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)unset[[:space:]]' || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" |
+		sed -E 's#^(([$>] )*)(SH|\./script\.sh): [0-9]+: unset: ([A-Za-z_][A-Za-z0-9_]*): is read only$#\1unset: \4 is read-only#')
+	# Two corpus cases route the diagnostic through `sed 's|^[^:]*: ||'`,
+	# which strips one colon field from each side: dash keeps its line number
+	# and the port loses its `unset: `. Rewrite that shape only for a case
+	# that contains that exact filter, so an unfiltered diagnostic missing
+	# its command name is still a difference.
+	if ds_case_contains "$DS_CASE" "sed 's|^[^:]*: ||'"; then
+		normalized=$(printf '%s\n' "$normalized" |
+			sed -E 's#^[0-9]+: unset: ([A-Za-z_][A-Za-z0-9_]*): is read only$#\1 is read-only#')
+	fi
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence unset_readonly_diagnostic
+}
+
+# A command substitution in a prompt is expanded, where dash replays the outer
+# parse's pushed-back token into the re-entered parse. `parser::expand_string`
+# starts a fresh parse of the prompt's text on top of whatever the caller was
+# reading; with a string-fed shell the outer parse has already pushed `Eof`
+# back, so dash's `$( )` reaches end of file at once and its backquote form
+# expands to nothing without saying so. `[spec:posix:req:param.ps4]` leaves
+# substitution in `PS4` unspecified, so *declining* to expand would conform --
+# but a parse diagnostic for text that parses is a stale token rather than a
+# choice, which is why the port is the right side here.
+#
+# Four complete result pairs, one per generated witness. Every byte of both
+# sides is pinned, including where in the script dash's outer parse happens to
+# have reached: in the `xtrace nested PS4` case its first traced command
+# expands correctly and only the last one does not.
+dsdiv_re_entered_prompt_substitution() {
+	[ "$3" = 0 ] && [ "$4" = 0 ] || return 1
+	local syntax='SH: 1: Syntax error: end of file unexpected (expecting ")")'
+
+	ds_case_contains "$5" "PS4='[\$(echo sub)] '" &&
+		ds_exact_pair "$1" "$2" \
+		"$syntax"$'\n[$(echo sub)] echo hi\nhi' \
+		$'[sub] echo hi\nhi' && return 0
+	ds_case_contains "$5" "PS4='[\`echo bq\`] '" &&
+		ds_exact_pair "$1" "$2" $'[] echo hi\nhi' $'[bq] echo hi\nhi' && return 0
+	ds_case_contains "$5" "PS4='\$(exit 3)x '" &&
+		ds_exact_pair "$1" "$2" \
+		"$syntax"$'\n$(exit 3)x echo hi\nhi\nx echo rc=0\nrc=0' \
+		$'x echo hi\nhi\nx echo rc=0\nrc=0' && return 0
+	ds_case_contains "$5" "PS4='\$(echo PS) '" &&
+		ds_exact_pair "$1" "$2" \
+		$'PS echo hi\nhi\n'"$syntax"$'\n$(echo PS) set +x' \
+		$'PS echo hi\nhi\nPS set +x' && return 0
+	return 1
+}
+
 # ds_harness_alive PORT REF -- both shells still exist and are runnable.
 #
 # The other half of making the tally mean something. A case whose port
@@ -788,6 +854,7 @@ DS_DIVERGENCES=(
 	c_locale_multibyte_ifs
 	parameter_operand_quote_preservation
 	empty_quote_field_anchors
+	re_entered_prompt_substitution
 	"${DS_NORMALIZERS[@]}"
 )
 
