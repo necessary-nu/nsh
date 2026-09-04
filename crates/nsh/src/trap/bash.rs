@@ -88,6 +88,17 @@ pub(crate) struct BashTraps {
 }
 
 impl BashTraps {
+    /// Whether one of the three actions is running right now.
+    ///
+    /// `$BASH_COMMAND` asks, because the reference's own name for what it
+    /// holds is `the_printed_command_except_trap`: an action reads the
+    /// command it was raised *for*, so the commands inside the action do
+    /// not overwrite it.
+    // [spec:nsh:req:compat.bash.names.ordinary-state]
+    pub(crate) fn action_is_running(&self) -> bool {
+        self.running.iter().any(|running| *running)
+    }
+
     pub(crate) const fn new() -> Self {
         Self {
             action: [const { TrapAction::Default }; 3],

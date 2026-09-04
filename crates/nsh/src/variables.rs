@@ -30,12 +30,14 @@ pub(crate) mod call_stack;
 
 pub(crate) mod declaration;
 
-pub(crate) mod special;
-pub(crate) use special::{
+pub(crate) mod readers;
+pub(crate) use readers::{
     continuation_prompt_value, default_ifs, default_path, history_size_value, ifs_is_set,
     ifs_value, mail_path_is_set, mail_path_value, mail_value, path_value, primary_prompt_value,
     trace_prompt_value,
 };
+
+pub(crate) mod special;
 
 /// Persistent attributes of a shell variable.
 // [spec:nsh:def:idiom.variable-expansion-state]
@@ -325,8 +327,8 @@ fn builtin(name: &[u8], value: Option<&[u8]>, callback: Callback) -> (BString, V
 // [spec:posix:req:param.ppid]
 // [spec:posix:req:param.ps1-default]
 pub fn initialize_variables(shell: &mut Shell) {
-    let prompt = special::default_primary_prompt();
-    let continuation = special::default_continuation_prompt();
+    let prompt = readers::default_primary_prompt();
+    let continuation = readers::default_continuation_prompt();
     let default_path = nsh_platform::default_search_path().to_shell_bytes();
     let mut entries = [
         builtin(b"IFS", Some(DEFAULT_IFS), Callback::Ifs),

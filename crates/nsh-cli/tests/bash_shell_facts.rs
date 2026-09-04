@@ -89,6 +89,74 @@ const AN_INTEGER_FACT_IS_ARITHMETIC: &[&str] = &[
     "echo $(( EUID - EUID ))\n",
 ];
 
+/// The eight names that are state the shell already kept.
+///
+/// Measured on the pinned 5.3.15, fed on standard input. Seven are in a
+/// start-up listing and one is not: `BASH_EXECUTION_STRING` exists only
+/// under `-c`, which is why the rows that ask about it run the shell
+/// again rather than asking this one.
+///
+/// Six of the seven are *invisible* -- `declare -x OLDPWD`,
+/// `declare -i HISTCMD`, `declare -- BASH_COMMAND`, `BASH_ARGV0` and
+/// `BASH_MONOSECONDS` with no value, `OPTERR` alone carrying `"1"` --
+/// and each answers a named lookup from whatever holds the state. That
+/// is the whole point of the set: publishing any of them as an empty
+/// name would make the listing agree while answering a script wrongly.
+///
+/// Three values are asked about rather than read, because neither shell's
+/// answer is a constant. `BASH_ARGV0` and `_` at rest are `$0`, which is
+/// a different string in the two shells, so the rows compare them *to*
+/// `$0`.
+/// `BASH_MONOSECONDS` is a clock, so the rows ask what a clock has to be
+/// -- digits, and never smaller on a later read -- rather than what it
+/// says. Its origin is not the reference's and `docs/divergences.md`
+/// records that.
+const STATE_THE_SHELL_ALREADY_KEEPS: &[&str] = &[
+    "declare -p | grep -E ' (OLDPWD|OPTERR|HISTCMD|BASH_COMMAND|BASH_ARGV0|BASH_MONOSECONDS)' | sed -E 's/=.*//' | sort\n",
+    "for n in OLDPWD OPTERR HISTCMD BASH_COMMAND BASH_ARGV0 BASH_MONOSECONDS; do declare -p $n | sed -E 's/=.*//'; done\n",
+    "echo \"[${OLDPWD+s}][${OPTERR+s}][${HISTCMD+s}][${BASH_COMMAND+s}][${BASH_ARGV0+s}]\"\n",
+    "for n in OLDPWD OPTERR HISTCMD BASH_COMMAND BASH_ARGV0 _; do test -v $n; echo \"$n=$?\"; done\n",
+    "echo \"[$OPTERR][$HISTCMD][${OLDPWD-unset}]\"\n",
+    "echo $(( HISTCMD + 0 )) $(( OPTERR + 1 ))\n",
+    "[ \"$BASH_ARGV0\" = \"$0\" ] && echo argv0-is-zero || echo differs\n",
+    "[ \"$_\" = \"$0\" ] && echo underscore-starts-at-zero || echo differs\n",
+    "case $BASH_MONOSECONDS in ''|*[!0-9]*) echo not-a-number;; *) echo digits;; esac\n",
+    "a=$BASH_MONOSECONDS\nb=$BASH_MONOSECONDS\n[ \"$b\" -ge \"$a\" ] && echo monotonic || echo went-back\n",
+    /* `$_` is the last word of the command before, and the command word
+     * itself when nothing follows it. A command that is only an
+     * assignment leaves it empty rather than leaving the last one. */
+    "echo hi\necho \"1=[$_]\"\ntrue a b c\necho \"2=[$_]\"\nx=5\necho \"3=[$_]\"\n:\necho \"4=[$_]\"\n",
+    "f(){ echo inner arg; echo \"in=[$_]\"; }\nf\necho \"out=[$_]\"\n",
+    "echo\necho \"bare=[$_]\"\n",
+    /* `$BASH_COMMAND` is the command running, and a trap action's own
+     * commands do not move it. */
+    "trap 'echo cmd=[$BASH_COMMAND]' DEBUG\necho one\n:\nx=1\n",
+    "trap 'echo cmd=[$BASH_COMMAND]' DEBUG\necho   one    two\necho \"a  b\"\necho \";\"\n",
+    "echo \"[$BASH_COMMAND]\"\nf(){ echo \"[$BASH_COMMAND]\"; }\nf q\n",
+    /* `OLDPWD` is where `cd -` goes back to, and it is empty until a
+     * `cd` has moved the shell. */
+    "cd /usr\ncd /tmp\necho \"[$OLDPWD]\"\ndeclare -p OLDPWD\n",
+    "cd /usr\ncd -\npwd\n",
+    /* `OPTERR=0` silences `getopts` and changes nothing else. The
+     * wording of the diagnostic is a registered difference, so the rows
+     * count lines rather than read them. */
+    "f(){ while getopts 'a' o; do :; done; echo \"o=[$o]\"; }\nOPTERR=0\nf -z 2>&1 | wc -l\nOPTERR=1\nf -z 2>&1 | wc -l\n",
+    "f(){ while getopts 'a:' o; do :; done; }\nOPTERR=0\nf -a 2>&1 | wc -l\n",
+    /* `BASH_ARGV0` is `$0`, and assigning it re-points `$0`. */
+    "BASH_ARGV0=zed\necho \"0=[$0] argv0=[$BASH_ARGV0]\"\ndeclare -p BASH_ARGV0\n",
+    /* A shell that was given no `-c` string has no name for one. */
+    "declare -p BASH_EXECUTION_STRING\necho \"status=$?\"\n",
+    "echo \"[${BASH_EXECUTION_STRING-unset}]\"\n",
+];
+
+/// The same names asked of a shell started with `-c`, where the
+/// reference has one more of them.
+const A_COMMAND_STRING_IS_A_NAME: &[&str] = &[
+    "declare -p BASH_EXECUTION_STRING",
+    "echo \"[$BASH_EXECUTION_STRING]\"",
+    "echo \"[${BASH_EXECUTION_STRING+set}]\"; declare -p BASH_EXECUTION_STRING | sed -E 's/=.*//'",
+];
+
 /// The five names that describe the call in progress, at rest and in one.
 ///
 /// Measured on the pinned 5.3.15, fed on standard input. At rest the
@@ -182,8 +250,8 @@ const A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL: &[&str] = &[
 /// This is the diff the node asked to start from, kept as a check: the
 /// letters and the name have to agree for all of them, and the two
 /// shells' start-up sets are still not comparable whole -- the reference
-/// has `OLDPWD`, `SHELL`, `TERM` and ten others this shell does not
-/// publish, thirteen of the nineteen it started with. `PS1` and `PS2` are not shared either, and the reference is
+/// has `SHELL`, `TERM` and the four names of an interactive surface this
+/// shell has not got, six of the nineteen it started with. `PS1` and `PS2` are not shared either, and the reference is
 /// the one without them:
 /// [`A_PROMPT_IS_ONLY_FOR_A_WATCHED_SHELL`] is where those two are asked.
 ///
@@ -209,15 +277,21 @@ fn every_shared_name() -> Vec<String> {
         "DIRSTACK",
         "EPOCHREALTIME",
         "EPOCHSECONDS",
+        "BASH_ARGV0",
+        "BASH_COMMAND",
+        "BASH_MONOSECONDS",
         "EUID",
         "FUNCNAME",
         "GROUPS",
+        "HISTCMD",
         "HOSTNAME",
         "HOSTTYPE",
         "IFS",
         "LC_ALL",
         "LINENO",
         "MACHTYPE",
+        "OLDPWD",
+        "OPTERR",
         "OPTIND",
         "OSTYPE",
         "PATH",
@@ -275,6 +349,34 @@ fn a_read_only_fact_refuses_a_write() {
 #[test]
 fn an_integer_fact_is_arithmetic() {
     agrees(&[], AN_INTEGER_FACT_IS_ARITHMETIC);
+}
+
+/// Both shells running one `-c` string, which is the one invocation
+/// shape `both` cannot put a script to: `answer` writes to standard
+/// input, and a `-c` shell never reads it.
+fn both_as_command(script: &str) -> ((Vec<u8>, i32), (Vec<u8>, i32)) {
+    let nsh = Path::new(env!("CARGO_BIN_EXE_nsh"));
+    let bash = pinned_bash::path();
+    (
+        pinned_bash::answer(nsh, &["-o", "bash", "-c", script], ""),
+        pinned_bash::answer(&bash, &["-c", script], ""),
+    )
+}
+
+/// Every name that is state this shell already kept answers from it.
+// [spec:nsh:req:compat.bash.names.ordinary-state/test]
+#[test]
+fn state_the_shell_already_keeps() {
+    agrees(&[], STATE_THE_SHELL_ALREADY_KEEPS);
+    for script in A_COMMAND_STRING_IS_A_NAME {
+        let (ours, theirs) = both_as_command(script);
+        assert_eq!(
+            String::from_utf8_lossy(&ours.0),
+            String::from_utf8_lossy(&theirs.0),
+            "output differed for -c {script}"
+        );
+        assert_eq!(ours.1, theirs.1, "status differed for -c {script}");
+    }
 }
 
 /// All five call-stack names exist wherever the reference has them.

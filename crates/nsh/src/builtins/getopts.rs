@@ -14,6 +14,21 @@ use crate::variables::{
     CallbackPolicy, VariableAttributes, set_bytes, set_integer_bytes, unset_bytes,
 };
 
+/// Whether a bad option earns a diagnostic, which `$OPTERR` decides.
+///
+/// Bash's switch and not POSIX's: `OPTERR=0` silences the message and
+/// changes nothing else -- the scan still answers `?` and still unsets
+/// `OPTARG`, exactly as a leading `:` in the option string does not.
+/// dash has no such name, so a POSIX-dialect script setting `OPTERR=0`
+/// must still be told about its own typo, and the dialect is the guard.
+// [spec:nsh:req:compat.bash.names.ordinary-state]
+fn reports_bad_options(shell: &Shell) -> bool {
+    if shell.options.dialect() != crate::options::Dialect::Bash {
+        return true;
+    }
+    crate::variables::special::opterr_reports(shell)
+}
+
 // [spec:dash:sem:options.getoptscmd-fn]
 // [spec:posix:syn:builtin.getopts.syn]
 // [spec:posix:req:builtin.getopts.retrieve-options]
@@ -124,6 +139,7 @@ fn getopts(
         cursor = Some((word_index, at + 1));
 
         let quiet = optstr.first() == Some(&b':');
+        let diagnose = reports_bad_options(shell);
         let mut spec = usize::from(quiet);
         while spec < optstr.len() && optstr[spec] != option {
             spec += 1;
@@ -140,15 +156,17 @@ fn getopts(
                     VariableAttributes::NONE,
                 )?;
             } else {
-                let mut message = shell
-                    .options
-                    .argument_zero()
-                    .unwrap_or_else(|| BStr::new(b"sh"))
-                    .to_vec();
-                message.extend_from_slice(b": Illegal option -");
-                message.push(option);
-                message.push(b'\n');
-                shell.write_output(OutputDestination::Stderr, &message)?;
+                if diagnose {
+                    let mut message = shell
+                        .options
+                        .argument_zero()
+                        .unwrap_or_else(|| BStr::new(b"sh"))
+                        .to_vec();
+                    message.extend_from_slice(b": Illegal option -");
+                    message.push(option);
+                    message.push(b'\n');
+                    shell.write_output(OutputDestination::Stderr, &message)?;
+                }
                 unset_bytes(shell, BStr::new(b"OPTARG"))?;
             }
             option = b'?';
@@ -179,15 +197,17 @@ fn getopts(
                     )?;
                     option = b':';
                 } else {
-                    let mut message = shell
-                        .options
-                        .argument_zero()
-                        .unwrap_or_else(|| BStr::new(b"sh"))
-                        .to_vec();
-                    message.extend_from_slice(b": No arg for -");
-                    message.push(option);
-                    message.extend_from_slice(b" option\n");
-                    shell.write_output(OutputDestination::Stderr, &message)?;
+                    if diagnose {
+                        let mut message = shell
+                            .options
+                            .argument_zero()
+                            .unwrap_or_else(|| BStr::new(b"sh"))
+                            .to_vec();
+                        message.extend_from_slice(b": No arg for -");
+                        message.push(option);
+                        message.extend_from_slice(b" option\n");
+                        shell.write_output(OutputDestination::Stderr, &message)?;
+                    }
                     unset_bytes(shell, BStr::new(b"OPTARG"))?;
                     option = b'?';
                 }

@@ -1695,6 +1695,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id compat.bash.names.call-stack, version 0}
     )}
+    {id bash.divergences.publish-names.ordinary-state, covered_rules (
+        compat.bash.names.ordinary-state
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.names.ordinary-state}
+    )}
     {id bash.divergences.publish-names.withhold-prompts, covered_rules (
         compat.bash.names.only-what-the-reference-has
     ), covered_claims (

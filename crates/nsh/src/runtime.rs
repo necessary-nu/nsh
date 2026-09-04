@@ -147,6 +147,12 @@ fn configure_startup(shell: &mut Shell, startup: &Startup) -> Result<(), crate::
     }
 
     crate::options::apply_option_changes(shell)?;
+    if let Some(text) = startup.command_text() {
+        /* After the options are applied, because that is what turns the
+         * dialect on and the name belongs to it. */
+        // [spec:nsh:req:compat.bash.names.ordinary-state]
+        crate::variables::special::set_execution_string(shell, text);
+    }
     crate::trap::refresh_startup_signal_policy(shell);
     Ok(())
 }

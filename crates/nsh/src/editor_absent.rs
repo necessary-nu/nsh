@@ -56,6 +56,13 @@ impl History {
     pub fn discard_input_entry(&mut self) {}
 
     #[must_use]
+    /// The newest entry, which `$HISTCMD` numbers. There is never one
+    /// without an editor, which is why a non-interactive shell answers
+    /// `0` for that name here and in the reference.
+    pub fn newest(&self) -> Option<HistoryEvent> {
+        None
+    }
+
     pub fn oldest(&self) -> Option<HistoryEvent> {
         None
     }
