@@ -139,17 +139,28 @@ obtains everything it needs and still cannot say what it claims to.
 > the count is plausible, and nothing says the shell under test was a stub, or
 > the same shell twice, or the dialect the profile is not about.
 
-> [spec:nsh:req:oracle.recording-carries-its-age]
-> A checked-in recording of a reference's answers MUST carry which build of
-> this shell it was made against and when. A run that reads one MUST report
-> that provenance alongside its verdict, so a recording older than the code it
-> is scoring is visible without anyone going to look.
+> [spec:nsh:req:oracle.recording-carries-its-age+1]
+> A recording a later run will score against MUST carry which build of this
+> shell it was made against and when. A run that reads one MUST report that
+> provenance alongside its verdict, so a recording older than the code it is
+> scoring is visible without anyone going to look. A checked-in list of a
+> reference's answers and a derived corpus a campaign replays are alike in
+> this: what makes something a recording is that a later run treats it as
+> evidence, not whether it is in git and not whether its contents came from a
+> reference.
 >
 > A regression set nothing has run against the current tree is not a regression
 > set, and it does not announce itself: the count it prints is the same either
 > way. Reporting the age is a fact and is required; what threshold, if any,
 > should turn an old recording into a failure is a separate argument and this
 > rule does not settle it.
+
+The v0 text said "a checked-in recording of a reference's answers", which was
+the Oils baseline and only the Oils baseline. The rule was drafted from
+`fuzz/campaign/TARGET.archived`, which is neither -- `fuzz/.gitignore` names
+`campaign` on purpose, and the file lists the inputs a derivation ran rather
+than any answer a reference gave. Two qualifiers taken from the first example
+had excluded the case the rule came from, so v1 drops them.
 
 > [spec:nsh:req:oracle.checks-do-not-share-state]
 > A check MUST NOT depend on, and MUST NOT leave behind, process state it
@@ -169,23 +180,60 @@ obtains everything it needs and still cannot say what it claims to.
 > depends on scheduling, and the natural reading of a rare failure in a
 > concurrency test is that the concurrency is at fault.
 
-## What the enforcement does not reach
+## Where a check that is not Rust says what it satisfies
 
-Two of the five instances sit outside the lint's corpus, so the rule's
-coverage reads complete while they are checked by nobody:
+These rules are about this project's own checks, and those checks are
+written in three languages: Rust under `crates/`, shell under `fuzz/` and
+`tests/harness/`, and one Python pty driver. Until 2026-09-04 the `nsh`
+spec had a single impl scope of `crates/**/*.rs`, so a rule was covered
+or not according to which directory the check that satisfies it happened
+to live in. `oracle.recording-carries-its-age` was the case that made the
+point: it was drafted from `fuzz/campaign/TARGET.archived`, its Rust half
+in `nsh-survey` was indexed, and the fuzz half it was actually about was
+invisible.
 
-* `tests/harness/locale-sweep.sh` and `tests/build-locales.sh` are shell
-  scripts, and the `nsh` spec's impl scope is `crates/**/*.rs`. Their fix
-  is real and committed, but cannot carry an annotation or be swept.
-* `fuzz/` is a cargo workspace of its own and is not read by the lint. A
-  fuzz target returns early on every input it finds uninteresting -- an
-  `Arbitrary` that did not parse, a byte string with a NUL in it -- which
-  is the fuzzing loop rather than a missing reference; sweeping the eleven
-  targets reports twenty-five of those against one real defect, and a lint
-  needing twenty-five suppressions on its first day does not survive to
-  catch the twenty-sixth. What the fuzz side has instead is
-  `fuzz/fuzz_targets/support.rs`, where obtaining the oracle panics, so no
-  target can reach a comparison without one.
+The `nsh` spec now has a second impl, `nsh-harness`, over the fuzz
+targets, the fuzz and harness scripts, the locale and reference
+bootstraps, and `scripts/`. Three things about it are worth knowing
+before changing it:
+
+* A reference is a claim only in bare form. `# [spec:nsh:req:id]` on its
+  own line is indexed; `` `[spec:nsh:req:id]` `` inside a sentence is
+  prose and is not. Every citation these files carried was prose, which
+  is why widening the scope indexed nothing until a bare line was added
+  beside each one that was a claim rather than an aside.
+* `tests/surveys/` is deliberately out of scope. Those cases are imported
+  from Oils and are upstream's to mean what upstream meant.
+* An include glob's `*` crosses `/`, so `tests/*.sh` reaches the 158
+  vendored cases under `tests/surveys/oils/spec/`. Name a directory with
+  no surprising subtree, or name the files.
+
+Widening the scope moved no coverage number -- every rule involved was
+already covered from Rust -- and that is the honest reading of it. What
+it changes is that `nspec unmapped` can now name the 32 of these 38 files
+that claim nothing, where before it could not report them as unannotated
+because it did not know they existed.
+
+### What the enforcement still does not reach
+
+`crates/nsh/tests/oracle_measurement.rs` reads `#[test]` functions under
+`crates/` and nothing else. Being inside an nspec impl scope does not put
+a file inside the lint's corpus; the two are separate, and `fuzz/` is
+outside the second on purpose. A fuzz target returns early on every input
+it finds uninteresting -- an `Arbitrary` that did not parse, a byte
+string with a NUL in it -- which is the fuzzing loop rather than a
+missing reference; sweeping the eleven targets reports twenty-five of
+those against one real defect, and a lint needing twenty-five
+suppressions on its first day does not survive to catch the twenty-sixth.
+What the fuzz side has instead is `fuzz/fuzz_targets/support.rs`, where
+obtaining the oracle panics, so no target can reach a comparison without
+one.
+
+So an annotation in a shell script records which rule the script
+satisfies; it does not mean a lint is watching the script for the shapes
+that rule forbids. Nothing sweeps shell for a guarded early return, and
+this is the paragraph that says so rather than leaving the coverage map
+to imply otherwise.
 
 ### What no lint here reaches
 

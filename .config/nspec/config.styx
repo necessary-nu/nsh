@@ -28,6 +28,22 @@
 // rule. There are currently 0 such collisions, but the prefixes
 // `expand.`, `redir.` and `shell.` appear in both, so check before
 // adding rules under those.
+//
+// Two more things decide what a scope actually sweeps:
+//
+//   * `*` in an include glob CROSSES `/`. `fuzz/*.rs` reaches
+//     `fuzz/fuzz_targets/parse.rs`, and — the reason this is written down
+//     — `tests/*.sh` reaches the 158 vendored Oils cases under
+//     `tests/surveys/oils/spec/`, which are upstream's files and are not
+//     this repository's to annotate. Name a directory that has no
+//     surprising subtree, or name the files.
+//   * A rule reference is a CLAIM only in bare form. `// [spec:ns:req:id]`
+//     is indexed; `` `[spec:ns:req:id]` `` in a sentence is prose and is
+//     not. Every citation in `fuzz/` and `tests/harness/` was written in
+//     the prose form, so widening a scope over them indexes nothing until
+//     a bare line is added beside the prose — which is the shape
+//     `crates/nsh-cli/tests/bash_both_streams_redirection.rs` already
+//     uses.
 specs (
     {
         name dash,
@@ -67,6 +83,33 @@ specs (
                 languages (@rust)
                 include (crates/**/*.rs)
                 exclude (target/**)
+                mode @both
+            }
+            // `docs/spec/nsh/verification.md` is a family of rules whose
+            // subject is this project's own checks, and those checks are
+            // written in three languages. A single `crates/**/*.rs` scope
+            // therefore settles coverage by the directory a check happens
+            // to live in: `oracle.recording-carries-its-age` is satisfied
+            // half in `nsh-survey` and half in `fuzz/corpus.sh`, and only
+            // one half can be claimed. A file in no impl is also beyond
+            // `nspec unmapped`, which cannot report a file it does not
+            // know exists.
+            //
+            // Scoped to the checks and the harness that runs them, never
+            // to `tests/surveys/`: that tree is imported from Oils and
+            // upstream's cases carry upstream's meaning.
+            {
+                name nsh-harness
+                languages (@rust @bash @python)
+                include (
+                    fuzz/*.rs
+                    fuzz/*.sh
+                    tests/harness/*
+                    tests/build-locales.sh
+                    tests/build-reference.sh
+                    scripts/*
+                )
+                exclude (target/** fuzz/target/**)
                 mode @both
             }
         )

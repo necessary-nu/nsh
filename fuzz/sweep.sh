@@ -213,6 +213,7 @@ choose_calibration() {
 # The artifact's own cost is read off libFuzzer's `Executed ... in N ms`
 # line, which is whole milliseconds -- a quantum for an ordinary input, and
 # three decimal places for an artifact that is a finding.
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 measure_artifact() {
     local artifact=$1 one_us many_us
     replay "${calibration[0]}"

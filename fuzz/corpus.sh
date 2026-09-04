@@ -81,7 +81,7 @@ adopt() {
 #
 # Reporting it is a fact and is required; what age, if any, should refuse a
 # campaign is a separate argument and nothing here settles it.
-# `[spec:nsh:req:oracle.recording-carries-its-age]`
+# `[spec:nsh:req:oracle.recording-carries-its-age+1]`
 
 # The checkout a path given to this script is in, if it is in one.
 #
@@ -121,6 +121,7 @@ build_identity() {
 # One `key=value` per line, beside the listing and never inside it: `seed`
 # compares `.archived` against the archive with `comm`, so it has to stay a
 # bare sorted listing of names.
+# [spec:nsh:req:oracle.recording-carries-its-age+1]
 stamp() {
     local campaign=$1 binary=$2 archived=$3 derived=$4
     {
@@ -153,6 +154,7 @@ distance_from() {
 }
 
 # The age of the derivation, said beside the count it qualifies.
+# [spec:nsh:req:oracle.recording-carries-its-age+1]
 report_provenance() {
     local campaign=$1 record="$campaign.provenance"
     if [[ ! -f $record ]]; then
@@ -185,6 +187,7 @@ report_provenance() {
     fi
 }
 
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 derive() {
     local binary=$1 archive=$2 campaign=$3 artifacts=$4
     local timeout_secs=${NSH_FUZZ_MERGE_TIMEOUT:-3600}

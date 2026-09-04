@@ -102,6 +102,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # and hand `240` to cargo, which is a fuzzing session that measures
 # nothing -- the shape `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`
 # exists to refuse.
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 case $target in
     *[![:alnum:]_-]*|'')
         echo "fuzz/run.sh: invalid target: $target" >&2
@@ -368,6 +369,7 @@ printf 'fuzz/run.sh: build %ss before the clock; replay and campaign %ss for %s\
 # so say which clock ended the run. `timeout` is identified by both its
 # status and the elapsed time, because 124 is also a status a target could
 # choose for itself.
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 if [[ $containment == new ]] && ((wall > 0)) && ((status == 124)) \
    && ((campaign_elapsed + 5 >= wall)); then
     printf 'fuzz/run.sh: the %ss containment wall clock stopped the campaign, not the %ss fuzzing budget\n' \

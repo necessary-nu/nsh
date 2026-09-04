@@ -53,6 +53,7 @@ pub fn under_nsh(script: &[u8], env: Vec<(Vec<u8>, Vec<u8>)>) -> Option<Outcome>
 /// tree. It must not live under `/tmp`: the fuzz containment mounts an
 /// empty tmpfs there, so an oracle kept in `/tmp` is invisible to every
 /// case, and the pinned build's default location is exactly that.
+// [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 fn reference_bash() -> &'static PathBuf {
     static SHELL: OnceLock<PathBuf> = OnceLock::new();
     SHELL.get_or_init(|| {

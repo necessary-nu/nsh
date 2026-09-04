@@ -37,6 +37,7 @@ build() {  # build DIRECTORY CHARMAP
 }
 
 build en_US.ISO-8859-1 ISO-8859-1
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 build en_US.utf8 UTF-8
 
 printf '%s\n' "$OUT"

@@ -9853,6 +9853,12 @@ children (
                                             }
                                         )
                                     }
+
+                                    {
+                                        id bash.divergences.redirection-status-without-a-command
+                                        title "Give a compound or command-less redirection failure the dialect's status"
+                                        kind @fix
+                                    }
                                 )
                                 log (
                                     {
@@ -10227,6 +10233,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 WHILE CLOSING `harness.spec-cannot-see-the-shell-harness`. It is the first thing that node's widening made visible, which is the point of it.\n\n`fuzz/*.rs` is now inside the `nsh` spec's `nsh-harness` impl. Ten of the eleven targets appear in `nplan spec unmapped` claiming nothing, and two of them already say in prose what they are evidence for:\n\n    fuzz/fuzz_targets/roundtrip.rs:9    `[spec:nsh:req:idiom.printable-ast+2]`\n    fuzz/fuzz_targets/differential.rs:31 `[spec:nsh:req:compat.smoosh.error-contracts]`\n\nBoth are backticked mid-sentence, which is the prose form and is not indexed. The eleventh, `support.rs`, was annotated under the closing node because it is where obtaining the oracle panics.\n\nNOT DONE IN PASSING, deliberately: `idiom.printable-ast` and `compat.smoosh.error-contracts` are different rule families from the `oracle.*` ones that node was about, and a differential fuzz target is `/test` evidence of an unusual kind -- it runs on whatever the fuzzer generates rather than on a fixed case list, so what it establishes is a property under sampling and not a case. Whether that counts as verification evidence for a rule is a judgement, not a transcription.\n\nDONE WHEN each target either carries a bare `[spec:nsh:req:.../test]` line naming the rule it samples, or the file says why a fuzz target is not evidence for any rule and `verification.md` agrees. Reading them in one sitting is the cheap part; deciding what a sampled property proves is the work."
+                            }
+
+                            {
+                                at 2026-09-04T13:17:25.605171698Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "SECOND THING FOUND IN THE SAME PLACE, 2026-09-04: `fuzz/` IS NOT REACHED BY `cargo fmt --all` AND HAS DRIFTED.\n\n`fuzz/` is a cargo workspace of its own, so the `rust/workspace (fmt)` commit gate -- `cargo fmt --all --check` from the repository root -- never reads it. Measured against pristine HEAD rather than a working tree:\n\n    $ git show HEAD:fuzz/fuzz_targets/support.rs > /tmp/support_head.rs\n    $ rustfmt --edition 2024 --check /tmp/support_head.rs\n    Diff in ...:58    the `map_or_else` closure around the `concat!`\n    Diff in ...:112   the `unwrap_or_else` panic arm\n\nTwo hunks, both pre-existing, neither large. Nothing is wrong with the code; what is worth writing down is that the gate's name says `--all` and its reach is one workspace. Whoever takes this node is already reading every file under `fuzz/fuzz_targets/`, which is the cheap moment to either run `cargo fmt` inside `fuzz/` or say that the second workspace is deliberately unformatted."
                             }
                         )
                     }
@@ -12162,6 +12175,7 @@ children (
                         id struct.posix-children-under-unix
                         title "Move the four pre-directory POSIX subjects under src/unix/"
                         kind @refactor
+                        sealed true
                         log (
                             {
                                 at 2026-09-03T23:25:27.721845581Z
@@ -12175,6 +12189,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-04T13:16:37.240687246Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -12190,6 +12211,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @blocker
                                 text "ONE `#[path]` IN THE TREE IS NOT A CONSEQUENCE OF AN `include!`, AND `[spec:nsh:req:idiom.declared-module-tree]` STILL REACHES IT.\n\n    crates/nsh/src/lib.rs:214-218\n        #[cfg(feature = \"edit\")]\n        pub(crate) mod editor;\n        #[cfg(not(feature = \"edit\"))]\n        #[path = \"editor_absent.rs\"]\n        pub(crate) mod editor;\n\nThe rule's first sentence is \"a module's path in the source is its path in the tree\". Here the tree says `crate::editor` and the source says `src/editor_absent.rs`, so a reader following the tree opens `src/editor/mod.rs` and finds the other implementation, or none. The rule's second and third sentences are about `include!` and about repairing its children, and neither applies: this is a deliberate `cfg`-selected alternative implementation of one name, which is a real and good pattern. It is the *file naming* that is the defect, not the two `mod` items.\n\nWHY IT IS SMALL AND WHY IT IS STILL WORTH DOING. `git mv crates/nsh/src/editor_absent.rs crates/nsh/src/editor/absent.rs` will not do on its own -- `src/editor/` is the feature-on module's own directory, so the file would become a child of the very module it replaces. The shape that works is either `src/editor.rs` + `src/editor/` for the real one and a differently-named module for the stub (`mod editor_absent; use editor_absent as editor;` does not work for a `pub(crate) mod`), or accepting that one name backed by two files needs the attribute. Establish which before changing anything; the answer may be that this is the one honest use of `#[path]` in the tree, in which case the finding is that the comment above it should say so and the rule should record the exception.\n\nCENSUS, 2026-09-04, for whoever picks this up. `grep -rn '#\\[path' --include=*.rs` outside `target/` reports 42 lines, of which 2 are the attribute spelled inside a comment. Of the 40 real ones: 32 are `#[path = \"../../nsh/tests/pinned_bash/mod.rs\"]` in `crates/nsh-cli/tests/` and belong to `struct.differential-helper-crate` (which recorded 31; it has grown by one). 7 were in `crates/nsh-platform/` and were removed by `struct.platform-children-module`. This is the remaining 1."
+                            }
+
+                            {
+                                at 2026-09-04T13:16:42.516885197Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }

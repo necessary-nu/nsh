@@ -231,6 +231,7 @@ expect_contains "$sweep" 'pruned 1 closed artifact'
 # A corpus that cannot say what an ordinary input costs leaves the artifact
 # undecided rather than closed, and the sweep says so in its status.
 # `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`.
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
 mv "$sweep_tree/fuzz/corpus/example" "$sweep_tree/fuzz/corpus/example-kept"
 printf '40000\n' >"$sweep_tree/fuzz/artifacts/example/slow-unit-now-fast"
 sweep=$(sweep_run) || :
@@ -329,6 +330,7 @@ seeds=$("$corpus_sh" seed "$archive" "$campaign" 2>/dev/null)
 # A merge is crash-resistant: it files the artifact, skips the input and
 # exits zero. Reading the status alone would call that a clean run, so the
 # artifact directory is what is read. `[spec:nsh:req:oracle.cannot-measure-is-a-failure]`.
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure/test]
 printf 'crash\n' >"$archive/input-that-crashes"
 if "$corpus_sh" derive "$work/merges" "$archive" "$campaign" "$artifacts" >/dev/null 2>&1; then
     fail 'a derivation that filed an artifact reported success'
@@ -352,7 +354,7 @@ fi
 # against what, so `seeding from 2659 campaign inputs standing for 21305
 # archived` reads the same whether the archive was last run against this
 # build or against the tree of a fortnight ago -- and the archive is the
-# regression set. `[spec:nsh:req:oracle.recording-carries-its-age]`
+# regression set. `[spec:nsh:req:oracle.recording-carries-its-age+1]`
 #
 # A checkout of its own, because the answer is a fact about a repository and
 # a fabricated tree under TMPDIR is in none. Both halves are checked here:
@@ -360,6 +362,7 @@ fi
 
 # The derivation records its age even where there is no repository to ask,
 # and `seed` reports the record without a commit rather than not at all.
+# [spec:nsh:req:oracle.recording-carries-its-age+1/test]
 report=$("$corpus_sh" seed "$archive" "$campaign" 2>&1 >/dev/null)
 expect_contains "$report" 'the archive was last run against unknown'
 expect_contains "$report" 'not a commit this checkout has'

@@ -149,7 +149,7 @@ Four things make it more than a one-liner, and all four are in
   `parse` had last been derived on 2026-09-02 against `04582ce`, 73 commits
   and 51 `crates/` commits back, and nothing anywhere said so. That is a
   fact and not a threshold -- no campaign is refused for an old derivation
-  (`[spec:nsh:req:oracle.recording-carries-its-age]`).
+  (`[spec:nsh:req:oracle.recording-carries-its-age+1]`).
 * **Copy-back.** libFuzzer writes what it finds into the first corpus
   directory it is given, which is now the campaign corpus. Every new input
   goes back into the archive when the campaign ends, whatever the campaign's

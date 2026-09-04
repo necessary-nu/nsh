@@ -223,7 +223,7 @@ impl Baseline {
     /// regression set, and it does not announce itself: the count it
     /// prints is the same either way, so the comparison has to say the
     /// age whether or not it likes it
-    /// (`[spec:nsh:req:oracle.recording-carries-its-age]`). The commit
+    /// (`[spec:nsh:req:oracle.recording-carries-its-age+1]`). The commit
     /// distance is the half that decides -- a fortnight in which nothing
     /// under `crates/` changed says nothing at all, and one commit there
     /// can move the list.
@@ -232,7 +232,7 @@ impl Baseline {
     /// comparison is a separate argument, and a check that started
     /// failing on a date would be answered by re-recording, which is the
     /// one response that must stay deliberate.
-    // [spec:nsh:req:oracle.recording-carries-its-age]
+    // [spec:nsh:req:oracle.recording-carries-its-age+1]
     fn age(&self) -> String {
         let when = match &self.recorded_at {
             Some(at) => format!("recorded on {at}"),
@@ -920,10 +920,10 @@ mod tests {
     /// The count a stale list prints is the same count a current one
     /// prints, so nothing but this sentence distinguishes a regression
     /// set from a file nobody has run
-    /// (`[spec:nsh:req:oracle.recording-carries-its-age]`). A file
+    /// (`[spec:nsh:req:oracle.recording-carries-its-age+1]`). A file
     /// written before the field existed is read rather than refused, and
     /// says which of the two it is.
-    // [spec:nsh:req:oracle.recording-carries-its-age/test]
+    // [spec:nsh:req:oracle.recording-carries-its-age+1/test]
     #[test]
     fn a_recorded_list_says_its_age() {
         let run = report(&["case_.test.sh:1"], &[]);

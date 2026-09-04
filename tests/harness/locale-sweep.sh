@@ -31,6 +31,7 @@ export LOCPATH=$LOCALE_ROOT
 # full sweep on it.  In ISO-8859-1, byte E9 is alphabetic and therefore a
 # valid shell-name byte.  Equality alone would pass if both shells silently
 # fell back to C, so require the value as well.
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 . "$ROOT/tests/harness/sandboxed.sh"
 probe=$(mktemp -d "${TMPDIR:-/tmp}/nsh-locale-probe.XXXXXXXX")
 trap 'rmdir "$probe"' EXIT
@@ -60,6 +61,7 @@ trap - EXIT
 # is, so an archive-only `en_US.utf8` would fail to load and leave both shells
 # in C -- a UTF-8 axis measuring nothing, which is what it did until the
 # fixture directory started carrying its own.
+# [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 for locale_name in C en_US.utf8 "$SINGLE_BYTE"; do
 	echo "==== locale baseline: $locale_name ===="
 	label=${locale_name//[^A-Za-z0-9_.-]/_}
