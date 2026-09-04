@@ -182,7 +182,7 @@ impl History {
         }
     }
 
-    #[cfg(test)]
+    /// The entry `$HISTCMD` numbers, which is the one being entered.
     #[must_use]
     pub fn newest(&self) -> Option<HistoryEvent> {
         self.store.newest().map(history_event)

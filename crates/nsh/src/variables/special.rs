@@ -1,28 +1,12 @@
-//! The variables the shell maintains on a script's behalf.
+//! The variables the Bash dialect maintains on a script's behalf.
 //!
-//! The oldest of them are POSIX's, and the shell installs them before it
-//! reads a line. [`super::initialize_variables`] enters `IFS`, `PATH`,
-//! `MAIL`, `MAILPATH`, `PS1`, `PS2`, `PS4` and `HISTSIZE` as `FIXED`
-//! entries carrying a [`Callback`], and the rest of the shell reads them
-//! back through the one-line accessor named for each -- `ifs_value`,
-//! `path_value`, `primary_prompt_value` and the others, over the single
-//! lookup in `builtin_value`. Naming a reader for the variable rather
-//! than for its caller is what makes the set of names the shell itself
-//! depends on a list one can read.
+//! The names POSIX defines and this shell reads back for itself are in
+//! [`super::readers`]; nothing in this file is one of them. What is here
+//! arrives with the dialect, and it is four kinds rather than one.
 //!
-//! `ifs_is_set` and `mail_path_is_set` are separate from the readers
-//! because for those two names unset and empty mean different things: an
-//! unset `IFS` splits on the default and an empty one does not split at
-//! all, and an empty `MAILPATH` still wins over `MAIL`. A caller given
-//! only the value could not tell the cases apart. `default_ifs` and
-//! `default_path` are what startup installs when nothing else supplies a
-//! value, and they sit beside the readers so that what is written at
-//! startup and what is read afterwards cannot drift.
-//!
-//! Three more kinds arrive with the Bash dialect, and they are not the
-//! same thing as each other. *Facts* -- `BASH`, `BASH_VERSION`,
-//! `OSTYPE`, `UID` -- are published once when the dialect turns on and
-//! then behave like any other variable. *Clocks and
+//! *Facts* -- `BASH`, `BASH_VERSION`, `OSTYPE`, `UID` -- are published
+//! once when the dialect turns on and then behave like any other
+//! variable. *Clocks and
 //! generators* -- `RANDOM`, `SRANDOM`, `SECONDS`, `EPOCHSECONDS`,
 //! `EPOCHREALTIME`, `LINENO`, `BASHPID`, `BASH_SUBSHELL` -- have no
 //! stored value worth trusting, so they are recomputed on the read that
@@ -30,6 +14,15 @@
 //! whatever moves them*, the way `call_stack` publishes `FUNCNAME`:
 //! ordinary indexed arrays that every existing reader already
 //! understands.
+//!
+//! *State the shell already keeps* is the third kind and the largest:
+//! `OLDPWD`, `OPTERR`, `HISTCMD`, `_`, `BASH_COMMAND`, `BASH_ARGV0`,
+//! `BASH_MONOSECONDS` and `BASH_EXECUTION_STRING` are all names for
+//! something this shell had before it had the name. Each is wired to
+//! whatever holds that state rather than seeded with a value, because
+//! the two are not the same claim: `${BASH_COMMAND}` reading empty says
+//! the shell is running a command with no text, and `BASH_COMMAND`
+//! being unset says the shell has not told you.
 //!
 //! `BASH_ARGC` and `BASH_ARGV` are a fourth kind and the odd one: the
 //! reference *installs* them on the read that first asks for them,
@@ -55,8 +48,9 @@
 use bstr::{BStr, BString};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
+use super::readers::{default_continuation_prompt, default_primary_prompt, path_value};
 use super::value::{VariableKind, VariableValue};
-use super::{Callback, DEFAULT_IFS, Variable, VariableAttributes, VariableState, arrays};
+use super::{Callback, Variable, VariableAttributes, VariableState, arrays};
 use crate::context::Shell;
 use crate::options::{Dialect, ShellOption};
 use crate::status::ExitStatus;
@@ -70,6 +64,10 @@ use crate::status::ExitStatus;
 /// is about to observe. See `tests/surveys/oils/BASH_REFERENCE.toml`.
 // [spec:nsh:req:compat.bash.reference-profile]
 const VERSION_FIELDS: [&str; 5] = ["5", "3", "15", "1", "release"];
+
+/// What `OPTERR` holds, which is the reference's own default and the
+/// value `getopts` reads to decide whether to say anything.
+const DIAGNOSE_BAD_OPTIONS: &str = "1";
 
 /// Facts about the host that an inherited environment may already
 /// answer, and which the shell therefore must not overwrite.
@@ -104,6 +102,15 @@ pub(crate) struct SpecialState {
     /// `BASH_ARGC` and `BASH_ARGV`. See [`publish_call_arguments`]: the
     /// reference pushes rather than computes, so this happens once.
     call_arguments_published: bool,
+    /// The run of tokens `$BASH_COMMAND` spells back.
+    ///
+    /// The run and not the text: keeping one is an `Arc` clone and two
+    /// offsets, so the write every command pays for is that, and the
+    /// bytes are assembled only if something reads the name. `None`
+    /// until the first command runs, which is what makes
+    /// `declare -p BASH_COMMAND` print no value in a shell that has not
+    /// run one.
+    current_command: Option<crate::nodes::SourceTokens>,
 }
 
 impl SpecialState {
@@ -115,6 +122,7 @@ impl SpecialState {
             seconds_base: 0,
             prompts_entered: true,
             call_arguments_published: false,
+            current_command: None,
         }
     }
 
@@ -173,7 +181,7 @@ fn publish(shell: &mut Shell) {
     let host = nsh_platform::host_name()
         .map(|name| BString::from(name.to_shell_bytes()))
         .unwrap_or_default();
-    let scalars: [(&[u8], BString); 9] = [
+    let scalars: [(&[u8], BString); 11] = [
         (b"BASH", shell_path(shell)),
         (b"BASH_VERSION", BString::from(version.as_str())),
         (b"HOSTNAME", host),
@@ -195,6 +203,14 @@ fn publish(shell: &mut Shell) {
             BString::from(nsh_platform::effective_uid().as_raw().to_string()),
         ),
         (b"SHLVL", BString::from(shell_level(shell).to_string())),
+        /* `getopts`' own error switch, and the reference writes `1` over
+         * whatever the environment carried: `OPTERR=0 bash -c ...` reads
+         * back `declare -x OPTERR="1"`, keeping only the export mark the
+         * import gave it. So it is not `INHERITABLE`. */
+        (b"OPTERR", BString::from(DIAGNOSE_BAD_OPTIONS)),
+        /* `$_` before any command has run is the name the shell was
+         * invoked under, which is where the reference starts it too. */
+        (b"_", argument_zero(shell)),
     ];
     for (name, value) in scalars {
         let name = BStr::new(name);
@@ -245,6 +261,14 @@ fn publish(shell: &mut Shell) {
         b"EPOCHREALTIME",
         b"BASHPID",
         b"BASH_SUBSHELL",
+        /* State the shell keeps elsewhere, answered from wherever it is
+         * kept rather than seeded here. All four are invisible in the
+         * reference's listing and answer a named lookup, which is what
+         * the mark plus a declared entry gives them. */
+        b"BASH_MONOSECONDS",
+        b"HISTCMD",
+        b"BASH_COMMAND",
+        b"BASH_ARGV0",
     ] {
         let name = BStr::new(name);
         mark_dynamic(shell, name, VariableAttributes::NONE);
@@ -271,9 +295,123 @@ fn publish(shell: &mut Shell) {
     for name in [b"SHELLOPTS".as_slice(), b"BASHOPTS"] {
         mark_dynamic(shell, BStr::new(name), VariableAttributes::READ_ONLY);
     }
+    publish_previous_directory(shell);
     mark_published_facts(shell);
     publish_directory_stack(shell);
     publish_call_frames(shell);
+}
+
+/// `$OLDPWD`: where `cd -` goes back to, which is nowhere yet.
+///
+/// The name is exported and holds nothing until a `cd` moves the shell,
+/// which `working_directory::update_current_directory` is what writes.
+/// This is the name before that, which the reference publishes as
+/// `declare -x OLDPWD` with no value at all.
+///
+/// An inherited value is discarded rather than kept, which is the
+/// reference's own answer and not an oversight here:
+/// `OLDPWD=/xx bash -c 'declare -p OLDPWD'` prints `declare -x OLDPWD`.
+/// A directory this shell has never been in is not one `cd -` may go
+/// back to.
+// [spec:nsh:req:compat.bash.names.ordinary-state]
+fn publish_previous_directory(shell: &mut Shell) {
+    let name = BStr::new(b"OLDPWD");
+    drop(super::set_bytes(
+        shell,
+        name,
+        Some(BStr::new(b"")),
+        VariableAttributes::EXPORTED,
+    ));
+    if let Some(entry) = shell.variables.entries.get_mut(name) {
+        entry.state = VariableState::Declared(VariableKind::Scalar);
+    }
+}
+
+/// The bytes `$BASH_COMMAND` answers with, less what ended the command.
+///
+/// A run reaches as far as the separator that closed it, so the newline
+/// or `;` after the last word is in it and the reference's answer has no
+/// such thing. Trailing blanks and separators come off; nothing else
+/// does, because the rest is the command as it was written.
+// [spec:nsh:req:compat.bash.names.ordinary-state]
+fn running_command_text(shell: &Shell) -> Option<BString> {
+    let text = shell.variables.special.current_command.as_ref()?.written();
+    let end = text
+        .iter()
+        .rposition(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b';' | b'&'))
+        .map_or(0, |last| last + 1);
+    Some(BString::from(&text[..end]))
+}
+
+/// Whether `$OPTERR` is asking `getopts` to report a bad option.
+///
+/// Zero is the only value that silences it: the reference treats the name
+/// as a switch and not as a level, so `OPTERR=x` reports and `OPTERR=00`
+/// does not.
+// [spec:nsh:req:compat.bash.names.ordinary-state]
+pub(crate) fn opterr_reports(shell: &Shell) -> bool {
+    let value = shell
+        .variables
+        .entries
+        .get(BStr::new(b"OPTERR"))
+        .and_then(Variable::scalar_owned);
+    let Some(value) = value else {
+        return true;
+    };
+    std::str::from_utf8(&value)
+        .ok()
+        .and_then(|text| text.trim().parse::<i64>().ok())
+        != Some(0)
+}
+
+/// `$0` as the shell currently answers it, which `BASH_ARGV0` both
+/// reports and rewrites.
+fn argument_zero(shell: &Shell) -> BString {
+    shell
+        .options
+        .argument_zero()
+        .map(BStr::to_owned)
+        .unwrap_or_default()
+}
+
+/// `$BASH_EXECUTION_STRING`: the argument `-c` was given.
+///
+/// Published from the start-up request rather than from `publish`,
+/// because the request is not known when the dialect is applied and
+/// because the name exists only for that one invocation shape: a shell
+/// reading standard input or a script file has no such string and the
+/// reference publishes no such name.
+// [spec:nsh:req:compat.bash.names.ordinary-state]
+pub(crate) fn set_execution_string(shell: &mut Shell, text: &BStr) {
+    if shell.options.dialect() != Dialect::Bash || !shell.variables.special.published {
+        return;
+    }
+    drop(super::set_bytes(
+        shell,
+        BStr::new(b"BASH_EXECUTION_STRING"),
+        Some(text),
+        VariableAttributes::NONE,
+    ));
+}
+
+/// Remember the command about to run, for `$BASH_COMMAND`.
+///
+/// Called where the `DEBUG` action is raised, because that is the moment
+/// the reference means by "the command currently being executed": a
+/// `DEBUG` action reads the command it was raised for, and a read from
+/// anywhere else reads whatever is running at the time.
+///
+/// A command inside a trap action does not move it. The reference's own
+/// name for the thing it publishes here is
+/// `the_printed_command_except_trap`, and the exception is observable:
+/// `trap 'echo $BASH_COMMAND' DEBUG` prints the command that raised the
+/// action and not the `echo` printing it.
+// [spec:nsh:req:compat.bash.names.ordinary-state]
+pub(crate) fn record_command(shell: &mut Shell, tokens: &crate::nodes::SourceTokens) {
+    if shell.options.dialect() != Dialect::Bash || shell.traps.bash.action_is_running() {
+        return;
+    }
+    shell.variables.special.current_command = Some(tokens.clone());
 }
 
 /// The five names that describe the call in progress.
@@ -348,6 +486,7 @@ fn mark_published_facts(shell: &mut Shell) {
     for name in [
         b"BASHPID".as_slice(),
         b"EUID",
+        b"HISTCMD",
         b"OPTIND",
         b"PPID",
         b"RANDOM",
@@ -658,6 +797,19 @@ fn compute(shell: &mut Shell, name: &BStr) -> Option<BString> {
             format!("{seconds}.{:06}", nanos / 1_000)
         }
         b"BASH_SUBSHELL" => shell.shell_level.to_string(),
+        /* A clock exactly like `EPOCHSECONDS`, off the monotonic source
+         * rather than the wall clock, which is the whole of what the
+         * name says. */
+        b"BASH_MONOSECONDS" => (nsh_platform::facts::monotonic_seconds() as i64).to_string(),
+        /* The number the newest history entry carries, and `0` where
+         * there is no history -- which is every non-interactive shell,
+         * here and in the reference. */
+        b"HISTCMD" => crate::editor::history_mut(shell)
+            .and_then(|history| history.newest())
+            .map_or(0, |event| event.number)
+            .to_string(),
+        b"BASH_ARGV0" => return Some(argument_zero(shell)),
+        b"BASH_COMMAND" => return running_command_text(shell),
         b"SHELLOPTS" => return Some(joined(&shell.options.enabled_shell_options())),
         b"BASHOPTS" => return Some(joined(&shell.options.enabled_bash_options())),
         _ => return None,
@@ -712,6 +864,14 @@ pub(crate) fn assigned(shell: &mut Shell, name: &BStr, value: Option<&BStr>) {
             shell.variables.special.seconds_origin = nsh_platform::facts::monotonic_seconds();
         }
         b"RANDOM" => shell.variables.special.reseed(),
+        /* `BASH_ARGV0=zed` makes `$0` answer `zed`, which is the only
+         * way a script can rename itself. */
+        // [spec:nsh:req:compat.bash.names.ordinary-state]
+        b"BASH_ARGV0" => {
+            if let Some(value) = value {
+                shell.options.set_arg0(value);
+            }
+        }
         _ => {}
     }
 }
@@ -774,86 +934,6 @@ pub(crate) fn fork_child(shell: &mut Shell) {
         return;
     }
     shell.variables.special.reseed();
-}
-
-pub fn default_ifs() -> &'static BStr {
-    BStr::new(DEFAULT_IFS)
-}
-
-pub fn default_path() -> BString {
-    BString::from(nsh_platform::default_search_path().to_shell_bytes())
-}
-
-/// A shell running as root prompts with `#`, which is what POSIX asks
-/// for and what tells the reader of a transcript which shell it was.
-// [spec:posix:req:param.ps1-default]
-pub fn default_primary_prompt() -> &'static BStr {
-    if nsh_platform::effective_uid().is_root() {
-        BStr::new(b"# ")
-    } else {
-        BStr::new(b"$ ")
-    }
-}
-
-pub fn default_continuation_prompt() -> &'static BStr {
-    BStr::new(b"> ")
-}
-
-fn builtin_value(shell: &Shell, name: &[u8]) -> BString {
-    shell
-        .variables
-        .entries
-        .get(BStr::new(name))
-        .and_then(Variable::scalar_owned)
-        .unwrap_or_default()
-}
-
-pub fn ifs_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"IFS")
-}
-
-pub fn ifs_is_set(shell: &Shell) -> bool {
-    shell
-        .variables
-        .entries
-        .get(BStr::new(b"IFS"))
-        .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
-}
-
-pub fn mail_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"MAIL")
-}
-
-pub fn mail_path_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"MAILPATH")
-}
-
-pub fn path_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PATH")
-}
-
-pub fn primary_prompt_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PS1")
-}
-
-pub fn continuation_prompt_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PS2")
-}
-
-pub fn trace_prompt_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"PS4")
-}
-
-pub fn history_size_value(shell: &Shell) -> BString {
-    builtin_value(shell, b"HISTSIZE")
-}
-
-pub fn mail_path_is_set(shell: &Shell) -> bool {
-    shell
-        .variables
-        .entries
-        .get(BStr::new(b"MAILPATH"))
-        .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
 }
 
 #[cfg(test)]

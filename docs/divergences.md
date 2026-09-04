@@ -598,6 +598,41 @@ PARSING divergence" -- and OSH also declines to reproduce it.
 Costs `var-op-patsub.test.sh:23` in the compatibility survey, registered
 as a sanctioned divergence rather than a defect.
 
+## Bash-compatibility divergences taken under `[dec:nsh:minimal-unsafe]`
+
+The shell reaches the host only through `nsh-platform`, and that boundary
+publishes the fact a shell needs rather than the syscall Bash happens to
+call. Where the two differ in a way a script can see, it is recorded
+here.
+
+### `BASH_MONOSECONDS` counts from the shell's own start
+
+**Status:** deliberate. `nsh_platform::facts::monotonic_seconds`.
+
+Bash's value is the system's monotonic clock, which on this host is
+seconds since boot: a fresh shell reads about 2.5 million. This shell's
+is seconds since the first read in the process, so a fresh shell reads
+`0`.
+
+The origin is the only difference, and it is the one thing neither the
+name nor Bash's own documentation fixes: the manual says the parameter
+expands to "the value of the system's monotonic clock, if one is
+available", and that where there is none it expands to the *realtime*
+clock instead -- two origins nineteen orders of magnitude apart, from one
+documented name. So a script that subtracts two reads gets the same
+answer from both shells, and a script that compares a single read against
+a constant was never portable between two Bash builds either.
+
+What it buys is the boundary staying as it is.
+`nsh_platform::facts::monotonic_seconds` is `Instant::elapsed` against a
+`OnceLock` origin and says in its own doc that "a shell reads
+differences, never the value, so the origin only has to be stable".
+Reading an absolute monotonic clock means `clock_gettime` on POSIX and
+`GetTickCount64` on Windows -- two host-specific FFI calls, one of them
+`unsafe` -- for a number whose meaning Bash does not fix.
+`SECONDS` and `EPOCHSECONDS` already read the two clocks a script can
+rely on.
+
 ## Bash-compatibility divergences taken under `[dec:nsh:safety-trumps-compatibility]`
 
 These are not dash divergences and have no entry in
@@ -786,9 +821,10 @@ evaluates without recursing through parentheses is unaffected.
 Observable difference: an expression that nests more than 1024 levels
 deep in total is a diagnostic rather than a crash.
 
-### `declare -f` writes a statement as it was written, not as Bash lays it out
+### `declare -f` and `$BASH_COMMAND` write a statement as it was written, not as Bash lays it out
 
-**Status:** deliberate. `crates/nsh/src/nodes/emit.rs`.
+**Status:** deliberate. `crates/nsh/src/nodes/emit.rs`,
+`crates/nsh/src/variables/special.rs::running_command_text`.
 
 This used to be the other way round, and worse: the body was re-spelled
 from its parts, so a printed definition was not always the text Bash
@@ -825,6 +861,18 @@ Nothing re-enters the parser to produce this text, which is the half of
 `[dec:nsh:safety-trumps-compatibility]` that matters here: an
 introspection call must not be a way to have the shell re-read whatever a
 stored definition happened to contain.
+
+`$BASH_COMMAND` is the same answer to the same question, one command
+wide. Bash rebuilds the command from its parse tree, so it re-orders and
+re-spaces: `>/dev/null echo z` comes back as `echo z > /dev/null`. This
+shell hands back the run of tokens the command was read from, less the
+separator that closed it, so it comes back as it was written. Measured
+against the pinned 5.3.15, every other shape the two shells were asked
+agrees exactly -- `echo   one    two` is `echo one two` on both,
+`echo "a  b"` is `echo "a b"` on both, a bare `:` is `:`, an assignment
+`x=1` is `x=1`, and a call `f q r` is `f q r` -- because the run holds
+one token per word and the blanks between them are not in it. Only a
+redirection written before the command word moves.
 
 ### An associative array iterates in sorted key order
 

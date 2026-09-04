@@ -311,6 +311,8 @@ fn evaluate_command_in_scope(
     shell.evaluation.declared_kind = None;
     shell.evaluation.held_declarations.clear();
     record_command_line(shell, command.line.get());
+    // [spec:nsh:req:compat.bash.names.ordinary-state]
+    crate::variables::special::record_command(shell, &command.tokens);
     // [spec:nsh:req:compat.bash.traps-introspection]
     flow!(crate::trap::bash::run_debug(shell));
     if has_unexecutable_bash_syntax(command) {
@@ -365,6 +367,17 @@ fn evaluate_command_in_scope(
             Some(expansion.words.fields[last_argument_index].as_bstr()),
             VariableAttributes::NONE,
         )?;
+    } else if shell.options.dialect() == crate::options::Dialect::Bash {
+        /* A command with no words at all still moves the name: `x=5`
+         * leaves `$_` empty in the reference rather than leaving the
+         * previous command's last word standing. */
+        // [spec:nsh:req:compat.bash.names.ordinary-state]
+        crate::variables::set_bytes(
+            shell,
+            BStr::new(b"_"),
+            Some(BStr::new(b"")),
+            VariableAttributes::NONE,
+        )?;
     }
 
     Ok(command_control
@@ -375,16 +388,29 @@ fn evaluate_command_in_scope(
 /// Which expanded word `$_` will be left holding, if any.
 ///
 /// The C's `lastarg`, and all three of its conditions are the C's too.
-/// `_` is a line-editing convenience, so a non-interactive shell never
-/// pays for it; a function body is not something the user typed, so its
-/// commands do not set it either; and a command with no words has
+/// `_` is a line-editing convenience there, so a non-interactive shell
+/// never pays for it; a function body is not something the user typed, so
+/// its commands do not set it either; and a command with no words has
 /// nothing to name.
+///
+/// NONE OF THE THREE IS BASH'S. Measured on the pinned 5.3.15 with a
+/// script on standard input, so non-interactive throughout: `echo hi`
+/// leaves `hi`, `true a b c` leaves `c`, a bare `echo` leaves `echo` and
+/// a bare `:` leaves `:` -- so the command word counts when nothing
+/// follows it -- and `f(){ echo inner arg; ...; }` leaves `arg` inside
+/// the body and `f` outside it. A command that is only an assignment
+/// leaves the empty string, which is [`None`] here and the empty write in
+/// the epilogue.
 ///
 /// An index rather than the word, and settled here rather than in the
 /// epilogue that uses it, because that is where the C settles it. It
 /// cannot go stale in between: a built-in is handed its words as a
 /// slice, whose length no callee can change.
+// [spec:nsh:req:compat.bash.names.ordinary-state]
 fn underscore_target_field(shell: &Shell, expansion: &ExpandedCommand<'_>) -> Option<usize> {
+    if shell.options.dialect() == crate::options::Dialect::Bash {
+        return expansion.words.fields.len().checked_sub(1);
+    }
     if shell.options.enabled(ShellOption::Interactive)
         && shell.evaluation.function_line == 0
         && expansion.argument_count > 0

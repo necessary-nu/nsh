@@ -5853,4 +5853,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.names.call-stack}
     )}
+    {id bash.divergences.publish-names.ordinary-state, covered_rules (
+        compat.bash.names.ordinary-state
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.names.ordinary-state}
+    )}
 )
