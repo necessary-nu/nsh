@@ -13316,6 +13316,14 @@ children (
                                 kind @status
                                 text "Doing → Done (nplan complete)"
                             }
+
+                            {
+                                at 2026-09-05T11:23:34.784863121Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "A THIRD PLACE THE TOOL CANNOT SEE, AND THE LARGEST FOUND SO FAR. Measured 2026-09-05 at `39b4e46`.\n\n`nplan_worktree` puts a node's build tree in its own store, beside the worktree rather than inside it:\n\n    ~/.local/share/nplan/dash-05c1076b/worktrees/locale-followons-target   3.5 GiB\n\nThe worktree it belonged to was removed on 2026-09-04. The build tree was not, because nothing removes it: `git worktree remove` deletes the checkout and knows nothing about a sibling directory in another tool's store. It had been sitting there since 19:22 on 2026-09-03 while the filesystem hit 100% four separate times, and `scripts/disk-headroom` reported nothing about it on either of the two runs it was asked -- verified directly before removing it, by grepping the tool's own output for the path.\n\nThat is 3.5 GiB, against the 0.24 GiB the `CACHEDIR.TAG` search found when this node was closed. So the marker search fixed the case inside the checkout and this one is outside it entirely, in a path the tool has no reason to guess.\n\nWHY IT IS INVISIBLE RATHER THAN MERELY UNSEARCHED. The search starts from a checkout and prunes upward; this lives under `~/.local/share/nplan/<project>/worktrees/`, which is neither a checkout nor inside one. Two candidate answers, and the second is probably right:\n\n  * enumerate the nplan store for the current project, which means the tool learning a second tool's layout; or\n  * have whatever removes a worktree remove its build tree, so the garbage never accumulates -- `git worktree remove` cannot, but the thing that *created* the pair can.\n\nIt also contained a copy of `target/bash-reference/`, so an orphaned store tree holds a second pinned oracle. That is worth knowing for `harness.oracle-outside-the-worktree`'s search order, which now looks in the git common dir's checkout: an oracle in a store nobody is using is still an oracle, and a stale one would be worse than none."
+                                after_done true
+                            }
                         )
                     }
 
