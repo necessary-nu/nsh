@@ -10350,6 +10350,20 @@ children (
                                             }
                                         )
                                     }
+
+                                    {
+                                        id harness.procsub-wait-ordering-flake
+                                        title "Stop `wait_blocks_on_the_most_recent` asserting that three sleeps finish in order"
+                                        kind @test
+                                        log (
+                                            {
+                                                at 2026-09-05T12:39:48.910981103Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FOUND 2026-09-05 while gating `bash.divergences.alias-listing-in-bash-mode`, in a `cargo test --workspace` run that had nothing to do with it. NOT a shell defect and not the node that delivered the test being wrong about `wait` -- the check's own timing assumption is what fails.\n\n`crates/nsh-cli/tests/bash_wait_for_a_substitution.rs`'s `wait_blocks_on_the_most_recent` runs\n\n    echo a > >(sleep 0.5; cat)\n    echo b > >(sleep 0.3; cat)\n    echo c > >(sleep 0.1; cat)\n    wait\n    echo after\n\nand compares both shells' whole output. It therefore asserts that three substitutions sleeping 0.5, 0.3 and 0.1 finish in that order *and that both shells order them identically*. Under load they do not.\n\nMEASURED on this machine, load beside each: at load 38 it failed, nsh answering `c\\nafter\\na\\nb` against the reference's `c\\nafter\\nb\\na` -- the 0.5 and the 0.3 arrived swapped in one shell and not the other. Four consecutive re-runs at load 29-34 all passed. The sibling `wait_blocks_on_a_substitution`, which has one substitution and so no ordering to get wrong, passed every time.\n\nWHY IT IS THE CHECK AND NOT THE SHELL. A 0.2s margin between two `sleep`s is not a margin at all on a box that has been between load 17 and load 101 today, and the two shells are run sequentially rather than concurrently, so they meet different load. `[spec:nsh:req:oracle.checks-do-not-share-state]` is the rule this sits under: the check depends on process state its siblings share -- the machine's runnable queue -- and it fails as a flake that reads like a shell defect. The house note that a flake rate was once \"an artifact of measuring two shells sequentially\" is the same shape.\n\nWHAT IT SHOULD ASSERT INSTEAD, none of it done: that `wait` blocked -- `after` comes after all three writes -- rather than in what order the three writes landed. Sorting the substitution lines before comparing, or giving each substitution a wide enough separation that the ordering is not a race (seconds, not 0.2s), or dropping to one substitution and testing the blocking property alone. The first keeps the most coverage for the least time.\n\n`505ab80` delivered the check. `bash.divergences.wait-by-pid-for-a-procsub` is a different subject -- what `wait PID` answers for a substitution the shell no longer holds -- and this does not block it."
+                                            }
+                                        )
+                                    }
                                 )
                                 log (
                                     {
