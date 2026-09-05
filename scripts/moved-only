@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Assert that a change moved code rather than changed it.
 #
-#   scripts/moved-only            # working tree against HEAD
-#   scripts/moved-only HEAD~1     # working tree against an older commit
+#   scripts/moved-only                    # working tree against HEAD
+#   scripts/moved-only HEAD~1             # working tree against an older commit
+#   scripts/moved-only -- src/thing       # only the files the change owns
+#   scripts/moved-only HEAD~1 -- a.rs b.rs
 #
 # A seven-hundred-line move and a seven-hundred-line rewrite are the same
 # diff, and no reviewer can tell them apart by reading one. This compares
@@ -14,6 +16,20 @@
 # one change, and it is the check that lets a split of a two-thousand-line
 # file be reviewed as the move it claims to be. A commit that means to fold
 # a helper is a different commit, and this is expected to report it.
+#
+# NAME THE PATHS THE CHANGE OWNS. Without a pathspec the subject is every
+# touched Rust file in the working tree, which in a checkout several sessions
+# share is not the change being reviewed. That reads both ways and the quiet
+# way is the dangerous one: a colleague's file can add a name and be reported
+# as a function this change invented, and it can also add back a name this
+# change folded away, so a fold is answered `unchanged`. Both were measured on
+# 2026-09-05. A pathspec is a claim about which files the change owns, so the
+# lines below say what was restricted to and how many touched Rust files that
+# left unproved.
+#
+# For a `git mv` name both sides of the pair, or a directory containing them:
+# with rename detection off the move is a delete of one path and an add of
+# another, and a pathspec matching only the destination hides the source.
 set -euo pipefail
 
 # `--self-test` builds a repository whose only change is a `git mv` and runs
@@ -22,6 +38,12 @@ set -euo pipefail
 # first case reports every function in the moved file as invented. The
 # second case moves a file AND folds a helper out of it, so the test can be
 # seen to fail rather than only to pass.
+#
+# The third case adds a bystander -- an untracked file this change does not
+# own -- and runs the same tree twice. Tree-wide it must report the
+# bystander's function, because that is the defect the pathspec exists for
+# and a case that cannot be seen failing is not evidence; restricted, it must
+# report the move and must not mention the bystander at all.
 if [ "${1-}" = "--self-test" ]; then
     self=$(cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")
     unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
@@ -54,13 +76,57 @@ if [ "${1-}" = "--self-test" ]; then
         *) echo "  FAIL: folding a helper must be reported, got: $folded" >&2; exit 1 ;;
     esac
 
+    printf 'pub fn one() {}\nfn two() {}\n' > "$work/src/beta.rs"
+    printf 'pub fn a_colleagues_function() {}\n' > "$work/src/bystander.rs"
+
+    status=0
+    whole=$(cd "$work" && "$self" 2>&1) || status=$?
+    case $status:$whole in
+        1:*new:*a_colleagues_function*) echo "  ok: tree-wide, a bystander's file is reported as this change's" ;;
+        *) echo "  FAIL: tree-wide must report the bystander, got: $whole" >&2; exit 1 ;;
+    esac
+
+    status=0
+    scoped=$(cd "$work" && "$self" -- src/alpha.rs src/beta.rs 2>&1) || status=$?
+    case $status:$scoped in
+        0:*unchanged*) echo "  ok: restricted to its own paths, the move reads as a move" ;;
+        *) echo "  FAIL: a pathspec must exclude the bystander, got: $scoped" >&2; exit 1 ;;
+    esac
+    case $scoped in
+        *a_colleagues_function*)
+            echo "  FAIL: the bystander leaked into a restricted run: $scoped" >&2; exit 1 ;;
+    esac
+    case $scoped in
+        *"not proved: 1 other touched Rust file(s)"*)
+            echo "  ok: a restricted run says what it left unproved" ;;
+        *) echo "  FAIL: a restricted run must say what it left out, got: $scoped" >&2; exit 1 ;;
+    esac
+
     echo "scripts/moved-only: self-test passed"
     exit 0
 fi
 
-base=${1:-HEAD}
+base=HEAD
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then
+    base=$1
+    shift
+fi
+restrict=()
+if [ "${1-}" = "--" ]; then
+    shift
+    restrict=("$@")
+elif [ $# -gt 0 ]; then
+    echo "scripts/moved-only: unexpected argument: $1 (paths go after \`--\`)" >&2
+    exit 2
+fi
+
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null || {
     echo "scripts/moved-only: no such commit: $base" >&2
+    case $base in
+        # A path where the base belongs would otherwise be proved about
+        # nothing, which is the misreading this whole script exists to refuse.
+        */*|*.rs) echo "scripts/moved-only: that looks like a path; write \`-- $base\`" >&2 ;;
+    esac
     exit 2
 }
 
@@ -85,14 +151,44 @@ names() {
 # halves of the pair -- one existing only at the base, one only in the tree
 # -- which is the same shape untracked files taught it above, and it already
 # handles it.
-touched=$(
+#
+# The caller's pathspec reaches both halves, so a restriction cannot be
+# honoured on tracked files and quietly ignored on untracked ones. The `.rs`
+# filter moved out of the pathspec and into `sed` so that the two cannot be
+# combined wrongly: git has no way to intersect two pathspecs, and passing
+# both `'*.rs'` and a caller's directory would widen the subject to the union
+# of them rather than narrow it to the overlap.
+touched_rs() {
     {
-        git diff --no-renames --name-only --diff-filter=ACMRD "$base" -- '*.rs'
-        git ls-files --others --exclude-standard -- '*.rs'
-    } | sort -u
-)
+        git diff --no-renames --name-only --diff-filter=ACMRD "$base" -- "$@"
+        git ls-files --others --exclude-standard -- "$@"
+    } | sed -n '/\.rs$/p' | sort -u
+}
+
+lines() { if [ -z "$1" ]; then echo 0; else printf '%s\n' "$1" | wc -l; fi; }
+
+touched=$(touched_rs ${restrict[@]+"${restrict[@]}"})
+
+scope=
+unproved=0
+if [ ${#restrict[@]} -gt 0 ]; then
+    scope="  restricted to: ${restrict[*]}"
+    unproved=$(( $(lines "$(touched_rs)") - $(lines "$touched") ))
+fi
+
+# What was left out is part of the verdict: a proof about a subset that does
+# not say it is one is the same defect as a proof about a superset.
+say_scope() {
+    [ -n "$scope" ] || return 0
+    echo "$scope" >&"$1"
+    if [ "$unproved" -gt 0 ]; then
+        echo "  not proved: $unproved other touched Rust file(s) outside it" >&"$1"
+    fi
+}
+
 if [ -z "$touched" ]; then
     echo "scripts/moved-only: no Rust file changed against $base"
+    say_scope 1
     exit 0
 fi
 
@@ -110,10 +206,12 @@ sort -o "$after" "$after"
 
 if diff -q "$before" "$after" >/dev/null; then
     printf 'scripts/moved-only: %s function(s) across %s file(s), unchanged\n' \
-        "$(wc -l < "$after")" "$(wc -l <<< "$touched")"
+        "$(wc -l < "$after")" "$(lines "$touched")"
+    say_scope 1
     exit 0
 fi
 
 echo "scripts/moved-only: the set of functions changed, so this is not only a move" >&2
+say_scope 2
 diff "$before" "$after" | sed -E 's/^</  gone: /; s/^>/  new:  /' | grep -E '^  (gone|new)' >&2
 exit 1
