@@ -162,13 +162,13 @@ const PRIVATE_PLATFORM_ALLOWLIST: &[&str] = &[
     "crates/nsh-platform/src/unix/editor_terminal.rs",
     "crates/nsh-platform/src/unix/endpoints.rs",
     "crates/nsh-platform/src/unix/errors.rs",
+    "crates/nsh-platform/src/unix/facts.rs",
     "crates/nsh-platform/src/unix/locale.rs",
     "crates/nsh-platform/src/unix/locale/characters.rs",
     "crates/nsh-platform/src/unix/paths.rs",
     "crates/nsh-platform/src/unix/process.rs",
     "crates/nsh-platform/src/unix/signals.rs",
     "crates/nsh-platform/src/unix/terminal.rs",
-    "crates/nsh-platform/src/unix_facts.rs",
     "crates/nsh-platform/src/windows.rs",
     "crates/nsh-platform/src/windows/broker.rs",
     "crates/nsh-platform/src/windows/children.rs",
@@ -1382,7 +1382,7 @@ fn descriptors_cross_the_boundary_owned() -> Vec<String> {
      * interactive surface and left with it; `wait_for_input` stayed because
      * `read -t` is a script-visible builtin. */
     let required = "pub fn wait_for_input(fd: &impl AsDescriptor";
-    match text_at(&workspace, "crates/nsh-platform/src/unix_facts.rs") {
+    match text_at(&workspace, "crates/nsh-platform/src/unix/facts.rs") {
         Err(report) => violations.push(report),
         Ok(facts) => {
             if !facts.contains(required) {

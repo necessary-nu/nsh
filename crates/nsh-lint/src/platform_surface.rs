@@ -19,8 +19,11 @@
 //! against the `cfg` conditions stacked on it -- a name published under
 //! `feature = "edit"` on one host and unconditionally on the other has
 //! drifted as surely as one that is missing. The crate root's own
-//! `pub use` items join the comparison when they carry a host predicate,
-//! because that is where `windows_facts` is published from.
+//! `pub use` items join the comparison when they carry a host predicate.
+//! Nothing in the crate root carries one today -- each host's table of
+//! contents lists its whole surface -- but the merge stays, because a
+//! name published from the root would otherwise be on a surface without
+//! appearing in the file that lists it.
 //!
 //! WHAT IS NOT, said here rather than left to be discovered. This reads
 //! module-level names, so a `cfg`-split *inherent method* -- of which
@@ -37,8 +40,8 @@ use crate::workspace_root;
 /// The platform crate's source directory, relative to the workspace root.
 const PLATFORM: &str = "crates/nsh-platform/src";
 
-/// The crate root, which publishes each host's facts module itself and so
-/// holds part of both surfaces.
+/// The crate root, read because a host-guarded `pub use` written here
+/// would belong to one surface and not the other.
 const CRATE_ROOT: &str = "lib.rs";
 
 /// Every supported host: the `cfg` predicate that selects it in the crate
@@ -53,10 +56,12 @@ type Surface = BTreeMap<String, String>;
 /// One `pub use` of one name, before either host has claimed it: the name
 /// and the conditions that publication carries.
 ///
-/// A list rather than a map, because the crate root publishes `UserId`
-/// twice -- once under `unix` and once under `windows` -- and folding
-/// those into one entry loses whichever host is read first, which is a
-/// name reported missing from a host that has it.
+/// A list rather than a map, because one file may publish a name twice
+/// -- once under `unix` and once under `windows` -- and folding those
+/// into one entry loses whichever host is read first, which is a name
+/// reported missing from a host that has it. `a_table_of_contents_reads`
+/// is where that is measured; no file in the platform crate is written
+/// that way today, so nothing else would notice the fold.
 type Publication = (String, String);
 
 /// Every host's table of contents publishes the same names under the same
@@ -332,9 +337,9 @@ mod tests {
              pub use windows::*;\n\
              pub use text::NativeStrExt as Native;\n\
              #[cfg(unix)]\n\
-             pub use unix_facts::UserId;\n\
+             pub use unix::facts::UserId;\n\
              #[cfg(windows)]\n\
-             pub use windows_facts::UserId;\n\
+             pub use windows::facts::UserId;\n\
              #[cfg(test)]\n\
              mod tests {\n    pub use hidden::NotPublished;\n}\n",
         );
@@ -411,20 +416,50 @@ mod tests {
         }
     }
 
-    /// The crate root carries part of *both* surfaces, and the same name
-    /// on each: `UserId` is published there once per host, and reading it
-    /// for one host must not take it away from the other.
+    /// Each host's surface is listed in that host's own table of
+    /// contents, and the crate root adds nothing to either.
+    ///
+    /// The root publishes each host's module whole and names nothing
+    /// under a host predicate itself, so a reader who wants to know what
+    /// a host publishes has one file to open. A name published from the
+    /// root instead is on a surface without appearing in the file that is
+    /// supposed to list it, which is the drift this check exists to
+    /// catch, one level up: the two lists would still agree with each
+    /// other and neither would be the whole truth.
+    ///
+    /// The merging in `hosts_publish_the_same_surface` stays, because
+    /// nothing stops a root publication being written again -- and this
+    /// is what would report it. `a_table_of_contents_reads` is where the
+    /// merge's hazard is measured, on a literal that holds `UserId` under
+    /// both hosts whatever the platform crate happens to look like today.
     #[test]
-    fn the_crate_root_carries_part_of_each_surface() {
+    fn the_crate_root_adds_nothing_to_a_surface() {
         let text = std::fs::read_to_string(workspace_root().join(PLATFORM).join(CRATE_ROOT))
             .expect("the crate root is readable");
-        let (names, _) = published(&text);
-        for (host, _) in HOSTS {
+        let (names, opaque) = published(&text);
+        for (host, file) in HOSTS {
             let guarded: Vec<_> = names
                 .iter()
                 .filter_map(|(name, conditions)| without(conditions, host).map(|_| name.as_str()))
                 .collect();
-            assert!(guarded.contains(&"UserId"), "{host}: {guarded:?}");
+            assert!(
+                guarded.is_empty(),
+                "{CRATE_ROOT} publishes {guarded:?} for {host} alone; \
+                 they belong in {file}"
+            );
+            /* Only the host-guarded ones. The root's unguarded `pub`
+             * items -- `mod facts`, `enum CharacterEncoding` -- are on
+             * both hosts by construction and are not a surface split. */
+            let cannot_read: Vec<_> = opaque
+                .iter()
+                .filter(|(conditions, _)| without(conditions, host).is_some())
+                .map(|(_, item)| item.as_str())
+                .collect();
+            assert!(
+                cannot_read.is_empty(),
+                "{CRATE_ROOT} publishes {cannot_read:?} for {host} alone \
+                 by a route the check cannot compare"
+            );
         }
     }
 }

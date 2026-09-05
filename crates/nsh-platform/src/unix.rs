@@ -3,13 +3,12 @@
 //!
 //! Every POSIX-only subject is declared below and resolves by
 //! convention, which is what this file being a module rather than an
-//! included text buys. Two are declared by the crate root instead, for
-//! the one reason a `mod` item cannot reach them from here:
-//! `signal_names` is shared with the Windows host, and `unix_facts` sits
-//! in the crate root's directory rather than in `unix/`.
+//! included text buys. One is declared by the crate root instead, for
+//! the one reason a `mod` item cannot reach it from here:
+//! `signal_names` is shared with the Windows host.
 //!
-//! Every name this file and the crate root publish for POSIX is
-//! published for Windows as well, under the same conditions. The shell
+//! Every name this file publishes for POSIX is published for Windows as
+//! well, under the same conditions. The shell
 //! names them with no `cfg`, so a host short of one fails in the shell on
 //! a target nobody here builds rather than in the file that is short;
 //! `nsh-lint`'s `hosts_publish_the_same_surface` compares the two lists
@@ -51,6 +50,11 @@ mod errors;
 pub use errors::{
     PathErrorKind, command_exec_failure_status, is_bad_descriptor_error, is_exec_format_error,
     is_path_error, is_pseudoterminal_end, platform_error,
+};
+mod facts;
+pub use facts::{
+    GroupId, UserId, descriptor_limit, effective_gid, effective_uid, host_name, real_uid,
+    supplementary_groups, wait_for_input,
 };
 mod locale;
 pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};

@@ -3,7 +3,7 @@
 //!
 //! Questions that share nothing with each other except that they are
 //! the ones this platform answers for the Bash-compatibility surface.
-//! `windows_facts` answers the same list, which is why the user and
+//! `windows::facts` answers the same list, which is why the user and
 //! group identities live here rather than beside the process code that
 //! reads them: a constructor belongs with the private field it fills,
 //! and on the Windows side that field can only be reached from the

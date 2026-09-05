@@ -1,4 +1,4 @@
-//! The Windows answers to the questions `unix_facts` answers on a
+//! The Windows answers to the questions `unix::facts` answers on a
 //! POSIX host: who the process is, what the host is called, and whether
 //! a descriptor has anything to read.
 
@@ -25,9 +25,9 @@ pub fn descriptor_limit() -> u32 {
 ///
 /// Declared here rather than in `windows` because this is the module
 /// that answers who the process is, and because a constructor has to sit
-/// with the private field it fills: `windows_facts` is a *sibling* of
-/// `windows`, where `unix_facts` is a *child* of `unix`, so it cannot
-/// reach a field declared over there.
+/// with the private field it fills. `ca0fa37` fixed a Windows build
+/// broken by exactly that split, when this module could not reach a
+/// private field `windows` declared.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UserId(u32);
 

@@ -10163,6 +10163,7 @@ children (
                                         id bash.divergences.hash-option-set
                                         title "Take `hash -p -t -d -l` and the reference's hit-count listing in Bash mode"
                                         kind @feat
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-04T15:50:50.930215832Z
@@ -10176,6 +10177,13 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @status
                                                 text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-05T12:07:07.646467476Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }
@@ -10295,6 +10303,20 @@ children (
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "FOUND 2026-09-05 while choosing cases for `bash.divergences.errexit-over-an-assignment-error`, and not part of it: it is present with `errexit` never set, and a control binary built from `051a717` answers exactly as the fixed one does, so nothing in that node moved it.\n\nTHE REFERENCE DOES NOT EVALUATE A SLICE BOUND WHEN THE ARRAY HAS NO ELEMENTS. This shell evaluates it always, so a bound that will not evaluate abandons the record here and expands to nothing there.\n\nMEASURED against the pinned Bash 5.3.15 at `target/bash-reference/bash` and a release nsh from `051a717` (private worktree, own CARGO_TARGET_DIR, `-p nsh-cli`), Bash mode, fed on standard input, load 70. Script is the expansion then `echo SAME`:\n\n    case                                        bash        nsh\n    declare -a w;        echo \"[${w[@]:1+:2}]\"  []  SAME    (abandons)   <<< diverges\n    unset w;             echo \"[${w[@]:1+:2}]\"  []  SAME    (abandons)   <<< diverges\n    declare -a w;        echo \"[${w[@]:1+}]\"    []  SAME    (abandons)   <<< diverges\n    declare -a w=(a b c) echo \"[${w[@]:1+:2}]\"  (abandons)  (abandons)   agrees\n    s=;                  echo \"[${s:1+:2}]\"     (abandons)  (abandons)   agrees\n    s=abc;               echo \"[${s:1+:2}]\"     (abandons)  (abandons)   agrees\n\nSo it is specifically the *array* path with nothing to walk. A string slice evaluates its bounds whether the string is empty or not, and an array with elements evaluates them too; only an array of no elements -- declared empty or entirely unset -- short-circuits before the arithmetic is reached. That is the same \"the array path finds no value to walk\" shape already recorded on the `${z[@]@a}` measurement elsewhere in this tree.\n\nWHY IT IS WORTH A NODE. The divergence is invisible until the bound is malformed, and then it is not a wrong value but a *different control flow*: this shell abandons the input record and the reference runs the command. A script slicing an array that happens to be empty on one input and populated on another changes behaviour between the two runs here and not there.\n\nNOT COVERED by `bash.divergences.substitution-in-subscript`, which is a command substitution inside a subscript, nor by any node mentioning empty arrays -- those are `declare -p` round trips and `@a` transforms.\n\nDONE WHEN a slice bound on an array of no elements is not evaluated in Bash mode, the string-slice and populated-array rows above do not move, the POSIX dialect is untouched, and a differential row holds all six cases through both shells."
+                                            }
+                                        )
+                                    }
+
+                                    {
+                                        id bash.divergences.type-reports-a-pinned-path
+                                        title "Report a `hash -p` pin from `type` and `command -v`, and count the lookup"
+                                        kind @fix
+                                        log (
+                                            {
+                                                at 2026-09-05T12:07:02.999443941Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FOUND 2026-09-05 WHILE CLOSING `bash.divergences.hash-option-set`, AND LEFT OUT OF IT ON PURPOSE. That node gave the Bash dialect `hash -p -t -d -l` and the reference's `hits`/`command` listing, and made a pinned path the thing that actually runs. Two readers of the same table were not moved with it, because both are `type`'s code rather than `hash`'s.\n\nMEASURED against the pinned Bash 5.3.15 at `target/bash-reference/bash` and a release build of the `hash-option-set` branch (`-p nsh-cli`), `env -i PATH=/usr/bin:/bin LC_ALL=C`, fed on standard input, load 47-98:\n\n    hash -p /bin/true tt; type tt\n      bash            tt is hashed (/bin/true)   st=0\n      nsh -o bash     nsh: type: tt: not found   st=1\n\n    hash -p /bin/true tt; command -v tt\n      bash            /bin/true                  st=0\n      nsh -o bash     nsh: type: tt: not found   st=1\n\n    ls >/dev/null 2>&1; type ls >/dev/null; command -v ls >/dev/null; hash\n      bash            hits 3\n      nsh -o bash     hits 1\n\nSo the pin is invisible to both readers, and neither counts the consultation the reference's listing counts. The execution path is right -- `hash -p /bin/true ls; ls` runs `/bin/true` in both shells -- so this is a reporting gap, not a lookup one.\n\nWHY IT WAS NOT DONE THERE. `builtins/type.rs` reads the table directly through `CommandTable::resolved` and skips `find_command` when it hits, so the counter `find_command` now keeps is never reached; adding `shell.commands.note_hit(command)` in that branch is one line and was written and measured. It changed nothing, because in the Bash dialect `type` does not run that code at all: `builtins/type.rs:37` hands the whole built-in to `builtins/type/bash.rs`, which is a second implementation. The one-line edit was reverted rather than left in as a POSIX-dialect-only half-fix that no measurement covers.\n\nWHERE THE WORK GOES. `builtins/type/bash.rs` for both readers, and the `Command::External { path_index }` arm in `builtins/type.rs:130` for the POSIX-dialect side if it is wanted there -- note that arm reconstructs a path from a `PATH` index and a pinned entry carries `path_index: None`, so today it falls through to printing the bare name rather than panicking, which is why this is a wrong answer and not a crash. `CommandTable::pinned_path` and `CommandTable::note_hit` already exist and are what the fix calls.\n\nNOT COVERED BY ANY SURVEY: `tests/surveys/oils/spec/command_.test.sh` has one `hash` case (`command_.test.sh:14`, \"hash with args\") and it reads the bare listing rather than `type`. `crates/nsh-cli/tests/bash_hash_option_set.rs` deliberately holds no row on either reader and its module comment does not claim one."
                                             }
                                         )
                                     }
@@ -10739,6 +10761,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 WHILE CLOSING `harness.spec-cannot-see-the-shell-harness`, AND WRITTEN INTO `verification.md` RATHER THAN FIXED.\n\nAn nspec impl scope and a lint corpus are two different things, and after that node they disagree. `fuzz/*.sh`, `tests/harness/*` and `scripts/*` are now inside the `nsh` spec's `nsh-harness` impl, so a shell script can carry `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` and the coverage map will believe it. Nothing checks it. `crates/nsh/tests/oracle_measurement.rs` reads `#[test]` functions under `crates/` and only there, which is stated in its own file and now also in `verification.md`.\n\nSo seven shell claims landed that day whose only warrant is that somebody read the script. That is exactly the standard the rule they claim exists to refuse, one level up: a claim that cannot be seen to fail.\n\nWHAT A SHELL SWEEP WOULD LOOK FOR, if it is worth one: a `return 0` or `exit 0` reached when a fixture, a reference binary or a directory is absent; an assertion guarded by `[[ -x $ref ]] &&` with no else; a `|| :` that swallows the status of the thing being measured. `fuzz/sweep.sh` already carries the argument for the third -- deciding liveness by exit status reported five live findings as closed.\n\nWHAT ARGUES AGAINST IT, and it is the same argument `verification.md` records for not sweeping `fuzz/fuzz_targets/`: a shell script is full of legitimate early exits, and a lint that needs twenty-five suppressions on its first day does not survive to catch the twenty-sixth. Measure the false-positive count over the 22 scripts before writing anything.\n\nDONE WHEN either a sweep exists and has been seen to fail on a shell check that was made to skip its reference, or `verification.md`'s closing paragraph is replaced by a recorded decision that a shell claim is warranted by review alone and says who reviews it."
+                            }
+
+                            {
+                                at 2026-09-05T12:04:09.535328308Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }
@@ -12941,6 +12970,7 @@ children (
                         id struct.facts-under-their-hosts
                         title "Move each host's facts module under the host that owns it"
                         kind @refactor
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T13:13:46.629467656Z
@@ -12954,6 +12984,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-05T12:09:35.185372009Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

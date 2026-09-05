@@ -71,6 +71,11 @@ pub use errors::{
     PathErrorKind, command_exec_failure_status, is_bad_descriptor_error, is_exec_format_error,
     is_path_error, is_pseudoterminal_end, platform_error,
 };
+mod facts;
+pub use facts::{
+    GroupId, UserId, descriptor_limit, effective_gid, effective_uid, host_name, real_uid,
+    supplementary_groups, wait_for_input,
+};
 mod locale;
 pub use locale::{Locale, LocaleCategory, LocaleCharacter, LocaleDecode, LocaleDecoder};
 mod paths;

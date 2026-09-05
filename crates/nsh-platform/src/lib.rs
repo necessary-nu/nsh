@@ -235,34 +235,20 @@ pub use work::{LocaleWork, locale_work};
 mod signal_names;
 pub use signal_names::{SIGNAL_COUNT, SIGNAL_NAMES};
 
-/* Each host owns every subject of its own except its facts, which are
- * declared here because a `mod` item names a file relative to the module
- * it is written in and `unix_facts.rs` sits in this directory rather than
- * the one `unix.rs` owns, as `windows_facts.rs` does below. */
+/* Each host owns every subject of its own, so the root declares one
+ * module per host and publishes its table of contents whole. A name
+ * published from here instead would be on one host's surface without
+ * appearing in the file that is supposed to list it. */
 // [spec:nsh:req:idiom.declared-module-tree]
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
 pub use unix::*;
-#[cfg(unix)]
-mod unix_facts;
-#[cfg(unix)]
-pub use unix_facts::{
-    GroupId, UserId, descriptor_limit, effective_gid, effective_uid, host_name, real_uid,
-    supplementary_groups, wait_for_input,
-};
 
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
 pub use windows::*;
-#[cfg(windows)]
-mod windows_facts;
-#[cfg(windows)]
-pub use windows_facts::{
-    GroupId, UserId, descriptor_limit, effective_gid, effective_uid, host_name, real_uid,
-    supplementary_groups, wait_for_input,
-};
 
 /// How one locale's charmap writes a character it was asked to write.
 ///
