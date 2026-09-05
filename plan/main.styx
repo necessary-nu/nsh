@@ -10271,6 +10271,13 @@ children (
                                                 kind @note
                                                 text "FOUND 2026-09-04 while closing `bash.divergences.refused-integer-abandons-list`, and deliberately left out of it because it is the *frame* and not the failure. This is the same shape `dec490b` established for an expansion error, one commit earlier: the boundary belongs to the frame the shell leaves through rather than to what failed.\n\nMEASURED against the pinned Bash 5.3.15, `bash --posix` and a release nsh at `9bb719e`, load 41. Each script is two records, the second `echo AFTER`:\n\n    frame            bash            nsh\n    -c \"a\\nb\"        rc=1, no AFTER  rc=0, AFTER runs   <<< diverges\n    FILE operand     rc=0, AFTER     rc=0, AFTER        agrees\n    STDIN            rc=0, AFTER     rc=0, AFTER        agrees\n\nwith `a` being any of `declare -i x=1+`, `declare -ai v=(1+)`, `typeset -i x=1+`, `local -i x=1+` in a function, or a plain `x=1+` on a name already carrying `-i`. Bash and `--posix` agree throughout, so it is not a dialect question.\n\nWHY IT IS NOT `refused-integer-abandons-list`'s. That node closed the difference between the two halves of one command -- the scalar `declare -i x=1+` was swallowed by the frame that catches a built-in's failure while the compound spelling raised -- and after it every spelling abandons its record in every frame. THIS divergence is left over and applies equally to the compound spelling, which agreed before that node and still does: it was never about `declare`. `-c` is the only frame that shows it.\n\nTHE MECHANISM, and it is already written down on `expansion-error-status-in-bash-mode`: Bash evaluates a `-c` string through `parse_and_execute`, which reads the whole string as one unit and whose `setjmp` is outside it, so a `DISCARD` jump leaves the string entirely. A file or standard input is read by a loop whose `setjmp` is inside, per record. `crates/nsh/src/evaluation.rs`'s `evaluate_record` is this shell's resumption point and its doc comment already says \"Every caller is such a loop -- the interactive command loop, a script or `-c` string\" -- that sentence is the bug: a `-c` string is NOT such a loop in the reference, and the comment should be corrected by whoever takes this.\n\nWORTH MEASURING FIRST, none of it done: whether an expansion error in a `-c` string is already handled by `dec490b`'s change and this is only the assignment class left behind (if so the two want one mechanism, not two); what `-c` does with `set -e` live, which interacts with `errexit-over-an-assignment-error`; and whether the interactive command loop is a third frame again.\n\nDONE WHEN a `-c` string abandons the rest of itself for every assignment error, a file and standard input still resume at the next record, and a differential row in `crates/nsh-cli/tests/bash_declaration_assignment_boundary.rs` holds all three frames -- that file currently feeds every case on stdin precisely to keep this question out of it, and says so."
                                             }
+
+                                            {
+                                                at 2026-09-05T13:30:42.656472351Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
                                         )
                                     }
 
@@ -14177,6 +14184,69 @@ children (
                                 text "FOUND 2026-09-02 WHILE CLOSING `let-the-sweep-see-a-slow-unit`, AND NOT PART OF IT. Nothing looks at what the corpus itself costs, and the corpus is where the expensive inputs are.\n\nlibFuzzer files a `slow-unit-` only when an input crosses `-report_slow_units`, ten seconds by default. Everything under that stays in the corpus and is never reported by anything. Measured on `fuzz/corpus/matcher`, a deterministic 249-input sample replayed through the built target at load 4:\n\n    median            2 ms\n    90th percentile   3 ms\n    99th percentile 160 ms\n    slowest         313 ms\n\nso the corpus holds inputs costing a hundred and fifty times an ordinary one, on the *fixed* tree. On the tree still carrying the alternation defect the same sample's slowest read 7,082ms -- which is the number that forced `fuzz/sweep.sh` to calibrate against the cheaper half of its sample rather than the mean, because averaging that one in would have hidden a 9,069ms artifact behind it.\n\nWHY IT IS WORTH LOOKING. The fifth `matcher` artifact, `d771ff817c9f`, took eleven seconds and had been reachable for as long as the defect existed; it was found only because someone ran one more campaign after believing the work was done. An input at three hundred milliseconds is the same shape one order of magnitude down, and there are already several of them sitting in a directory nobody reads. The sweep now has the machinery to say what an input costs as a multiple of an ordinary one, and pointing it at the corpus instead of the artifact directory is most of the work.\n\nWHAT IS NOT OBVIOUS AND IS THE ACTUAL QUESTION. A corpus outlier is not automatically a defect: a legitimately large input legitimately costs more, and the sweep's multiple is not size-normalised. So the useful report is probably cost per input byte, or cost against the same target's inputs of a similar size, rather than a flat multiple -- and choosing between those wants the distribution looked at rather than guessed.\n\nDONE WHEN. Something reports the cost distribution of a target's corpus in units that do not move with the machine's load, the `matcher` outliers above have been read and either explained or filed, and whatever it is runs cheaply enough that a campaign can end with it."
                             }
                         )
+                    }
+                )
+            }
+        )
+    }
+
+    {
+        id interactive
+        title "Give nsh the interactive surface its own decision left open"
+        kind @feat
+        children (
+            {
+                id interactive.prompt-hook
+                title "Run a hook before each prompt, in the shell's own environment"
+                kind @feat
+                implements {
+                    nsh-library ([spec:nsh:req:interactive.prompt-hook])
+                }
+            }
+
+            {
+                id interactive.prompt-state
+                title "Let a prompt hook read the status, the job count and the last command's duration"
+                kind @feat
+                implements {
+                    nsh-library ([spec:nsh:req:interactive.prompt-state])
+                }
+            }
+
+            {
+                id interactive.terminal-width
+                title "Publish the terminal's width as COLUMNS, and refresh it on resize"
+                kind @feat
+                implements {
+                    nsh-library ([spec:nsh:req:interactive.terminal-width])
+                }
+            }
+
+            {
+                id interactive.prompt-display-width
+                title "Place the cursor by the prompt's display width, not its byte length"
+                kind @feat
+                implements {
+                    nsh-library ([spec:nsh:req:interactive.prompt-display-width])
+                }
+            }
+
+            {
+                id interactive.starship
+                title "Render a starship prompt from the state the shell already holds"
+                kind @feat
+                deps (
+                    interactive.prompt-hook
+                    interactive.prompt-state
+                    interactive.terminal-width
+                    interactive.prompt-display-width
+                )
+                log (
+                    {
+                        at 2026-09-05T14:45:21.176704358Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "WHAT STARSHIP ACTUALLY NEEDS, MEASURED 2026-09-05 AGAINST STARSHIP 1.22.1 AND A RELEASE BUILD OF `24d977f`.\n\nIts Bash integration (`starship init bash --print-full-init`) is 140 lines and almost all of it exists to recover state a shell already has. Probed feature by feature, this shell in Bash mode already answers:\n\n    BASH_VERSION       5.3.15(1)-release      BASH_VERSINFO[0]   5\n    PIPESTATUS         `true|false` -> \"0 1\"  jobs -p            rc=0\n    local -a + append  ok                     ${x//[!y]}         ok\n    RANDOM, SHLVL      ok                     ${x:0:16}          ok\n\nand does not answer:\n\n    PROMPT_COMMAND     assignable, read by nothing -- 0 hits in crates/\n    PS0                assignable, read by nothing -- 0 hits\n    COLUMNS            never set; `checkwinsize` is in the option table and\n                       implemented nowhere\n    prompt width       nothing computes it -- no ANSI stripping, no `\\[ \\]`\n                       handling anywhere in the tree\n\nBECAUSE `BASH_VERSINFO[0]` IS 5, starship's init takes its `PS0` branch rather than its `DEBUG`-trap branch. That is worth knowing before anyone reaches for the trap.\n\nTHE MEASUREMENT THAT DECIDED THE DESIGN. `STARSHIP_SHELL` selects how the prompt is escaped:\n\n    STARSHIP_SHELL=bash   \\[ESC[1;33m\\]brendan\\[ESC[0m\\] in ...\n    STARSHIP_SHELL=nsh    ESC[1;33mbrendan ESC[0m in ...\n\nBash's `\\[`/`\\]` mark the runs that do not advance the cursor, because readline will not parse the sequences. An unknown shell gets neither markers nor complaint -- the prompt is plain ANSI. Since `[spec:nsh:req:interactive.prompt-display-width]` requires computing that width properly, the markers buy nothing, and telling starship we are Bash would only add a second thing to parse.\n\nSO THIS NODE IS SMALL AND IS NOT A BASH EMULATION. `starship prompt` takes the state on its command line:\n\n    starship prompt --status=N --jobs=N --cmd-duration=MS --terminal-width=N \\\n                    --pipestatus=\"...\" --shlvl=N\n\nEvery one of those is something the shell holds already, which is what its four dep nodes deliver. The deliverable here is the small init this shell ships, an integration check that a real `starship prompt` renders through the editor without mis-wrapping, and `PS2` from `starship prompt --continuation`.\n\nWHAT WE OWN BY DOING IT THIS WAY, recorded because it is the cost of the choice: the init snippet is ours, so a change to starship's `prompt` arguments is ours to track. The alternative -- evaluating their bash script -- would have made it their maintenance and our impersonation, and `[dec:nsh:bash-compatibility-is-scripts]` rejected precisely that: \"a Bash-compatibility contract that promises Bash-shaped interactivity implemented over a different editor promises something neither Bash nor nsh delivers.\"\n\nNOT MEASURED, and worth doing before the node closes: whether `starship prompt --right` is worth wiring (nshedit would need right-prompt support), and whether the `--keymap` argument means anything for an editor that is not vi/emacs-moded."
                     }
                 )
             }
