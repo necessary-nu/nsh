@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-05T20:31:00.113968683Z
+last_sync_at 2026-09-05T20:47:13.859759948Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -2496,6 +2496,13 @@ impl_evidence (
         {impl_name nsh-library, rule interactive.prompt-state}
     ), rule_versions_seen (
         {id interactive.prompt-state, version 0}
+    )}
+    {id interactive.terminal-width, covered_rules (
+        interactive.terminal-width
+    ), covered_claims (
+        {impl_name nsh-library, rule interactive.terminal-width}
+    ), rule_versions_seen (
+        {id interactive.terminal-width, version 0}
     )}
     {id introduce-bash-value-model, covered_rules (
         compat.bash.value-model
@@ -5992,10 +5999,5 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
-    )}
-    {id interactive.terminal-width, covered_rules (
-        interactive.terminal-width
-    ), covered_claims (
-        {impl_name nsh-library, rule interactive.terminal-width}
     )}
 )
