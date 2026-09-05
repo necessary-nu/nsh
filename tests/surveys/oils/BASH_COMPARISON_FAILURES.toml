@@ -2,12 +2,18 @@
 #
 # Generated. Do not edit the list by hand: re-record it with
 #
-#     nsh-survey run-oils --expect-shell bash \
+#     scripts/sandboxed --writable tests/surveys/oils -- \
+#       target/release/nsh-survey run-oils --expect-shell bash \
 #       --group bash-comparison --baseline tests/surveys/oils/BASH_COMPARISON_FAILURES.toml --update-baseline
 #
 # and read the difference the refresh prints before you keep it. Drop
 # `--update-baseline` to compare instead: that exits non-zero when the sets
 # differ and names every id on either side of the difference.
+#
+# `--writable` is not optional. The containment binds `/` read-only and
+# this file's directory is outside the writable set without it, so the
+# refresh has nowhere to put its answer; it says so in the first second
+# rather than after the group, which takes minutes.
 #
 # Nothing is extracted from the run's text, which is the whole point of the
 # file. The `grep -aoE '^FAIL +[a-z0-9-]+\.test\.sh:[0-9]+'` this replaces

@@ -1717,7 +1717,8 @@ assertions (
     {id bash.divergences.errexit-over-an-assignment-error, kind @doing, author "brendan@necessary.nu", at 2026-09-05T11:27:51.256239714Z}
     {id tooling.moved-only-reads-the-whole-dirty-tree, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:33:17.709902353Z}
     {id tooling.disk.readme-says-tmp-is-ram, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:36:53.379279236Z}
-    {id harness.refresh-cannot-write-inside-the-containment, kind @doing, author "brendan@necessary.nu", at 2026-09-05T11:38:00.694372454Z}
+    {id harness.refresh-cannot-write-inside-the-containment, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:56:22.338183749Z}
+    {id harness.fuzz-targets-claim-nothing, kind @doing, author "brendan@necessary.nu", at 2026-09-05T11:41:59.333400759Z}
 )
 
 impl_evidence (

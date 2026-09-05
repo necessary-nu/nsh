@@ -71,8 +71,14 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
      * replace. Asked here so a refusal costs a second rather than the
      * group run, and again at the write, because the group run is exactly
      * the window another session re-records in. */
+    /* And the third: whether the file can be written at all. The two
+     * above are about what the file means; this one is about whether the
+     * run has anywhere to put its answer, and it is the question the
+     * containment makes fail. Asked last of the three because it is the
+     * cheapest to satisfy and the least interesting to be told. */
     if let (Some(path), true) = (&options.baseline, provenance.is_some()) {
         crate::provenance::guard_generated(path, options.overwrite)?;
+        baseline::refuse_unwritable(path)?;
     }
     let report = run_manifest(&options, &manifest)?;
     if let Some(path) = &options.summary {

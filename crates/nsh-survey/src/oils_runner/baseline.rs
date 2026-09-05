@@ -84,7 +84,17 @@ const SCHEMA: u32 = 1;
 /// The command it quotes is the one that reproduces *this* file, group
 /// and path included. A header naming some other run is how a file ends
 /// up being maintained by a command that does not maintain it.
+///
+/// WHICH IS WHY IT SPELLS THE WRAPPER AND `--writable`. `README.md`
+/// spells every survey run through `scripts/sandboxed`, and that
+/// containment binds `/` read-only with this file's directory outside the
+/// writable set. A header quoting the bare binary quotes a command that
+/// runs for minutes and then cannot write the file it claims to maintain.
 fn header(group: &str, expectation_shell: &str, path: &Path) -> String {
+    let directory = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.display().to_string(),
+        _ => ".".to_owned(),
+    };
     let path = path.display();
     format!(
         "\
@@ -92,12 +102,18 @@ fn header(group: &str, expectation_shell: &str, path: &Path) -> String {
 #
 # Generated. Do not edit the list by hand: re-record it with
 #
-#     nsh-survey run-oils --expect-shell {expectation_shell} \\
+#     scripts/sandboxed --writable {directory} -- \\
+#       target/release/nsh-survey run-oils --expect-shell {expectation_shell} \\
 #       --group {group} --baseline {path} --update-baseline
 #
 # and read the difference the refresh prints before you keep it. Drop
 # `--update-baseline` to compare instead: that exits non-zero when the sets
 # differ and names every id on either side of the difference.
+#
+# `--writable` is not optional. The containment binds `/` read-only and
+# this file's directory is outside the writable set without it, so the
+# refresh has nowhere to put its answer; it says so in the first second
+# rather than after the group, which takes minutes.
 #
 # Nothing is extracted from the run's text, which is the whole point of the
 # file. The `grep -aoE '^FAIL +[a-z0-9-]+\\.test\\.sh:[0-9]+'` this replaces
@@ -618,12 +634,72 @@ fn record(
     Ok(true)
 }
 
+/// Refuse a refresh that could not write its baseline, before the group
+/// runs rather than after it.
+///
+/// The write above is the last thing after a run that takes minutes. The
+/// documented `bash-comparison` refresh inside `scripts/sandboxed`, which
+/// binds `/` read-only and makes only `target` and whatever `--writable`
+/// names writable, measured 238 seconds on 2026-09-05 -- 192 of them the
+/// group itself, 2735 cases -- printed a correct comparison, and ended in
+/// `nsh-survey: Read-only file system (os error 30)`. Naming no path: the
+/// reader had to already know that `--baseline`'s directory was outside
+/// the writable set to make anything of it, which is knowing the answer
+/// before asking the question.
+///
+/// Nothing about the answer needs the run, so it is asked in the first
+/// second, for the same reason `vouch` and `guard_generated` are.
+///
+/// IT OPENS RATHER THAN READING PERMISSION BITS. `EROFS` is a property of
+/// the mount and not of the mode, and the mode is exactly what looks fine
+/// in the case that cost the four minutes: the file is `rw-` to its owner
+/// on a filesystem that will not take a write from anyone. An existing
+/// file is opened for writing and NOT truncated, so the probe cannot
+/// damage the list it is asking about; a file that does not exist yet is
+/// probed by creating one beside it and removing it, that being the
+/// permission the write will actually need.
+pub(super) fn refuse_unwritable(path: &Path) -> Result<()> {
+    let directory = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let attempted = if path.exists() {
+        fs::OpenOptions::new().write(true).open(path).map(drop)
+    } else {
+        probe_new_file_in(directory)
+    };
+    attempted.map_err(|error| {
+        format!(
+            "cannot write the baseline {}: {error}\n\
+             The group run takes minutes and the write is the last thing after it, so this \
+             is refused now rather than then.\n\
+             Inside scripts/sandboxed that directory is read-only unless it is named:\n    \
+             scripts/sandboxed --writable {} -- nsh-survey run-oils ...",
+            path.display(),
+            directory.display(),
+        )
+        .into()
+    })
+}
+
+/// Whether a file could be created here, answered by creating one.
+///
+/// The name carries the process id because the survey's own tests run as
+/// threads of one process and a fixed name would be a file two of them
+/// share -- `[spec:nsh:req:oracle.checks-do-not-share-state]`.
+fn probe_new_file_in(directory: &Path) -> std::io::Result<()> {
+    let probe = directory.join(format!(".baseline-writable.{}", std::process::id()));
+    fs::File::create(&probe)?;
+    fs::remove_file(&probe)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{CaseRecord, Options, Outcome, OutputFormat, RunReport, Totals};
     use super::*;
     use crate::process::ScratchTree;
     use std::collections::BTreeSet;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -1124,6 +1200,116 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("--baseline")
+        );
+    }
+
+    /// The checked-in list carries the header its own generator writes.
+    ///
+    /// The header quotes the command that maintains this file. A header
+    /// and a generator that disagree mean one of them is telling the
+    /// reader to run something that does not produce the file they are
+    /// reading, which is the failure `header`'s doc comment describes and
+    /// which nothing was watching for: the list is compared on every run
+    /// and the prose above it never was.
+    ///
+    /// The path is the repo-relative spelling because that is what
+    /// `--baseline` is given in the documented refresh, and the header
+    /// echoes back whatever the caller typed.
+    #[test]
+    fn the_baseline_header_matches_its_generator() {
+        let relative = Path::new("tests/surveys/oils/BASH_COMPARISON_FAILURES.toml");
+        let text =
+            fs::read_to_string(crate::survey_root().join("BASH_COMPARISON_FAILURES.toml")).unwrap();
+        let expected = header("bash-comparison", "bash", relative);
+        assert!(
+            text.starts_with(&expected),
+            "the checked-in header is not what a refresh would write; copy this in:\n\
+             ----8<----\n{expected}----8<----"
+        );
+    }
+
+    /// A baseline that can be written is not refused, whether or not it
+    /// exists yet.
+    ///
+    /// The absent case is the one worth having: a refresh writing a
+    /// baseline for the first time must not be turned away by the check
+    /// that exists to save it four minutes.
+    #[test]
+    fn a_writable_baseline_is_not_refused() {
+        let scratch = ScratchTree::new().unwrap();
+        let absent = scratch.path().join("ABSENT.toml");
+        refuse_unwritable(&absent).unwrap();
+        assert!(!absent.exists(), "the probe left its own file behind");
+
+        let present = scratch.path().join("PRESENT.toml");
+        fs::write(&present, "# recorded\n").unwrap();
+        refuse_unwritable(&present).unwrap();
+        assert_eq!(
+            fs::read_to_string(&present).unwrap(),
+            "# recorded\n",
+            "the probe truncated the list it was asked about"
+        );
+    }
+
+    /// An unwritable baseline is refused by name, with the flag that
+    /// makes it writable.
+    ///
+    /// The failure this stands for is `EROFS` from the containment, which
+    /// a unit test cannot mount; the mode is the reachable spelling of
+    /// the same refusal, and the assertion is on what the message tells
+    /// the reader rather than on which errno produced it. The four
+    /// minutes were lost to a message naming no path at all.
+    #[test]
+    fn an_unwritable_baseline_names_its_path_and_flag() {
+        let scratch = ScratchTree::new().unwrap();
+        let path = scratch.path().join("READONLY.toml");
+        fs::write(&path, "# recorded\n").unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        PermissionsExt::set_mode(&mut permissions, 0o444);
+        fs::set_permissions(&path, permissions).unwrap();
+
+        let complaint = refuse_unwritable(&path).unwrap_err().to_string();
+        assert!(
+            complaint.contains(&path.display().to_string()),
+            "the refusal must name the file: {complaint}"
+        );
+        assert!(
+            complaint.contains("--writable"),
+            "the refusal must name the flag that fixes it: {complaint}"
+        );
+        assert!(
+            complaint.contains(&scratch.path().display().to_string()),
+            "the refusal must name the directory to make writable: {complaint}"
+        );
+    }
+
+    /// A baseline that does not exist yet in a directory that will not
+    /// take one is refused too.
+    ///
+    /// Opening the file would report `NotFound` here and say nothing
+    /// about the directory, so this is the case the create-and-remove
+    /// probe is for.
+    #[test]
+    fn an_unwritable_directory_is_refused_early() {
+        let scratch = ScratchTree::new().unwrap();
+        let closed = scratch.path().join("closed");
+        fs::create_dir(&closed).unwrap();
+        let mut permissions = fs::metadata(&closed).unwrap().permissions();
+        PermissionsExt::set_mode(&mut permissions, 0o555);
+        fs::set_permissions(&closed, permissions).unwrap();
+
+        let refused = refuse_unwritable(&closed.join("NEW.toml"));
+
+        // Restored before the assertion, so a failure here does not also
+        // leave a directory `ScratchTree`'s cleanup cannot remove.
+        let mut permissions = fs::metadata(&closed).unwrap().permissions();
+        PermissionsExt::set_mode(&mut permissions, 0o755);
+        fs::set_permissions(&closed, permissions).unwrap();
+
+        let complaint = refused.unwrap_err().to_string();
+        assert!(
+            complaint.contains("--writable") && complaint.contains("NEW.toml"),
+            "{complaint}"
         );
     }
 }

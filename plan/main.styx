@@ -10270,6 +10270,34 @@ children (
                                             }
                                         )
                                     }
+
+                                    {
+                                        id bash.divergences.bash-mode-bad-identifier-status
+                                        title "Answer 1 for a bad identifier in Bash mode where the reference does"
+                                        kind @fix
+                                        log (
+                                            {
+                                                at 2026-09-05T11:42:34.362840729Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FOUND 2026-09-05 as by-catch of `bash.divergences.errexit-over-an-assignment-error`, and left out of it because it is the *number* and not the boundary: both shells stop, so the errexit correction that node made does not touch this and this does not touch that.\n\nMEASURED against the pinned Bash 5.3.15 at `target/bash-reference/bash` and a release nsh built from `051a717` in a private worktree (own CARGO_TARGET_DIR, `-p nsh-cli`), fed on standard input, load 71. Script is the refusal then `echo st=$?`:\n\n    refusal (Bash mode)   bash   nsh\n    export 1bad=1         st=1   st=2   <<< diverges\n    export 1bad           st=1   st=2   <<< diverges\n    readonly 1bad=1       st=1   st=2   <<< diverges\n    unset -v 1bad         st=1   st=2   <<< diverges\n    declare -i 1bad=1     st=1   st=1   agrees\n\nSo `declare` already takes the reference's number and the three POSIX-inherited built-ins do not. It shows up under `set -e` as a whole-shell status -- `set -e; export 1bad=1; echo NEXT` ends with 1 in the reference and 2 here -- which is how it was found, but it is present without `errexit` too and is visible directly as `$?`.\n\nTHE POSIX DIALECT IS RIGHT AND MUST NOT MOVE: `export 1bad=1` and `readonly 1bad=1` end the shell in both nsh's POSIX dialect and `/usr/bin/dash` 0.5.12-12, which is XCU 2.8.1. Only the Bash-mode number is wrong, so the fix is gated on `bash::active`.\n\nNOT `error-boundary-status-collisions`, which is sealed and is about the *default* dialect answering 1 where dash answers 2 for four named failures. This is the opposite direction in the other dialect: Bash mode answering 2 where the reference answers 1.\n\nNOT `reference-to-a-non-name` either, which is the status of a `declare -n` refusal of a non-name value.\n\nWHERE IT LIVES: `crates/nsh/src/builtins/export.rs` and `crates/nsh/src/builtins/unset.rs`, which were another agent's territory on the day this was found and are the reason it was filed rather than fixed.\n\nDONE WHEN the four rows above answer 1 in Bash mode, the POSIX rows still end the shell as dash does, and the rows are added to `A_REFUSAL_IS_STILL_FATAL` in `crates/nsh-cli/tests/bash_errexit_over_an_assignment_error.rs`, whose comment names this node as the reason they are currently absent."
+                                            }
+                                        )
+                                    }
+
+                                    {
+                                        id bash.divergences.slice-bound-on-an-empty-array
+                                        title "Leave a slice bound unevaluated when the array holds no elements"
+                                        kind @fix
+                                        log (
+                                            {
+                                                at 2026-09-05T11:46:57.137921523Z
+                                                author "brendan@necessary.nu"
+                                                kind @note
+                                                text "FOUND 2026-09-05 while choosing cases for `bash.divergences.errexit-over-an-assignment-error`, and not part of it: it is present with `errexit` never set, and a control binary built from `051a717` answers exactly as the fixed one does, so nothing in that node moved it.\n\nTHE REFERENCE DOES NOT EVALUATE A SLICE BOUND WHEN THE ARRAY HAS NO ELEMENTS. This shell evaluates it always, so a bound that will not evaluate abandons the record here and expands to nothing there.\n\nMEASURED against the pinned Bash 5.3.15 at `target/bash-reference/bash` and a release nsh from `051a717` (private worktree, own CARGO_TARGET_DIR, `-p nsh-cli`), Bash mode, fed on standard input, load 70. Script is the expansion then `echo SAME`:\n\n    case                                        bash        nsh\n    declare -a w;        echo \"[${w[@]:1+:2}]\"  []  SAME    (abandons)   <<< diverges\n    unset w;             echo \"[${w[@]:1+:2}]\"  []  SAME    (abandons)   <<< diverges\n    declare -a w;        echo \"[${w[@]:1+}]\"    []  SAME    (abandons)   <<< diverges\n    declare -a w=(a b c) echo \"[${w[@]:1+:2}]\"  (abandons)  (abandons)   agrees\n    s=;                  echo \"[${s:1+:2}]\"     (abandons)  (abandons)   agrees\n    s=abc;               echo \"[${s:1+:2}]\"     (abandons)  (abandons)   agrees\n\nSo it is specifically the *array* path with nothing to walk. A string slice evaluates its bounds whether the string is empty or not, and an array with elements evaluates them too; only an array of no elements -- declared empty or entirely unset -- short-circuits before the arithmetic is reached. That is the same \"the array path finds no value to walk\" shape already recorded on the `${z[@]@a}` measurement elsewhere in this tree.\n\nWHY IT IS WORTH A NODE. The divergence is invisible until the bound is malformed, and then it is not a wrong value but a *different control flow*: this shell abandons the input record and the reference runs the command. A script slicing an array that happens to be empty on one input and populated on another changes behaviour between the two runs here and not there.\n\nNOT COVERED by `bash.divergences.substitution-in-subscript`, which is a command substitution inside a subscript, nor by any node mentioning empty arrays -- those are `declare -p` round trips and `@a` transforms.\n\nDONE WHEN a slice bound on an array of no elements is not evaluated in Bash mode, the string-slice and populated-array rows above do not move, the POSIX dialect is untouched, and a differential row holds all six cases through both shells."
+                                            }
+                                        )
+                                    }
                                 )
                                 log (
                                     {
@@ -10683,6 +10711,13 @@ children (
                                 kind @note
                                 text "SECOND THING FOUND IN THE SAME PLACE, 2026-09-04: `fuzz/` IS NOT REACHED BY `cargo fmt --all` AND HAS DRIFTED.\n\n`fuzz/` is a cargo workspace of its own, so the `rust/workspace (fmt)` commit gate -- `cargo fmt --all --check` from the repository root -- never reads it. Measured against pristine HEAD rather than a working tree:\n\n    $ git show HEAD:fuzz/fuzz_targets/support.rs > /tmp/support_head.rs\n    $ rustfmt --edition 2024 --check /tmp/support_head.rs\n    Diff in ...:58    the `map_or_else` closure around the `concat!`\n    Diff in ...:112   the `unwrap_or_else` panic arm\n\nTwo hunks, both pre-existing, neither large. Nothing is wrong with the code; what is worth writing down is that the gate's name says `--all` and its reach is one workspace. Whoever takes this node is already reading every file under `fuzz/fuzz_targets/`, which is the cheap moment to either run `cargo fmt` inside `fuzz/` or say that the second workspace is deliberately unformatted."
                             }
+
+                            {
+                                at 2026-09-05T11:41:59.333400759Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 
@@ -10761,6 +10796,7 @@ children (
                         id harness.refresh-cannot-write-inside-the-containment
                         title "Let a baseline refresh say which directory it needs writable, before it runs"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T14:30:51.26621495Z
@@ -10774,6 +10810,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-05T11:56:22.338183749Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
