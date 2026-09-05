@@ -13128,20 +13128,6 @@ children (
                             }
                         )
                     }
-
-                    {
-                        id tooling.nplan.uncovered-prefix-filter-answers-nothing
-                        title "nplan_spec_uncovered's prefix filter reports no uncovered rules when there are"
-                        kind @fix
-                        log (
-                            {
-                                at 2026-09-04T21:06:22.415819239Z
-                                author "brendan@necessary.nu"
-                                kind @note
-                                text "FOUND 2026-09-04 while starting `an-embedder-cannot-read-a-script-without-running-it`. The brief said `embedding-safety.reading-without-running` was uncovered; the filtered query said it was not, and the filtered query was wrong. Nearly cost the node's whole delivery -- the annotation would not have been written.\n\nREPRODUCED, same session, minutes apart:\n\n    nplan_spec_uncovered {spec_impl: \"nsh\"}    -> 3 uncovered rule(s):\n                                                    cost.locale-selected-per-operation\n                                                    cost.proportional-to-the-input\n                                                    oracle.checks-do-not-share-state\n    nplan_spec_uncovered {prefix: \"cost\"}      -> No uncovered rules.\n    nplan_spec_uncovered {prefix: \"oracle.\"}   -> No uncovered rules.\n    nplan_spec_uncovered {prefix: \"embedding-safety\"} -> No uncovered rules.\n\nThe last was run while `embedding-safety.reading-without-running` had zero impl sites -- `nplan_spec_rule` on it printed a body and no `impl` block at all, and `nplan_spec_status` counted nsh at 102 of 106 covered. So the prefix filter returned nothing for a prefix that had an uncovered rule under it, with and without the trailing dot, for three different prefixes.\n\nWHY IT IS WORSE THAN AN EMPTY RESULT. \"No uncovered rules\" is the same answer the tool gives when a prefix genuinely has none, so the failure is indistinguishable from success. That is the shape `docs/spec/nsh/verification.md` is entirely about -- a check that answers confidently about something it cannot see -- and here it is in the tool the coverage discipline runs on. An agent that scopes its query, as the parameter invites, is told its rule is already covered and moves on.\n\nNOT OURS TO FIX. nplan lives in ~/git/nplan; this node is the report. What it wants there: a test that the filtered result is the unfiltered result restricted to the prefix, for a prefix that matches at least one uncovered rule -- the current behaviour would pass any test that only asserts \"filtering narrows the list\", since narrowing to nothing does narrow it.\n\nWORKAROUND UNTIL THEN: call `nplan_spec_uncovered` with `spec_impl` alone, or with no arguments, and filter the result by eye. `nplan_spec_rule` on the individual rule is the reliable per-rule answer -- an uncovered rule prints no `impl` block."
-                            }
-                        )
-                    }
                 )
             }
 
