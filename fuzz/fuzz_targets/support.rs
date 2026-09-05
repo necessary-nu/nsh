@@ -5,7 +5,7 @@ use nsh::{Shell, Streams};
 use std::ffi::OsStr;
 use std::io::Write as _;
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
@@ -41,6 +41,47 @@ pub fn under_nsh(script: &[u8], env: Vec<(Vec<u8>, Vec<u8>)>) -> Option<Outcome>
     })
 }
 
+/// Where a build of this repository leaves the pinned Bash, relative to
+/// the checkout that ran it.
+const UNDER_A_CHECKOUT: &str = "target/bash-reference/bash";
+
+/// The checkout git keeps this repository's shared directories in.
+///
+/// A linked worktree has no build tree of its own -- worktrees share one
+/// repository's history and keep their own working files -- so a build
+/// artefact lives in whichever checkout ran the build, and from a
+/// worktree that is the one git calls the main one. `--git-common-dir`
+/// names its `.git`, and the checkout is that directory's parent. Asked
+/// of git rather than parsed here because a worktree's pointer may be
+/// relative, may be reached through a second worktree, and has been
+/// spelled more than one way; `--path-format=absolute` is what makes the
+/// answer independent of where it was asked from.
+///
+/// `None` covers everything that is not a worktree of a repository with
+/// a working tree, "git is not installed" included, and the caller then
+/// reports the one place it did look.
+///
+/// `crates/nsh/tests/pinned_bash/mod.rs` and `nsh-survey`'s
+/// `bash_reference::location` answer the same question for the
+/// differential tests and for the survey gate. This is a third copy for
+/// the reason they are two: `fuzz/` is a cargo workspace of its own, so
+/// it can reach neither without the dependency edge
+/// `struct.differential-helper-crate` exists to add. Change all three or
+/// none.
+fn main_checkout(from: &Path) -> Option<PathBuf> {
+    let asked = Command::new("git")
+        .arg("-C")
+        .arg(from)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !asked.status.success() {
+        return None;
+    }
+    let common = PathBuf::from(String::from_utf8(asked.stdout).ok()?.trim());
+    common.parent().map(Path::to_path_buf)
+}
+
 /// The pinned Bash every differential target is judged against.
 ///
 /// `[dec:nsh:differential-is-the-oracle]` is only worth anything if the
@@ -49,21 +90,58 @@ pub fn under_nsh(script: &[u8], env: Vec<(Vec<u8>, Vec<u8>)>) -> Option<Outcome>
 /// which is not "whatever is on PATH" so much as "always /usr/bin/bash" --
 /// 5.2.37 where `calibrate-bash-5-3-oracle` pins 5.3.15.
 ///
-/// `NSH_FUZZ_BASH` names it; otherwise it is looked for beside the build
-/// tree. It must not live under `/tmp`: the fuzz containment mounts an
-/// empty tmpfs there, so an oracle kept in `/tmp` is invisible to every
-/// case, and the pinned build's default location is exactly that.
+/// `NSH_FUZZ_BASH` names it and is taken as the whole answer: a run that
+/// names its own oracle has answered the question, and searching past a
+/// name that is wrong would hide the mistake behind whatever else the
+/// machine has. Otherwise the search runs over the checkouts this
+/// repository has -- this one, then the one it shares a history with --
+/// because the oracle is a build artefact and a linked worktree taken
+/// for a campaign has no build tree of its own.
+///
+/// Wherever it is found, it must not live under `/tmp`: the fuzz
+/// containment mounts an empty tmpfs there, so an oracle kept in `/tmp`
+/// is invisible to every case, and the pinned build's default location
+/// is exactly that.
 // [spec:nsh:req:oracle.cannot-measure-is-a-failure]
 fn reference_bash() -> &'static PathBuf {
     static SHELL: OnceLock<PathBuf> = OnceLock::new();
     SHELL.get_or_init(|| {
-        let path = std::env::var_os("NSH_FUZZ_BASH").map_or_else(
-            || PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/bash-reference/bash")),
-            PathBuf::from,
+        let tried = std::env::var_os("NSH_FUZZ_BASH").map_or_else(
+            || {
+                let checkout = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
+                let checkout =
+                    std::fs::canonicalize(checkout).unwrap_or_else(|_| checkout.to_owned());
+                let mut places = vec![checkout.join(UNDER_A_CHECKOUT)];
+                if let Some(shared) = main_checkout(&checkout).filter(|shared| *shared != checkout)
+                {
+                    places.push(shared.join(UNDER_A_CHECKOUT));
+                }
+                places
+            },
+            |named| vec![PathBuf::from(named)],
         );
         // Refuse rather than score. A target that cannot reach its
         // reference has measured nothing, and the one thing it must never
-        // do is say so quietly.
+        // do is say so quietly. Listing every place it looked is the
+        // difference between a reader seeing a broken machine and a
+        // reader seeing a question about layout.
+        let path = tried
+            .iter()
+            .find(|candidate| candidate.exists())
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "the differential oracle is not usable: no pinned Bash at any of the \
+                     places this run looked:\n{}build it, or name a pinned \
+                     build this machine already has:\n\
+                     \x20   cargo run -p nsh-survey -- build-bash-reference\n\
+                     \x20   NSH_FUZZ_BASH=/path/to/pinned/bash <command>",
+                    tried
+                        .iter()
+                        .map(|candidate| format!("  {}\n", candidate.display()))
+                        .collect::<String>(),
+                )
+            });
         if let Err(reason) = nsh::fuzzing::reference::verify(&path) {
             panic!("the differential oracle is not usable: {reason}");
         }
@@ -112,7 +190,9 @@ pub fn under_bash(script: &[u8], env: &[(Vec<u8>, Vec<u8>)]) -> Option<(Vec<u8>,
         .spawn()
         // Verified above, so a failure here is the harness breaking
         // rather than an input being uninteresting.
-        .unwrap_or_else(|error| panic!("cannot start the pinned Bash {}: {error}", shell.display()));
+        .unwrap_or_else(|error| {
+            panic!("cannot start the pinned Bash {}: {error}", shell.display())
+        });
 
     /* A short write is Bash having stopped reading, which is an answer
      * about the script rather than a reason to measure nothing: the

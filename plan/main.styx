@@ -10718,6 +10718,7 @@ children (
                         id harness.fuzz-oracle-outside-the-worktree
                         title "Let a fuzz target find the oracle from a worktree that has no `target/`"
                         kind @fix
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T13:38:43.19723789Z
@@ -10731,6 +10732,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-05T11:40:21.869878362Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -10759,6 +10767,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 WHILE CLOSING `harness.oils-baseline-is-behind`, AND DELIBERATELY NOT FIXED THERE -- that node's territory is the register, not the runner's argument handling.\n\n`scripts/sandboxed` binds `/` read-only and makes `$ROOT/target` writable, plus whatever `--writable` names. `tests/surveys/oils/` is neither, so the documented refresh run inside the containment writes nothing:\n\n    scripts/sandboxed -- target/release/nsh-survey run-oils --group bash-comparison \\\n        --expect-shell bash --baseline tests/surveys/oils/BASH_COMPARISON_FAILURES.toml \\\n        --update-baseline\n    ...\n    baseline: MISMATCHED -- 1 newly failing, 9 no longer failing, 0 not in the group, 0 unstable\n      = process-sub.test.sh:2 keeps its recorded answer (failing); this run could not decide it\n    nsh-survey: Read-only file system (os error 30)\n    exit 1\n\nTWO THINGS ARE WRONG WITH THAT AND ONLY ONE OF THEM IS THE WRAPPER.\n\nThe message names no path. `os error 30` on a run that has just spent two minutes and printed a correct difference reads as a broken machine; the reader has to know that `--baseline`'s directory is outside the writable set to make anything of it. Every other refusal in this tool names what it could not do and what to type instead -- `provenance.rs`'s uncommitted-tree refusal lists the paths and names the flag -- and this one is a bare `io::Error`.\n\nAnd it is discovered two minutes late. The path to be written is known before the first case runs, so a refresh could probe it and refuse in the first second, which is the same argument `1bfbb52` makes for asking the disk before the compiler rather than after the linker.\n\nTHE INVOCATION THAT WORKS, for whoever needs it before this is fixed:\n\n    scripts/sandboxed --writable tests/surveys/oils -- target/release/nsh-survey run-oils ...\n\nDONE WHEN a refresh that cannot write its baseline says so, with the path, before it runs the group -- and the file's own header, which spells the refresh without the wrapper while `README.md` spells every other survey run with it, agrees with whichever spelling is meant."
+                            }
+
+                            {
+                                at 2026-09-05T11:38:00.694372454Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }
