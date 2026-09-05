@@ -1458,6 +1458,36 @@ Costs no survey case; no corpus exercises `TIMEFORMAT`.
 
 ## Bash-compatibility divergences taken under `[dec:nsh:bash-compatibility-is-scripts]`
 
+### `COLUMNS` on a terminal that has never been sized
+
+**Status:** deliberate. `[spec:nsh:req:interactive.terminal-width]`.
+
+Measured 2026-09-05 on a `pty.fork()` whose window size is left at zero,
+then resized twice:
+
+```
+                        unsized   ->  100  ->  133
+pinned bash 5.3.15         80         100      133
+nsh                     (unset)       100      133
+```
+
+Bash answers 80 for a terminal whose size it could not obtain. This shell
+publishes nothing until it has a measurement, and both answers are
+asserted rather than one of them assumed.
+
+80 is a defensible guess and it is still a guess. A prompt generator is
+handed `--terminal-width` and draws to it, so a fabricated 80 on a
+200-column terminal produces a confidently wrong prompt, where an absent
+`COLUMNS` lets the generator decide for itself what to do about not
+knowing. That is the whole of the reason, and it is a product judgement
+rather than a conformance one -- which is why it is registered here and
+not argued in the rule.
+
+This sits under `[dec:nsh:bash-compatibility-is-scripts]` because it is
+interactive surface: nothing about what a Bash *script* means changes,
+and a script that reads `COLUMNS` non-interactively sees neither shell
+publish it.
+
 ### Four names for surfaces this shell has not got
 
 **Status:** deliberate. `crates/nsh/src/variables/special.rs`, by absence.

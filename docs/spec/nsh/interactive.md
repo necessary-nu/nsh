@@ -67,6 +67,20 @@ recover.
 > width readable as `COLUMNS`, and MUST refresh it when the terminal is
 > resized. A shell that is not attached to a terminal MUST leave it alone,
 > because there is no width to report and a fabricated one is worse than none.
+>
+> **Correction, 2026-09-05, the day after.** The last sentence was written as
+> though it were the only defensible answer. It is not the reference's: measured
+> on a real pseudo-terminal with no size set, the pinned Bash 5.3.15 publishes
+> `COLUMNS=80` and this shell leaves the name unset. So this is a **sanctioned
+> divergence** rather than agreement, and it is registered as one in
+> `docs/divergences.md`. The requirement stands -- a width nobody measured is a
+> width that will be wrong, and a prompt generator handed 80 on a 200-column
+> terminal draws the wrong prompt confidently -- but the rule may not imply the
+> reference concurs, because it does not.
+>
+> An earlier `script -qec` probe suggested Bash left the name alone. It was
+> measuring the probe: `script` gives its child a terminal that already has a
+> size. Only a `pty.fork()` with no size set asks the question.
 
 > [spec:nsh:req:interactive.prompt-display-width]
 > The line editor MUST place the cursor by the prompt's *display* width, not by
