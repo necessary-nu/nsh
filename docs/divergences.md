@@ -303,6 +303,27 @@ content/drop/add/duplicate/status failures, the line shape and feature
 scope, the optional `*`, basename rather than full-path sorting, a bare
 name refusal, and an unsorted nsh permutation.
 
+The Bash dialect inherits the same ordering, against a second reference.
+`bash.divergences.hash-option-set` gave that dialect the reference's
+`hits`/`command` columns, its `hash table empty` line and its `-p -t -d -l`,
+so the listing now agrees with Bash 5.3.15 line for line — but not
+necessarily line *order* for line order. Measured 2026-09-05 at load 58:
+hashing `ls` then `cat`, and hashing `cat` then `ls`, both list `ls` first
+in the reference, so its order is neither insertion nor name order but its
+own hash buckets, and the `BTreeMap` lists `cat` first either way. This is
+the same accepted trade as above with a different shell on the other side,
+not a second one, so no new harness ID is registered: `sorted_cmdtable`
+matches a bare `hash` in the POSIX dialect and is untouched, and
+`crates/nsh-cli/tests/bash_hash_option_set.rs` states in its module comment
+why no case there lists two entries.
+
+`hash`'s diagnostics also differ in wording from the reference's in that
+dialect, as `exec`'s letters do: an unknown letter is `Illegal option -z`
+rather than `-z: invalid option` plus a usage line. The exit statuses are
+measured and equal — 2 for an unknown letter and for `-p` with no name, 1
+for `-t` or `-d` with no name and for a name the table does not hold — and
+the tests read status and standard output only.
+
 ### POSIX corrections retained over dash
 
 **Status:** implemented in the Rust; dash unchanged. Category 3. Every ID

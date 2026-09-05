@@ -36,6 +36,7 @@ pub struct CommandSearch {
     skip_functions: bool,
     alternate_path: bool,
     regular_builtins_only: bool,
+    count_hit: bool,
 }
 
 impl CommandSearch {
@@ -45,7 +46,17 @@ impl CommandSearch {
         skip_functions: false,
         alternate_path: false,
         regular_builtins_only: false,
+        count_hit: true,
     };
+
+    /// Look the name up without counting it as a consultation.
+    ///
+    /// `hash name` is the one search that fills the table rather than
+    /// reading it, and the reference reports 0 hits for what it wrote.
+    pub const fn not_counting_a_hit(mut self) -> Self {
+        self.count_hit = false;
+        self
+    }
 
     pub const fn reporting_errors(mut self) -> Self {
         self.report_errors = true;
@@ -111,6 +122,17 @@ pub(crate) enum Command {
 pub struct CommandEntry {
     pub(crate) command: Command,
     pub(crate) rehash: bool,
+    /// Consultations of this entry since it was last written.
+    ///
+    /// The Bash dialect's `hash` listing prints this in a `hits` column.
+    /// Writing the entry restarts it, which is why `hash name` reports 0
+    /// for a command that has already run several times.
+    pub(crate) hits: u32,
+    /// The path `hash -p` gave this name, used in place of a `PATH` search.
+    ///
+    /// The reference does not check it when it is written, so a pin to a
+    /// path that does not exist is only discovered by running it.
+    pub(crate) pinned: Option<BString>,
 }
 
 impl CommandEntry {
@@ -196,6 +218,49 @@ impl CommandTable {
             Some(Command::Function(_))
         )
     }
+
+    /// The pinned path, which stands in for the whole `PATH` walk and is
+    /// run unchecked — a name with one can never be "not found".
+    pub(crate) fn pinned_path(&self, name: &BStr) -> Option<&BStr> {
+        self.get(name)
+            .and_then(|entry| entry.pinned.as_ref())
+            .map(|path| path.as_slice().as_bstr())
+    }
+
+    /// Record that `name` was consulted, which the Bash dialect's listing
+    /// counts.
+    ///
+    /// Only an external is in the reference's hash table at all, so a
+    /// cached built-in or function is not a consultation of it.
+    pub(crate) fn note_hit(&mut self, name: &BStr) {
+        if let Some(stored) = self.map.get_mut(name)
+            && matches!(stored.command, Command::External { .. })
+        {
+            stored.hits = stored.hits.saturating_add(1);
+        }
+    }
+
+    /// Give `name` a path in place of a `PATH` search — the Bash dialect's
+    /// `hash -p`.
+    ///
+    /// The entry is not marked for rehash, so `find_command` answers it
+    /// from the table and never walks `PATH` for the name again.
+    pub(crate) fn pin(&mut self, name: &BStr, path: &BStr) {
+        let stored = lookup_cached_command(self, name, true).expect("adding returns an entry");
+        stored.command = Command::External { path_index: None };
+        stored.rehash = false;
+        stored.hits = 0;
+        stored.pinned = Some(BString::from(path.to_vec()));
+    }
+
+    /// `hash name` on a command that has already run reports 0, not the
+    /// count it had: re-hashing writes the entry, and a written entry has
+    /// not been consulted yet.
+    pub(crate) fn restart_hit_count(&mut self, name: &BStr) {
+        if let Some(stored) = self.map.get_mut(name) {
+            stored.hits = 0;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -253,6 +318,12 @@ pub fn execute_external_command_named(
     argument_zero: Option<&BStr>,
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
     let command = arguments.first().expect("shellexec needs a command name");
+    /* Read before the borrows below, and owned: the search that follows
+     * wants the shell again. A name with a separator was never in the
+     * table, so it can carry no pin. */
+    let pinned: Option<BString> = (!nsh_platform::shell_path_has_separator(command))
+        .then(|| shell.commands.pinned_path(command).map(BString::from))
+        .flatten();
 
     /* A library shell may fork children, but it may not replace the host
      * process itself without the host's explicit grant. A forked shell owns
@@ -301,6 +372,19 @@ pub fn execute_external_command_named(
     if let Err(error) = shell.descriptors.materialize() {
         return exec_failure(shell, command, error);
     }
+    if let Some(pinned) = pinned {
+        /* Run as written, with no `PATH` walk and no check first: the
+         * reference reports the pinned path itself as missing rather than
+         * the name as not found, so the failure names it too. */
+        let subject = pinned.as_slice().as_bstr();
+        let native = match subject.try_to_os_string() {
+            Ok(native) => native,
+            Err(error) => return native_exec_failure(shell, subject, &error),
+        };
+        let failure = try_external_candidate(&native, &argv, &envv);
+        return exec_failure(shell, pinned.as_slice().as_bstr(), failure);
+    }
+
     let error = if nsh_platform::shell_path_has_separator(command) {
         let resolved = nsh_platform::resolve_command_path(Path::new(&program), &envv);
         try_external_candidate(resolved.as_os_str(), &argv, &envv)
@@ -620,6 +704,9 @@ pub fn find_command(
             update_table = false;
             cached = None;
         } else if !rehash {
+            if search.count_hit {
+                shell.commands.note_hit(name);
+            }
             *entry = command.clone();
             return Ok(crate::evaluation::Flow::Done((0).into()));
         }
@@ -690,6 +777,9 @@ pub fn find_command(
                 if let Some(stored) = shell.commands.map.get_mut(name) {
                     stored.rehash = false;
                 }
+                if search.count_hit {
+                    shell.commands.note_hit(name);
+                }
                 *entry = command;
                 return Ok(crate::evaluation::Flow::Done((0).into()));
             }
@@ -744,6 +834,9 @@ pub fn find_command(
                     path_index: Some(candidate_index),
                 },
             );
+            if search.count_hit {
+                shell.commands.note_hit(name);
+            }
         }
         *entry = Command::External {
             path_index: Some(candidate_index),
@@ -876,6 +969,8 @@ pub(crate) fn lookup_cached_command<'a>(
                 .or_insert_with(|| CommandEntry {
                     command: Command::Unknown,
                     rehash: false,
+                    hits: 0,
+                    pinned: None,
                 }),
         )
     } else {
@@ -909,6 +1004,10 @@ fn cache_command(commands: &mut CommandTable, name: &BStr, command: Command) {
         lookup_cached_command(commands, name, true).expect("adding returns an entry");
     command_entry.command = command;
     command_entry.rehash = false;
+    command_entry.hits = 0;
+    /* A search that reached `PATH` supersedes whatever `hash -p` pinned:
+     * the pin is only consulted while the entry it wrote still stands. */
+    command_entry.pinned = None;
 }
 
 /*
