@@ -13901,6 +13901,20 @@ children (
                     }
                 )
             }
+
+            {
+                id tooling.interactive-parity-at-the-published-pin
+                title "Bring the interactive byte stream back to parity at the published editor pin"
+                kind @fix
+                log (
+                    {
+                        at 2026-09-05T21:39:42.023904542Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "FOUND WHILE DOING `interactive.prompt-display-width`, WHICH IS NOT WHAT MOVED IT. `tests/harness/ptydiff.py` -- the interactive acceptance check `docs/libedit-parity.md` names -- reports PASS=24 FAIL=37 on 63 cases at the pin the workspace carries today, `nshedit` 0.1.2 from crates.io.\n\nMEASURED AS AN INTERLEAVED PAIR ON 2026-09-05, load 3-7:\n\n    control    release build of `e04418d` (before the prompt-width change)\n               PASS=24 FAIL=37 FLAKY=0\n    treatment  release build of `d31287e` (after it)\n               PASS=24 FAIL=37 FLAKY=2\n\nThe two runs agree case for case; `diff` over the verdict lines shows only two cases the treatment run marked flaky and then recovered (\"the port produced an output the reference also produces\"). So the prompt-width change moved nothing here, and the 37 are older than it.\n\nWHAT THEY LOOK LIKE. Job control dominates -- `five bg jobs + jobs`, `job refs by number`, `job refs by name`, `bg pipeline + jobs`, `fg a bg job`, `stop then fg`, `stop then bg`, `fg then read the tty`, `exit with a stopped job` -- plus `unset -u error` and `emacs mode: fc -l`. One case prints `SH: 2: Cannot set tty process group (No such process)`.\n\nWHY THIS IS PROBABLY THE PIN AND NOT THE JOBS CODE. `nshedit-in-tree` carries a note recording an attempted bump to upstream `72d796f1` that was reverted because \"every prompt render is wrapped in `\\r \\x1b7 \\x1b8 <prompt> \\x1b[K <echo> \\x1b8`\" -- DECSC/DECRC region anchoring emitted unconditionally in the inline profile, where libedit emits none of it -- and it says the pin \"stays at cfb16cee until an upstream fix lands\". The workspace no longer pins cfb16cee: `tooling.repin-editor-crates` moved it to the published 0.1.2 for the aarch64 matrix, and 0.1.2 emits that anchoring. It is visible in any transcript today: a prompt draw reads `\\r\\x1b7\\x1b8$ \\x1b[K`. That note also warns that ptydiff's ANSI-strip regex does not cover bare `ESC 7` / `ESC 8`, which is exactly why the anchoring shows up as a diff rather than being stripped away.\n\nSo the likely reading is that the revert's condition was never met and the pin moved anyway, and the acceptance check has been red since. That is a reading, not a measurement: nobody has run ptydiff against a cfb16cee build to confirm, and the job-control cases may have their own reasons on top.\n\nWHAT THIS NODE OWES. Establish which of the 37 are the anchoring and which are not, by running ptydiff against a build pinned to cfb16cee. If it is the anchoring, `nshedit` is ours -- fix the inline profile upstream so it emits what libedit emits for sequential input, publish, and repin. If some are the shell's job control, they are their own nodes.\n\nTWO HARNESS FACTS FOR WHOEVER PICKS THIS UP. A whole ptydiff run takes about 25 minutes on this machine, well past the 15 minutes a naive budget allows, and it writes nothing until it finishes when its output is piped -- use `python3 -u` and redirect to a file. `PORT=<binary>` selects the shell under test, which is what made the interleaved pair above cheap."
+                    }
+                )
+            }
         )
     }
 
