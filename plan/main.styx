@@ -13389,12 +13389,27 @@ children (
                         id tooling.disk.readme-says-tmp-is-ram
                         title "Stop the README telling readers a /tmp checkout spends RAM"
                         kind @docs
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T15:43:06.083221661Z
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "FOUND 2026-09-04 WHILE CLOSING `tooling.disk.worktrees-on-tmpfs`, AND NOT PART OF IT -- that node's territory was `scripts/`.\n\n`README.md` line 266, in the \"Budget for this\" paragraph on worktree discipline:\n\n    Remove a worktree when its node is done, and note that a checkout\n    under `/tmp` is spending RAM rather than disk, which `disk-headroom`\n    says out loud.\n\nBoth halves are now false on this machine. Measured 2026-09-04:\n\n    $ findmnt -no SOURCE,FSTYPE /tmp\n    /dev/sda2[/data/tmp] xfs\n    $ stat -c %d /tmp /home/brendan/work/dash\n    2050 /tmp\n    2050 /home/brendan/work/dash\n\n`/tmp` is a bind of `/data/tmp` on the same device as the checkout, so a worktree there costs the same disk everything else guards. And `disk-headroom` does not say it out loud: it reads `stat -f -c %T` per checkout and prints the tmpfs line only when the answer is `tmpfs`, so on this host it says nothing -- which is right, and leaves the README the only thing still asserting it.\n\nWHAT TO KEEP. The advice around it stands and is the valuable part: remove a worktree when its node is done, and keep a build tree out of `/tmp` -- but for the reason that survives, which is that the survey containment mounts an empty tmpfs over `/tmp` and a tree kept there is invisible from inside it. `scripts/sandboxed` was corrected the same day and carries the measurement and a dated correction; the README paragraph can point at that rather than restate a host fact that expires.\n\nWHY IT IS WORTH A NODE RATHER THAN A ONE-LINE EDIT: this is the second place the same expired fact was written down, and a third may exist. Whoever picks it up should grep for the claim rather than fix the line -- and consider whether a host fact belongs in prose at all when a script beside it can measure it."
+                            }
+
+                            {
+                                at 2026-09-05T11:34:15.37381427Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-05T11:36:53.379279236Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

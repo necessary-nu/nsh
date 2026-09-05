@@ -262,10 +262,23 @@ Budget for this. The practice that makes measurements here trustworthy — a
 detached worktree with its own `CARGO_TARGET_DIR`, because the shared checkout
 is transiently unbuildable from another session's in-flight files — is also
 what fills the disk, at up to 2.79 GiB a time with six to eight worktrees live
-at once. Remove a worktree when its node is done, and note that a checkout
-under `/tmp` is spending RAM rather than disk, which `disk-headroom` says out
-loud. `tests/harness/disk-headroom-selftest.sh` is its self-test; every case in
-it is about something the tool must refuse to delete.
+at once. Remove a worktree when its node is done, and keep its build tree out
+of `/tmp` — for the reason below, which is the containment boundary and not the
+cost of the space. `tests/harness/disk-headroom-selftest.sh` is its self-test;
+every case in it is about something the tool must refuse to delete.
+
+This paragraph used to add that a checkout under `/tmp` spends RAM rather than
+disk, "which `disk-headroom` says out loud". Both halves were false when
+measured on 2026-09-05, and the second is the one worth keeping a note about.
+`/tmp` here is `/dev/sda2[/data/tmp] xfs`, a bind on the same device as the
+checkout, so a tree there costs the same disk as everywhere else. And
+`disk-headroom` never said it: it reads `stat -f -c %T` for each checkout and
+prints `that space is RAM` only where that answers `tmpfs`, so on this host it
+prints nothing — the README was the only thing still asserting it, and was
+citing a tool that measures as though it agreed. Which is the general point: a
+host fact does not belong in prose next to a script that can measure it, because
+the prose cannot notice when the host changes. `scripts/sandboxed` carries the
+same correction, dated, from `69165cc`.
 
 Two ways that practice used to come back red for reasons that were not the
 change are now the harness's problem rather than the reader's. **The pinned
