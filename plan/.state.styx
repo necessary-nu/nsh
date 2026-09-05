@@ -1739,7 +1739,6 @@ assertions (
     {id bash.divergences.exec-empty-environment, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:37:15.25741977Z}
     {id bash.divergences.assignment-error-in-a-c-string, kind @complete, author "brendan@necessary.nu", at 2026-09-05T15:02:17.830468731Z}
     {id bash.divergences.non-identifier-environment-names, kind @complete, author "brendan@necessary.nu", at 2026-09-05T15:34:02.159372976Z}
-    {id interactive.prompt-display-width, kind @doing, author "brendan@necessary.nu", at 2026-09-05T19:50:04.894739397Z}
 )
 
 impl_evidence (
@@ -5999,5 +5998,10 @@ impl_evidence (
         {impl_name nsh-library, rule idiom.conformance-closure}
     ), rule_versions_seen (
         {id idiom.conformance-closure, version 0}
+    )}
+    {id interactive.prompt-display-width, covered_rules (
+        interactive.prompt-display-width
+    ), covered_claims (
+        {impl_name nsh-library, rule interactive.prompt-display-width}
     )}
 )

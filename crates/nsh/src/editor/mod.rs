@@ -901,25 +901,117 @@ fn shell_prompt(shell: &mut crate::context::Shell) -> Prompt {
      * arrives as an empty value and builds an empty `Prompt`, which is
      * what the unreachable early return produced. */
     let prompt = crate::parser::render_prompt(shell);
-    prompt_from_text(&text_from_bytes(&prompt), 0x01)
+    prompt_from_bytes(&prompt)
 }
 
-fn prompt_from_text(text: &Text, escape: u32) -> Prompt {
-    let marker = TextUnit::from_code_point(escape);
+/// The byte an escape sequence begins with.
+const ESCAPE: u8 = 0x1b;
+
+/// The terminator xterm accepts for a string sequence, where ECMA-48 names
+/// `ESC \`. Every prompt that sets a window title uses this one.
+const BELL: u8 = 0x07;
+
+/// Split a prompt into the text that occupies terminal columns and the
+/// escape sequences that occupy none.
+///
+/// The sequences are recognised here rather than pointed out by whoever
+/// wrote the prompt. Bash asks for `\[` and `\]` around a non-printing run
+/// because readline will not read the run itself, and that convention
+/// reaches only a prompt written for Bash: a generator handed a shell name
+/// it does not know emits plain sequences and no markers, and a person
+/// setting `PS1` by hand emits them only if they knew to. Reading the
+/// sequences serves all three, and it is why this shell does not have to
+/// answer to the name `bash` to be handed a prompt whose cursor it can
+/// place.
+///
+/// A recognised sequence contributes no columns. That is exact for what
+/// prompts carry -- colour, the window title, cursor save and restore --
+/// and it is deliberately short of a terminal emulator: `ESC [ 5 C` moves
+/// five columns and is counted here as none, which the rule permits
+/// because it asks only that a sequence moving no column contribute none.
+/// Emulating the ones that do move would mean holding a screen model the
+/// shell does not have and the editor already keeps.
+// [spec:nsh:req:interactive.prompt-display-width]
+fn prompt_from_bytes(bytes: &[u8]) -> Prompt {
     let mut prompt = Prompt::default();
-    let mut literal = false;
-    for part in text.as_units().split(|unit| *unit == marker) {
-        if literal {
-            let bytes = part.iter().copied().collect::<Text>();
-            let bytes = text_to_bytes(&bytes)
-                .expect("shell prompt bytes cannot contain opaque code points");
-            prompt.push_literal(TerminalLiteral::from(bytes));
-        } else {
-            prompt.push_text(part.iter().copied().collect::<Text>());
-        }
-        literal = !literal;
+    let mut text_begins = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let Some(length) = escape_sequence_length(&bytes[at..]) else {
+            at += 1;
+            continue;
+        };
+        prompt.push_text(text_from_bytes(&bytes[text_begins..at]));
+        prompt.push_literal(TerminalLiteral::from(&bytes[at..at + length]));
+        at += length;
+        text_begins = at;
     }
+    prompt.push_text(text_from_bytes(&bytes[text_begins..]));
     prompt
+}
+
+/// How many bytes the escape sequence at the front of `bytes` occupies, or
+/// `None` when no sequence begins there.
+fn escape_sequence_length(bytes: &[u8]) -> Option<usize> {
+    if bytes.first() != Some(&ESCAPE) {
+        return None;
+    }
+    match *bytes.get(1)? {
+        /* A control sequence carries parameter bytes of its own before
+         * the tail every escape sequence ends with. */
+        b'[' => {
+            let mut at = 2;
+            while matches!(bytes.get(at), Some(0x30..=0x3f)) {
+                at += 1;
+            }
+            escape_sequence_tail(bytes, at, 0x40)
+        }
+        /* The string sequences -- an operating-system command, a device
+         * control string, and the three application strings -- run to a
+         * terminator of their own rather than to a final byte. A prompt
+         * that sets the window title is one of these, which is why
+         * finding the end of a colour sequence does not find its end. */
+        b']' | b'P' | b'X' | b'^' | b'_' => Some(string_sequence_length(bytes)),
+        /* An escape whose intermediate bytes come first: `ESC ( B` and
+         * the rest of the character-set selections. */
+        0x20..=0x2f => escape_sequence_tail(bytes, 1, 0x30),
+        /* Two bytes and nothing between them: `ESC 7`, `ESC 8`, `ESC M`. */
+        0x30..=0x7e => Some(2),
+        /* An escape before a control byte begins nothing. Showing it is a
+         * better answer than swallowing the byte behind it. */
+        _ => None,
+    }
+}
+
+/// Where a sequence ends once its parameters are behind it: any number of
+/// intermediate bytes, then one final byte at or above `first_final`.
+fn escape_sequence_tail(bytes: &[u8], mut at: usize, first_final: u8) -> Option<usize> {
+    while matches!(bytes.get(at), Some(0x20..=0x2f)) {
+        at += 1;
+    }
+    match bytes.get(at) {
+        Some(byte) if (first_final..=0x7e).contains(byte) => Some(at + 1),
+        Some(_) => None,
+        /* The prompt ends inside the sequence. The terminal's own parser
+         * is left standing there too, waiting for a final byte this
+         * prompt will never send, so the run it has consumed occupies no
+         * columns either. */
+        None => Some(at),
+    }
+}
+
+/// Where a string sequence ends: at its own bell, at a string terminator,
+/// or at the end of the prompt.
+fn string_sequence_length(bytes: &[u8]) -> usize {
+    let mut at = 2;
+    while at < bytes.len() {
+        match bytes[at] {
+            BELL => return at + 1,
+            ESCAPE if bytes.get(at + 1) == Some(&b'\\') => return at + 2,
+            _ => at += 1,
+        }
+    }
+    bytes.len()
 }
 
 fn text_from_bytes(bytes: &[u8]) -> Text {
@@ -982,6 +1074,8 @@ fn shell_editor(shell: &mut crate::context::Shell) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use nshedit::domain::PromptPart;
+
     use super::*;
 
     #[test]
@@ -1002,10 +1096,71 @@ mod tests {
         assert!(!terminfo_supports_line_editing(&dumb));
     }
 
+    fn literal(bytes: &[u8]) -> PromptPart {
+        PromptPart::Literal(TerminalLiteral::from(bytes))
+    }
+
+    fn visible(bytes: &[u8]) -> PromptPart {
+        PromptPart::Text(text_from_bytes(bytes))
+    }
+
+    // [spec:nsh:req:interactive.prompt-display-width/test]
     #[test]
-    fn prompt_literals_do_not_contribute_columns() {
-        let prompt = prompt_from_text(&text_from_bytes(b"x\x01\x1b[31m\x01> "), 1);
-        assert_eq!(prompt.parts().len(), 3);
+    fn a_colour_sequence_is_separate_from_its_text() {
+        let prompt = prompt_from_bytes(b"\x1b[1;33muser\x1b[0m$ ");
+        assert_eq!(
+            prompt.parts(),
+            [
+                literal(b"\x1b[1;33m"),
+                visible(b"user"),
+                literal(b"\x1b[0m"),
+                visible(b"$ "),
+            ]
+            .as_slice()
+        );
+    }
+
+    /// A string sequence ends at a terminator of its own, so the scan for
+    /// a final byte that ends a colour sequence would run past a title's
+    /// `;` and letters and stop on the first of them.
+    // [spec:nsh:req:interactive.prompt-display-width/test]
+    #[test]
+    fn a_title_sequence_ends_at_either_terminator() {
+        for sequence in [
+            b"\x1b]0;a title\x07".as_slice(),
+            b"\x1b]0;a title\x1b\\".as_slice(),
+        ] {
+            let mut bytes = sequence.to_vec();
+            bytes.extend_from_slice(b"$ ");
+            assert_eq!(
+                prompt_from_bytes(&bytes).parts(),
+                [literal(sequence), visible(b"$ ")].as_slice(),
+                "{sequence:?}"
+            );
+        }
+    }
+
+    /// A prompt that ends mid-sequence leaves the terminal's own parser
+    /// waiting there, consuming rather than displaying what it has.
+    // [spec:nsh:req:interactive.prompt-display-width/test]
+    #[test]
+    fn a_sequence_the_prompt_ends_inside_occupies_nothing() {
+        assert_eq!(
+            prompt_from_bytes(b"$ \x1b[1;").parts(),
+            [visible(b"$ "), literal(b"\x1b[1;")].as_slice()
+        );
+    }
+
+    /// An escape that begins nothing is text, and text is what the editor
+    /// shows: swallowing the byte behind it would hide a column that the
+    /// terminal is about to draw.
+    // [spec:nsh:req:interactive.prompt-display-width/test]
+    #[test]
+    fn an_escape_that_begins_no_sequence_stays_text() {
+        assert_eq!(
+            prompt_from_bytes(b"\x1b\x08$ ").parts(),
+            [visible(b"\x1b\x08$ ")].as_slice()
+        );
     }
 
     #[test]
