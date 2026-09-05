@@ -338,12 +338,19 @@ pub(crate) fn command_loop(
         let interactive = shell.options.enabled(ShellOption::Interactive) && top_level;
         if interactive {
             crate::mail::check_mail(shell)?;
+            crate::prompt::publish_terminal_width(shell);
             /* The last thing before the prompt is drawn, so that what the
              * hook assigns is what `parse_command`'s prompt expansion
              * reads. An `exit` from inside it leaves through here. */
             crate::evaluation::flow!(crate::prompt::run_hook(shell));
         }
         let parsed = crate::parser::parse_command(shell, interactive)?;
+        if interactive {
+            /* Again, because the window may have been dragged while the
+             * shell sat in that read, and the command about to run is
+             * what would then read a stale width. */
+            crate::prompt::publish_terminal_width(shell);
+        }
         if let crate::parser::ParseResult::Tree(command) = parsed {
             shell.jobs.job_warning = shell.jobs.job_warning.advance();
             eof_count = 0;

@@ -8,7 +8,10 @@
 //! `GetConsoleMode` call asked for an answer rather than for the
 //! settings.
 
-use windows_sys::Win32::System::Console::{ENABLE_LINE_INPUT, GetConsoleMode, SetConsoleMode};
+use windows_sys::Win32::System::Console::{
+    CONSOLE_SCREEN_BUFFER_INFO, ENABLE_LINE_INPUT, GetConsoleMode, GetConsoleScreenBufferInfo,
+    SetConsoleMode,
+};
 
 use super::*;
 
@@ -45,4 +48,19 @@ pub fn terminal_canonical_mode(fd: &impl AsDescriptor) -> Option<bool> {
 
 pub fn is_terminal(fd: &impl AsDescriptor) -> bool {
     TerminalSettings::capture(fd).is_ok()
+}
+
+/// How many columns wide the console behind `fd` is right now.
+///
+/// The *window* rather than the screen buffer, which is wider than the
+/// window whenever the console scrolls horizontally: what a prompt has
+/// to fit in is what the viewer can see.
+pub fn terminal_width(fd: &impl AsDescriptor) -> Option<usize> {
+    let mut information = CONSOLE_SCREEN_BUFFER_INFO::default();
+    // SAFETY: the handle is borrowed and the record is writable.
+    if unsafe { GetConsoleScreenBufferInfo(raw_handle(fd), &mut information) } == 0 {
+        return None;
+    }
+    let columns = i32::from(information.srWindow.Right - information.srWindow.Left + 1);
+    usize::try_from(columns).ok().filter(|columns| *columns > 0)
 }

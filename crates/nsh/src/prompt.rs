@@ -19,6 +19,7 @@
 use bstr::{BStr, BString};
 
 use crate::context::Shell;
+use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
 use crate::evaluation::{EvaluationContext, Flow};
 use crate::variables::VariableAttributes;
@@ -42,6 +43,10 @@ const JOBS: &[u8] = b"NSH_JOBS";
 /// counts seconds). A name that has to be looked up is worse than a long
 /// one.
 const DURATION: &[u8] = b"NSH_DURATION_MS";
+
+/// How wide the terminal is. The reference's name, and the reference has
+/// it for the same reason, so this one is published rather than lent.
+const COLUMNS: &[u8] = b"COLUMNS";
 
 /// What the shell measured around the last command, kept for the hook.
 ///
@@ -148,6 +153,56 @@ pub(crate) fn run_hook(shell: &mut Shell) -> Result<Flow, Error> {
     withdraw_state(shell, state);
     shell.status = status;
     settle(shell, outcome)
+}
+
+/// Publish the terminal's current width, where there is a terminal.
+///
+/// Called at both ends of the command loop's wait for a line: before the
+/// prompt, so the hook and the prompt expansion read the width they are
+/// about to be drawn into, and again once the line has been read, so a
+/// command typed after the window was dragged sees the size the person
+/// dragged it to. Those are the two moments the value can be observed
+/// from, and a query is one `ioctl`.
+///
+/// A shell with no terminal leaves the name entirely alone. There is no
+/// width to report; an inherited `COLUMNS` is the caller's answer and a
+/// fabricated one is worse than none. That last is where the rule parts
+/// company with the reference rather than following it: on a
+/// pseudo-terminal nobody has sized the pinned Bash 5.3.15 answers 80,
+/// a width no terminal reported. Both shells are driven through the
+/// same sequence, and both answers asserted, by
+/// `crates/nsh-cli/tests/interactive_terminal_width.rs`.
+// [spec:nsh:req:interactive.terminal-width]
+pub(crate) fn publish_terminal_width(shell: &mut Shell) {
+    let Some(width) = terminal_width(shell) else {
+        return;
+    };
+    let name = BStr::new(COLUMNS);
+    if writable(shell, name) {
+        assign(shell, COLUMNS, width.to_string().as_bytes());
+    }
+}
+
+/// The width of whichever of the shell's own streams is a terminal.
+///
+/// Stderr, then stdout, then stdin -- the order `jobs::terminal` takes
+/// when it is looking for the same terminal, and the order the shell's
+/// own writing reaches the person watching in: the prompt goes to
+/// stderr.
+fn terminal_width(shell: &Shell) -> Option<usize> {
+    [
+        LogicalDescriptor::STDERR,
+        LogicalDescriptor::STDOUT,
+        LogicalDescriptor::STDIN,
+    ]
+    .into_iter()
+    .find_map(|slot| {
+        shell
+            .descriptors
+            .get(slot)
+            .as_ref()
+            .and_then(nsh_platform::terminal_width)
+    })
 }
 
 /// A name the shell lends the hook for the length of one run.

@@ -14273,6 +14273,21 @@ children (
                 implements {
                     nsh-library ([spec:nsh:req:interactive.terminal-width])
                 }
+                log (
+                    {
+                        at 2026-09-05T20:31:14.017187206Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-09-05T20:31:14.017187206Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "single-flight overridden: started while interactive.prompt-display-width had uncommitted WIP"
+                    }
+                )
             }
 
             {

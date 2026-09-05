@@ -88,6 +88,17 @@ pub fn is_terminal(fd: &impl AsDescriptor) -> bool {
     rustix::termios::tcgetattr(fd.as_platform_descriptor().0).is_ok()
 }
 
+/// How many columns wide the terminal behind `fd` is right now.
+///
+/// `None` where there is no terminal, and also where the terminal
+/// reports a width of zero -- which a pseudo-terminal nobody has sized
+/// does, and which is not a width. The caller cannot tell the two apart
+/// and has no use for the distinction: neither is a number to publish.
+pub fn terminal_width(fd: &impl AsDescriptor) -> Option<usize> {
+    let size = rustix::termios::tcgetwinsize(fd.as_platform_descriptor().0).ok()?;
+    (size.ws_col > 0).then(|| usize::from(size.ws_col))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

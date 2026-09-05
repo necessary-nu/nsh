@@ -109,7 +109,7 @@ pub use signals::{
 mod spawn;
 pub use spawn::execute_program;
 mod terminal;
-pub use terminal::{TerminalSettings, is_terminal, terminal_canonical_mode};
+pub use terminal::{TerminalSettings, is_terminal, terminal_canonical_mode, terminal_width};
 mod text;
 pub use text::{
     NativeStrExt, ShellBytesExt, input_newline_width, trim_command_substitution_output,

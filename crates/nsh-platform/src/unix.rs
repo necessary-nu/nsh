@@ -88,7 +88,7 @@ pub use signals::{
     terminal_stop_signal, terminate_with_interrupt, termination_signal, unblock_all_signals,
 };
 mod terminal;
-pub use terminal::{TerminalSettings, is_terminal, terminal_canonical_mode};
+pub use terminal::{TerminalSettings, is_terminal, terminal_canonical_mode, terminal_width};
 mod text;
 pub use text::{
     NativeStrExt, ShellBytesExt, input_newline_width, trim_command_substitution_output,
