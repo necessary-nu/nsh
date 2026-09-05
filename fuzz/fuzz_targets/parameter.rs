@@ -3,6 +3,15 @@
 //! Fuzzer bytes are carried in variables. The script text is selected from a
 //! fixed set of parameter-expansion forms so the target explores expansion
 //! behavior without letting input bytes become shell syntax.
+//!
+//! # What it is evidence for
+//!
+//! The parameter transformations, substring and pattern substitutions of
+//! `compat.bash.expansion-globbing`, held to the pinned Bash. Four of the
+//! thirteen forms below are POSIX rather than Bash and are carried along
+//! for the ride; they belong to the `posix` spec, whose one impl scope
+//! does not reach this directory.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
 
 #![no_main]
 

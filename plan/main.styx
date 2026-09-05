@@ -10697,6 +10697,7 @@ children (
                         id harness.fuzz-targets-claim-nothing
                         title "Say what the eleven fuzz targets are evidence for, now that they are swept"
                         kind @docs
+                        sealed true
                         log (
                             {
                                 at 2026-09-04T13:14:48.82809165Z
@@ -10717,6 +10718,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-09-05T12:00:32.220110446Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -12939,6 +12947,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "THE LAST TWO PLATFORM SUBJECTS THAT SIT IN THE CRATE ROOT'S DIRECTORY RATHER THAN IN A HOST'S. Split out of `struct.posix-children-under-unix` on 2026-09-04, which moved the four asymmetric POSIX subjects and deliberately left this pair alone.\n\n    crates/nsh-platform/src/unix_facts.rs     -> src/unix/facts.rs\n    crates/nsh-platform/src/windows_facts.rs  -> src/windows/facts.rs\n\nWHY IT WAS NOT PART OF THAT NODE. The pair is already symmetric: both files sit beside `lib.rs`, both are declared and published by `lib.rs` under a host `cfg`, and neither host root can reach the other's. Nothing about them is the asymmetry that node named, and after it the crate root's two host blocks read identically -- `mod unix; pub use unix::*;` plus facts, `mod windows; pub use windows::*;` plus facts.\n\nWHAT IT WOULD BUY, and it is real: `src/unix/` and `src/windows/` would then hold everything of their host, the crate root would declare exactly two modules per host and publish two globs, and `ca0fa37` already moved `UserId` and `GroupId` into the facts modules themselves so nothing depends on the declaration's position.\n\nWHAT MAKES IT A NODE RATHER THAN A FIVE-MINUTE EDIT. `crates/nsh-lint/src/platform_surface.rs` reads part of each host's surface out of the crate root, on purpose, and its unit test `the_crate_root_carries_part_of_each_surface` asserts that `UserId` is published there under a host predicate for BOTH hosts -- with the comment that reading it for one host must not take it away from the other. Publishing the facts from the host roots makes that test's premise false. The parity check itself would stay green, because a name that leaves the crate root and arrives on the same host's root is on the same surface either way, but the test around it has to be rewritten to say what is still true. That is a change to the check that guards platform parity, made while moving the files it reads, which is exactly the pairing that wants its own commit and its own reviewer.\n\nAlso: `crates/nsh-lint/src/main.rs`'s `PRIVATE_PLATFORM_ALLOWLIST` names both files and is exact in both directions, and `descriptors_cross_the_boundary_owned` reads `src/unix_facts.rs` by path for `pub fn wait_for_input(fd: &impl AsDescriptor`. Both follow the files.\n\n`scripts/moved-only` is the proof to attach, run with rename detection off -- see `tooling.moved-only-cannot-see-a-rename`."
+                            }
+
+                            {
+                                at 2026-09-05T12:00:32.152300624Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
                             }
                         )
                     }

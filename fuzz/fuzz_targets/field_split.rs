@@ -4,6 +4,26 @@
 //! globbing disabled. Joining the resulting positional parameters with the
 //! first byte of default `IFS` must equal the same normalization performed
 //! directly over the input bytes.
+//!
+//! # Why this target claims no rule
+//!
+//! The property here is field splitting with the default `IFS`, and no
+//! `nsh` rule says anything about it. That spec is about what the library
+//! promises an embedder and about this project's own checks; field
+//! splitting is POSIX ground, and the `posix` spec's one impl reaches
+//! `crates/**/*.rs` and `posix/harness/**/*.py` and not this directory.
+//! A `[spec:posix:req:...]` line written here would be text no coverage
+//! map reads, which is worse than none.
+//!
+//! `crates/nsh/src/expand/typed/split.rs`, the module this samples,
+//! carries one annotation and it is `dash` provenance rather than a
+//! behavioural rule, so the gap is not this file's making.
+//!
+//! `harness.posix-rules-cannot-see-the-shell-harness` holds the same
+//! blind spot for the harness *scripts*. This is its Rust half and is
+//! wider than that node states: widening the `posix` impl to shell would
+//! still leave a Rust file outside `crates/` unable to claim a POSIX
+//! rule, which is what this one is.
 
 #![no_main]
 

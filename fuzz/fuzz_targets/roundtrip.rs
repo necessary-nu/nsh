@@ -18,6 +18,16 @@
 //! Rejecting the input is an ordinary answer to arbitrary bytes. So is an
 //! alias expansion, which replaces text before the parser sees it and is
 //! carved out of the rule for that reason.
+//!
+//! # What it is evidence for
+//!
+//! `idiom.printable-ast` under sampling. The right-hand side of the
+//! comparison is the fuzzer's own input, so there is no recorded
+//! expectation here for a wrong renderer to agree with -- which is the
+//! one thing a sampled property can offer that a case list cannot. What
+//! it does not reach is the rule's last sentence, about a node built
+//! rather than parsed: every tree here came from source.
+// [spec:nsh:req:idiom.printable-ast+2/test]
 
 #![no_main]
 

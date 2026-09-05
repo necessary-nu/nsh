@@ -25,6 +25,23 @@
 //! The verdict comes back as an exit status the shell computes, so the
 //! comparison happens in the shell's own `[` and cannot be fooled by a
 //! difference in how Rust would compare the bytes.
+//!
+//! # What it is evidence for
+//!
+//! One rule for each half of the round trip: `${X@Q}` is a Bash parameter
+//! transformation under `compat.bash.expansion-globbing`, and
+//! `printf -v q %q` is a Bash built-in reached through a Bash invocation
+//! flag under `compat.bash.builtins-special-variables`.
+//!
+//! Both are held to self-consistency and not to the Reference Profile.
+//! No reference runs here, so quoting that round-trips through this shell
+//! while spelling itself differently from Bash passes every input. That
+//! is the right bar for the security property above, which is about what
+//! this shell's own `eval` reads back, and the wrong one for conformance:
+//! `crates/nsh-cli/tests/bash_quoting_and_slicing.rs` is where the two
+//! spellings are compared.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
 
 #![no_main]
 

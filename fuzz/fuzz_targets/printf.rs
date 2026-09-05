@@ -2,6 +2,16 @@
 //!
 //! Format strings are fixed. The fuzzer supplies string bytes through `V`
 //! and bounded numeric text through `N`.
+//!
+//! # What it is evidence for
+//!
+//! `compat.bash.builtins-special-variables`, for one built-in. `%q` and
+//! `%b` are Bash's own conversions and the target holds them to the
+//! Reference Profile; the seven POSIX conversions beside them establish
+//! that the Bash spelling did not cost the ordinary ones. The rule's
+//! other two clauses, about the special variables and about the option
+//! sets, are untouched by anything here.
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
 
 #![no_main]
 

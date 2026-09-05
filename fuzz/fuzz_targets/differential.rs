@@ -42,6 +42,25 @@
 //! went on doing so after the other differential targets were moved onto
 //! the pin. Obtaining the oracle now panics
 //! (`[spec:nsh:req:oracle.cannot-measure-is-a-failure]`).
+//!
+//! # What it is evidence for
+//!
+//! Three Bash-mode rules, each sampled through the constructs the
+//! generator below emits and each judged against the Reference Profile
+//! rather than against a recorded answer: the parameter transformations
+//! and pattern substitutions of `compat.bash.expansion-globbing`, the
+//! `[[ ... ]]` pattern operands and truth-status conventions of
+//! `compat.bash.conditionals-arithmetic`, and the creation, compound
+//! assignment, whole-array expansion and length query of
+//! `compat.bash.arrays-declarations`.
+//!
+//! Each rule reaches well past what this grammar can generate -- there is
+//! no `globstar` here, no associative array, no regular-expression
+//! operand, no sparse subscript -- so this is a slice of each, and the
+//! fixed cases under `crates/` are what cover the rest.
+// [spec:nsh:req:compat.bash.expansion-globbing/test]
+// [spec:nsh:req:compat.bash.conditionals-arithmetic/test]
+// [spec:nsh:req:compat.bash.arrays-declarations/test]
 
 #![no_main]
 

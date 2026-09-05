@@ -18,6 +18,21 @@
 //! A hang is as much a finding as a crash: libFuzzer's `-timeout` reports
 //! one, and an unbounded backtrack is exactly what the budgets exist to
 //! prevent.
+//!
+//! # What it is evidence for
+//!
+//! `idiom.bounded-recursion`, which `crates/nsh/src/regex.rs` cites for
+//! the group-nesting ceiling this target attacks: an arbitrary pattern is
+//! mostly parentheses, and building that tree and dropping it each
+//! recurse once per one.
+//!
+//! It is evidence about survival and not about answers. Neither shell is
+//! consulted, so a matcher that never crashed and always reported no
+//! match would pass every input here. The budgets themselves are the
+//! other half of what this file is about and no rule states them: they
+//! are a commitment under `[dec:nsh:safety-trumps-compatibility]`, and a
+//! decision is not something an annotation can cite.
+// [spec:nsh:req:idiom.bounded-recursion/test]
 
 #![no_main]
 

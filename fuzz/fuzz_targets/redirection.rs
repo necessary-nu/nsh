@@ -2,6 +2,21 @@
 //!
 //! The generated source contains only fixed shell forms and a bounded decimal
 //! descriptor number. No fuzzer byte string is embedded into the script.
+//!
+//! # Why this target claims no rule
+//!
+//! Here-documents and the descriptor table are POSIX ground, and the
+//! three `nsh` rules that touch descriptors --
+//! `idiom.descriptor-materialization`, `idiom.resource-scopes` and
+//! `idiom.immutable-ast`, which is where a finalized here-document body
+//! is required -- are each about how the implementation is shaped rather
+//! than about what a shell prints. A target that reads a byte stream and
+//! an exit status cannot see any of the three, and would go on passing if
+//! all three were violated by an implementation that behaved.
+//!
+//! What it does establish is that this shell answers a write to a closed
+//! descriptor, and a here-document body, the way the pinned Bash does.
+//! No rule in a scope that reaches this directory claims that.
 
 #![no_main]
 

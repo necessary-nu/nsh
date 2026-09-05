@@ -3,6 +3,21 @@
 //! The generated script contains only decimal integers and a fixed operator.
 //! The fuzzer chooses values and operations; it does not contribute shell
 //! source text.
+//!
+//! # What it is evidence for
+//!
+//! `compat.bash.conditionals-arithmetic`, reached through `$(( ))` rather
+//! than through the `(( ))` the rule names.
+//! `crates/nsh/src/evaluation/bash_arithmetic.rs` records why those are
+//! one subject: evaluating the command is the same operation as expanding
+//! the substitution, deliberately, "since a second arithmetic entry would
+//! be a second set of answers".
+//!
+//! One binary operator is sampled at a time, so of the five conventions
+//! the rule names, precedence, side effects and diagnostics are not
+//! reached here at all -- the divisor is forced non-zero above precisely
+//! to keep a diagnostic out of the comparison.
+// [spec:nsh:req:compat.bash.conditionals-arithmetic/test]
 
 #![no_main]
 

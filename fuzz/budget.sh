@@ -117,6 +117,11 @@ wait "$mirror" 2>/dev/null || :
 finished=$(date +%s)
 
 case $stopped in
+    # A campaign whose replay ate the whole allowance mutated for zero
+    # seconds. It must not exit the way one that mutated and found nothing
+    # exits, because the two are indistinguishable from the status alone
+    # and only one of them is evidence.
+    # [spec:nsh:req:oracle.cannot-measure-is-a-failure]
     replay)
         printf 'fuzz/budget.sh: the corpus replay did not reach the fuzzing loop within %ss, so nothing was mutated\n' \
             "$allowance" >&2

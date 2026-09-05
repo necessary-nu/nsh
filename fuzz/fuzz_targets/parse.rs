@@ -17,6 +17,17 @@
 //! spawn anything, and the fuzzer stays fast enough to be worth running.
 //! See `fuzz/README.md` for the containment rule used when running
 //! campaigns.
+//!
+//! # What it is evidence for
+//!
+//! `idiom.bounded-recursion`, and only of its second half: that reaching
+//! a bound produces an error value rather than a crash. It cannot
+//! establish that a bound exists at all -- a fuzzer that never generates
+//! seventeen hundred nested constructs says nothing about depth
+//! seventeen hundred -- so the ceilings themselves are asserted by fixed
+//! cases under `crates/`, and this is what looks for the input that gets
+//! past them.
+// [spec:nsh:req:idiom.bounded-recursion/test]
 
 #![no_main]
 
