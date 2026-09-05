@@ -9,25 +9,31 @@
 //! embedded shell cannot survive it, so the API gates it behind a `Host`
 //! method a frontend grants and an ordinary embedder refuses.
 //!
-//! # The letters that name the process
+//! # The three letters of `exec [-cl] [-a name]`
 //!
 //! POSIX gives `exec` no options and dash takes none: `exec -a N prog`
-//! reads `-a` as the program and reports it missing. Bash gives it three,
-//! and two of them say what the image will call itself. Measured against
-//! the pinned Bash 5.3.15:
+//! reads `-a` as the program and reports it missing. Bash gives it three.
+//! Two say what the image will call itself and the third says what it is
+//! handed:
 //!
 //! * `exec -a MYNAME sh -c 'echo $0'` prints `MYNAME` -- the program is
 //!   still found by the word after the name, and only `argv[0]` moves.
 //! * `exec -l sh -c 'echo $0'` prints `-/bin/sh`, and `exec -l -a N`
 //!   prints `-N`: the letter prefixes a hyphen to whatever `argv[0]`
 //!   would otherwise have been, which is how a login shell is spelled.
-//! * `exec -c` runs the program with an empty environment. That is not a
-//!   name, it is the environment, and it is not taken here --
-//!   `bash.divergences.exec-empty-environment` holds the measurement.
+//! * `exec -c /usr/bin/env` prints nothing whatever the shell exported:
+//!   the program is handed an empty environment. The *search* still reads
+//!   the shell's, so `exec -c sh -c ...` finds `sh` on the shell's own
+//!   `PATH` and the child then sets its own default.
 //!
 //! The letters live inside the dialect test for the reason `export -n`'s
 //! do: they are Bash's alone, and taking them in the POSIX dialect would
-//! move dash.
+//! move dash, which reads each of the three as a program that is not
+//! there and ends the shell with 127.
+//!
+//! Every claim above is measured against the pinned Bash 5.3.15 by
+//! `crates/nsh-cli/tests/bash_exec_argument_zero.rs`, which runs each case
+//! through both shells and compares; nothing here is a recorded answer.
 
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
@@ -36,7 +42,7 @@ use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 
 use crate::evaluation::Flow;
-use crate::execution::execute_external_command_named;
+use crate::execution::{ExecOverrides, execute_external_command_for_exec};
 
 // [spec:dash:sem:eval.execcmd-fn]
 // [spec:posix:syn:builtin.exec.syn]
@@ -52,29 +58,32 @@ use crate::execution::execute_external_command_named;
 // [spec:nsh:def:idiom.shell-options]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     // [spec:nsh:req:compat.bash.builtins-special-variables]
-    let (utility, argument_zero) = if shell.options.dialect() == crate::options::Dialect::Bash {
-        let mut option_scan = crate::options::Options::new(args);
-        let mut name: Option<&BStr> = None;
-        let mut login = false;
-        while let Some(letter) = option_scan.next(&mut shell.diagnostics(), b"a:l")? {
-            match letter {
-                b'a' => name = Some(option_scan.arg()),
-                _ => login = true,
+    let (utility, argument_zero, empty_environment) =
+        if shell.options.dialect() == crate::options::Dialect::Bash {
+            let mut option_scan = crate::options::Options::new(args);
+            let mut name: Option<&BStr> = None;
+            let mut login = false;
+            let mut empty_environment = false;
+            while let Some(letter) = option_scan.next(&mut shell.diagnostics(), b"a:cl")? {
+                match letter {
+                    b'a' => name = Some(option_scan.arg()),
+                    b'c' => empty_environment = true,
+                    _ => login = true,
+                }
             }
-        }
-        let operands = option_scan.operands();
-        let argument_zero = spelled_name(name, login, operands.first().copied());
-        (operands, argument_zero)
-    } else {
-        let mut utility = args.get(1..).unwrap_or_default();
-        if utility
-            .first()
-            .is_some_and(|argument| *argument == BStr::new(b"--"))
-        {
-            utility = &utility[1..];
-        }
-        (utility, None)
-    };
+            let operands = option_scan.operands();
+            let argument_zero = spelled_name(name, login, operands.first().copied());
+            (operands, argument_zero, empty_environment)
+        } else {
+            let mut utility = args.get(1..).unwrap_or_default();
+            if utility
+                .first()
+                .is_some_and(|argument| *argument == BStr::new(b"--"))
+            {
+                utility = &utility[1..];
+            }
+            (utility, None, false)
+        };
 
     if !utility.is_empty() {
         let interactive_root = shell
@@ -100,12 +109,15 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         /* Hoisted out of `shellexec`'s argument list, which also takes
          * the shell; see the note in `eval.rs`'s `evalcommand`. */
         let path = crate::variables::path_value(shell);
-        let outcome = execute_external_command_named(
+        let outcome = execute_external_command_for_exec(
             shell,
             utility,
             path.as_slice().as_bstr(),
             None,
-            argument_zero.as_deref().map(BStr::new),
+            ExecOverrides {
+                argument_zero: argument_zero.as_deref().map(BStr::new),
+                empty_environment,
+            },
         );
 
         if interactive_root {

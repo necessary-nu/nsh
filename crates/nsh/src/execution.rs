@@ -292,30 +292,53 @@ pub fn execute_external_command(
     path: &BStr,
     path_index: Option<usize>,
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
-    execute_external_command_named(shell, arguments, path, path_index, None)
+    execute_external_command_for_exec(shell, arguments, path, path_index, ExecOverrides::default())
 }
 
-/// The same, with the `argv[0]` the program runs under named separately
-/// from the word it is found by.
+/// What `exec`'s letters ask for beyond running the program.
 ///
-/// `exec -a name` and `exec -l` are the only callers that need the two to
-/// differ, which is why this is a second entry point rather than a
-/// parameter on the one every other path through the evaluator uses: a
-/// command word is its own `argv[0]` everywhere else, and a signature
-/// that let it not be would invite the two to drift apart at sites where
-/// nothing distinguishes them.
+/// Both defaults are what every other path through the evaluator needs, so
+/// a caller that has no opinion cannot accidentally state one: a command
+/// word is its own `argv[0]` everywhere else, and every other child is
+/// handed the shell's environment.
+#[derive(Clone, Copy, Default)]
+pub struct ExecOverrides<'a> {
+    /// `-a name` and `-l`: the `argv[0]` the image runs under.
+    pub argument_zero: Option<&'a BStr>,
+    /// `-c`: hand the program an empty environment.
+    ///
+    /// The program's only. The search that finds it still reads the
+    /// shell's, because `resolve_command_path` takes `PATHEXT` out of that
+    /// slice on Windows and this letter says nothing about where a command
+    /// is found -- `exec -c sh -c ...` still finds `sh` on the shell's own
+    /// `PATH` in the reference.
+    pub empty_environment: bool,
+}
+
+/// The same, with the three things `exec`'s option group can change about
+/// a program the rest of the evaluator cannot.
+///
+/// `exec [-cl] [-a name]` is the only spelling that separates the word a
+/// program is found by from the `argv[0]` it runs under, and the only one
+/// that hands it an environment other than the shell's. That is why this
+/// is a second entry point rather than parameters on the one every other
+/// path uses: a signature that let a command word differ from its own
+/// `argv[0]`, or a child's environment from its parent's, would invite
+/// the two to drift apart at sites where nothing distinguishes them.
 ///
 /// `[dec:nsh:host-owns-the-process]` still governs. Replacing the image
-/// is the grant; running it under another name is a narrowing of what the
-/// host already permitted, and the permission check below is the same one.
+/// is the grant; running it under another name, or with less environment
+/// than the shell has, narrows what the host already permitted, and the
+/// permission check below is the same one.
 // [spec:posix:req:cmd.nonbuiltin-path-search-execl]
+// [spec:posix:req:cmd.nonbuiltin-exec-replaces-environment]
 // [spec:nsh:req:compat.bash.builtins-special-variables]
-pub fn execute_external_command_named(
+pub fn execute_external_command_for_exec(
     shell: &mut crate::context::Shell,
     arguments: &[&BStr],
     path: &BStr,
     path_index: Option<usize>,
-    argument_zero: Option<&BStr>,
+    overrides: ExecOverrides<'_>,
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
     let command = arguments.first().expect("shellexec needs a command name");
     /* Read before the borrows below, and owned: the search that follows
@@ -343,6 +366,14 @@ pub fn execute_external_command_named(
         Ok(environment) => environment,
         Err(error) => return native_exec_failure(shell, command, &error),
     };
+    /* `-c` empties what the program is handed and not what the search
+     * reads. The two are the same slice everywhere else, and separating
+     * them here is the whole of the letter. */
+    let handed: &[(OsString, OsString)] = if overrides.empty_environment {
+        &[]
+    } else {
+        &envv
+    };
     let mut argv: Vec<OsString> = match arguments
         .iter()
         .map(|word| word.try_to_os_string())
@@ -355,7 +386,7 @@ pub fn execute_external_command_named(
      * the program by the word it was written as, and only the vector the
      * image will read moves. */
     let program = argv[0].clone();
-    if let Some(name) = argument_zero {
+    if let Some(name) = overrides.argument_zero {
         match name.try_to_os_string() {
             Ok(name) => argv[0] = name,
             Err(error) => return native_exec_failure(shell, command, &error),
@@ -381,13 +412,13 @@ pub fn execute_external_command_named(
             Ok(native) => native,
             Err(error) => return native_exec_failure(shell, subject, &error),
         };
-        let failure = try_external_candidate(&native, &argv, &envv);
+        let failure = try_external_candidate(&native, &argv, handed);
         return exec_failure(shell, pinned.as_slice().as_bstr(), failure);
     }
 
     let error = if nsh_platform::shell_path_has_separator(command) {
         let resolved = nsh_platform::resolve_command_path(Path::new(&program), &envv);
-        try_external_candidate(resolved.as_os_str(), &argv, &envv)
+        try_external_candidate(resolved.as_os_str(), &argv, handed)
     } else {
         let mut search_error =
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
@@ -400,7 +431,7 @@ pub fn execute_external_command_named(
                     Err(error) => return native_exec_failure(shell, command, &error),
                 };
                 let candidate = nsh_platform::resolve_command_path(&candidate, &envv);
-                let candidate_error = try_external_candidate(candidate.as_os_str(), &argv, &envv);
+                let candidate_error = try_external_candidate(candidate.as_os_str(), &argv, handed);
                 if !nsh_platform::is_path_error(
                     &candidate_error,
                     nsh_platform::PathErrorKind::NotFound,

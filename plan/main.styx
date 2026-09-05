@@ -10235,12 +10235,27 @@ children (
                                         id bash.divergences.exec-empty-environment
                                         title "Take `exec -c`, which hands the program an empty environment"
                                         kind @feat
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-04T16:12:05.22962922Z
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "FOUND 2026-09-04 WHILE CLOSING `bash.divergences.exec-argument-zero`, AND LEFT OUT OF IT ON PURPOSE. That node took the two letters of `exec [-cl] [-a name]` that say what the image *calls itself* -- `-a` and `-l`, which both write `argv[0]` and share one line of code. `-c` is in the same option scan and is a different subject: it writes the environment.\n\nMEASURED against the pinned Bash 5.3.15 at `target/bash-reference/bash`, `tests/.build/ref/src/dash` 0.5.12-12, and a release build of the `exec-argument-zero` branch (`-p nsh-cli`, private worktree at `ddbaccd`, own CARGO_TARGET_DIR), load 50:\n\n    FOO=bar; export FOO; exec -c /usr/bin/env        bash: no output at all\n    exec -c sh -c 'env | wc -l'                      bash: 1 -- and that one is the child's own PWD\n    exec -c env X=1 /usr/bin/env                     bash: X=1\n    exec -cl /bin/sh -c 'echo $0'                    bash: -/bin/sh\n\n    exec -c /bin/true; echo after=$?\n      bash            after=2 is not reached; the program runs and the shell is gone\n      nsh -o bash     `exec: Illegal option -c`, after=2, shell continues\n      nsh (POSIX)     `exec: -c: not found`, 127, shell ends\n      dash            `exec: -c: not found`, 127, shell ends\n\nTHE POSIX ROW IS RIGHT AND MUST NOT MOVE: dash reads `-c` as the program, and the letters are inside the dialect test for that reason. The Bash row is the divergence, and it *changed shape* when `exec-argument-zero` landed -- before it, Bash mode also said \"`-c`: not found\" and ended the shell; now it reports an unknown option, takes 2 and carries on. Both are wrong against the reference and the new one is not worse: it says the shell does not have the letter instead of pretending `-c` was a program.\n\nWHAT THE SEARCH STILL USES. The child's environment is emptied; the *lookup* is not. `exec -c sh -c ...` finds `sh` through the shell's own PATH and the child then sets its own default, which is why the row above prints `/usr/local/sbin:...:/bin` from inside a shell that inherited nothing.\n\nWHERE THE WORK GOES. `crates/nsh/src/execution.rs`'s `execute_external_command_named` computes `envv` once, from `crate::variables::environment(shell)`, and hands the same slice to `resolve_command_path` and to `try_external_candidate`. `-c` must empty only the second: on Windows `resolve_command_path` reads `PATHEXT` out of that slice to decide an extension, so emptying both would change command lookup on a platform the letter says nothing about. The letter itself is one more arm in `builtins/exec.rs`'s option scan, which already takes `a:l`.\n\nWHY IT WAS NOT DONE WITH THE OTHER TWO. `-a` and `-l` are three lines that both end in the same `argument_zero`; `-c` needs a second parameter through the same seam and a decision about the Windows path above. Doing it as part of the naming node would have been two subjects in one commit, and the seam is exactly where the two subjects part.\n\nNOT COVERED BY ANY SURVEY: `tests/surveys/oils/spec/builtin-process.test.sh` has one `exec` option case, `exec -a sets argv[0]` (`builtin-process.test.sh:5`), and nothing for `-c` or `-l`. `crates/nsh-cli/tests/bash_exec_argument_zero.rs` is where a row for it belongs and its module comment names this node."
+                                            }
+
+                                            {
+                                                at 2026-09-05T12:26:26.63650674Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-05T12:37:15.25741977Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

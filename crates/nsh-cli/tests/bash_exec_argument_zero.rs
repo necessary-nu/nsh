@@ -8,20 +8,25 @@
 //!
 //! `-l` is the same mechanism and is measured with it: it prefixes a
 //! hyphen to whichever name is in force, which is `-a`'s when there is
-//! one and the program word otherwise. `-c`, the third letter of the
-//! reference's `[-cl] [-a name]`, is an environment rather than a name,
-//! and no row here asserts either side of it --
-//! `bash.divergences.exec-empty-environment` holds its measurement.
+//! one and the program word otherwise.
+//!
+//! `-c`, the third letter of the reference's `[-cl] [-a name]`, is an
+//! environment rather than a name and is measured here too. It empties
+//! what the program is handed and not what the search reads, so
+//! `exec -c sh -c ...` still finds `sh` on the shell's own `PATH` and the
+//! child then sets its own default -- which is why the row below counts
+//! one variable rather than none.
 //!
 //! THE LETTERS ARE BASH'S ALONE, so the POSIX dialect must go on reading
 //! `-a` as a program name. That half cannot be a differential here --
 //! dash is not wired into this crate's harness the way `pinned_bash`
 //! wires the reference Bash -- so it is recorded, against
-//! `tests/.build/ref/src/dash` 0.5.12-12 on 2026-09-04, at load 60:
-//! `exec -a MYNAME sh -c ...`, `exec -aMYNAME ...`, `exec -a` alone,
-//! `exec -l ...`, `exec -al N ...` and `exec -z ...` all answer 127 with
+//! `tests/.build/ref/src/dash` 0.5.12-12 on 2026-09-04 at load 60 and
+//! 2026-09-05 at load 25: `exec -a MYNAME sh -c ...`, `exec -aMYNAME ...`,
+//! `exec -a` alone, `exec -l ...`, `exec -al N ...`, `exec -c ...`,
+//! `exec -cl ...`, `exec -ca N ...` and `exec -z ...` all answer 127 with
 //! the option read as the missing program, and all end the shell. The
-//! default dialect answers the same six, which is what
+//! default dialect answers the same nine, which is what
 //! `the_default_dialect_still_has_no_such_letter` pins.
 //!
 //! Nothing in the differential rows is a recorded expectation. Every case
@@ -56,6 +61,31 @@ const NAMES_THE_PROCESS: &[&str] = &[
      * command before it still runs. */
     "echo first\nexec -a N /bin/sh -c 'echo 0=$0'\n",
     "exec -a N /bin/sh -c 'echo 0=$0' 2>/dev/null\n",
+];
+
+/// `-c` empties the environment the program is handed.
+const EMPTIES_THE_ENVIRONMENT: &[&str] = &[
+    /* Nothing the shell exported survives, so `env` prints nothing at
+     * all. */
+    "FOO=bar\nexport FOO\nexec -c /usr/bin/env\n",
+    /* The one variable a child shell then sets for itself is its own
+     * `PWD`, which is what makes this a count rather than a zero. */
+    "FOO=bar\nexport FOO\nexec -c sh -c 'env | wc -l'\n",
+    /* An assignment on the `exec` word is not the shell's environment
+     * and is handed over. */
+    "exec -c env X=1 /usr/bin/env\n",
+    /* The letter clusters with the other two, in both spellings, and
+     * neither of them stops emptying it. */
+    "exec -cl /bin/sh -c 'echo 0=$0'\n",
+    "exec -c -a N /bin/sh -c 'echo 0=$0; env | wc -l'\n",
+    "exec -ca N /bin/sh -c 'echo 0=$0'\n",
+    /* `--` still ends the options after it. */
+    "FOO=bar\nexport FOO\nexec -c -- /usr/bin/env\n",
+    /* With no program there is nothing to hand an environment to, and
+     * the redirection-only form succeeds as it always did. */
+    "exec -c\necho after=$?\n",
+    /* A program that cannot be run keeps its status past the letter. */
+    "exec -c /no/such/prog-for-exec-empty-environment\necho after=$?\n",
 ];
 
 /// What the letters refuse, and whether the refusal ends the shell.
@@ -119,12 +149,19 @@ fn the_option_scan_refuses_what_bash_refuses() {
     agrees(REFUSES);
 }
 
+/// `exec -c` hands the program an empty environment.
+// [spec:nsh:req:compat.bash.builtins-special-variables/test]
+#[test]
+fn the_letter_empties_the_environment() {
+    agrees(EMPTIES_THE_ENVIRONMENT);
+}
+
 /// The default dialect has no such letters and must keep dash's answer.
 ///
 /// Recorded rather than differential for the reason the module comment
 /// gives. The status is the whole assertion: the letter is read as the
 /// program, no such program is found, and a non-interactive shell ends
-/// there, so nothing after the `exec` runs in any of the six.
+/// there, so nothing after the `exec` runs in any of the nine.
 // [spec:nsh:req:compat.bash.builtins-special-variables/test]
 #[test]
 fn the_default_dialect_still_has_no_such_letter() {
@@ -135,6 +172,9 @@ fn the_default_dialect_still_has_no_such_letter() {
         "exec -a\necho after\n",
         "exec -l sh -c 'echo 0=$0'\necho after\n",
         "exec -al N sh -c 'echo 0=$0'\necho after\n",
+        "exec -c /bin/true\necho after\n",
+        "exec -cl /bin/sh -c 'echo 0=$0'\necho after\n",
+        "exec -ca N /bin/sh -c 'echo 0=$0'\necho after\n",
         "exec -z /bin/true\necho after\n",
     ] {
         let (stdout, status) = pinned_bash::answer(nsh, &[], script);
