@@ -192,6 +192,15 @@ impl JobTable {
         }
     }
 
+    /// How many jobs the shell is tracking, running and stopped alike.
+    ///
+    /// The presentation order holds exactly the live slots, so this is
+    /// the same set `jobs` lists and not the slot vector, which retains
+    /// the holes a removal leaves.
+    pub(crate) fn tracked(&self) -> usize {
+        self.order.len()
+    }
+
     pub(crate) fn order_snapshot(&self) -> Vec<JobId> {
         let mut snapshot = Vec::with_capacity(self.order.len());
         snapshot.extend(self.order.iter().copied());

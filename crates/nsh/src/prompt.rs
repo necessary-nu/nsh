@@ -21,6 +21,7 @@ use bstr::{BStr, BString};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::evaluation::{EvaluationContext, Flow};
+use crate::variables::VariableAttributes;
 
 /// The name the hook is spelled with.
 ///
@@ -29,6 +30,67 @@ use crate::evaluation::{EvaluationContext, Flow};
 /// many words that nothing here promises Bash's array form, its ordering
 /// with `PS0`, or its `DEBUG` interactions.
 const HOOK: &[u8] = b"PROMPT_COMMAND";
+
+/// How many jobs the shell is tracking, as the hook reads it.
+const JOBS: &[u8] = b"NSH_JOBS";
+
+/// How long the last command record took, in milliseconds.
+///
+/// The unit is in the name because there is no convention to appeal to:
+/// the reference has no name for this at all, and the shells that do
+/// disagree (fish counts milliseconds, zsh's `$EPOCHREALTIME` arithmetic
+/// counts seconds). A name that has to be looked up is worse than a long
+/// one.
+const DURATION: &[u8] = b"NSH_DURATION_MS";
+
+/// What the shell measured around the last command, kept for the hook.
+///
+/// Beside [`crate::mail::MailState`] on the shell and for the same
+/// reason: it is what the command loop remembers between one command and
+/// the next prompt.
+pub struct PromptState {
+    /// Milliseconds the last *command* record took. A record that parsed
+    /// to nothing does not replace it, which is the same distinction the
+    /// command loop already draws for the status it carries forward.
+    duration: u64,
+}
+
+impl PromptState {
+    pub(crate) const fn new() -> Self {
+        Self { duration: 0 }
+    }
+}
+
+/// The shell's clock, read on both sides of a command record.
+///
+/// The rule requires the measurement to be taken *here*, by the shell,
+/// around the command it reports -- and not by a hook sampling a clock at
+/// each prompt. A hook runs after the fact and cannot see where the
+/// pipeline began, so a shell built that way needs a second, pre-execution
+/// hook as well, and still mis-times `slow | slow | fast`: the members of
+/// a pipeline start together, so the moment any of them was reached says
+/// nothing about when the pipeline did.
+#[derive(Clone, Copy)]
+pub(crate) struct Elapsed(f64);
+
+impl Elapsed {
+    /// The moment a command record is about to run, taken *after* the
+    /// parse: the parse is where the shell waits for the person typing,
+    /// and their thinking time is not the command's.
+    pub(crate) fn started() -> Self {
+        Self(nsh_platform::facts::monotonic_seconds())
+    }
+}
+
+/// Charge the time since `started` to the record that has just finished.
+///
+/// Clamped at zero and saturated at the top, because the value crosses
+/// into a shell variable and an integer that went backwards there would
+/// be read as an enormous positive one.
+pub(crate) fn record_duration(shell: &mut Shell, started: Elapsed) {
+    let seconds = nsh_platform::facts::monotonic_seconds() - started.0;
+    shell.prompt.duration = (seconds.max(0.0) * 1000.0) as u64;
+}
 
 /// Run the prompt hook, if there is one, before the primary prompt.
 ///
@@ -53,6 +115,17 @@ pub(crate) fn run_hook(shell: &mut Shell) -> Result<Flow, Error> {
      * anything else in `PROMPT_COMMAND` runs. */
     let status = shell.status;
 
+    /* Published for the length of the hook and taken away again, which is
+     * what `[spec:nsh:req:interactive.prompt-state]` asks for and no more:
+     * the state must be readable *by the hook*. Leaving the two names on
+     * the table would put them in `declare -p`, and
+     * `[spec:nsh:req:compat.bash.names.only-what-the-reference-has]`
+     * forbids Bash mode publishing a name the reference does not have --
+     * `bash_shell_facts::the_published_set_is_the_references_less_four`
+     * is the check that would fail. */
+    // [spec:nsh:req:interactive.prompt-state]
+    let state = publish_state(shell);
+
     /* A diagnostic raised inside the hook is prefixed with the hook's
      * name, so a syntax error in `PROMPT_COMMAND` cannot be read as the
      * command the user just ran having failed. A command *within* the
@@ -72,8 +145,71 @@ pub(crate) fn run_hook(shell: &mut Shell) -> Result<Flow, Error> {
     );
 
     shell.evaluation.command_name = outer_name;
+    withdraw_state(shell, state);
     shell.status = status;
     settle(shell, outcome)
+}
+
+/// A name the shell lends the hook for the length of one run.
+struct Lent {
+    name: &'static [u8],
+    /// What the name held before the loan and what it gets back.
+    /// `None` means it held nothing and is unset again afterwards.
+    previous: Option<BString>,
+}
+
+/// Give the hook the state a prompt generator needs, and say what has to
+/// be put back.
+///
+/// The status is not among these: `$?` is already the answer to it, and
+/// [`run_hook`] is what keeps that answer truthful across the call.
+///
+/// A read-only name is skipped rather than assigned through. Assigning
+/// through one is refused *with a diagnostic*, and a session that printed
+/// the same refusal above every prompt would be unusable; a name the user
+/// has pinned is left holding what they pinned.
+fn publish_state(shell: &mut Shell) -> Vec<Lent> {
+    let jobs = shell.jobs.tracked().to_string();
+    let duration = shell.prompt.duration.to_string();
+    let mut lent = Vec::with_capacity(2);
+    for (name, value) in [(JOBS, jobs), (DURATION, duration)] {
+        if !writable(shell, BStr::new(name)) {
+            continue;
+        }
+        let previous = crate::variables::lookup_bytes(shell, BStr::new(name));
+        assign(shell, name, value.as_bytes());
+        lent.push(Lent { name, previous });
+    }
+    lent
+}
+
+fn withdraw_state(shell: &mut Shell, lent: Vec<Lent>) {
+    for Lent { name, previous } in lent {
+        match previous {
+            Some(value) => assign(shell, name, value.as_slice()),
+            None => drop(crate::variables::unset_bytes(shell, BStr::new(name))),
+        }
+    }
+}
+
+/// Whether the shell may write through `name` without being refused.
+fn writable(shell: &Shell, name: &BStr) -> bool {
+    !crate::variables::variable_attributes(shell, name)
+        .is_some_and(|attributes| attributes.read_only)
+}
+
+/// Land `value` on `name`, dropping a refusal the guard above did not
+/// foresee -- a `local` declaration in the hook's own scope, say. The
+/// hook then reads whatever the name does hold, which is the outcome the
+/// prompt can live with.
+fn assign(shell: &mut Shell, name: &[u8], value: &[u8]) {
+    let assigned = crate::variables::set_bytes(
+        shell,
+        BStr::new(name),
+        Some(BStr::new(value)),
+        VariableAttributes::NONE,
+    );
+    drop(assigned);
 }
 
 /// What a finished hook leaves the command loop.

@@ -144,6 +144,10 @@ pub struct Shell {
     /// What `$MAILPATH` checking remembers between prompts. `mail.rs`
     /// owns the shape.
     pub(crate) mail: crate::mail::MailState,
+    /// What the prompt hook is given: the clock the command loop keeps
+    /// around each command record. `prompt.rs` owns the shape.
+    // [spec:nsh:req:interactive.prompt-state]
+    pub(crate) prompt: crate::prompt::PromptState,
     /// `IFS` in the forms field splitting wants it, rebuilt by the
     /// variable hook. `expand.rs` owns the shape.
     pub(crate) ifs: crate::expand::IfsCache,
@@ -273,6 +277,7 @@ impl Shell {
                 crate::evaluation::bash_process_substitution::SubstitutionStack::default(),
             working_directory: crate::working_directory::WorkingDirectoryState::new(),
             mail: crate::mail::MailState::new(),
+            prompt: crate::prompt::PromptState::new(),
             ifs: crate::expand::IfsCache::new(),
             expand: crate::expand::ExpandState::new(),
             display_history: false,

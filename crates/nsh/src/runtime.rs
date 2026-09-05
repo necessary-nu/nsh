@@ -347,13 +347,25 @@ pub(crate) fn command_loop(
         if let crate::parser::ParseResult::Tree(command) = parsed {
             shell.jobs.job_warning = shell.jobs.job_warning.advance();
             eof_count = 0;
+            /* The shell's own clock, around the record it will report --
+             * started after the parse, because the parse is where the
+             * shell waited for the person typing. A failed record is
+             * still charged what it took. */
+            // [spec:nsh:req:interactive.prompt-state]
+            let started = crate::prompt::Elapsed::started();
             // [spec:nsh:req:compat.bash.error-boundary]
-            let flow = crate::evaluation::evaluate_record(
+            let outcome = crate::evaluation::evaluate_record(
                 shell,
                 command.as_ref(),
                 EvaluationContext::DEFAULT,
                 record_frame,
-            )?;
+            );
+            /* A record that parsed to nothing did not run, which is the
+             * same distinction the status below draws. */
+            if command.is_some() {
+                crate::prompt::record_duration(shell, started);
+            }
+            let flow = outcome?;
             match flow {
                 crate::evaluation::Flow::Done(command_status) => {
                     if command.is_some() {

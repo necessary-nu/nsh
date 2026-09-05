@@ -14256,6 +14256,14 @@ children (
                 implements {
                     nsh-library ([spec:nsh:req:interactive.prompt-state])
                 }
+                log (
+                    {
+                        at 2026-09-05T20:09:12.402321475Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {
