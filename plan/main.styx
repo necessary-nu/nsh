@@ -14239,6 +14239,14 @@ children (
                 implements {
                     nsh-library ([spec:nsh:req:interactive.prompt-hook])
                 }
+                log (
+                    {
+                        at 2026-09-05T19:51:32.018768645Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {
@@ -14266,6 +14274,14 @@ children (
                 implements {
                     nsh-library ([spec:nsh:req:interactive.prompt-display-width])
                 }
+                log (
+                    {
+                        at 2026-09-05T19:50:04.894739397Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {

@@ -187,6 +187,7 @@ pub(crate) mod input;
 pub(crate) mod lifecycle;
 pub(crate) mod mail;
 pub(crate) mod options;
+pub(crate) mod prompt;
 pub(crate) mod redirection;
 pub(crate) mod resource;
 pub(crate) mod trap;
