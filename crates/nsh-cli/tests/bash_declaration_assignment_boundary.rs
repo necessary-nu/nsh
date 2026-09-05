@@ -97,14 +97,11 @@ const REFUSAL_KEEPS_THE_LIST: &[&str] = &[
 /// A subshell and a command substitution contain it, so the enclosing
 /// shell sees a status and reads on.
 ///
-/// Only the single-record `errexit` case is here. What `set -e` does to
-/// this class across a *record* boundary is a divergence of its own and
-/// older than this file: the reference reports an arithmetic assignment
-/// error and reads the next record with `set -e` live, where this shell
-/// stops, and it does so for the compound spelling and the plain
-/// assignment as much as for `declare -i` -- so it is not this boundary's
-/// question. `bash.divergences.errexit-over-an-assignment-error` holds it,
-/// with the measurement.
+/// Only the single-record `errexit` case is here, and `set -e` decides
+/// nothing in it: the record is abandoned by the arithmetic failure, so
+/// the row answers the same with the option cleared. What `set -e` does
+/// to this class across a *record* boundary is a separate table, in
+/// `crates/nsh-cli/tests/bash_errexit_over_an_assignment_error.rs`.
 const THE_ABANDONMENT_IS_CONTAINED: &[&str] = &[
     "( declare -i x=1+; echo INNER ); echo NEXT\n",
     "v=$( declare -i x=1+; echo INNER ); echo \"NEXT [$v]\"\n",

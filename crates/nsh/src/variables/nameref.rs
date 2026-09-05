@@ -393,10 +393,16 @@ pub(crate) fn declared_value(
          * command of the list after the second. */
         // [spec:nsh:req:compat.bash.error-boundary]
         let number = crate::arithmetic::evaluate(shell, value).map_err(|error| match error {
-            Error::Abandoned { line, message, .. } => Error::Abandoned {
+            Error::Abandoned {
+                line,
+                message,
+                from_arithmetic,
+                ..
+            } => Error::Abandoned {
                 line,
                 message,
                 from_assignment: true,
+                from_arithmetic,
             },
             /* The POSIX dialect builds no abandonment: there the same
              * arithmetic failure is a fatal `shell_error`, and marking it

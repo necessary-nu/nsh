@@ -310,6 +310,49 @@ facility this shell does not provide.
 > first paragraph above says and is unchanged. The default dialect is untouched
 > and still answers dash's 2 in every invocation shape.
 >
+> Corrected 2026-09-05 by `bash.divergences.errexit-over-an-assignment-error`,
+> everything above kept verbatim: "With `errexit` enabled the failure MUST
+> remain fatal" is wrong in scope. It is true of a refusal and false of a
+> failed arithmetic evaluation, and the reason given for it -- that a script
+> which asked to stop at the first error must not be carried past a reported
+> one -- argues against the reference this profile exists to track.
+>
+> Measured against the pinned Bash 5.3.15 and `bash --posix`, three records on
+> standard input and as a file operand, `set -e` in the first: the reference
+> reports and **reads the next record** after `declare -i x=1+`,
+> `declare -ai v=(1+)`, `typeset -i x=1+`, `declare -i x; x=1+`, a
+> `local -i x=1+` in a function, `w[1+]=2`, `${w[1+]}`, `${w[@]:1+:2}`,
+> `m[$((1+))]=v`, `x=$((1+))` and `echo $((1+))`, and **ends the shell** after
+> `readonly r=1; r=2`, `declare -r r=1; r=2`, `readonly r=1; unset r`,
+> `export 1bad=1`, `declare -i 1bad=1`, `declare -A a; declare -a a` and the
+> invalid indirect expansion `${!x@bad}`.
+>
+> The control that makes this a scope error rather than a preference: run the
+> same records with `set -e` removed and the arithmetic rows are unchanged in
+> both shells. `errexit` is doing no work for that class at all, so a
+> requirement that it "remain fatal" there describes a mechanism the reference
+> does not have. Both classes abandon their record -- `FAIL; echo SAME` prints
+> nothing for either -- so abandonment does not separate them and the raise has
+> to carry which it was.
+>
+> Bash mode therefore MUST resume at the next record after a failed arithmetic
+> evaluation whether or not `errexit` is set, and MUST keep `errexit` fatal for
+> a refusal. Two things the same measurement establishes. `(( 1+ ))` and
+> `let x=1+` are neither class: the arithmetic is the command, so its failure
+> is that command's status, `FAIL; echo SAME` prints `SAME`, and ordinary
+> `errexit` ends the shell -- both shells already agreed and nothing here moves
+> them. And `x=$((1+))` is the one row where the reference's two modes differ:
+> it is recoverable in the default mode and fatal under `--posix`, with or
+> without `errexit`, so Bash mode tracks the default mode and the earlier
+> reading that "Bash and `--posix` agree throughout" holds only for the
+> declaration spellings. The default dialect is untouched: `declare` does not
+> exist there, and `x=$((1+))` stays fatal at status 2 as `/usr/bin/dash`
+> 0.5.12-12 answers it.
+>
+> `crates/nsh-cli/tests/bash_errexit_over_an_assignment_error.rs` runs every
+> row above through both shells in both frames and holds no expected values of
+> its own.
+>
 > Source: `[dec:nsh:we-own-the-defects]`
 
 ## Interactive profile

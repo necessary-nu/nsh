@@ -370,6 +370,25 @@ pub enum Error {
         /// function.
         // [spec:nsh:req:compat.bash.error-boundary]
         from_assignment: bool,
+        /// Whether an arithmetic evaluation raised it, which decides
+        /// whether `errexit` can reach it: the reference resumes at the
+        /// next record after one of these even under `set -e`, and ends
+        /// the shell after a refusal. Both classes abandon their record,
+        /// so the abandonment cannot separate them and the raise has to
+        /// say which it was.
+        ///
+        /// `(( 1+ ))` and `let x=1+` are neither. The arithmetic is the
+        /// command there, so its failure becomes that command's status
+        /// instead of an abandonment and ordinary `errexit` acts on it;
+        /// they never reach this variant and so need no arm.
+        ///
+        /// Set by `crate::arithmetic`, the only frame that knows the
+        /// failure was arithmetic, and read by
+        /// [`crate::evaluation::evaluate_record`].
+        /// `crates/nsh-cli/tests/bash_errexit_over_an_assignment_error.rs`
+        /// measures both classes through both shells.
+        // [spec:nsh:req:compat.bash.error-boundary]
+        from_arithmetic: bool,
     },
     /// A diagnostic with no more specific variant.
     Other {
@@ -438,6 +457,7 @@ impl Error {
             line,
             message: BString::default(),
             from_assignment: false,
+            from_arithmetic: false,
         }
     }
 
@@ -671,6 +691,7 @@ impl Diagnostics<'_> {
             line: self.line,
             message: BString::from(msg),
             from_assignment: false,
+            from_arithmetic: false,
         };
         self.report(error)
     }
@@ -703,6 +724,7 @@ impl Diagnostics<'_> {
             line: self.line,
             message: BString::new(Vec::new()),
             from_assignment: false,
+            from_arithmetic: false,
         }
     }
 

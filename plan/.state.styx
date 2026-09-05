@@ -1714,7 +1714,7 @@ assertions (
     {id posix.nonconformance.dot-prints-a-newline, kind @complete, author "brendan@necessary.nu", at 2026-09-04T21:28:18.722503503Z}
     {id harness.fuzz-oracle-outside-the-worktree, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:40:21.869878362Z}
     {id bash.divergences.hash-option-set, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:07:07.646467476Z}
-    {id bash.divergences.errexit-over-an-assignment-error, kind @doing, author "brendan@necessary.nu", at 2026-09-05T11:27:51.256239714Z}
+    {id bash.divergences.errexit-over-an-assignment-error, kind @complete, author "brendan@necessary.nu", at 2026-09-05T13:29:49.098213188Z}
     {id tooling.moved-only-reads-the-whole-dirty-tree, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:33:17.709902353Z}
     {id tooling.disk.readme-says-tmp-is-ram, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:36:53.379279236Z}
     {id harness.refresh-cannot-write-inside-the-containment, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:56:22.338183749Z}

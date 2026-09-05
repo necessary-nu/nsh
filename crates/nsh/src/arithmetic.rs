@@ -101,9 +101,29 @@ impl<'a, 'shell> Parser<'a, 'shell> {
          * failure -- a syntax error, a division by zero, a subscript that
          * will not evaluate. `set -u` on an unset name inside an
          * expression is not one of them and keeps the fatal boundary in
-         * both dialects, which is why that raise is separate. */
+         * both dialects, which is why that raise is separate.
+         *
+         * The mark is set here because this is the only place that knows
+         * the failure was arithmetic, and `errexit` does not end the
+         * shell for one: the reference reads the next record after
+         * `declare -i x=1+` with `set -e` live, and stops at the
+         * read-only refusal that reaches `dialect_error` by every other
+         * caller. The POSIX dialect builds no abandonment to mark. */
         // [spec:nsh:req:compat.bash.error-boundary]
-        self.shell.diagnostics().dialect_error(&text)
+        match self.shell.diagnostics().dialect_error(&text) {
+            Error::Abandoned {
+                line,
+                message,
+                from_assignment,
+                ..
+            } => Error::Abandoned {
+                line,
+                message,
+                from_assignment,
+                from_arithmetic: true,
+            },
+            fatal => fatal,
+        }
     }
 
     /// Bash's comma operator: evaluate each side, answer with the right.

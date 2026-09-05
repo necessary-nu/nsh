@@ -537,10 +537,14 @@ pub(crate) fn parse_and_execute(
 /// returning to its outermost loop -- would destroy the locals of a
 /// function that merely called `eval`.
 ///
-/// `errexit` overrides the recovery, and that is Bash's rule rather than an
-/// interpretation of it: `set -e` makes Bash's `report_error` end the shell
-/// where it stands. A script that asked to stop at the first error gets to
-/// stop at this one, and the recovery cannot be the thing that swallows it.
+/// `errexit` overrides the recovery for a *refusal* -- a read-only name, a
+/// bad identifier, an invalid indirect expansion -- so a script that asked
+/// to stop at the first error is not carried past one. It does not reach a
+/// failed arithmetic evaluation: the reference reads the next record after
+/// `declare -i x=1+` or `x=$((1+))` with `set -e` live, and only
+/// `from_arithmetic` separates the two, because both abandon their record.
+/// `crates/nsh-cli/tests/bash_errexit_over_an_assignment_error.rs`
+/// measures both classes through both shells.
 ///
 /// `outermost` is false for a record of a `.` or `source` operand, which
 /// recovers the same way but does not take the interactive arm -- that one
@@ -565,7 +569,14 @@ pub(crate) fn evaluate_record(
         evaluate_tree(shell, node, context)
     };
     match outcome {
-        Err(error) if error.is_abandoned() && !shell.options.enabled(ShellOption::Errexit) => {
+        Err(error)
+            if match &error {
+                Error::Abandoned {
+                    from_arithmetic, ..
+                } => *from_arithmetic || !shell.options.enabled(ShellOption::Errexit),
+                _ => false,
+            } =>
+        {
             let status = error.status();
             drop(error);
             shell.status = status;
