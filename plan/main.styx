@@ -10192,12 +10192,27 @@ children (
                                         id bash.divergences.alias-listing-in-bash-mode
                                         title "Print an alias listing the way Bash does, and take `alias -p`"
                                         kind @fix
+                                        sealed true
                                         log (
                                             {
                                                 at 2026-09-04T15:51:12.762383212Z
                                                 author "brendan@necessary.nu"
                                                 kind @note
                                                 text "Found 2026-09-04 while deciding `bash.divergences.publish-names.table-views`, measured against the pinned Bash 5.3.15, `env -i PATH=/usr/bin:/bin LC_ALL=C`, fed on standard input, machine load 57.\n\n    alias zz=1; alias\n      bash:           alias zz='1'\n      nsh -o bash:    zz='1'\n      nsh (posix):    zz='1'          dash: zz='1'\n    alias zz=1; alias -p\n      bash:           alias zz='1'\n      nsh -o bash:    alias: -p not found          (status 1)\n\nTwo differences, one built-in. The reference prefixes each line with `alias ` so the listing re-enters as commands rather than as assignments, and it takes `-p`, which is the same listing spelled explicitly.\n\nTHIS IS NOT THE DIVERGENCE ALREADY ON THE BOOKS. `docs/divergences.md` \"### `alias` displays `name=quoted-value`\" is about where the quote goes -- dash prints `'name=value'`, this shell prints `name='value'` because `[spec:posix:req:builtin.alias.stdout-format]` requires the name and the equals sign unquoted, and `fix-builtin-alias-stdout-format` delivered it. That entry is a claim about the POSIX dialect against dash and says nothing about the Bash dialect, where the reference's line is a third form again. The POSIX-dialect answer must not move: it is the rule's, and `alias_stdout_format` in `tests/harness/divergences.sh` is scoped to it.\n\nSo the change is `bash::active`-gated: the prefix and `-p` in the Bash dialect only, leaving `zz='1'` for POSIX. `crates/nsh/src/builtins/alias.rs` is the whole of it, plus a differential row.\n\nWHY IT MATTERS MORE THAN A PREFIX. It is the observable half of `BASH_ALIASES`: the reference's own demonstration that the variable is a live view is `BASH_ALIASES[ll]='ls -l'; alias` printing `alias ll='ls -l'`, and that row cannot agree while the listing does not. `bash.divergences.publish-names.table-views` was decided against on 2026-09-04 partly on this: publishing a live view onto a table whose own built-in prints a different shape from the reference's puts the variable in front of the built-in.\n\n`alias -p` is also what a script uses to save and restore the table across a subshell, which is script-visible rather than interactive, so `[dec:nsh:bash-compatibility-is-scripts]` does not put it outside the contract."
+                                            }
+
+                                            {
+                                                at 2026-09-05T12:10:47.068426157Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Todo → Doing (nplan start)"
+                                            }
+
+                                            {
+                                                at 2026-09-05T12:25:00.311059968Z
+                                                author "brendan@necessary.nu"
+                                                kind @status
+                                                text "Doing → Done (nplan complete)"
                                             }
                                         )
                                     }

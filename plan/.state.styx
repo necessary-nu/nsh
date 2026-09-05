@@ -1721,6 +1721,7 @@ assertions (
     {id harness.fuzz-targets-claim-nothing, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:00:32.220110446Z}
     {id struct.facts-under-their-hosts, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:09:35.185372009Z}
     {id harness.no-lint-reads-a-shell-check, kind @doing, author "brendan@necessary.nu", at 2026-09-05T12:04:09.535328308Z}
+    {id bash.divergences.alias-listing-in-bash-mode, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:25:00.311059968Z}
 )
 
 impl_evidence (

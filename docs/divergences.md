@@ -179,6 +179,27 @@ alias-shaped lines to move. It also proves that multi-entry port listings are
 sorted, because quote placement and the existing alias-table ordering
 divergence occur in the same output and cannot be sanctioned independently.
 
+The Bash dialect prints a fourth form, and now matches it.
+`bash.divergences.alias-listing-in-bash-mode` gave that dialect the
+reference's `alias name='value'` and its `-p`, so a listing there
+re-enters as commands rather than as assignments. The POSIX line above is
+untouched and `alias_stdout_format` still measures it against dash. Note
+that the prefix is not unconditional in the reference: measured 2026-09-05
+at load 58, `bash --posix` drops it from a bare `alias` and from a name
+query while keeping it for `-p`, so the two references disagree and Bash
+mode follows plain `bash`, as it does for `exec`'s letters and `hash`'s
+columns.
+
+**One byte inside the value still differs there, and it is not the
+prefix.** `crate::escape::shell_quote` renders an embedded single quote
+as `'a'"'"'b'` and the reference's alias printer as `'a'\''b'`. Both
+re-enter to the same bytes and neither is more correct; the shells simply
+close and reopen the quoting differently. It is confined to `alias`:
+`declare -p` agrees with the reference exactly, because both switch the
+whole value to double quotes when it holds a single one. No case in
+`crates/nsh-cli/tests/bash_alias_listing.rs` uses a value containing a
+single quote, and its module comment says so.
+
 ### `env` and `alias` print in sorted order
 
 **Status:** fixed in the Rust; dash unchanged. Category 3. Registered as

@@ -3,6 +3,31 @@
 //! Port of `aliascmd` from `src/alias.c`. The alias table itself stays in
 //! `crate::alias`, where the parser and the line editor read it; this is
 //! the command that prints and defines entries in it.
+//!
+//! # Three shapes for one line
+//!
+//! dash prints `'name=value'`, quoting the whole assignment. This shell
+//! prints `name='value'` because
+//! `[spec:posix:req:builtin.alias.stdout-format]` requires the name and
+//! the equals sign unquoted, and that answer is the POSIX dialect's and
+//! must not move. The reference prints a third form again,
+//! `alias name='value'`, so the listing re-enters as commands rather than
+//! as assignments -- and it takes `-p`, which is the same listing spelled
+//! explicitly.
+//!
+//! The prefix is not simply "what Bash does". `bash --posix` drops it
+//! from a bare `alias` and from a name query, and keeps it for `-p`. Bash
+//! mode is measured against plain `bash`, as `exec`'s and `hash`'s
+//! letters are, so the prefix is on every line this dialect prints.
+//!
+//! `-p` is not a filter. It prints the whole table and ignores its
+//! operands entirely: `alias a=1; alias -p nosuch` prints `alias a='1'`
+//! and succeeds, where `alias nosuch` alone reports and fails, and
+//! `alias -p zz=1` defines nothing.
+//!
+//! Every claim above is measured against the pinned Bash 5.3.15 by
+//! `crates/nsh-cli/tests/bash_alias_listing.rs`, which runs each case
+//! through both shells and compares; nothing here is a recorded answer.
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -25,15 +50,32 @@ use crate::output::OutputDestination;
 // [spec:posix:req:builtin.alias.exit-status]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut failed = false;
+    let bash = shell.options.dialect() == crate::options::Dialect::Bash;
+    let mut list_all = false;
+    let operands: &[&BStr] = if bash {
+        let mut option_scan = crate::options::Options::new(args);
+        while option_scan.next(&mut shell.diagnostics(), b"p")?.is_some() {
+            list_all = true;
+        }
+        option_scan.operands()
+    } else {
+        /* dash has no option scan at all, so `-p` is a name it does not
+         * hold and `--` is another. Both must go on being reported. */
+        args.get(1..).unwrap_or_default()
+    };
 
-    if args.len() == 1 {
+    if list_all || operands.is_empty() {
         /* Rendered inside the walk, written after it: the walk holds
          * `sh.aliases` borrowed and the write wants `sh.io`. */
         let lines: Vec<Vec<u8>> = shell
             .aliases
             .entries()
             .map(|(name, value)| {
-                format_alias(BStr::new(name.as_slice()), BStr::new(value.as_slice()))
+                listing_line(
+                    bash,
+                    BStr::new(name.as_slice()),
+                    BStr::new(value.as_slice()),
+                )
             })
             .collect();
         for line in lines {
@@ -41,7 +83,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
         return Ok(Flow::Done((0).into()));
     }
-    for word in &args[1..] {
+    for word in operands {
         /* n + 1: funny ksh stuff (from 44lite) */
         let equals = (!word.is_empty())
             .then(|| {
@@ -54,7 +96,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         match equals {
             None => {
                 if let Some(value) = shell.aliases.lookup(word, false) {
-                    let line = format_alias(word, BStr::new(value.as_slice()));
+                    let line = listing_line(bash, word, BStr::new(value.as_slice()));
                     shell.write_output(OutputDestination::Stdout, &line)?;
                 } else {
                     let mut message = b"alias: ".to_vec();
@@ -75,6 +117,21 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     Ok(Flow::Done(i32::from(failed).into()))
+}
+
+/// One printed entry, in whichever dialect's shape.
+///
+/// The Bash dialect's `alias ` is a prefix on the POSIX line rather than
+/// a format of its own, so the quoting the POSIX rule fixes is the same
+/// quoting in both and only one of the two can drift.
+fn listing_line(bash: bool, name: &BStr, value: &BStr) -> Vec<u8> {
+    let line = format_alias(name, value);
+    if !bash {
+        return line;
+    }
+    let mut prefixed = b"alias ".to_vec();
+    prefixed.extend_from_slice(&line);
+    prefixed
 }
 
 #[cfg(test)]
