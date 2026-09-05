@@ -207,6 +207,26 @@ pub struct VariableTable {
     /// The generators, clocks and published facts of the Bash dialect.
     // [spec:nsh:req:compat.bash.builtins-special-variables]
     pub(crate) special: special::SpecialState,
+    /// Inherited environment entries whose names are not identifiers,
+    /// kept in order to be handed on to children.
+    ///
+    /// They are deliberately not in `entries`: nothing in the shell can
+    /// name one, so being a variable would give them a visibility the
+    /// reference does not have -- no listing shows one, no expansion
+    /// names one, and `unset` cannot reach one. Keeping the list beside
+    /// the table is what makes all three true without a test of their
+    /// own. `crates/nsh-cli/tests/bash_inherited_environment.rs` runs
+    /// each of them through both shells.
+    ///
+    /// Populated in both dialects and emitted only in Bash mode. The
+    /// dialect cannot be consulted at import -- `Builder::build` reads the
+    /// environment before it applies the options -- so emission is what
+    /// follows it, and `set -o posix` therefore stops passing the entry on
+    /// where the reference keeps doing so. That is a registered
+    /// divergence, `set -o posix` in `docs/divergences.md`; holding the
+    /// list here rather than dropping it is what makes `set -o bash`
+    /// restore the entry instead of losing it.
+    non_identifier_environment: Vec<(BString, BString)>,
 }
 
 impl VariableTable {
@@ -218,6 +238,7 @@ impl VariableTable {
             function_frames: Vec::new(),
             call_stack: call_stack::CallStack::new(),
             special: special::SpecialState::new(),
+            non_identifier_environment: Vec::new(),
         }
     }
 
@@ -454,8 +475,20 @@ impl Shell {
         for (name, value) in pairs {
             let name = BStr::new(name.as_slice());
             let value = BStr::new(value.as_slice());
-            if !is_locale_variable!(name) && valid_name(&self.locale, name) {
+            if is_locale_variable!(name) {
+                continue;
+            }
+            if valid_name(&self.locale, name) {
                 set_bytes(self, name, Some(value), VariableAttributes::EXPORTED)?;
+            } else {
+                /* Dropping it here is what made a `CARGO_BIN_EXE_<name>`
+                 * with a hyphen in it vanish two processes later. The
+                 * reference hands such an entry to every child it execs,
+                 * so it is kept rather than discarded; `environment`
+                 * decides which dialect passes it on. */
+                self.variables
+                    .non_identifier_environment
+                    .push((name.to_owned(), value.to_owned()));
             }
         }
         Ok(())
@@ -817,7 +850,7 @@ pub(crate) fn variable_attributes(shell: &Shell, name: &BStr) -> Option<Variable
 // [spec:dash:sem:var.listvars-fn]
 // [spec:nsh:req:compat.bash.arrays-declarations]
 pub fn environment(shell: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
-    shell
+    let exported = shell
         .variables
         .entries
         .iter()
@@ -829,8 +862,23 @@ pub fn environment(shell: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> 
         .map(|(name, var)| {
             let value = var.scalar().unwrap_or_else(|| BStr::new(b""));
             Ok((name.try_to_os_string()?, value.try_to_os_string()?))
-        })
-        .collect()
+        });
+    /* An inherited name that is not an identifier is handed on in Bash
+     * mode and dropped in the POSIX dialect, which is what `/usr/bin/dash`
+     * does with one. The dialect is read here rather than at import
+     * because `set -o posix` can arrive after it. */
+    let inherited = shell
+        .variables
+        .non_identifier_environment
+        .iter()
+        .filter(|_| shell.options.dialect() == crate::options::Dialect::Bash)
+        .map(|(name, value)| {
+            Ok((
+                BStr::new(name.as_slice()).try_to_os_string()?,
+                BStr::new(value.as_slice()).try_to_os_string()?,
+            ))
+        });
+    exported.chain(inherited).collect()
 }
 
 /// List the variables a selection names, in the dialect's own form.

@@ -1534,3 +1534,50 @@ grepped 2026-09-04, the name appears nowhere in `tests/surveys/oils/`,
 `tests/surveys/smoosh/shell/` or `tests/corpus/`. The comparison in
 `bash_shell_facts.rs` is the only thing that observes them, which is why
 it had to become a whole-set claim to be worth anything.
+
+### `set -o posix` stops passing on a non-identifier environment entry
+
+**Status:** deliberate. `crates/nsh/src/variables.rs::environment`.
+
+An environment entry whose name is not a shell identifier -- `A-B=1`, or
+the `CARGO_BIN_EXE_<name>` a hyphenated cargo binary produces -- cannot be
+named by any expansion, so no script can read it, and the only thing a
+shell can do with it is hand it to the children it execs. GNU Bash keeps
+such an entry and passes it on; `/usr/bin/dash` 0.5.12-12 drops it at
+import and no child ever sees it. This shell follows each reference in the
+dialect that has it: Bash mode passes it on, the POSIX dialect does not.
+
+Measured against the pinned Bash 5.3.15, `env 'A-B=1' <shell> -c env`:
+
+```
+bash 5.3.15   passes it on
+nsh -o bash   passes it on
+nsh (POSIX)   drops it
+dash          drops it
+```
+
+Where the two part company is `set -o posix` *after* the fact. The
+reference keeps passing the entry on under `set -o posix` and under
+`--posix`, because its POSIX mode is a set of behaviours rather than a
+different shell. Here `set -o posix` leaves Bash mode entirely, per
+`[spec:nsh:req:compat.bash.posix-option]`, and the POSIX dialect is the
+one whose reference is dash -- so from that point the entry is not passed
+on. `set -o bash` restores it: the entry is held beside the variable table
+for the life of the shell and only its *emission* follows the dialect, so
+nothing is destroyed by the switch.
+
+The alternative was to decide at import, which would match the reference
+in both directions. It is not available: `Builder::build` imports the
+environment before it applies the options, so the dialect is not yet known
+when the entry arrives, and reordering those two is a larger change than
+this divergence is worth.
+
+Nothing inside the shell can see the entry in either dialect, which is
+also the reference's behaviour and was measured the same way: `export -p`,
+`declare -p`, `set` and `compgen -v` mention it in neither shell, `${A-B}`
+is the ordinary default-value expansion and answers `B` in both, and
+`unset 'A-B'` leaves it reaching the next child in both. It survives
+`exec`, a subshell, a function call and a nested shell in both.
+
+`crates/nsh-cli/tests/bash_inherited_environment.rs` runs every row above
+through both shells and holds no expected values of its own.
