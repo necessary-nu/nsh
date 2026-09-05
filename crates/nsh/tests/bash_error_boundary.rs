@@ -144,8 +144,8 @@ fn eval_recovers_without_unwinding_its_caller() {
     );
 }
 
-/// A bad substitution is the same boundary; an arithmetic failure inside
-/// a subscript is too, because the subscript is the expansion.
+/// A bad substitution is the same boundary, and so is an arithmetic
+/// failure the expansion machinery raises.
 // [spec:nsh:req:compat.bash.error-boundary/test]
 #[test]
 fn a_bad_substitution_abandons_its_record() {
@@ -156,10 +156,39 @@ fn a_bad_substitution_abandons_its_record() {
     );
     expect(b"v=abcde\necho ${#v:1:3}\necho next=$?\n", 0, b"next=1\n");
     expect(b"echo $((1+)); echo same\necho next=$?\n", 0, b"next=1\n");
-    expect(
-        b"a=(x y)\nPWD=1\nref='a[~+]'\necho ${!ref}\necho next=$?\n",
-        0,
-        b"next=1\n",
+}
+
+/// A subscript the variable machinery evaluates itself is a different
+/// boundary from the three above, and [`Shell::run`] is where that shows.
+///
+/// `run` on bytes is dash's parse-execute loop -- the `-c` frame, not a
+/// command file -- and that frame is not a recovery point for this class.
+/// Measured: the same five lines answer `next=1` and status 0 from the
+/// pinned Bash on standard input and as a file operand, and print nothing
+/// at status 1 from `bash -c`. So the failure leaves `run` as an `Err`
+/// with the diagnostic already written, which is the contract `run`
+/// documents for a failure that ends it.
+// [spec:nsh:req:compat.bash.error-boundary/test]
+#[test]
+fn a_subscripts_arithmetic_leaves_a_run_of_bytes() {
+    let mut shell = shell(true);
+    let error = shell
+        .run(b"a=(x y)\nPWD=1\nref='a[~+]'\necho ${!ref}\necho next=$?\n".as_slice())
+        .expect_err("the whole byte source is abandoned");
+    assert!(error.is_abandoned(), "unexpected error: {error:?}");
+    assert!(
+        !shell
+            .take_captured_stderr()
+            .expect("capture stderr")
+            .is_empty(),
+        "the failure was not reported"
+    );
+    assert!(
+        shell
+            .take_captured_stdout()
+            .expect("capture stdout")
+            .is_empty(),
+        "a command after the failure still ran"
     );
 }
 

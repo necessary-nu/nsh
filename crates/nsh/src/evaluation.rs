@@ -501,7 +501,7 @@ pub(crate) fn parse_and_execute(
                 shell,
                 command.as_ref(),
                 command_context,
-                true
+                RecordFrame::Text
             ));
             if command.is_some() {
                 status = command_status;
@@ -513,6 +513,42 @@ pub(crate) fn parse_and_execute(
     Ok(Flow::Done(status))
 }
 
+/// Which loop is reading the records a frame evaluates.
+///
+/// Only [`RecordFrame::OutermostInput`] recovers an abandonment the
+/// variable machinery's arithmetic raised. The reference recovers that
+/// class at the loop reading its own script or terminal and nowhere else,
+/// so a `.` operand and a string the shell was handed whole both pass it
+/// on -- and a `-c` string, having no such loop above it, ends the shell.
+// [spec:nsh:req:compat.bash.error-boundary]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RecordFrame {
+    /// The shell's own stream input: a script operand, standard input, or
+    /// the terminal.
+    Stream,
+    /// The shell's own command file, read by a loop that does not prompt.
+    CommandFile,
+    /// A `.` or `source` operand, or a profile.
+    Pushed,
+    /// Text handed to the shell whole: a `-c` command or an `eval`
+    /// operand. It takes the interactive arm where [`Self::Stream`] would,
+    /// because an `eval` typed at the prompt is still the prompt's record.
+    Text,
+}
+
+impl RecordFrame {
+    /// Whether a record here can be the one a person typed.
+    const fn may_be_interactive(self) -> bool {
+        matches!(self, Self::Stream | Self::Text)
+    }
+
+    /// Whether this loop is the shell's own input, and so the one that
+    /// recovers the arithmetic the variable machinery raised.
+    const fn is_the_shells_own_input(self) -> bool {
+        matches!(self, Self::Stream | Self::CommandFile)
+    }
+}
+
 /// Evaluate one parsed input record, and resume at the next one after a
 /// failure whose boundary is the record rather than the shell.
 ///
@@ -520,12 +556,17 @@ pub(crate) fn parse_and_execute(
 /// right one because it is where Bash's is: `parse_and_execute` reads one
 /// record, runs it, and its `setjmp` catches the `DISCARD` an expansion or
 /// assignment failure raises, so the rest of *that* record is abandoned and
-/// the next is read. Every caller is such a loop -- the interactive command
-/// loop, a script or `-c` string, and the `eval`, dot and `source` frames
-/// that parse newly supplied text. Bash recovers at all of them, and
-/// observably: `readonly r=1; r=2; echo x` prints nothing while the same
-/// three commands on three lines print `x`, and an `eval` whose text fails
-/// leaves the caller's locals and its enclosing loop intact.
+/// the next is read. Bash recovers there observably: `readonly r=1; r=2;
+/// echo x` prints nothing while the same three commands on three lines
+/// print `x`, and an `eval` whose text fails leaves the caller's locals
+/// and its enclosing loop intact.
+///
+/// Not every caller is such a loop, and the earlier reading that they all
+/// were is what [`RecordFrame`] corrects. A `-c` string, an `eval` operand
+/// and a `.` script are not recovery points for the arithmetic the
+/// variable machinery raises: `-c 'declare -i x=1+; echo A'` runs nothing
+/// in the reference, where the same two commands on standard input print
+/// `A`. Only the loop reading the shell's own input recovers that class.
 ///
 /// Nothing is unwound here on purpose. Every temporary the abandoned record
 /// held is already released by the frame that owns it as the error passes
@@ -546,11 +587,13 @@ pub(crate) fn parse_and_execute(
 /// `crates/nsh-cli/tests/bash_errexit_over_an_assignment_error.rs`
 /// measures both classes through both shells.
 ///
-/// `outermost` is false for a record of a `.` or `source` operand, which
-/// recovers the same way but does not take the interactive arm -- that one
-/// belongs to the loop a person is typing at. It is a different rule: a
-/// POSIX expansion failure abandons the affected command and resumes at the
-/// next `;` command, which is finer than a record and is what dash does.
+/// Which loop is reading these records decides one class of failure, and
+/// [`RecordFrame`] is that answer: the variable machinery's own arithmetic
+/// is recovered only by the shell's own outermost input, so a `.` operand,
+/// an `eval` and a `-c` string all pass it on. A POSIX expansion failure is
+/// a different rule again -- it abandons the affected command and resumes
+/// at the next `;` command, which is finer than a record and is what dash
+/// does.
 ///
 /// No dialect test: [`Error::Abandoned`] is built only in Bash mode.
 // [spec:nsh:req:compat.smoosh.error-contracts]
@@ -559,10 +602,11 @@ pub(crate) fn evaluate_record(
     shell: &mut Shell,
     node: Option<&Node>,
     context: EvaluationContext,
-    outermost: bool,
+    frame: RecordFrame,
 ) -> Result<Flow, Error> {
-    let interactive_root =
-        outermost && shell.options.enabled(ShellOption::Interactive) && shell.shell_level == 0;
+    let interactive_root = frame.may_be_interactive()
+        && shell.options.enabled(ShellOption::Interactive)
+        && shell.shell_level == 0;
     let outcome = if interactive_root {
         evaluate_interactive_sequence(shell, node, context)
     } else {
@@ -572,8 +616,13 @@ pub(crate) fn evaluate_record(
         Err(error)
             if match &error {
                 Error::Abandoned {
-                    from_arithmetic, ..
-                } => *from_arithmetic || !shell.options.enabled(ShellOption::Errexit),
+                    from_arithmetic,
+                    unwinds_to_the_input_loop,
+                    ..
+                } => {
+                    (*from_arithmetic || !shell.options.enabled(ShellOption::Errexit))
+                        && (!*unwinds_to_the_input_loop || frame.is_the_shells_own_input())
+                }
                 _ => false,
             } =>
         {

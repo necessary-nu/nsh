@@ -392,23 +392,28 @@ pub(crate) fn declared_value(
          * Bash abandons the record for the first and runs the next
          * command of the list after the second. */
         // [spec:nsh:req:compat.bash.error-boundary]
-        let number = crate::arithmetic::evaluate(shell, value).map_err(|error| match error {
-            Error::Abandoned {
-                line,
-                message,
-                from_arithmetic,
-                ..
-            } => Error::Abandoned {
-                line,
-                message,
-                from_assignment: true,
-                from_arithmetic,
-            },
-            /* The POSIX dialect builds no abandonment: there the same
-             * arithmetic failure is a fatal `shell_error`, and marking it
-             * would claim a boundary that dialect does not have. */
-            fatal => fatal,
-        })?;
+        let number =
+            crate::arithmetic::evaluate_for_a_variable(shell, value).map_err(
+                |error| match error {
+                    Error::Abandoned {
+                        line,
+                        message,
+                        from_arithmetic,
+                        unwinds_to_the_input_loop,
+                        ..
+                    } => Error::Abandoned {
+                        line,
+                        message,
+                        from_assignment: true,
+                        from_arithmetic,
+                        unwinds_to_the_input_loop,
+                    },
+                    /* The POSIX dialect builds no abandonment: there the same
+                     * arithmetic failure is a fatal `shell_error`, and marking it
+                     * would claim a boundary that dialect does not have. */
+                    fatal => fatal,
+                },
+            )?;
         return Ok(Some(BString::from(number.to_string())));
     }
     // Case conversion follows the C locale, as it does in Bash for every

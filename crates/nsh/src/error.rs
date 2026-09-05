@@ -389,6 +389,24 @@ pub enum Error {
         /// measures both classes through both shells.
         // [spec:nsh:req:compat.bash.error-boundary]
         from_arithmetic: bool,
+        /// Whether only the shell's own outermost input loop recovers it,
+        /// every nested frame passing it on.
+        ///
+        /// True for the arithmetic the variable machinery evaluates itself
+        /// -- a declaration's integer value and an indexed subscript --
+        /// and false for the arithmetic that reaches it through an
+        /// expansion, `$(( ))` and a slice bound. The reference separates
+        /// the two by where the failure is raised rather than by what
+        /// failed: `-c 'declare -i x=1+ ; echo A'` runs nothing, while
+        /// `-c 'x=$((1+)); echo A'` abandons that record and reads on.
+        ///
+        /// So an `eval`, a `.` script and a `-c` string are not recovery
+        /// points for this class, and a subshell still contains it because
+        /// it contains everything.
+        /// `crates/nsh-cli/tests/bash_assignment_error_frames.rs` measures
+        /// each frame through both shells.
+        // [spec:nsh:req:compat.bash.error-boundary]
+        unwinds_to_the_input_loop: bool,
     },
     /// A diagnostic with no more specific variant.
     Other {
@@ -458,6 +476,7 @@ impl Error {
             message: BString::default(),
             from_assignment: false,
             from_arithmetic: false,
+            unwinds_to_the_input_loop: false,
         }
     }
 
@@ -692,6 +711,7 @@ impl Diagnostics<'_> {
             message: BString::from(msg),
             from_assignment: false,
             from_arithmetic: false,
+            unwinds_to_the_input_loop: false,
         };
         self.report(error)
     }
@@ -725,6 +745,7 @@ impl Diagnostics<'_> {
             message: BString::new(Vec::new()),
             from_assignment: false,
             from_arithmetic: false,
+            unwinds_to_the_input_loop: false,
         }
     }
 

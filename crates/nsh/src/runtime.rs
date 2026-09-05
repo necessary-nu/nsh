@@ -304,6 +304,15 @@ pub(crate) fn command_loop(
     frame: InputFrame,
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
     let top_level = frame == InputFrame::Stream;
+    /* A `.` operand is the only one of the three that is not the shell's
+     * own input, and that is the distinction the variable machinery's
+     * arithmetic is recovered at. */
+    // [spec:nsh:req:compat.bash.error-boundary]
+    let record_frame = match frame {
+        InputFrame::Stream => crate::evaluation::RecordFrame::Stream,
+        InputFrame::CommandFile => crate::evaluation::RecordFrame::CommandFile,
+        InputFrame::Pushed => crate::evaluation::RecordFrame::Pushed,
+    };
     let mut status = crate::status::ExitStatus::SUCCESS;
     let mut eof_count = 0usize;
     /* `set -i` can change prompting and the other live interactive option
@@ -339,7 +348,7 @@ pub(crate) fn command_loop(
                 shell,
                 command.as_ref(),
                 EvaluationContext::DEFAULT,
-                top_level,
+                record_frame,
             )?;
             match flow {
                 crate::evaluation::Flow::Done(command_status) => {

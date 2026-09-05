@@ -115,12 +115,14 @@ impl<'a, 'shell> Parser<'a, 'shell> {
                 line,
                 message,
                 from_assignment,
+                unwinds_to_the_input_loop,
                 ..
             } => Error::Abandoned {
                 line,
                 message,
                 from_assignment,
                 from_arithmetic: true,
+                unwinds_to_the_input_loop,
             },
             fatal => fatal,
         }
@@ -433,6 +435,46 @@ impl<'a, 'shell> Parser<'a, 'shell> {
 // [spec:posix:req:xcurel.arithmetic-expression-evaluation]
 pub fn evaluate(shell: &mut Shell, input: &BStr) -> Result<i64, Error> {
     evaluate_at_depth(shell, input, 0)
+}
+
+/// [`evaluate`] for the variable machinery's own arithmetic: a
+/// declaration's integer value and an indexed subscript.
+///
+/// The reference recovers from these only at the loop reading its own
+/// input, so an `eval`, a `.` script and a `-c` string all go with the
+/// failure -- where the same fault reached through a `$(( ))` expansion
+/// or a slice bound abandons its record and is read past. Nothing but the
+/// raise can tell the two apart by then, so the caller says which it is by
+/// which entry point it uses.
+// [spec:nsh:req:compat.bash.error-boundary]
+pub(crate) fn evaluate_for_a_variable(shell: &mut Shell, input: &BStr) -> Result<i64, Error> {
+    /* Only text the shell evaluates *as written* is the variable
+     * machinery's own. A subscript or value carrying an expansion reached
+     * its arithmetic through one, and the reference recovers from it at
+     * the record like any other expansion failure: `w[$((1+))]=2` is read
+     * past where `w[1+]=2` takes the whole `-c` string with it. */
+    // [spec:nsh:req:compat.bash.error-boundary]
+    if input.iter().any(|byte| matches!(byte, b'$' | b'`')) {
+        return evaluate(shell, input);
+    }
+    evaluate(shell, input).map_err(|error| match error {
+        Error::Abandoned {
+            line,
+            message,
+            from_assignment,
+            from_arithmetic,
+            ..
+        } => Error::Abandoned {
+            line,
+            message,
+            from_assignment,
+            from_arithmetic,
+            unwinds_to_the_input_loop: true,
+        },
+        /* The POSIX dialect builds no abandonment: there the same failure
+         * is a fatal `shell_error` and has no frame to unwind past. */
+        fatal => fatal,
+    })
 }
 
 fn evaluate_at_depth(shell: &mut Shell, input: &BStr, depth: u32) -> Result<i64, Error> {

@@ -353,6 +353,47 @@ facility this shell does not provide.
 > row above through both shells in both frames and holds no expected values of
 > its own.
 >
+> Extended 2026-09-05 by `bash.divergences.assignment-error-in-a-c-string`,
+> everything above kept verbatim: "which resumes at the next record" does not
+> name *which* loop resumes, and the reference does not let every frame do it.
+> An abandonment the variable machinery's own arithmetic raised is recovered
+> only by the loop reading the shell's own input, so an `eval` operand, a `.`
+> script and a `-c` string all pass it on -- and a `-c` string, having no such
+> loop above it, ends the shell at status 1.
+>
+> Measured against the pinned Bash 5.3.15 in all three invocation shapes,
+> `FAIL; echo SAME` as one record and `echo AFTER` as the next. Taking the
+> whole `-c` string, printing neither: `declare -i x=1+`, `declare -ai v=(1+)`,
+> `typeset -i x=1+`, `declare -i x; x=1+`, `declare -i x=1/0`, `w[1+]=2`,
+> `${w[1+]}`, a `local -i x=1+` in a function, and each of those reached
+> through `eval`, through a function body, through `||` and through an `if`
+> condition. Abandoning only their own record and printing `AFTER`:
+> `x=$((1+))`, `echo $((1+))`, `declare -i x=$((1+))`, `w[$((1+))]=2`,
+> `${w[$((1+))]}`, `${w[@]:1+:1}`, and the refusals `readonly r=1; r=2` and
+> `declare -r r=1; r=2`. A `( )` subshell and a command substitution contain
+> it in every shape, and `declare -A m; m[1+]=v` is not a failure at all
+> because an associative subscript is a key rather than arithmetic.
+>
+> `declare -i x=1+` against `declare -i x=$((1+))` is the pair that settles the
+> criterion: same utility, same attribute, same unevaluable text, and the
+> reference takes the whole string for the first and reads past the second. So
+> it is WHERE THE ARITHMETIC WAS RAISED and not what failed, nor which utility
+> was running. Arithmetic that *is* the command -- `(( 1+ ))` and `let x=1+` --
+> is a third thing again and abandons nothing.
+>
+> Two things this corrects. The mechanism recorded on 2026-09-04, that Bash
+> "reads the whole string as one unit" so any `DISCARD` leaves it, would
+> predict every class above taking the string; `x=$((1+))` does not, so a `-c`
+> string keeps record boundaries for everything the expansion machinery
+> raises. And an `eval` operand is not the recovery point it was read as: on
+> standard input `eval "declare -i x=1+"; echo SAME` prints nothing before the
+> next record in the reference, where this shell printed `SAME` until this was
+> measured.
+>
+> `crates/nsh-cli/tests/bash_assignment_error_frames.rs` runs every row through
+> both shells in all three shapes. The default dialect is untouched and
+> measured against `/usr/bin/dash` 0.5.12-12 in all three.
+>
 > Source: `[dec:nsh:we-own-the-defects]`
 
 ## Interactive profile

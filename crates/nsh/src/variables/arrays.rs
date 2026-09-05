@@ -142,7 +142,7 @@ pub(crate) fn resolve_selector(
         return Ok(ArraySelector::Key(subscript.to_owned()));
     }
 
-    let index = crate::arithmetic::evaluate(shell, subscript)?;
+    let index = crate::arithmetic::evaluate_for_a_variable(shell, subscript)?;
     normalize_index(shell, name, index)
 }
 
@@ -592,7 +592,7 @@ fn arithmetic_value(shell: &mut Shell, text: &BStr) -> Result<i64, Error> {
     if text.iter().all(u8::is_ascii_whitespace) {
         return Ok(0);
     }
-    crate::arithmetic::evaluate(shell, text)
+    crate::arithmetic::evaluate_for_a_variable(shell, text)
 }
 
 fn existing_element(value: &VariableValue, selector: &ArraySelector) -> Option<BString> {

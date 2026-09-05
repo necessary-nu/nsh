@@ -26,13 +26,13 @@
 //! both, through the status and through the commands that no longer run.
 //!
 //! Every script is fed on standard input rather than as a `-c` string,
-//! and that is load-bearing. Bash reads a `-c` string through
-//! `parse_and_execute`, which abandons the whole string rather than the
-//! record inside it, so `declare -i x=1+` there takes a following *line*
-//! with it as well; a file and standard input both resume at the next
-//! line. That frame difference is the subject of
-//! `bash.divergences.assignment-error-in-a-c-string`, not of this file,
-//! and feeding stdin keeps the two questions apart.
+//! and that is load-bearing. A `-c` string is not a recovery point for a
+//! declaration's arithmetic, so `declare -i x=1+` there takes a following
+//! *line* with it as well, while a file and standard input resume at the
+//! next line. Keeping this file on standard input holds it to the one
+//! question it is about -- which failure abandons a record --
+//! and leaves which *frame* recovers to
+//! `crates/nsh-cli/tests/bash_assignment_error_frames.rs`.
 
 #[path = "../../nsh/tests/pinned_bash/mod.rs"]
 mod pinned_bash;
