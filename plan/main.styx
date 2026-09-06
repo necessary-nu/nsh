@@ -14353,6 +14353,7 @@ children (
                     interactive.terminal-width
                     interactive.prompt-display-width
                 )
+                sealed true
                 log (
                     {
                         at 2026-09-05T14:45:21.176704358Z
@@ -14373,6 +14374,27 @@ children (
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-09-06T01:13:54.819712071Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-09-06T01:22:19.952604672Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "LANDED. The snippet lives at `share/nsh/starship.nsh` and is sourced from a startup file:\n\n    . /usr/share/nsh/starship.nsh\n\nWHY A FILE THIS REPOSITORY SHIPS, rather than something `nsh` emits. The node left the choice open. A file is readable before it is run, which is the property that matters for a thing a user pastes into a startup file: `nsh --emit-starship-init` would have to be trusted, and would put shell text inside the binary where nothing lints it. It also stays a plain shell script that this shell parses like any other, so a defect in it is a defect the shell can be asked about -- which is exactly how the one below was found.\n\nTHE SNIPPET HAD A REAL DEFECT AND THE CHECK CAUGHT IT ON ITS FIRST RUN. Written first as\n\n    PROMPT_COMMAND='PS1=$(\n        starship prompt\n            --status=\"$?\"\n            ...\n    )'\n\nwhich is wrong: a newline inside `$( )` ends a command there as it does anywhere else. Every argument line ran as a command of its own --\n\n    PROMPT_COMMAND: --status=0: not found\n    PROMPT_COMMAND: --jobs=0: not found\n\n-- and `starship prompt` then ran with no arguments at all and rendered a **perfectly plausible prompt** carrying none of this shell's state. Nothing about the terminal said anything was wrong; only stderr did, and only if anyone looked. The line continuations are now load-bearing and the file says so.\n\nThat is the shape `docs/spec/nsh/verification.md` is about, arriving in new work rather than old: a check that passes on the appearance of a prompt would have passed here forever.\n\nWHAT THE TWO CHECKS ASSERT, and why not \"a prompt appeared\":\n\n* `every_flag_the_snippet_passes_is_one_starship_accepts` reads the flags out of the snippet itself and requires each to appear in `starship prompt --help`. This is the node's recorded cost made mechanical -- the snippet is ours, so their arguments are ours to track, and a renamed flag would otherwise be silently ignored.\n* `the_failing_status_reaches_the_rendered_prompt` renders twice, after a failing command and after a succeeding one, and requires the two to **differ**. A single render proves only that something was produced. It also asserts the prompt carries no `\\[` markers, which is the check that we did not quietly start claiming to be Bash.\n\nBoth were seen to fail: pinning `--status=\"0\"` fails the second with \"the prompt is the same after a failing command as after a succeeding one\"; misspelling a flag fails the first by name.\n\nMEASURED, load 10-18, starship 1.22.1, debug build at `64567a7`. `PS1` is 152 bytes of starship output; after `false` it carries `ESC[1;31m`, the reference's failure colour, and after `true` it does not. `PS2` is `starship prompt --continuation`. No `\\[` anywhere.\n\nBOTH TESTS ARE `#[ignore]`d because starship is a property of the host, not of the shell, and `[spec:nsh:req:oracle.cannot-measure-is-a-failure]` permits a static skip the runner can report. Run them with `-- --ignored`. That is weaker than this repository usually accepts and it is the honest arrangement: the alternative is a suite that fails on a developer's machine for want of a prompt tool.\n\nTWO THINGS THE NODE ASKED ABOUT, BOTH ANSWERED NO FOR NOW, neither implemented:\n\n* `--right`. `starship prompt --right` renders, but nothing consumes it: `nshedit`'s `Prompt` has no right-hand side, so wiring it means an editor feature first. Filed rather than done.\n* `--keymap`. It selects a vi/emacs mode indicator. This editor's baseline mode is neither, and `[dec:nsh:bash-compatibility-is-scripts]` records that vi and emacs keymaps are not prerequisites here, so passing a keymap would be reporting a mode the editor does not have. Left out deliberately, not overlooked.\n\nNOT MEASURED: `--pipestatus` and `--shlvl`, which the vendor's Bash init passes and this snippet does not. `PIPESTATUS` works in Bash mode and `SHLVL` is published, so both are reachable; whether starship's default preset uses either was not established, and adding an argument nothing reads would be the same defect as dropping one something does."
+                    }
+
+                    {
+                        at 2026-09-06T01:22:20.516152509Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
