@@ -1,8 +1,14 @@
 # Render this shell's prompt with starship (https://starship.rs).
 #
-# Source this from your startup file:
+# Source this from your startup file, by the path it is actually at. In a
+# checkout that is:
 #
-#     . /usr/share/nsh/starship.nsh
+#     . /path/to/dash/share/nsh/starship.nsh
+#
+# THERE IS NO INSTALLED COPY. This repository has no packaging: nothing
+# writes to `/usr/share/nsh`, and an earlier version of this comment told
+# the reader to source a path that has never existed. Where nsh should put
+# its data files, and how, is `interactive.starship-install`.
 #
 # WHY THIS IS NOT `eval "$(starship init bash)"`. That script is 140 lines
 # and nearly all of it recovers state a shell cannot hand over: it lays a
