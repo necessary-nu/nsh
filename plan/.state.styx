@@ -1616,7 +1616,6 @@ assertions (
     {id perf.locale.decode-from-the-buffer, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:40:24.4528738Z}
     {id perf.locale.one-character-end, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:34:27.974563803Z}
     {id perf.locale.per-byte-elsewhere, kind @complete, author "brendan@necessary.nu", at 2026-09-02T18:56:43.013987831Z}
-    {id perf.locale.per-byte-of-a-name, kind @doing, author "brendan@necessary.nu", at 2026-09-03T17:40:35.445894886Z}
     {id perf.locale.split-the-character-half, kind @complete, author "brendan@necessary.nu", at 2026-09-03T19:07:54.773469165Z}
     {id perf.pattern.bracket-test-scan, kind @complete, author "brendan@necessary.nu", at 2026-09-03T16:48:14.874917173Z}
     {id perf.pattern.substitution-linear, kind @complete, author "brendan@necessary.nu", at 2026-09-03T17:43:53.155641929Z}
@@ -1678,7 +1677,6 @@ assertions (
     {id stop-the-forking-tests-from-flaking, kind @complete, author "brendan@necessary.nu", at 2026-09-01T18:03:14.668188673Z}
     {id stop-the-fuzz-budget-paying-for-the-build, kind @complete, author "brendan@necessary.nu", at 2026-09-02T02:09:16.656636099Z}
     {id stop-the-locale-tests-passing-vacuously, kind @complete, author "brendan@necessary.nu", at 2026-08-29T12:35:51.627877045Z}
-    {id struct.script-module-port, kind @doing, author "brendan@necessary.nu", at 2026-09-03T17:39:34.261606606Z}
     {id test-fc-histfile-reload-format, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:11:25.747215108Z}
     {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
     {id tooling.disk.keep-headroom, kind @complete, author "brendan@necessary.nu", at 2026-09-02T18:00:18.807269689Z}
@@ -1722,7 +1720,6 @@ assertions (
     {id bash.divergences.exec-argument-zero, kind @complete, author "brendan@necessary.nu", at 2026-09-04T16:12:51.422269599Z}
     {id bash.divergences.publish-names.table-views, kind @complete, author "brendan@necessary.nu", at 2026-09-04T15:58:29.522603092Z}
     {id bash.divergences.expansion-error-status-in-bash-mode, kind @complete, author "brendan@necessary.nu", at 2026-09-04T17:28:35.146963335Z}
-    {id bash.divergences.multibyte-blank-split, kind @doing, author "brendan@necessary.nu", at 2026-09-04T16:45:29.313482936Z}
     {id bash.divergences.refused-integer-abandons-list, kind @complete, author "brendan@necessary.nu", at 2026-09-04T21:06:47.813269634Z}
     {id struct.dead-decision-citations-in-spec, kind @complete, author "brendan@necessary.nu", at 2026-09-04T20:46:27.398524355Z}
     {id struct.conditional-sub-grammar, kind @complete, author "brendan@necessary.nu", at 2026-09-04T21:00:45.478489631Z}
@@ -1735,7 +1732,6 @@ assertions (
     {id harness.refresh-cannot-write-inside-the-containment, kind @complete, author "brendan@necessary.nu", at 2026-09-05T11:56:22.338183749Z}
     {id harness.fuzz-targets-claim-nothing, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:00:32.220110446Z}
     {id struct.facts-under-their-hosts, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:09:35.185372009Z}
-    {id harness.no-lint-reads-a-shell-check, kind @doing, author "brendan@necessary.nu", at 2026-09-05T12:04:09.535328308Z}
     {id bash.divergences.alias-listing-in-bash-mode, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:25:00.311059968Z}
     {id bash.divergences.exec-empty-environment, kind @complete, author "brendan@necessary.nu", at 2026-09-05T12:37:15.25741977Z}
     {id bash.divergences.assignment-error-in-a-c-string, kind @complete, author "brendan@necessary.nu", at 2026-09-05T15:02:17.830468731Z}
