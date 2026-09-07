@@ -95,6 +95,53 @@ recover.
 > non-printing runs: those markers exist because a shell would otherwise have to
 > parse the sequences, and parsing them is the requirement.
 
+## Where a package puts startup code
+
+The startup chain a shell inherits from `sh` -- `/etc/profile`, then
+`$HOME/.profile`, then `$ENV` -- has no place a *package* may write. The first
+two belong to the administrator and the user, and `$ENV` is a single pathname
+the user chooses, so two integrations wanting it means one of them loses. A
+shell that ships an integration of its own, as this one ships
+`share/nsh/starship.nsh`, has nowhere to install it that anything reads.
+
+> [spec:nsh:req:interactive.vendor-startup-path]
+> An interactive `nsh` that is not in POSIX mode MUST read startup files from a
+> vendor directory and then an administrator directory, in that order, so that
+> a local setting overrides a packaged one.
+>
+> The vendor directory is `nsh/vendor_conf.d/` beneath each entry of
+> `$XDG_DATA_DIRS`, which defaults to `/usr/local/share:/usr/share` when unset
+> or empty. The administrator directory is `/etc/nsh/conf.d/`. Within each,
+> regular files MUST be read in sorted order by name, so that a package can
+> place itself before or after another by naming.
+>
+> The search path MUST NOT be compiled in. A path fixed at build time is a
+> reader that cannot be taught where it is looking, which is the thing that
+> forces a package into `/etc` in the first place; reading the environment
+> answers a system install and a rootless one with one mechanism.
+>
+> A directory that does not exist MUST be silently absent -- that is the
+> ordinary case on a machine with no packages installed. A directory that
+> exists and cannot be read MUST be reported, because that is a
+> misconfiguration and conflating the two is how a startup mechanism becomes
+> something people turn off.
+
+> [spec:nsh:req:interactive.vendor-path-is-not-for-scripts]
+> A non-interactive shell MUST NOT read either directory, and neither MUST a
+> shell in POSIX mode.
+>
+> The reason is a hazard rather than conformance. A build script running under
+> `sh` would otherwise inherit a prompt hook, an alias or a changed `IFS` from
+> whichever packages happen to be installed on the machine that built it. The
+> distribution this shell ships in runs `sh` as the interpreter for every
+> recipe build script, so a drop-in reaching a non-interactive shell would make
+> its builds depend on the installed package set -- which is the
+> `/etc/profile.d` footgun with a blast radius that can be named.
+>
+> `sh` is also specified, and this reading keeps the specified startup sequence
+> exactly as it was: the directories are read by a shell that has already
+> departed from it.
+
 ## Signals while the prompt is waiting
 
 A shell spends nearly all of an interactive session blocked in one read, so
