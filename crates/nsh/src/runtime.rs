@@ -85,10 +85,15 @@ fn advance_after_flow(flow: crate::evaluation::Flow, next: StartupTask) -> Start
 /// package's build depend on which other packages happen to be installed
 /// on the builder: an alias, a changed `IFS` or a prompt hook arriving
 /// from a machine's inventory rather than from the recipe.
-// [spec:nsh:req:interactive.vendor-path-is-not-for-scripts]
+// [spec:nsh:req:interactive.vendor-path-is-not-for-scripts+1]
 fn reads_drop_in_directories(shell: &Shell) -> bool {
+    /* Interactive, and nothing else. The dialect deliberately does not
+     * appear: in this shell POSIX mode is the default rather than a mode
+     * one enters, so gating on it excluded the plain `nsh -i` a terminal
+     * spawns -- the shell this whole path exists to reach. The hazard the
+     * rule names is a build script inheriting state, and a build script is
+     * not interactive. */
     shell.options.enabled(ShellOption::Interactive)
-        && shell.options.dialect() == crate::options::Dialect::Bash
 }
 
 // [spec:nsh:req:idiom.jobs-startup-control-flow]

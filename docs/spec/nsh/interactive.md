@@ -126,9 +126,24 @@ shell that ships an integration of its own, as this one ships
 > misconfiguration and conflating the two is how a startup mechanism becomes
 > something people turn off.
 
-> [spec:nsh:req:interactive.vendor-path-is-not-for-scripts]
-> A non-interactive shell MUST NOT read either directory, and neither MUST a
-> shell in POSIX mode.
+> [spec:nsh:req:interactive.vendor-path-is-not-for-scripts+1]
+> A non-interactive shell MUST NOT read either directory.
+>
+> **Correction, 2026-09-07, the same day.** This rule said "and neither MUST a
+> shell in POSIX mode", and that sentence made the feature unreachable by the
+> shell it was built for. In this shell POSIX mode is not a mode one enters: it
+> is the default, and the Bash dialect is the departure --
+> `[spec:nsh:req:compat.bash.posix-option]` is explicit that "this shell's
+> default is the standard". So "not in POSIX mode" can only mean "in the Bash
+> dialect", and the implementation read it correctly and gated on exactly that.
+> Measured: `nsh -i` read nothing and `nsh -i -o bash` read the drop-ins, which
+> is the login-only outcome this work exists to avoid, arriving by another
+> route.
+>
+> The clause was also doing no work. The hazard below is a *build script*
+> inheriting state, and a build script is not interactive; the interactive
+> condition defeats it on its own. Excluding the default dialect bought nothing
+> against the hazard and cost the whole feature.
 >
 > The reason is a hazard rather than conformance. A build script running under
 > `sh` would otherwise inherit a prompt hook, an alias or a changed `IFS` from
@@ -138,9 +153,16 @@ shell that ships an integration of its own, as this one ships
 > its builds depend on the installed package set -- which is the
 > `/etc/profile.d` footgun with a blast radius that can be named.
 >
-> `sh` is also specified, and this reading keeps the specified startup sequence
-> exactly as it was: the directories are read by a shell that has already
-> departed from it.
+> `sh` is specified, and an interactive shell reading two more directories is a
+> departure from that sequence whichever dialect it is in. This rule accepts the
+> departure and confines it to the interactive case, rather than pretending the
+> default dialect is where it does not happen.
+>
+> Left open, and not decided here: whether a shell *invoked as* `sh` should be
+> excluded as well. That is a question about a compatibility persona rather than
+> about a dialect, and the two are not the same thing -- `argv[0]` selects the
+> dialect today but nothing reads it for any other purpose. It is worth
+> answering only if someone runs `sh -i` and minds.
 
 ## Signals while the prompt is waiting
 

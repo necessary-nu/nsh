@@ -224,7 +224,7 @@ fn a_directory_read_later_overrides_one_read_earlier() {
 /// The half that matters if it is ever wrong. A recipe build script runs
 /// under `sh`, and a drop-in reaching it would make the build depend on
 /// the builder's installed package set.
-// [spec:nsh:req:interactive.vendor-path-is-not-for-scripts/test]
+// [spec:nsh:req:interactive.vendor-path-is-not-for-scripts+1/test]
 #[test]
 fn a_non_interactive_shell_reads_no_drop_in() {
     let (fixture, data_dirs) = trail_fixture();
@@ -238,17 +238,25 @@ fn a_non_interactive_shell_reads_no_drop_in() {
     );
 }
 
-/// POSIX mode in this shell is the absence of the Bash dialect, so this is
-/// the same tree run without `-o bash`.
-// [spec:nsh:req:interactive.vendor-path-is-not-for-scripts/test]
+/// The default dialect reads them, and this is the regression guard for
+/// the one bug this feature has already had.
+///
+/// The rule first said the drop-ins were not read "in POSIX mode". In this
+/// shell POSIX mode is not a mode one enters -- it is the default, and the
+/// Bash dialect is the departure -- so that clause gated the feature on
+/// `-o bash` and made it unreachable by the plain `nsh -i` a terminal
+/// spawns, which is the only shell it was built for. Measured before the
+/// correction: `nsh -i` read nothing, `nsh -i -o bash` read the drop-ins.
+// [spec:nsh:req:interactive.vendor-path-is-not-for-scripts+1/test]
 #[test]
-fn posix_mode_reads_no_drop_in() {
+fn the_default_dialect_reads_a_drop_in() {
     let (fixture, data_dirs) = trail_fixture();
     let output = fixture.run(&data_dirs, &[], &["-i"], "echo \"TRAIL:$TRAIL\"");
 
     assert!(
-        output.stdout.contains("TRAIL:") && !output.stdout.contains("first"),
-        "a shell in POSIX mode read a drop-in: stdout {:?}, stderr {:?}",
+        output.stdout.contains("first"),
+        "the plain interactive shell read no drop-in, so the feature is \
+         unreachable by the shell it exists for: stdout {:?}, stderr {:?}",
         output.stdout,
         output.stderr
     );
