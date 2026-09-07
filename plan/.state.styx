@@ -2506,7 +2506,13 @@ impl_evidence (
     ), rule_versions_seen (
         {id interactive.prompt-state, version 0}
     )}
-    {id interactive.startup-vendor-path}
+    {id interactive.startup-vendor-path, covered_rules (
+        interactive.vendor-path-is-not-for-scripts
+        interactive.vendor-startup-path
+    ), covered_claims (
+        {impl_name nsh-library, rule interactive.vendor-path-is-not-for-scripts}
+        {impl_name nsh-library, rule interactive.vendor-startup-path}
+    )}
     {id interactive.terminal-width, covered_rules (
         interactive.terminal-width
     ), covered_claims (

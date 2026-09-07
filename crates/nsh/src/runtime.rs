@@ -17,6 +17,8 @@ use crate::options::ShellOption;
 use crate::source::Startup;
 // [spec:nsh:def:idiom.shell-options]
 
+mod startup_directories;
+
 /// Whether this is the top-level shell rather than one of its children.
 #[inline]
 pub(crate) fn is_root_shell(shell: &Shell) -> bool {
@@ -28,6 +30,14 @@ enum StartupTask {
     Initialize,
     SystemProfile,
     UserProfile,
+    /// The vendor and administrator drop-in directories.
+    ///
+    /// It sits beside `Environment` rather than beside the profiles, and
+    /// that placement is the whole feature. `SystemProfile` and
+    /// `UserProfile` run only for a login shell; the shell a terminal
+    /// spawns is not one, so a drop-in mechanism reached only from there
+    /// would never load anything on the machine it was built for.
+    VendorConf,
     Environment,
     Command,
     CommandLoop,
@@ -38,7 +48,8 @@ impl StartupTask {
         match self {
             Self::Initialize => None,
             Self::SystemProfile => Some(Self::UserProfile),
-            Self::UserProfile => Some(Self::Environment),
+            Self::UserProfile => Some(Self::VendorConf),
+            Self::VendorConf => Some(Self::Environment),
             Self::Environment => Some(Self::Command),
             Self::Command | Self::CommandLoop => Some(Self::CommandLoop),
         }
@@ -59,6 +70,27 @@ fn advance_after_flow(flow: crate::evaluation::Flow, next: StartupTask) -> Start
     }
 }
 
+/// Whether this shell reads the vendor and administrator drop-in
+/// directories at all.
+///
+/// Two conditions, and the second is the one worth explaining. POSIX mode
+/// in this shell is the *absence* of the Bash dialect -- `set -o posix` is
+/// `set +o bash`, because here the dialect is the departure -- so this
+/// asks for a shell that has already left the specified startup sequence
+/// before adding to it.
+///
+/// The interactive half is a hazard rather than a reading of the standard.
+/// The distribution this shell ships in runs `sh` as the interpreter for
+/// every recipe build script, and a drop-in reaching those would make a
+/// package's build depend on which other packages happen to be installed
+/// on the builder: an alias, a changed `IFS` or a prompt hook arriving
+/// from a machine's inventory rather than from the recipe.
+// [spec:nsh:req:interactive.vendor-path-is-not-for-scripts]
+fn reads_drop_in_directories(shell: &Shell) -> bool {
+    shell.options.enabled(ShellOption::Interactive)
+        && shell.options.dialect() == crate::options::Dialect::Bash
+}
+
 // [spec:nsh:req:idiom.jobs-startup-control-flow]
 fn run_startup_task(
     shell: &mut Shell,
@@ -71,7 +103,7 @@ fn run_startup_task(
             let next = if startup.login {
                 StartupTask::SystemProfile
             } else {
-                StartupTask::Environment
+                StartupTask::VendorConf
             };
             Ok(StartupAdvance::Next(next))
         }
@@ -81,8 +113,17 @@ fn run_startup_task(
         )),
         StartupTask::UserProfile => Ok(advance_after_flow(
             read_profile(shell, BStr::new(b"$HOME/.profile"))?,
-            StartupTask::Environment,
+            StartupTask::VendorConf,
         )),
+        StartupTask::VendorConf => {
+            if !reads_drop_in_directories(shell) {
+                return Ok(StartupAdvance::Next(StartupTask::Environment));
+            }
+            Ok(advance_after_flow(
+                startup_directories::read_all(shell)?,
+                StartupTask::Environment,
+            ))
+        }
         StartupTask::Environment => {
             if shell.options.enabled(ShellOption::Interactive)
                 && let Some(shinit) = crate::variables::lookup_bytes(shell, BStr::new(b"ENV"))
@@ -493,11 +534,25 @@ fn read_profile(
     name: &BStr,
 ) -> Result<crate::evaluation::Flow, crate::error::Error> {
     let name = crate::parser::expand_string(shell, name)?;
+    read_startup_file(shell, BStr::new(&name))
+}
 
+/// Read one startup file whose pathname is already a pathname.
+///
+/// The expansion is [`read_profile`]'s and stays there. The three names in
+/// the inherited chain are shell text -- `$HOME/.profile` is written as
+/// that and means it -- but a drop-in's pathname comes from a directory
+/// listing, and expanding one would let a file called `$(...)` or `a b`
+/// run something or name a different file. A package manager chooses those
+/// names; nothing should be reading them as shell text.
+fn read_startup_file(
+    shell: &mut Shell,
+    path: &BStr,
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
     crate::resource::with_resources(shell, |shell, _resources| {
         if !crate::input::set_input_file(
             shell,
-            BStr::new(&name),
+            path,
             crate::input::InputFileOptions::OPTIONAL_PUSHED,
         )? {
             return Ok(crate::evaluation::Flow::Done((0).into()));
@@ -539,6 +594,10 @@ mod tests {
         );
         assert_eq!(
             StartupTask::UserProfile.recovery(),
+            Some(StartupTask::VendorConf)
+        );
+        assert_eq!(
+            StartupTask::VendorConf.recovery(),
             Some(StartupTask::Environment)
         );
         assert_eq!(
