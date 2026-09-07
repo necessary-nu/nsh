@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-09-07T12:03:51.381051011Z
+last_sync_at 2026-09-07T13:27:18.186920026Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -2512,6 +2512,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule interactive.vendor-path-is-not-for-scripts}
         {impl_name nsh-library, rule interactive.vendor-startup-path}
+    ), rule_versions_seen (
+        {id interactive.vendor-path-is-not-for-scripts, version 0}
+        {id interactive.vendor-startup-path, version 0}
     )}
     {id interactive.terminal-width, covered_rules (
         interactive.terminal-width
